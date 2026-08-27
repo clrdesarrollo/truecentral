@@ -21,6 +21,8 @@
     <PackageReference Include="Flyleaf.FFmpeg" Version="9.0.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.11" />
+    <!-- DPAPI: cifrado de credenciales recordadas, ligado al usuario de Windows. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
   </ItemGroup>
 
 </Project>

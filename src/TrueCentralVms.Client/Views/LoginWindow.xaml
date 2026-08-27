@@ -28,10 +28,65 @@
             <TextBox x:Name="ServerBox" Style="{StaticResource DarkTextBox}" Margin="0,0,0,12"/>
 
             <TextBlock Text="Usuario" Style="{StaticResource FieldLabel}"/>
-            <TextBox x:Name="UserBox" Style="{StaticResource DarkTextBox}" Margin="0,0,0,12"/>
+            <Grid Margin="0,0,0,12">
+                <TextBox x:Name="UserBox" Style="{StaticResource DarkTextBox}" Padding="8,7,34,7"/>
+                <!-- Despliega los últimos usuarios que han iniciado sesión -->
+                <ToggleButton x:Name="UsersToggle" Width="26" HorizontalAlignment="Right" Margin="0,1,1,1"
+                              Background="Transparent" BorderThickness="0" Cursor="Hand"
+                              Foreground="{StaticResource MutedBrush}" Content="▾"
+                              ToolTip="Usuarios recientes"/>
+                <Popup x:Name="UsersPopup" PlacementTarget="{Binding ElementName=UserBox}" Placement="Bottom"
+                       IsOpen="{Binding IsChecked, ElementName=UsersToggle}" StaysOpen="False"
+                       AllowsTransparency="True" Width="{Binding ActualWidth, ElementName=UserBox}">
+                    <Border Background="{StaticResource Panel2Brush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="6" Margin="0,2,0,0">
+                        <ItemsControl x:Name="UsersList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel>
+                                        <!-- Eliminar la cuenta recordada -->
+                                        <Button DockPanel.Dock="Right" Content="🗑" FontSize="11" Width="30"
+                                                Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                Foreground="{StaticResource MutedBrush}"
+                                                ToolTip="Quitar de la lista (borra la credencial recordada)"
+                                                Click="OnDeleteAccount" Tag="{Binding}"/>
+                                        <Button Click="OnPickAccount" Tag="{Binding}"
+                                                Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                HorizontalContentAlignment="Left" Padding="10,7">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Username}" Foreground="{StaticResource TextBrush}" FontSize="12.5"/>
+                                                <TextBlock Text="{Binding DisplayLabel}" Foreground="{StaticResource MutedBrush}" FontSize="10.5"/>
+                                            </StackPanel>
+                                        </Button>
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+                </Popup>
+            </Grid>
 
             <TextBlock Text="Contraseña" Style="{StaticResource FieldLabel}"/>
-            <PasswordBox x:Name="PasswordBox" Style="{StaticResource DarkPasswordBox}" Margin="0,0,0,18"/>
+            <Grid Margin="0,0,0,12">
+                <PasswordBox x:Name="PasswordBox" Style="{StaticResource DarkPasswordBox}" Padding="8,7,34,7"/>
+                <!-- Copia visible de la contraseña (solo mientras el ojo está activo) -->
+                <TextBox x:Name="PasswordPlain" Style="{StaticResource DarkTextBox}" Padding="8,7,34,7"
+                         Visibility="Collapsed"/>
+                <ToggleButton x:Name="ShowPasswordToggle" Width="26" HorizontalAlignment="Right" Margin="0,1,1,1"
+                              Background="Transparent" BorderThickness="0" Cursor="Hand"
+                              Foreground="{StaticResource MutedBrush}" Content="👁"
+                              ToolTip="Mostrar/ocultar contraseña"
+                              Checked="OnShowPassword" Unchecked="OnHidePassword"/>
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                <CheckBox x:Name="RememberCheck" Content="Recordar contraseña"
+                          Foreground="{StaticResource TextBrush}" FontSize="12"
+                          Unchecked="OnRememberUnchecked"/>
+                <CheckBox x:Name="AutoLoginCheck" Content="Inicio de sesión automático" Margin="18,0,0,0"
+                          Foreground="{StaticResource TextBrush}" FontSize="12"
+                          Checked="OnAutoLoginChecked"/>
+            </StackPanel>
 
             <Button x:Name="LoginButton" Content="Ingresar" Style="{StaticResource PrimaryButton}"
                     Click="OnLoginClick" IsDefault="True"/>
