@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CLR TrueCentral VMS</title>
+  <link rel="stylesheet" href="styles.css?v=1">
+</head>
+<body>
+  <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
+  <div id="auth-screen" class="auth-screen hidden">
+    <div class="auth-card">
+      <div class="brand">
+        <div class="brand-mark">TC</div>
+        <div>
+          <h1>CLR TrueCentral <span class="accent">VMS</span></h1>
+          <p class="muted" id="auth-subtitle">Gestión de video multimarca</p>
+        </div>
+      </div>
+      <div id="auth-body"><!-- lo llena app.js --></div>
+      <p class="auth-version muted" id="auth-version"></p>
+    </div>
+  </div>
+
+  <!-- Aplicación -->
+  <div id="app-shell" class="shell hidden">
+    <aside class="sidebar">
+      <div class="brand small">
+        <div class="brand-mark">TC</div>
+        <span>TrueCentral <span class="accent">VMS</span></span>
+      </div>
+      <nav id="nav">
+        <a href="#/" data-route="dashboard">Panel</a>
+        <a href="#/devices" data-route="devices">Dispositivos</a>
+        <a href="#/users" data-route="users">Usuarios</a>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="conn-dot" class="dot ok" title="Conexión con el servidor"></span>
+        <span id="conn-text" class="muted">Conectado</span>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <h2 id="page-title">Panel</h2>
+        <div class="topbar-user">
+          <span id="current-user" class="muted"></span>
+          <button class="btn ghost" id="btn-logout">Cerrar sesión</button>
+        </div>
+      </header>
+      <main id="view"><!-- lo llena app.js --></main>
+    </div>
+  </div>
+
+  <!-- Modal genérico -->
+  <div id="modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal" id="modal"><!-- lo llena app.js --></div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="api.js?v=1"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>
