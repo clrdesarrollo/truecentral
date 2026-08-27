@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TrueCentralVms.Client/TrueCentralVms.Client.csproj" />
+    <Project Path="src/TrueCentralVms.Core/TrueCentralVms.Core.csproj" />
+    <Project Path="src/TrueCentralVms.Drivers.Dahua/TrueCentralVms.Drivers.Dahua.csproj" />
+    <Project Path="src/TrueCentralVms.Drivers.Hikvision/TrueCentralVms.Drivers.Hikvision.csproj" />
+    <Project Path="src/TrueCentralVms.Drivers.Onvif/TrueCentralVms.Drivers.Onvif.csproj" />
+    <Project Path="src/TrueCentralVms.Server/TrueCentralVms.Server.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    Versión única de TODOS los binarios del producto (servidor, cliente,
+    drivers). El número vive en el archivo VERSION de la raíz, así una
+    compilación de desarrollo y un instalador nunca reportan versiones
+    distintas.
+
+    Para entregar una versión nueva: edite VERSION y nada más.
+
+    Dónde se ve: /api/health y el log de arranque del servidor, el título de
+    la ventana del cliente y las propiedades de los .exe/.dll en Windows.
+  -->
+  <PropertyGroup>
+    <Version Condition="Exists('$(MSBuildThisFileDirectory)VERSION')">$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</Version>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,19 @@
+# Normaliza los finales de línea: en el repositorio siempre LF, en la copia de
+# trabajo los del sistema. Evita diffs completos al editar desde distintos
+# equipos o editores.
+* text=auto
+
+# Scripts y proyectos que Windows espera con CRLF
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+*.sln   text eol=crlf
+*.slnx  text eol=crlf
+
+# Binarios: sin conversión
+*.dll   binary
+*.exe   binary
+*.pdb   binary
+*.png   binary
+*.jpg   binary
+*.ico   binary

@@ -1,0 +1,32 @@
+# Compilación
+bin/
+obj/
+dist/
+.vs/
+*.user
+
+# ---------------------------------------------------------------------------
+# Binarios que NO viven en git (cientos de MB, redistribuibles de terceros).
+# Se reconstruyen con: build\setup-binaries.ps1
+# ---------------------------------------------------------------------------
+# SDKs de fábrica tal como los entrega el fabricante
+Resources/
+# DLLs nativas que el servidor carga en runtime (derivadas de Resources\)
+native/
+# PostgreSQL portable, MediaMTX y FFmpeg
+tools/
+
+# ---------------------------------------------------------------------------
+# Datos y secretos de runtime — NUNCA versionar
+# ---------------------------------------------------------------------------
+# Clúster PostgreSQL embebido: incluye tcvms-pg.secret (clave del superusuario)
+# y tcvms-data.key (llave AES que descifra las contraseñas de los dispositivos)
+pgdata/
+*.secret
+*.key
+admin-initial.txt
+# Configuración generada de MediaMTX: contiene las credenciales de los equipos
+# embebidas en las URL RTSP de origen
+mediamtx.runtime.yml
+# Ajustes por instalación (puertos, rutas)
+appsettings.Local.json
