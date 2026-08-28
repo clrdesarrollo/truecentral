@@ -41,6 +41,19 @@ public enum PtzCommand
     TiltUp, TiltDown, PanLeft, PanRight,
     UpLeft, UpRight, DownLeft, DownRight,
     ZoomIn, ZoomOut,
+    FocusNear, FocusFar,
+    IrisOpen, IrisClose,
+}
+
+/// <summary>Operaciones sobre puntos preestablecidos (presets) del PTZ.</summary>
+public enum PtzPresetAction
+{
+    /// <summary>Mover la cámara al preset.</summary>
+    Goto,
+    /// <summary>Guardar la posición actual como preset.</summary>
+    Set,
+    /// <summary>Eliminar el preset.</summary>
+    Clear,
 }
 
 /// <summary>
@@ -70,6 +83,13 @@ public interface IDeviceDriver
     /// soportan. Implementación por defecto: sin soporte PTZ.
     /// </summary>
     Task<bool> PtzControlAsync(DeviceConnectionInfo info, int channelNumber, PtzCommand command, int speed, bool stop,
+        CancellationToken ct = default) => Task.FromResult(false);
+
+    /// <summary>
+    /// Operación sobre un preset PTZ (ir, guardar o borrar; índice 1..300).
+    /// Devuelve false si el driver o el canal no lo soportan.
+    /// </summary>
+    Task<bool> PtzPresetAsync(DeviceConnectionInfo info, int channelNumber, PtzPresetAction action, int presetIndex,
         CancellationToken ct = default) => Task.FromResult(false);
 }
 

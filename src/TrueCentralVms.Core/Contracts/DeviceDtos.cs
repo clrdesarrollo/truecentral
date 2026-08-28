@@ -60,6 +60,9 @@ public sealed record ChannelDto(int Id, int DeviceId, int ChannelNumber, int Rts
 /// <summary>Orden PTZ del cliente (Speed 1..7; Stop=true detiene el movimiento en curso).</summary>
 public sealed record PtzRequestDto(Drivers.PtzCommand Command, int Speed, bool Stop);
 
+/// <summary>Operación sobre un preset PTZ (índice 1..300).</summary>
+public sealed record PtzPresetRequestDto(Drivers.PtzPresetAction Action, int Index);
+
 /// <summary>
 /// Edición de un canal: nombre visible, habilitado, y marca PTZ manual (para
 /// domos que la detección automática no ve, ej. conectados al DVR por ONVIF).

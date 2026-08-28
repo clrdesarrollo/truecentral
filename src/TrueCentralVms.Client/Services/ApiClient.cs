@@ -54,6 +54,11 @@ public sealed class ApiClient
         SendAsync<object?>(HttpMethod.Post, $"/api/devices/{deviceId}/channels/{channelNumber}/ptz",
             new PtzRequestDto(command, speed, stop), ct);
 
+    /// <summary>Operación sobre un preset PTZ (ir / guardar / borrar).</summary>
+    public Task PtzPresetAsync(int deviceId, int channelNumber, PtzPresetAction action, int index, CancellationToken ct = default) =>
+        SendAsync<object?>(HttpMethod.Post, $"/api/devices/{deviceId}/channels/{channelNumber}/ptz-preset",
+            new PtzPresetRequestDto(action, index), ct);
+
     private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct)
     {
         if (BaseUrl is null)

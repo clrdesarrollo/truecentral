@@ -75,4 +75,11 @@ public partial class MainWindow : Window
         _activePtzCommand = null;
         _ = _vm.PtzAsync(Enum.Parse<TrueCentralVms.Core.Drivers.PtzCommand>(command), stop: true);
     }
+
+    /// <summary>Botones de preset (Ir / Guardar / Borrar): órdenes de un solo clic.</summary>
+    private void OnPtzPreset(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string action })
+            _ = _vm.PtzPresetAsync(Enum.Parse<TrueCentralVms.Core.Drivers.PtzPresetAction>(action));
+    }
 }

@@ -176,6 +176,10 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
             PtzCommand.UpRight => CHCNetSDK.UP_LEFT + 1,     // UP_RIGHT = 26
             PtzCommand.DownLeft => CHCNetSDK.UP_LEFT + 2,    // DOWN_LEFT = 27
             PtzCommand.DownRight => CHCNetSDK.DOWN_RIGHT,
+            PtzCommand.FocusNear => CHCNetSDK.FOCUS_NEAR,
+            PtzCommand.FocusFar => CHCNetSDK.FOCUS_FAR,
+            PtzCommand.IrisOpen => CHCNetSDK.IRIS_OPEN,
+            PtzCommand.IrisClose => CHCNetSDK.IRIS_CLOSE,
             _ => -1,
         };
         if (sdkCommand < 0) return false;
@@ -190,6 +194,28 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
         HikvisionSessionCache.Invalidate(info);
         userId = HikvisionSessionCache.GetOrLogin(info);
         return CHCNetSDK.NET_DVR_PTZControlWithSpeed_Other(userId, channelNumber, sdkCommand, stop ? 1 : 0, clampedSpeed);
+    }, ct);
+
+    public Task<bool> PtzPresetAsync(DeviceConnectionInfo info, int channelNumber, PtzPresetAction action, int presetIndex,
+        CancellationToken ct = default) => Task.Run(() =>
+    {
+        uint presetCommand = action switch
+        {
+            PtzPresetAction.Goto => (uint)CHCNetSDK.GOTO_PRESET,
+            PtzPresetAction.Set => CHCNetSDK.SET_PRESET,
+            PtzPresetAction.Clear => CHCNetSDK.CLE_PRESET,
+            _ => 0,
+        };
+        if (presetCommand == 0) return false;
+
+        int userId = HikvisionSessionCache.GetOrLogin(info);
+        if (CHCNetSDK.NET_DVR_PTZPreset_Other(userId, channelNumber, presetCommand, (uint)presetIndex))
+            return true;
+
+        // Sesión vencida: reintentar UNA vez con login limpio.
+        HikvisionSessionCache.Invalidate(info);
+        userId = HikvisionSessionCache.GetOrLogin(info);
+        return CHCNetSDK.NET_DVR_PTZPreset_Other(userId, channelNumber, presetCommand, (uint)presetIndex);
     }, ct);
 
     /// <summary>

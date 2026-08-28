@@ -160,6 +160,43 @@ internal sealed class OnvifClient : IDisposable
             """, withAuth: true, ct);
     }
 
+    /// <summary>Mueve la cámara a un preset (los tokens numéricos son la convención de facto).</summary>
+    public async Task GotoPresetAsync(string profileToken, string presetToken, CancellationToken ct)
+    {
+        string ptzUrl = await GetPtzUrlAsync(ct);
+        await CallAsync(ptzUrl, $"""
+            <tptz:GotoPreset xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl">
+              <tptz:ProfileToken>{profileToken}</tptz:ProfileToken>
+              <tptz:PresetToken>{presetToken}</tptz:PresetToken>
+            </tptz:GotoPreset>
+            """, withAuth: true, ct);
+    }
+
+    /// <summary>Guarda la posición actual como preset con el token indicado.</summary>
+    public async Task SetPresetAsync(string profileToken, string presetToken, string presetName, CancellationToken ct)
+    {
+        string ptzUrl = await GetPtzUrlAsync(ct);
+        await CallAsync(ptzUrl, $"""
+            <tptz:SetPreset xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl">
+              <tptz:ProfileToken>{profileToken}</tptz:ProfileToken>
+              <tptz:PresetName>{presetName}</tptz:PresetName>
+              <tptz:PresetToken>{presetToken}</tptz:PresetToken>
+            </tptz:SetPreset>
+            """, withAuth: true, ct);
+    }
+
+    /// <summary>Elimina un preset.</summary>
+    public async Task RemovePresetAsync(string profileToken, string presetToken, CancellationToken ct)
+    {
+        string ptzUrl = await GetPtzUrlAsync(ct);
+        await CallAsync(ptzUrl, $"""
+            <tptz:RemovePreset xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl">
+              <tptz:ProfileToken>{profileToken}</tptz:ProfileToken>
+              <tptz:PresetToken>{presetToken}</tptz:PresetToken>
+            </tptz:RemovePreset>
+            """, withAuth: true, ct);
+    }
+
     /// <summary>URI RTSP del perfil (sin credenciales; se inyectan al generar la configuración del media server).</summary>
     public async Task<string?> GetStreamUriAsync(string profileToken, CancellationToken ct)
     {

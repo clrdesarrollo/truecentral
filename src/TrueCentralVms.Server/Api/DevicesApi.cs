@@ -382,6 +382,42 @@ public static class DevicesApi
         });
 
         // ------------------------------------------------------------------
+        // Presets PTZ: ir / guardar / borrar (índice 1..300)
+        // ------------------------------------------------------------------
+        app.MapPost("/api/devices/{id:int}/channels/{channelNumber:int}/ptz-preset", async (HttpContext ctx, int id,
+            int channelNumber, PtzPresetRequestDto request, VmsDbContext db, DriverRegistry drivers,
+            CredentialProtector protector, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (request.Index is < 1 or > 300)
+                return Error("El preset debe estar entre 1 y 300.");
+
+            var channel = await db.Channels.Include(c => c.Device)
+                .FirstOrDefaultAsync(c => c.DeviceId == id && c.ChannelNumber == channelNumber, ct);
+            if (channel is null) return Results.NotFound();
+            if (!channel.SupportsPtz)
+                return Error("Este canal no tiene PTZ.");
+            var factory = drivers.Find(channel.Device.DriverKey);
+            if (factory is null)
+                return Error("Driver no disponible.");
+
+            var conn = new DeviceConnectionInfo(channel.Device.Host, channel.Device.SdkPort,
+                channel.Device.Username, protector.Unprotect(channel.Device.PasswordCiphertext));
+            bool ok;
+            try
+            {
+                ok = await factory.Create().PtzPresetAsync(conn, channelNumber, request.Action, request.Index, ct);
+            }
+            catch (DriverException ex)
+            {
+                return Error(ex.Message, StatusCodes.Status502BadGateway);
+            }
+            return ok
+                ? Results.Ok()
+                : Error("El equipo rechazó la operación de preset.", StatusCodes.Status502BadGateway);
+        });
+
+        // ------------------------------------------------------------------
         // Snapshot JPEG de un canal (cache 25 s, máximo 4 capturas simultáneas)
         // ------------------------------------------------------------------
         app.MapGet("/api/devices/{id:int}/snapshot/{channelNumber:int}", async (HttpContext ctx, int id, int channelNumber,

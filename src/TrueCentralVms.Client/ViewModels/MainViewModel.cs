@@ -66,6 +66,32 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>Número de preset activo en el panel PTZ (1..300).</summary>
+    [ObservableProperty] private int _ptzPresetIndex = 1;
+
+    /// <summary>Ir / guardar / borrar el preset del panel, con confirmación en la barra de estado.</summary>
+    public async Task PtzPresetAsync(PtzPresetAction action)
+    {
+        if (_ptzChannel is not { } node) return;
+        int index = Math.Clamp(PtzPresetIndex, 1, 300);
+        PtzPresetIndex = index;
+        try
+        {
+            await _api.PtzPresetAsync(node.Device.Id, node.Channel.ChannelNumber, action, index);
+            StatusMessage = action switch
+            {
+                PtzPresetAction.Goto => $"PTZ: moviéndose al preset {index}.",
+                PtzPresetAction.Set => $"PTZ: posición actual guardada como preset {index}.",
+                PtzPresetAction.Clear => $"PTZ: preset {index} eliminado.",
+                _ => StatusMessage,
+            };
+        }
+        catch (ApiException ex)
+        {
+            StatusMessage = $"PTZ: {ex.Message}";
+        }
+    }
+
     private const string HintMessage =
         "Clic en la barra de un cuadro para seleccionarlo (borde azul); doble clic en un canal del árbol lo abre ahí.";
 

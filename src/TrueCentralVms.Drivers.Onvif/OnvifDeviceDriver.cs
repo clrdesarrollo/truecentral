@@ -60,22 +60,35 @@ public sealed class OnvifDeviceDriver : IDeviceDriver
     /// <summary>Token del perfil PTZ por host (evita GetProfiles en cada orden interactiva).</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> PtzProfileCache = new();
 
+    /// <summary>Perfil PTZ del equipo (cacheado): el que declara PTZConfiguration, o el primero.</summary>
+    private static async Task<string?> ResolvePtzProfileAsync(OnvifClient client, DeviceConnectionInfo info, CancellationToken ct)
+    {
+        string cacheKey = $"{info.Host}:{info.Port}";
+        if (PtzProfileCache.TryGetValue(cacheKey, out string? token))
+            return token;
+        var profiles = await client.GetProfilesAsync(ct);
+        token = (profiles.FirstOrDefault(p => p.HasPtz).Token is { Length: > 0 } withPtz
+            ? withPtz
+            : profiles.FirstOrDefault().Token) ?? "";
+        if (token.Length == 0) return null;
+        PtzProfileCache[cacheKey] = token;
+        return token;
+    }
+
     public async Task<bool> PtzControlAsync(DeviceConnectionInfo info, int channelNumber, PtzCommand command, int speed, bool stop,
         CancellationToken ct = default)
     {
+        // Foco e iris no viajan por el servicio PTZ de ONVIF (van por el
+        // servicio de imagen, pendiente): se reporta como no soportado.
+        if (command is PtzCommand.FocusNear or PtzCommand.FocusFar or PtzCommand.IrisOpen or PtzCommand.IrisClose)
+            return false;
+
         using var client = new OnvifClient(info.Host, info.Port, info.Username, info.Password);
         await client.InitializeAsync(ct);
 
         string cacheKey = $"{info.Host}:{info.Port}";
-        if (!PtzProfileCache.TryGetValue(cacheKey, out string? token))
-        {
-            var profiles = await client.GetProfilesAsync(ct);
-            token = (profiles.FirstOrDefault(p => p.HasPtz).Token is { Length: > 0 } withPtz
-                ? withPtz
-                : profiles.FirstOrDefault().Token) ?? "";
-            if (token.Length == 0) return false;
-            PtzProfileCache[cacheKey] = token;
-        }
+        if (await ResolvePtzProfileAsync(client, info, ct) is not { } token)
+            return false;
 
         try
         {
@@ -108,6 +121,41 @@ public sealed class OnvifDeviceDriver : IDeviceDriver
         catch (DriverException)
         {
             PtzProfileCache.TryRemove(cacheKey, out _); // perfil obsoleto: redescubrir la próxima vez
+            throw;
+        }
+    }
+
+    public async Task<bool> PtzPresetAsync(DeviceConnectionInfo info, int channelNumber, PtzPresetAction action, int presetIndex,
+        CancellationToken ct = default)
+    {
+        using var client = new OnvifClient(info.Host, info.Port, info.Username, info.Password);
+        await client.InitializeAsync(ct);
+        if (await ResolvePtzProfileAsync(client, info, ct) is not { } token)
+            return false;
+
+        // Convención de facto en ONVIF: tokens de preset numéricos ("1", "2"...).
+        string presetToken = presetIndex.ToString();
+        try
+        {
+            switch (action)
+            {
+                case PtzPresetAction.Goto:
+                    await client.GotoPresetAsync(token, presetToken, ct);
+                    break;
+                case PtzPresetAction.Set:
+                    await client.SetPresetAsync(token, presetToken, $"Preset {presetIndex}", ct);
+                    break;
+                case PtzPresetAction.Clear:
+                    await client.RemovePresetAsync(token, presetToken, ct);
+                    break;
+                default:
+                    return false;
+            }
+            return true;
+        }
+        catch (DriverException)
+        {
+            PtzProfileCache.TryRemove($"{info.Host}:{info.Port}", out _);
             throw;
         }
     }
