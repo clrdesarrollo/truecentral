@@ -18,7 +18,7 @@ internal sealed class OnvifClient : IDisposable
 {
     private static readonly XNamespace Soap = "http://www.w3.org/2003/05/soap-envelope";
 
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
+    private readonly HttpClient _http;
     private readonly string _host;
     private readonly int _port;
     private readonly string _username;
@@ -32,6 +32,16 @@ internal sealed class OnvifClient : IDisposable
         _port = port;
         _username = username;
         _password = password;
+        // Firmwares recientes (Dahua 3.1xx entre otros) exigen digest a nivel
+        // HTTP en el endpoint ONVIF y responden 401 ignorando el
+        // WS-UsernameToken del sobre; el handler contesta el desafío con las
+        // mismas credenciales y reenvía el cuerpo completo.
+        var handler = new HttpClientHandler
+        {
+            Credentials = new NetworkCredential(username, password),
+            PreAuthenticate = true,
+        };
+        _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
     }
 
     private string DeviceUrl => $"http://{_host}:{_port}/onvif/device_service";
@@ -266,7 +276,10 @@ internal sealed class OnvifClient : IDisposable
 
         string text = await response.Content.ReadAsStringAsync(ct);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
-            throw new DriverException("El dispositivo ONVIF rechazó las credenciales (usuario o contraseña incorrectos).");
+            throw new DriverException(
+                "El dispositivo ONVIF rechazó las credenciales. Ojo: en algunas marcas (ej. Dahua) " +
+                "la cuenta ONVIF es independiente de la cuenta web/SDK y se administra aparte " +
+                "(Cuentas → Usuario ONVIF en el equipo).");
 
         XElement root;
         try
@@ -291,7 +304,9 @@ internal sealed class OnvifClient : IDisposable
             bool authFault = reason.Contains("auth", StringComparison.OrdinalIgnoreCase) ||
                              reason.Contains("NotAuthorized", StringComparison.OrdinalIgnoreCase);
             throw new DriverException(authFault
-                ? "El dispositivo ONVIF rechazó las credenciales (usuario o contraseña incorrectos)."
+                ? "El dispositivo ONVIF rechazó las credenciales. Ojo: en algunas marcas (ej. Dahua) " +
+                  "la cuenta ONVIF es independiente de la cuenta web/SDK y se administra aparte " +
+                  "(Cuentas → Usuario ONVIF en el equipo)."
                 : $"El dispositivo ONVIF respondió con un error: {reason}");
         }
         return body;
