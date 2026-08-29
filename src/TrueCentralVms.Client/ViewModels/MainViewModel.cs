@@ -337,8 +337,8 @@ public partial class MainViewModel : ObservableObject
         {
             MaximizedIndex = -1;
             if (_autoPromotedCell == cell && cell.AssignedChannel == _autoPromotedChannel &&
-                cell.Profile == StreamProfile.Main && _autoPromotedChannel is { } channel)
-                _ = cell.OpenAsync(channel, StreamProfile.Sub);
+                cell.Profile == StreamProfile.Main)
+                _ = cell.SwitchToProfileAsync(StreamProfile.Sub);
             _autoPromotedCell = null;
             _autoPromotedChannel = null;
             return;
@@ -350,7 +350,7 @@ public partial class MainViewModel : ObservableObject
         {
             _autoPromotedCell = cell;
             _autoPromotedChannel = node;
-            _ = cell.OpenAsync(node, StreamProfile.Main);
+            _ = cell.SwitchToProfileAsync(StreamProfile.Main);
         }
     }
 

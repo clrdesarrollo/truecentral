@@ -24,7 +24,11 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     private int _openSequence;
     private bool _retryPending;
 
-    public Player Player { get; }
+    /// <summary>Player visible del cuadro. Observable porque el cambio suave de
+    /// stream lo REEMPLAZA: el nuevo se abre en un player de reserva mientras
+    /// este sigue reproduciendo, y recién con imagen lista se intercambian
+    /// (FlyleafHost reengancha su superficie al vuelo).</summary>
+    [ObservableProperty] private Player _player = null!;
 
     /// <summary>Se encendió el audio de este cuadro (el dueño silencia el resto).</summary>
     public event Action<VideoCellViewModel>? AudioActivated;
@@ -56,7 +60,16 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     {
         _api = api;
         _settings = settings;
+        _player = CreatePlayer();
+    }
 
+    /// <summary>
+    /// Player configurado para vigilancia en vivo, con los manejadores de
+    /// reintento enganchados. Los manejadores ignoran a los players retirados
+    /// (el cambio suave de stream deja al viejo agonizando un instante).
+    /// </summary>
+    private Player CreatePlayer()
+    {
         var config = new Config();
         config.Player.AutoPlay = true;
         config.Audio.Enabled = false; // se enciende por cuadro con su botón 🔊
@@ -69,13 +82,13 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         // análisis corto basta; la imagen aparece con el primer keyframe.
         config.Demuxer.FormatOpt["analyzeduration"] = "500000"; // 0,5 s (µs)
         config.Demuxer.FormatOpt["probesize"] = "524288";       // 512 KB
-        Player = new Player(config);
-        Player.Audio.Volume = Math.Clamp(settings.DefaultVolume, 0, 100);
-        ApplyStretch(settings.StretchVideo);
+        var player = new Player(config);
+        player.Audio.Volume = Math.Clamp(_settings.DefaultVolume, 0, 100);
+        player.Config.Video.AspectRatio = _settings.StretchVideo ? AspectRatio.Fill : AspectRatio.Keep;
 
-        Player.OpenCompleted += (_, e) =>
+        player.OpenCompleted += (sender, e) =>
         {
-            if (_assigned is null) return;
+            if (!ReferenceEquals(sender, Player) || _assigned is null) return;
             if (e.Success) { Status = ""; return; }
             Status = "No se pudo abrir el video: " + (e.Error ?? "error desconocido");
             ScheduleRetry(_openSequence);
@@ -84,8 +97,9 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         // Fin de reproducción no pedido (caída de red, equipo apagado,
         // expulsión desde el panel): reintentar. Clear/Dispose/reasignación
         // invalidan la secuencia ANTES de detener, así que no reintentan.
-        Player.PlaybackStopped += (_, e) =>
+        player.PlaybackStopped += (sender, e) =>
         {
+            if (!ReferenceEquals(sender, Player)) return;
             // Flyleaf corta la grabación junto con el stream: reflejar y avisar
             // (la cápsula quedó guardada hasta el momento del corte).
             if (IsRecordingClip && !Player.IsRecording)
@@ -97,6 +111,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
             if (!e.Success) Status = "Sin señal — reintentando…";
             ScheduleRetry(_openSequence);
         };
+        return player;
     }
 
     /// <summary>Abre un canal en esta celda (perfil main/sub según el tamaño de la grilla).</summary>
@@ -114,16 +129,63 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         await ConnectAsync(sequence);
     }
 
-    /// <summary>
-    /// Alterna entre stream principal y secundario del canal en pantalla.
-    /// Reabre por el flujo normal: concesión nueva y misma lógica de
-    /// reintentos; el fan-out de MediaMTX hace el resto.
-    /// </summary>
+    /// <summary>Alterna entre stream principal y secundario del canal en pantalla.</summary>
     [RelayCommand]
-    private async Task SwitchProfileAsync()
+    private async Task SwitchProfileAsync() =>
+        await SwitchToProfileAsync(Profile == StreamProfile.Main ? StreamProfile.Sub : StreamProfile.Main);
+
+    /// <summary>
+    /// Cambio SUAVE de stream: el destino se abre en un player de reserva
+    /// mientras el actual sigue reproduciendo, y solo cuando el nuevo ya tiene
+    /// imagen (primer keyframe decodificado) se intercambian — el corte pasa de
+    /// varios segundos en negro a un parpadeo. Si el nuevo no logra imagen en
+    /// 10 s, se descarta y el cuadro sigue con el stream que tenía.
+    /// </summary>
+    public async Task SwitchToProfileAsync(StreamProfile target)
     {
-        if (_assigned is not { } node) return;
-        await OpenAsync(node, Profile == StreamProfile.Main ? StreamProfile.Sub : StreamProfile.Main);
+        if (_assigned is not { } node || Profile == target) return;
+        int sequence = ++_openSequence; // invalida reintentos del stream visible
+        StopClipRecording(notify: true);
+        Status = target == StreamProfile.Main ? "Cambiando a principal…" : "Cambiando a secundario…";
+
+        var fresh = CreatePlayer();
+        try
+        {
+            var grant = await _api.RequestStreamAsync(node.Device.Id, node.Channel.RtspChannel, target);
+            if (sequence != _openSequence) { fresh.Dispose(); return; }
+            fresh.OpenAsync(grant.RtspUrl);
+
+            // Esperar la primera imagen real: el reloj del player parte a
+            // correr con el primer cuadro presentado.
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline && fresh.CurTime == 0 &&
+                   fresh.Status is not (FlyleafLib.MediaPlayer.Status.Failed or FlyleafLib.MediaPlayer.Status.Stopped))
+                await Task.Delay(100);
+
+            if (sequence != _openSequence)
+            {
+                fresh.Dispose();
+                return;
+            }
+            if (fresh.CurTime == 0)
+            {
+                fresh.Dispose();
+                FlashStatus("No se pudo cambiar el stream: sin señal del perfil destino.");
+                return;
+            }
+
+            var retired = Player;
+            Profile = target;
+            fresh.Config.Audio.Enabled = IsAudioOn;
+            Player = fresh; // FlyleafHost reengancha la superficie: corte mínimo
+            Status = "";
+            retired.Dispose();
+        }
+        catch (ApiException ex)
+        {
+            fresh.Dispose();
+            if (sequence == _openSequence) FlashStatus("No se pudo cambiar el stream: " + ex.Message);
+        }
     }
 
     /// <summary>Pide una concesión nueva y abre la URL RTSP resultante.</summary>
