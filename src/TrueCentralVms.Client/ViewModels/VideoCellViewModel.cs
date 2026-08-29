@@ -141,7 +141,11 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     /// varios segundos en negro a un parpadeo. Si el nuevo no logra imagen en
     /// 10 s, se descarta y el cuadro sigue con el stream que tenía.
     /// </summary>
-    public async Task SwitchToProfileAsync(StreamProfile target)
+    /// <summary>Anula un cambio de stream en vuelo: el player de reserva se
+    /// descarta solo al despertar (ve la secuencia vencida).</summary>
+    public void CancelPendingSwitch() => _openSequence++;
+
+    public async Task SwitchToProfileAsync(StreamProfile target, bool hardFallbackOnFailure = false)
     {
         if (_assigned is not { } node || Profile == target) return;
         int sequence = ++_openSequence; // invalida reintentos del stream visible
@@ -191,6 +195,15 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
                 if (sequence == _openSequence) FlashStatus("No se pudo cambiar el stream: " + ex.Message);
                 return;
             }
+        }
+        if (hardFallbackOnFailure)
+        {
+            // El destino es obligatorio (ej. volver a secundario al restaurar
+            // un cuadro: quedarse en principal quema ancho de banda): apertura
+            // dura con la lógica normal de reintentos, aunque corte la imagen.
+            if (sequence == _openSequence && _assigned == node)
+                await OpenAsync(node, target);
+            return;
         }
         FlashStatus("El stream destino no entregó imagen (¿perfil no disponible o enlace del equipo saturado?). Se mantiene el actual.");
     }

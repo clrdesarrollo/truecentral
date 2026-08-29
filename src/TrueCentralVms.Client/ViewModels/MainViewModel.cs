@@ -337,8 +337,17 @@ public partial class MainViewModel : ObservableObject
         {
             MaximizedIndex = -1;
             if (_autoPromotedCell == cell && cell.AssignedChannel == _autoPromotedChannel &&
-                cell.Profile == StreamProfile.Main)
-                _ = cell.SwitchToProfileAsync(StreamProfile.Sub);
+                _autoPromotedChannel is not null)
+            {
+                if (cell.Profile == StreamProfile.Main)
+                    // La vuelta al secundario es obligatoria (quedar en principal
+                    // en un cuadro chico quema ancho de banda): si el cambio
+                    // suave no lo logra, reapertura dura.
+                    _ = cell.SwitchToProfileAsync(StreamProfile.Sub, hardFallbackOnFailure: true);
+                else
+                    // La promoción seguía en vuelo: se descarta antes de aterrizar.
+                    cell.CancelPendingSwitch();
+            }
             _autoPromotedCell = null;
             _autoPromotedChannel = null;
             return;
