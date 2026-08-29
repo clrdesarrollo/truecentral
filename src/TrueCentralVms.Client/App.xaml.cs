@@ -7,9 +7,20 @@ namespace TrueCentralVms.Client;
 
 public partial class App : Application
 {
+    /// <summary>
+    /// Sin esto, si el hilo de UI se atasca unos segundos (crear o liberar
+    /// decenas de players de video), Windows reemplaza la ventana por la
+    /// copia "fantasma" blanca con "(No responde)". Desactivarlo es lo
+    /// estándar en aplicaciones de video: la ventana conserva su contenido
+    /// aunque un trabajo pesado demore un instante.
+    /// </summary>
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern void DisableProcessWindowsGhosting();
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        DisableProcessWindowsGhosting();
 
         // Motor de video (FFmpeg): una sola inicialización por proceso. Los
         // binarios los aporta el paquete Flyleaf.FFmpeg (carpeta FFmpeg junto

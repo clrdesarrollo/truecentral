@@ -387,6 +387,9 @@ public partial class MainViewModel : ObservableObject
         MaximizedIndex = -1; // los índices cambian con la división
         CurrentLayout = layout;
         int count = layout.CellCount;
+        // Cediendo un ciclo por CADA celda: liberar un player con video andando
+        // puede tomar cientos de milisegundos y el bombeo de mensajes debe
+        // seguir corriendo entre uno y otro.
         while (Cells.Count > count)
         {
             var cell = Cells[^1];
@@ -394,8 +397,7 @@ public partial class MainViewModel : ObservableObject
             cell.AudioActivated -= OnCellAudioActivated;
             cell.MediaSaved -= OnCellMediaSaved;
             cell.Dispose();
-            if (Cells.Count % 4 == 0)
-                await Dispatcher.Yield(DispatcherPriority.Background);
+            await Dispatcher.Yield(DispatcherPriority.Background);
         }
         while (Cells.Count < count)
         {
@@ -403,8 +405,7 @@ public partial class MainViewModel : ObservableObject
             cell.AudioActivated += OnCellAudioActivated;
             cell.MediaSaved += OnCellMediaSaved;
             Cells.Add(cell);
-            if (Cells.Count % 2 == 0)
-                await Dispatcher.Yield(DispatcherPriority.Background);
+            await Dispatcher.Yield(DispatcherPriority.Background);
         }
         for (int i = 0; i < Cells.Count; i++)
             Cells[i].Index = i + 1;
