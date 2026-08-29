@@ -1,119 +1,147 @@
 # CLR TrueCentral VMS
 
-Software de gestión de video (VMS) cliente-servidor y multimarca: administra
-cámaras, DVR, NVR y XVR de **Hikvision** y **Dahua** por SDK nativo, y el resto
-de las marcas por **ONVIF**.
+Sistema de gestión de video (VMS) cliente-servidor multimarca de CLRobotics:
+administración web, monitoreo en vivo multicámara con control PTZ y un plano
+de media centralizado que hace fan-out de los streams (competencia directa de
+HikCentral / SmartPSS / iVMS-4200).
 
-El servidor distribuye el video estilo *streaming media server*: abre **un solo
-stream** contra cada equipo y lo reparte a **N clientes**, de modo que agregar
-operadores no agrega carga al DVR/NVR.
+## Arquitectura
 
 ```
-Cliente WPF (xN) ─┐
-                  ├── REST + SignalR ──► TrueCentral VMS Server ──┬─► SDK nativo / ONVIF (gestión, PTZ)
-Panel web         ─┘                              │               └─► RTSP (1 pull por canal)
-                                                  ▼
-                                          MediaMTX embebido
-                                       (fan-out RTSP a N clientes)
+┌────────────────────────────── Servidor (Windows) ──────────────────────────────┐
+│  TrueCentralVms.Server (ASP.NET Core, x64)                                     │
+│  ├─ PostgreSQL embebido      (tools\postgres, 127.0.0.1:25490)                 │
+│  ├─ MediaMTX embebido        (tools\mediamtx, RTSP :8654 solo TCP,             │
+│  │                            API 127.0.0.1:9911, auth delegada por HTTP)      │
+│  ├─ Panel web de administración (wwwroot, SPA sin framework, :5090)            │
+│  ├─ API REST + SignalR (/hubs/vms)                                             │
+│  └─ Drivers de gestión: Hikvision (HCNetSDK) · Dahua (NetSDK) · ONVIF (SOAP)   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+        ▲ HTTPS/HTTP + SignalR                     ▲ RTSP/TCP con token
+        │                                          │
+   Panel web (admin)                    TrueCentralVms.Client (WPF + FlyleafLib)
 ```
 
-## Características
+- **Los SDK de fábrica se usan solo para gestión** (validar credenciales,
+  modelo/serie/firmware, canales, snapshots, PTZ). El video SIEMPRE viaja por
+  MediaMTX: un solo pull RTSP por cámara (`sourceOnDemand`) compartido entre N
+  espectadores.
+- **Toda lectura RTSP se autoriza contra el servidor** (`authMethod: http`):
+  el cliente pide una concesión (`POST /api/streams/request`), recibe una URL
+  con token de 60 s y MediaMTX valida ese token en `/api/streaming/auth`.
+  Cada visualización queda auditada en `StreamSessions` (quién, qué canal,
+  desde qué IP, cuándo empezó y terminó).
 
-- **Multimarca**: driver Hikvision (HCNetSDK), Dahua (NetSDK) y ONVIF genérico.
-  Agregar una marca es implementar `IDeviceDriverFactory` y registrarla.
-- **Alta de equipos validada**: al agregar un dispositivo se inicia sesión
-  contra el equipo real y se obtienen modelo, número de serie, firmware,
-  canales y puerto RTSP; si las credenciales fallan no se guarda nada.
-- **Streaming 1→N** con MediaMTX embebido, autorización delegada por tokens de
-  corta vida y auditoría de sesiones (quién vio qué canal y cuándo).
-- **Control PTZ** por SDK y por ONVIF, visible solo en canales que lo soportan.
-- **PostgreSQL embebido**, privado del sistema: escucha únicamente en
-  `127.0.0.1`, en un puerto propio y con credenciales generadas.
-- **Seguridad de cuentas**: servidor desactivado de fábrica (el primer
-  administrador se crea solo desde la máquina del servidor), política de
-  contraseñas, historial que impide reutilizarlas y caducidad configurable.
-- **Cliente WPF** con árbol de dispositivos, grilla 1/4/9/16 y video acelerado
-  por GPU; **panel web** de administración sin dependencias ni build.
+## Matriz de puertos
 
-## Estructura
-
-| Proyecto | Descripción |
-|---|---|
-| `TrueCentralVms.Core` | Contratos compartidos: DTOs, abstracción de drivers, política de contraseñas |
-| `TrueCentralVms.Server` | ASP.NET Core (API REST + SignalR + panel web + PostgreSQL y MediaMTX embebidos) |
-| `TrueCentralVms.Client` | Cliente de escritorio WPF |
-| `TrueCentralVms.Drivers.Hikvision` | Driver HCNetSDK (P/Invoke) |
-| `TrueCentralVms.Drivers.Dahua` | Driver NetSDK (P/Invoke) |
-| `TrueCentralVms.Drivers.Onvif` | Driver ONVIF (SOAP sobre HttpClient) |
-
-## Puertos
-
-| Servicio | Puerto | Escucha en |
+| Servicio | Puerto | Bind |
 |---|---|---|
-| HTTP / API / SignalR / panel web | 5090 | todas las interfaces |
-| PostgreSQL embebido | 25490 | 127.0.0.1 |
-| MediaMTX RTSP (clientes) | 8654 | todas las interfaces (solo TCP) |
-| MediaMTX API de control | 9911 | 127.0.0.1 |
+| HTTP / API / SignalR / panel web | **5090** | 0.0.0.0 |
+| PostgreSQL embebido | **25490** | 127.0.0.1 |
+| MediaMTX RTSP (espectadores) | **8654** | 0.0.0.0, solo TCP |
+| MediaMTX API de control | **9911** | 127.0.0.1 |
 
-Elegidos fuera de los valores estándar para convivir con otros productos en la
-misma máquina.
+(El producto videowall `vwcontroller` usa 5080/25480/8554: coexisten en la
+misma máquina.)
 
-## Puesta en marcha
+## Estructura de la solución
 
-Requisitos: **.NET 10 SDK** y Windows x64 (los SDK de los fabricantes son
-nativos de 64 bits).
+```
+CLRTrueCentralVMS.slnx
+src\TrueCentralVms.Core\               contratos: DTOs, IDeviceDriver, hub SignalR
+src\TrueCentralVms.Server\             servidor + panel web (wwwroot)
+src\TrueCentralVms.Client\             cliente de escritorio WPF (FlyleafLib)
+src\TrueCentralVms.Drivers.Hikvision\  interop HCNetSDK 6.1.9.48
+src\TrueCentralVms.Drivers.Dahua\      interop propio contra dhnetsdk.h (x64)
+src\TrueCentralVms.Drivers.Onvif\      SOAP manual (WS-UsernameToken)
+native\hikvision\ · native\dahua\      DLLs de los SDK (git-ignored)
+tools\postgres\ · tools\mediamtx\      binarios embebidos (git-ignored)
+tools\ffmpeg-flyleaf\                  FFmpeg compartido para FlyleafLib (git-ignored)
+build\setup-binaries.ps1               regenera todos los binarios git-ignored
+```
+
+## Ejecutar en desarrollo
+
+Requisitos: .NET 10 SDK, Windows x64, y los binarios de `build\setup-binaries.ps1`.
 
 ```powershell
-# 1. Binarios de terceros (no viven en el repositorio)
+# 1. Binarios nativos (SDKs, PostgreSQL, MediaMTX, FFmpeg) — una sola vez
 .\build\setup-binaries.ps1
 
-# 2. Compilar
-dotnet build CLRTrueCentralVMS.slnx
+# 2. Servidor (el directorio de trabajo define dónde vive pgdata)
+cd src\TrueCentralVms.Server
+dotnet run
 
-# 3. Servidor
-dotnet run --project src\TrueCentralVms.Server
-
-# 4. Cliente de escritorio (en otra consola)
-dotnet run --project src\TrueCentralVms.Client
+# 3. Cliente de escritorio
+cd src\TrueCentralVms.Client
+dotnet run
 ```
 
-En el primer arranque el servidor inicializa su clúster PostgreSQL y queda
-**desactivado**: abra `http://localhost:5090` **en la máquina del servidor**
-para crear el primer administrador (por seguridad el asistente solo acepta
-conexiones locales).
+Panel web: `http://localhost:5090`. El sistema viene **desactivado de
+fábrica**: el primer administrador se crea desde el asistente del panel, que
+solo acepta conexiones desde la propia máquina del servidor.
 
-### Binarios de terceros
+## Cliente de escritorio
 
-No se versionan por tamaño (~700 MB). `build\setup-binaries.ps1` arma `native\`
-a partir de los SDK que se descompriman en `Resources\`, y puede copiar
-`tools\` desde otro checkout con `-FromProduct <ruta>`. El script indica qué
-falta y de dónde obtenerlo.
+- Página de inicio con módulos (estilo DSS); **Vista en Vivo** se abre como
+  viñeta en el navbar y la ventana usa barra de título propia (sin marco de
+  Windows), con indicadores de CPU/RAM/disco del servidor (gris/amarillo/rojo
+  por umbral, detalle en tooltip).
+- Vista en Vivo: árbol de dispositivos con buscador, divisiones de pantalla
+  estilo iVMS-4200 (1/4/6/8/9/13/16/25/36/64, incluidas las asimétricas; la
+  última usada se recuerda como preferencia local), apertura por doble clic o
+  arrastrando el canal a un cuadro, selección sincronizada grilla↔árbol,
+  audio por cuadro (exclusivo), y **reconexión automática** de cada cuadro
+  ante cortes de red, reinicios del equipo o expulsiones (pide una concesión
+  nueva cada vez).
+- Doble clic sobre un video: el cuadro se **maximiza** dentro de la grilla
+  (los demás siguen corriendo ocultos); doble clic de nuevo restaura la
+  división anterior. Botón **Pantalla completa**: el área de la grilla ocupa
+  el monitor completo sin ningún elemento de la interfaz (Esc para salir).
+- PTZ: panel siempre presente (minimizado por defecto) con controles
+  habilitados solo si el cuadro seleccionado tiene cámara PTZ
+  (pan/tilt/zoom/foco/iris continuos + presets 1..300). Manejo por teclado:
+  **flechas** = pan/tilt, **+/−** = zoom, y **Shift sostenido** = modo
+  precisión (velocidad mínima, con píldora indicadora en el panel).
+- Credenciales recordadas cifradas con DPAPI, inicio de sesión automático
+  opcional, lista de usuarios recientes.
 
-| Carpeta | Contenido |
-|---|---|
-| `Resources\` | SDK de Hikvision y Dahua tal como los entrega el fabricante |
-| `native\hikvision`, `native\dahua` | DLLs que el servidor carga en runtime |
-| `tools\postgres` | PostgreSQL portable |
-| `tools\mediamtx` | MediaMTX v1.20 |
-| `tools\ffmpeg-flyleaf` | FFmpeg compartido que exige FlyleafLib (cliente) |
+## Panel web
 
-> La versión de FFmpeg debe coincidir con la que espera el paquete NuGet de
-> FlyleafLib: use el asset `FFmpeg` del release con el mismo número de versión.
+`#/` dashboard (salud, dispositivos, sesiones activas) · `#/devices`
+mantenedor con wizard "Probar conexión", canales, revalidación, snapshots y
+descubrimiento SADP · `#/sessions` sesiones de video en vivo con **Expulsar**
+(corta la sesión RTSP en MediaMTX; el espectador puede reconectarse — no
+bloquea la cuenta) · `#/users` mantenedor de usuarios.
 
-## Seguridad
+Cada canal tiene además la casilla **Proxy** (mantenedor de canales): para
+cámaras que anuncian mal su audio (SDP inválido que MediaMTX rechaza con
+"media N config is missing", p. ej. `a=fmtp` apuntando a otro payload). Con
+la casilla marcada, MediaMTX lanza **FFmpeg bajo demanda**: FFmpeg tolera ese
+SDP, pull-ea la cámara y republica solo el video (sin audio) en la misma
+ruta; la publicación se autoriza por loopback + secreto por arranque. Caso
+real: los canales 3–10 del NVR CIAPCO.
 
-Estos archivos se generan en runtime y **nunca** deben versionarse (ya están en
-`.gitignore`):
+## Seguridad de cuentas
 
-| Archivo | Contiene |
-|---|---|
-| `pgdata\tcvms-pg.secret` | Contraseña del superusuario de PostgreSQL |
-| `pgdata\tcvms-data.key` | Llave AES-256 que descifra las contraseñas de los equipos |
-| `mediamtx.runtime.yml` | URLs RTSP de origen **con las credenciales de los equipos** |
+- Política de contraseñas compartida (8+ caracteres, mayúscula, minúscula,
+  número y especial) + historial que impide reutilizar claves + caducidad
+  configurable (`Security:PasswordMaxAgeDays`, 0 = off).
+- Tokens de API opacos (12 h). Credenciales de equipos cifradas con
+  AES-256-GCM (llave local junto a pgdata). Las credenciales solo existen en
+  claro dentro de `mediamtx.runtime.yml`, generado en runtime y git-ignored.
 
-Las contraseñas de los dispositivos se guardan cifradas con AES-256-GCM y las
-de los usuarios con PBKDF2-SHA256 (100.000 iteraciones).
+## Estado (v0.1.0)
 
-## Estado
+- **M1** esqueleto + PG embebido + auth + panel: ✅
+- **M2** CRUD dispositivos + driver Hikvision (validado con hardware real): ✅
+- **M3** MediaMTX + concesiones + cliente WPF (verificado E2E): ✅
+- **M4** Dahua + ONVIF + SADP: ✅ código completo — **pendiente validar Dahua
+  y ONVIF contra hardware real** (todos los equipos en producción son Hikvision).
+- **M5** pulido (sesiones + kick, reconexión de celdas, audio por cuadro,
+  drag & drop, divisiones iVMS, buscador, indicadores de salud, README): ✅
 
-Ver [PLAN.md](PLAN.md) para la arquitectura detallada y el avance por hitos.
+Pendientes conocidos: transporte por SDK para equipos sin RTSP; re-login
+automático del cliente cuando el servidor se reinicia (hoy pide entrar de
+nuevo); playback, mapas, muro de video y eventos (la arquitectura no los
+bloquea); foco/iris por ONVIF (servicio de imagen).
