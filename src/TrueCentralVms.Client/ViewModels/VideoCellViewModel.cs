@@ -19,6 +19,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
 
     private readonly ApiClient _api;
+    private readonly ClientSettings _settings;
     private ChannelNode? _assigned;
     private int _openSequence;
     private bool _retryPending;
@@ -39,10 +40,13 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _isAudioOn;
     /// <summary>Stream en uso (Main/Sub). El botón P/S de la barra lo alterna.</summary>
     [ObservableProperty] private StreamProfile _profile;
+    /// <summary>Grabando una cápsula local de este cuadro (botón ● en rojo).</summary>
+    [ObservableProperty] private bool _isRecordingClip;
 
-    public VideoCellViewModel(ApiClient api)
+    public VideoCellViewModel(ApiClient api, ClientSettings settings)
     {
         _api = api;
+        _settings = settings;
 
         var config = new Config();
         config.Player.AutoPlay = true;
@@ -57,6 +61,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         config.Demuxer.FormatOpt["analyzeduration"] = "500000"; // 0,5 s (µs)
         config.Demuxer.FormatOpt["probesize"] = "524288";       // 512 KB
         Player = new Player(config);
+        Player.Audio.Volume = Math.Clamp(settings.DefaultVolume, 0, 100);
 
         Player.OpenCompleted += (_, e) =>
         {
@@ -71,6 +76,8 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         // invalidan la secuencia ANTES de detener, así que no reintentan.
         Player.PlaybackStopped += (_, e) =>
         {
+            // Flyleaf corta la grabación junto con el stream: reflejarlo.
+            if (IsRecordingClip && !Player.IsRecording) IsRecordingClip = false;
             if (_assigned is null) return;
             if (!e.Success) Status = "Sin señal — reintentando…";
             ScheduleRetry(_openSequence);
@@ -81,6 +88,8 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     public async Task OpenAsync(ChannelNode node, StreamProfile profile)
     {
         int sequence = ++_openSequence;
+        StopClipRecording(silent: true);
+        ResetDigitalZoom();
         _assigned = node;
         Profile = profile;
         AssignedChannel = node;
@@ -140,6 +149,103 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         await ConnectAsync(sequence);
     }
 
+    // ------------------------------------------------------------------
+    // Captura y grabación local (carpetas de Configuración)
+    // ------------------------------------------------------------------
+
+    private string MediaFileBase(string folder, string extension)
+    {
+        System.IO.Directory.CreateDirectory(folder);
+        string name = string.Join("_", (Title ?? "captura").Split(System.IO.Path.GetInvalidFileNameChars()));
+        return System.IO.Path.Combine(folder, $"{name} {DateTime.Now:yyyy-MM-dd HH.mm.ss}{extension}");
+    }
+
+    /// <summary>Guarda el cuadro actual como imagen en la carpeta de capturas.</summary>
+    [RelayCommand]
+    private void Snapshot()
+    {
+        if (_assigned is null) return;
+        try
+        {
+            string extension = _settings.SnapshotFormat.Equals("png", StringComparison.OrdinalIgnoreCase) ? ".png" : ".jpg";
+            string file = MediaFileBase(_settings.EffectiveSnapshotFolder, extension);
+            Player.TakeSnapshotToFile(file);
+            FlashStatus($"Captura guardada: {System.IO.Path.GetFileName(file)}");
+        }
+        catch (Exception ex)
+        {
+            FlashStatus("No se pudo guardar la captura: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Graba una cápsula local del stream tal como llega (remux sin
+    /// recomprimir: no cuesta CPU). Un clic parte, otro detiene.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleRecording()
+    {
+        if (_assigned is null) return;
+        if (IsRecordingClip)
+        {
+            StopClipRecording(silent: false);
+            return;
+        }
+        try
+        {
+            // Sin extensión: Flyleaf agrega la recomendada según el contenedor.
+            string file = MediaFileBase(_settings.EffectiveRecordingFolder, "");
+            Player.StartRecording(ref file, useRecommendedExtension: true);
+            IsRecordingClip = true;
+            FlashStatus("Grabando cápsula local…");
+        }
+        catch (Exception ex)
+        {
+            FlashStatus("No se pudo iniciar la grabación: " + ex.Message);
+        }
+    }
+
+    private void StopClipRecording(bool silent)
+    {
+        if (!IsRecordingClip) return;
+        try { Player.StopRecording(); } catch { }
+        IsRecordingClip = false;
+        if (!silent) FlashStatus($"Grabación guardada en {_settings.EffectiveRecordingFolder}");
+    }
+
+    /// <summary>Mensaje transitorio en la barra del cuadro (no pisa los estados
+    /// persistentes de conexión: se borra solo si nadie lo cambió).</summary>
+    private async void FlashStatus(string message)
+    {
+        Status = message;
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        if (Status == message) Status = "";
+    }
+
+    // ------------------------------------------------------------------
+    // Zoom digital (rueda del mouse sobre el video)
+    // ------------------------------------------------------------------
+
+    /// <summary>Zoom en % (100 = sin zoom). Flyleaf recorta el viewport en GPU.</summary>
+    public double DigitalZoom => Player.Config.Video.Zoom;
+
+    /// <summary>Acerca o aleja centrado en el punto del cursor (normalizado 0..1).</summary>
+    public void DigitalZoomStep(bool zoomIn, System.Windows.Point center)
+    {
+        double target = Math.Clamp(Player.Config.Video.Zoom + (zoomIn ? 20 : -20), 100, 600);
+        if (target <= 100)
+            ResetDigitalZoom();
+        else
+            Player.Config.Video.SetZoomAndCenter(target, center);
+        FlashStatus(target <= 100 ? "Zoom 1x" : $"Zoom digital {target / 100.0:0.#}x");
+    }
+
+    private void ResetDigitalZoom()
+    {
+        Player.Config.Video.Zoom = 100;
+        Player.Config.Video.ZoomCenter = new System.Windows.Point(0.5, 0.5);
+    }
+
     [RelayCommand]
     private void ToggleAudio() => IsAudioOn = !IsAudioOn;
 
@@ -155,6 +261,8 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     public void Clear()
     {
         _openSequence++;
+        StopClipRecording(silent: false);
+        ResetDigitalZoom();
         _assigned = null;
         AssignedChannel = null;
         IsAudioOn = false;
@@ -167,6 +275,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _openSequence++;
+        StopClipRecording(silent: true);
         _assigned = null;
         Player.Dispose();
     }

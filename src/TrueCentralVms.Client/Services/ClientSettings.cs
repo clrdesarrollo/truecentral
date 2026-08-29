@@ -2,6 +2,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace TrueCentralVms.Client.Services;
 
@@ -36,6 +37,35 @@ public sealed class ClientSettings
     public string? LastLayout { get; set; }
     /// <summary>Últimos inicios de sesión, el más reciente primero.</summary>
     public List<SavedAccount> Accounts { get; set; } = [];
+
+    // ---------- Configuración (ventana de ajustes) ----------
+
+    /// <summary>Carpeta de capturas de imagen; null/vacío = Imágenes\TrueCentral VMS.</summary>
+    public string? SnapshotFolder { get; set; }
+    /// <summary>Carpeta de grabaciones locales; null/vacío = Videos\TrueCentral VMS.</summary>
+    public string? RecordingFolder { get; set; }
+    /// <summary>Formato de las capturas: "jpg" o "png".</summary>
+    public string SnapshotFormat { get; set; } = "jpg";
+    /// <summary>Volumen inicial del audio de los cuadros (0..100).</summary>
+    public int DefaultVolume { get; set; } = 75;
+    /// <summary>Stream al abrir un canal: "auto" (main ≤4 cuadros), "main" o "sub".</summary>
+    public string DefaultProfile { get; set; } = "auto";
+    /// <summary>Tiempo de espera de la API en segundos (se aplica al iniciar la aplicación).</summary>
+    public int ApiTimeoutSeconds { get; set; } = 20;
+
+    public static string DefaultSnapshotFolder =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "TrueCentral VMS");
+
+    public static string DefaultRecordingFolder =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "TrueCentral VMS");
+
+    [JsonIgnore]
+    public string EffectiveSnapshotFolder =>
+        string.IsNullOrWhiteSpace(SnapshotFolder) ? DefaultSnapshotFolder : SnapshotFolder;
+
+    [JsonIgnore]
+    public string EffectiveRecordingFolder =>
+        string.IsNullOrWhiteSpace(RecordingFolder) ? DefaultRecordingFolder : RecordingFolder;
 
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

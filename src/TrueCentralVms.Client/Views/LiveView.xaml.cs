@@ -202,6 +202,18 @@ public partial class LiveView : UserControl
         // Flyleaf: el PTZ por teclado también debe funcionar desde ahí.
         window.AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler(OnPtzKeyDown), handledEventsToo: true);
         window.AddHandler(Keyboard.PreviewKeyUpEvent, new KeyEventHandler(OnPtzKeyUp), handledEventsToo: true);
+        // Rueda del mouse sobre el video = zoom digital, centrado en el cursor
+        // (posición normalizada 0..1 dentro de la ventana de video).
+        window.AddHandler(MouseWheelEvent, new MouseWheelEventHandler((_, e) =>
+        {
+            if (host.DataContext is not VideoCellViewModel cell || cell.IsEmpty) return;
+            var position = e.GetPosition(window);
+            var center = new Point(
+                window.ActualWidth > 0 ? position.X / window.ActualWidth : 0.5,
+                window.ActualHeight > 0 ? position.Y / window.ActualHeight : 0.5);
+            cell.DigitalZoomStep(e.Delta > 0, center);
+            e.Handled = true;
+        }), handledEventsToo: true);
     }
 
     private void SelectCell(VideoCellViewModel cell) => Vm.SelectedCell = Vm.SelectedCell == cell ? null : cell;

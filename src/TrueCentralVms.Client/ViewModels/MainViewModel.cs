@@ -67,6 +67,17 @@ public partial class MainViewModel : ObservableObject
     private void ShowComingSoon(string module) =>
         StatusMessage = $"El módulo \"{module}\" estará disponible próximamente.";
 
+    /// <summary>Ventana de Configuración. Edita la MISMA instancia de ajustes
+    /// que usan las celdas (carpetas, formato, stream por defecto): al guardar,
+    /// los cambios rigen de inmediato sin reiniciar.</summary>
+    [RelayCommand]
+    private void OpenSettings()
+    {
+        var window = new Views.SettingsWindow(_settings) { Owner = Application.Current.MainWindow };
+        if (window.ShowDialog() == true)
+            StatusMessage = "Configuración guardada.";
+    }
+
     // ---------- PTZ ----------
     // El panel está siempre presente (minimizado por defecto); sus controles
     // se habilitan solo cuando el cuadro seleccionado tiene una cámara PTZ.
@@ -348,7 +359,7 @@ public partial class MainViewModel : ObservableObject
         }
         while (Cells.Count < count)
         {
-            var cell = new VideoCellViewModel(_api);
+            var cell = new VideoCellViewModel(_api, _settings);
             cell.AudioActivated += OnCellAudioActivated;
             Cells.Add(cell);
         }
@@ -377,17 +388,22 @@ public partial class MainViewModel : ObservableObject
         int next = Cells.IndexOf(cell) + 1;
         SelectedCell = next < Cells.Count ? Cells[next] : null;
 
-        var profile = Cells.Count <= 4 ? StreamProfile.Main : StreamProfile.Sub;
-        await cell.OpenAsync(node, profile);
+        await cell.OpenAsync(node, DefaultProfileForOpen());
     }
 
     /// <summary>Abre un canal en un cuadro específico (drag & drop del árbol a
     /// la grilla): sin avanzar la selección.</summary>
-    public async Task OpenChannelInCellAsync(ChannelNode node, VideoCellViewModel cell)
+    public async Task OpenChannelInCellAsync(ChannelNode node, VideoCellViewModel cell) =>
+        await cell.OpenAsync(node, DefaultProfileForOpen());
+
+    /// <summary>Stream al abrir un canal según Configuración → Video: fijo, o
+    /// automático (principal en grillas chicas, secundario en grandes).</summary>
+    private StreamProfile DefaultProfileForOpen() => _settings.DefaultProfile switch
     {
-        var profile = Cells.Count <= 4 ? StreamProfile.Main : StreamProfile.Sub;
-        await cell.OpenAsync(node, profile);
-    }
+        "main" => StreamProfile.Main,
+        "sub" => StreamProfile.Sub,
+        _ => Cells.Count <= 4 ? StreamProfile.Main : StreamProfile.Sub,
+    };
 
     /// <summary>Audio exclusivo: encender el audio de un cuadro apaga el resto.</summary>
     private void OnCellAudioActivated(VideoCellViewModel active)

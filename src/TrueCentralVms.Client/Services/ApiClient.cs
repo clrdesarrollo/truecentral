@@ -24,7 +24,11 @@ public sealed class ApiClient
         Converters = { new JsonStringEnumConverter() },
     };
 
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private readonly HttpClient _http = new()
+    {
+        // Configurable en Configuración → Red (se aplica al iniciar la app).
+        Timeout = TimeSpan.FromSeconds(Math.Clamp(ClientSettings.Load().ApiTimeoutSeconds, 5, 120)),
+    };
 
     private readonly SemaphoreSlim _reloginLock = new(1, 1);
     private string? _password;
