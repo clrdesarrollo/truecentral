@@ -4,14 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
-  <link rel="stylesheet" href="styles.css?v=1">
+  <link rel="icon" href="favicon.ico">
+  <link rel="stylesheet" href="styles.css?v=2">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
   <div id="auth-screen" class="auth-screen hidden">
     <div class="auth-card">
       <div class="brand">
-        <div class="brand-mark">TC</div>
+        <div class="brand-mark logo"><img src="logo.png" alt=""></div>
         <div>
           <h1>CLR TrueCentral <span class="accent">VMS</span></h1>
           <p class="muted" id="auth-subtitle">Gestión de video multimarca</p>
@@ -26,12 +27,13 @@
   <div id="app-shell" class="shell hidden">
     <aside class="sidebar">
       <div class="brand small">
-        <div class="brand-mark">TC</div>
+        <div class="brand-mark logo"><img src="logo.png" alt=""></div>
         <span>TrueCentral <span class="accent">VMS</span></span>
       </div>
       <nav id="nav">
         <a href="#/" data-route="dashboard">Panel</a>
         <a href="#/devices" data-route="devices">Dispositivos</a>
+        <a href="#/sessions" data-route="sessions">Sesiones</a>
         <a href="#/users" data-route="users">Usuarios</a>
       </nav>
       <div class="sidebar-footer">
@@ -59,6 +61,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="api.js?v=1"></script>
-  <script src="app.js?v=1"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

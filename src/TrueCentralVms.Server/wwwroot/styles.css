@@ -49,6 +49,8 @@ body {
   color: white; font-weight: 700; border-radius: 10px; letter-spacing: .5px;
 }
 .brand.small .brand-mark { width: 30px; height: 30px; font-size: 12px; border-radius: 8px; }
+.brand-mark.logo { background: none; }
+.brand-mark.logo img { width: 100%; height: 100%; border-radius: inherit; }
 .auth-version { margin: 18px 0 0; text-align: center; font-size: 11px; }
 
 .field { margin-bottom: 14px; }

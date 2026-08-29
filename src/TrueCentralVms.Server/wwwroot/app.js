@@ -247,8 +247,10 @@ async function renderDashboard() {
   let devices = [];
   try { devices = await Api.get("/api/devices"); } catch { /* sin sesión aún */ }
   let usersCount = "—";
+  let sessionsCount = "—";
   if (Api.role === "Admin") {
     try { usersCount = (await Api.get("/api/users")).length; } catch { /* sin permiso */ }
+    try { sessionsCount = (await Api.get("/api/streams/active")).length; } catch { /* sin permiso */ }
   }
   const online = devices.filter((d) => d.status === "Online").length;
   $("#view").innerHTML = `
@@ -265,6 +267,11 @@ async function renderDashboard() {
         <div class="card-label">Dispositivos</div>
         <div class="card-value">${devices.length}<span class="muted" style="font-size:13px"> (${online} en línea)</span></div>
       </div>
+      ${Api.role === "Admin" ? `
+      <div class="card">
+        <div class="card-label">Sesiones de video activas</div>
+        <div class="card-value">${esc(sessionsCount)}</div>
+      </div>` : ""}
       <div class="card">
         <div class="card-label">Usuarios</div>
         <div class="card-value">${esc(usersCount)}</div>
@@ -273,11 +280,86 @@ async function renderDashboard() {
         <div class="card-label">Hora del servidor (UTC)</div>
         <div class="card-value small">${health ? formatDate(health.time) : "—"}</div>
       </div>
-    </div>
-    <div class="info-box">
-      Próximos módulos: streaming en vivo (cliente de escritorio), Dahua, ONVIF
-      y sesiones activas.
     </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Sesiones de streaming activas (quién ve qué) + expulsión
+// ---------------------------------------------------------------------------
+let sessionsTimer = null;
+
+function sessionDuration(startedAt) {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = seconds % 60;
+  return (h ? `${h} h ` : "") + (h || m ? `${m} min ` : "") + `${s} s`;
+}
+
+async function renderSessions() {
+  $("#page-title").textContent = "Sesiones";
+  if (Api.role !== "Admin") {
+    $("#view").innerHTML = `<div class="warn-box">Requiere rol administrador.</div>`;
+    return;
+  }
+
+  const load = async () => {
+    let sessions;
+    try { sessions = await Api.get("/api/streams/active"); }
+    catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
+
+    $("#view").innerHTML = `
+      <div class="toolbar">
+        <h3>Sesiones de video activas <span class="muted" style="font-weight:normal;font-size:12px">(se actualiza cada 5 s)</span></h3>
+      </div>
+      ${sessions.length === 0 ? `<div class="info-box">Nadie está viendo video en este momento.</div>` : `
+      <div class="table-scroll"><table class="grid">
+        <thead><tr>
+          <th>Usuario</th><th>Dispositivo</th><th>Canal</th><th>Perfil</th>
+          <th>IP del espectador</th><th>Inicio</th><th>Duración</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${sessions.map((s) => `
+            <tr data-id="${s.id}">
+              <td>${esc(s.username)}</td>
+              <td>${esc(s.deviceName)}</td>
+              <td>${s.rtspChannel}</td>
+              <td><span class="tag ${s.profile === "main" ? "admin" : "operator"}">${s.profile === "main" ? "Principal" : "Secundario"}</span></td>
+              <td class="muted">${esc(s.clientIp)}</td>
+              <td class="muted">${formatDate(s.startedAt)}</td>
+              <td class="muted">${sessionDuration(s.startedAt)}</td>
+              <td class="row-actions">
+                <button class="btn danger btn-kick" title="Cortar esta sesión de video (el usuario puede volver a conectarse)">Expulsar</button>
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table></div>`}`;
+
+    $$("#view .btn-kick").forEach((b) => b.addEventListener("click", async (e) => {
+      const row = e.target.closest("tr");
+      const id = Number(row.dataset.id);
+      const s = sessions.find((x) => x.id === id);
+      if (!confirm(`¿Cortar la sesión de "${s.username}" sobre ${s.deviceName} canal ${s.rtspChannel}?`)) return;
+      e.target.disabled = true;
+      try {
+        await Api.post(`/api/streams/${id}/kick`);
+        toast("Sesión expulsada.");
+        load();
+      } catch (err) {
+        toast(err.error, true);
+        e.target.disabled = false;
+      }
+    }));
+  };
+
+  await load();
+  clearInterval(sessionsTimer);
+  sessionsTimer = setInterval(() => {
+    // Sigue sondeando solo mientras la página esté visible y activa.
+    if (location.hash !== "#/sessions" || $("#app-shell").classList.contains("hidden")) {
+      clearInterval(sessionsTimer);
+      return;
+    }
+    load();
+  }, 5000);
 }
 
 // ---------------------------------------------------------------------------
@@ -615,6 +697,10 @@ async function channelsModal(device) {
                    title="Mostrar control PTZ. Se detecta automático; márquelo a mano para domos que el equipo no reporta (ej. conectados por ONVIF al DVR).">
               <input type="checkbox" class="ch-ptz" ${c.supportsPtz ? "checked" : ""} ${isAdmin ? "" : "disabled"}> PTZ
             </label>
+            <label class="checkbox-row" style="margin:0"
+                   title="Para cámaras que anuncian mal su audio (SDP inválido que el servidor de media rechaza): el video pasa por un relé FFmpeg y se ve SIN audio. Márquelo si el canal da error de reproducción pese a estar en línea.">
+              <input type="checkbox" class="ch-proxy" ${c.useFfmpegProxy ? "checked" : ""} ${isAdmin ? "" : "disabled"}> Proxy
+            </label>
             ${isAdmin ? `<button class="btn ghost ch-save">Guardar</button>` : ""}
           </div>`).join("")}
       </div>`}
@@ -631,6 +717,7 @@ async function channelsModal(device) {
         name: row.querySelector(".ch-name").value.trim(),
         enabled: row.querySelector(".ch-enabled").checked,
         supportsPtz: row.querySelector(".ch-ptz").checked,
+        useFfmpegProxy: row.querySelector(".ch-proxy").checked,
       });
       toast("Canal actualizado.");
     } catch (err) {
@@ -759,10 +846,12 @@ const routes = {
   "": renderDashboard,
   "#/": renderDashboard,
   "#/devices": renderDevices,
+  "#/sessions": renderSessions,
   "#/users": renderUsers,
 };
 
 function navigate() {
+  clearInterval(sessionsTimer); // el sondeo de sesiones vive solo en su página
   const hash = location.hash || "#/";
   const render = routes[hash] || renderDashboard;
   $$("#nav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === hash));
