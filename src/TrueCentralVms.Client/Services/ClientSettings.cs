@@ -50,6 +50,8 @@ public sealed class ClientSettings
     public int DefaultVolume { get; set; } = 75;
     /// <summary>Stream al abrir un canal: "auto" (main ≤4 cuadros), "main" o "sub".</summary>
     public string DefaultProfile { get; set; } = "auto";
+    /// <summary>true = estirar el video al cuadro (sin barras negras); false = mantener proporción.</summary>
+    public bool StretchVideo { get; set; }
     /// <summary>Tiempo de espera de la API en segundos (se aplica al iniciar la aplicación).</summary>
     public int ApiTimeoutSeconds { get; set; } = 20;
 

@@ -75,7 +75,12 @@ public partial class MainViewModel : ObservableObject
     {
         var window = new Views.SettingsWindow(_settings) { Owner = Application.Current.MainWindow };
         if (window.ShowDialog() == true)
+        {
+            // El ajuste de imagen rige de inmediato en los cuadros existentes.
+            foreach (var cell in Cells)
+                cell.ApplyStretch(_settings.StretchVideo);
             StatusMessage = "Configuración guardada.";
+        }
     }
 
     // ---------- PTZ ----------

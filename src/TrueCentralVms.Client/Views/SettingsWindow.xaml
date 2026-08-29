@@ -121,6 +121,16 @@
                 <TextBlock Style="{StaticResource SettingHint}"
                            Text="Automático usa el stream principal en divisiones de hasta 4 cuadros y el secundario en las más grandes. El botón P/S de cada cuadro sigue disponible como ajuste manual."/>
 
+                <TextBlock Text="Ajuste de imagen" Style="{StaticResource FieldLabel}" Margin="0,18,0,4"/>
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="FitKeep" Content="Mantener proporción" Style="{StaticResource OptionRadio}"
+                                 GroupName="Fit"/>
+                    <RadioButton x:Name="FitStretch" Content="Estirar al cuadro" Style="{StaticResource OptionRadio}"
+                                 GroupName="Fit"/>
+                </StackPanel>
+                <TextBlock Style="{StaticResource SettingHint}"
+                           Text="Estirar llena cada cuadro por completo (sin barras negras) deformando levemente la imagen. Se aplica a todos los cuadros al guardar."/>
+
                 <TextBlock Text="Carpeta de grabaciones locales" Style="{StaticResource FieldLabel}" Margin="0,18,0,4"/>
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Content="Examinar…" Style="{StaticResource GhostButton}"

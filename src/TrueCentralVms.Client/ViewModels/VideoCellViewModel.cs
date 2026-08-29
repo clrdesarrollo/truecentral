@@ -71,6 +71,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         config.Demuxer.FormatOpt["probesize"] = "524288";       // 512 KB
         Player = new Player(config);
         Player.Audio.Volume = Math.Clamp(settings.DefaultVolume, 0, 100);
+        ApplyStretch(settings.StretchVideo);
 
         Player.OpenCompleted += (_, e) =>
         {
@@ -272,6 +273,11 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     // ------------------------------------------------------------------
     // Zoom digital (rueda del mouse sobre el video)
     // ------------------------------------------------------------------
+
+    /// <summary>Ajuste de imagen: estirar al cuadro (sin barras negras) o
+    /// mantener la proporción original. Aplica en caliente.</summary>
+    public void ApplyStretch(bool stretch) =>
+        Player.Config.Video.AspectRatio = stretch ? AspectRatio.Fill : AspectRatio.Keep;
 
     /// <summary>Zoom en % (100 = sin zoom). Flyleaf recorta el viewport en GPU.</summary>
     public double DigitalZoom => Player.Config.Video.Zoom;

@@ -33,6 +33,8 @@ public partial class SettingsWindow : Window
         (settings.SnapshotFormat.Equals("png", StringComparison.OrdinalIgnoreCase)
             ? FormatPng : FormatJpg).IsChecked = true;
 
+        (settings.StretchVideo ? FitStretch : FitKeep).IsChecked = true;
+
         VolumeSlider.Value = Math.Clamp(settings.DefaultVolume, 0, 100);
         TimeoutBox.Text = settings.ApiTimeoutSeconds.ToString();
     }
@@ -86,6 +88,7 @@ public partial class SettingsWindow : Window
         _settings.DefaultProfile = ProfileMain.IsChecked == true ? "main"
             : ProfileSub.IsChecked == true ? "sub" : "auto";
         _settings.SnapshotFormat = FormatPng.IsChecked == true ? "png" : "jpg";
+        _settings.StretchVideo = FitStretch.IsChecked == true;
         _settings.DefaultVolume = (int)VolumeSlider.Value;
         _settings.ApiTimeoutSeconds = timeout;
         _settings.Save();
