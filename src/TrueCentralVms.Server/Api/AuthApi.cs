@@ -9,7 +9,8 @@ public static class AuthApi
 {
     public static void MapAuthApi(this WebApplication app)
     {
-        app.MapPost("/api/auth/login", async (LoginRequest request, VmsDbContext db, TokenService tokens, PasswordGovernance passwords) =>
+        app.MapPost("/api/auth/login", async (HttpContext ctx, LoginRequest request, VmsDbContext db,
+            TokenService tokens, PasswordGovernance passwords, ILogger<Program> logger) =>
         {
             // Servidor "desactivado": sin usuarios no hay login; hay que
             // completar la configuración inicial desde la máquina del servidor.
@@ -20,7 +21,11 @@ public static class AuthApi
 
             var user = await db.Users.FirstOrDefaultAsync(u => u.Username == request.Username && u.Enabled);
             if (user is null || !PasswordHasher.Verify(request.Password, user.PasswordHash, user.PasswordSalt))
+            {
+                logger.LogWarning("Auth: login rechazado para '{Username}' desde {Ip}.",
+                    request.Username, ctx.Connection.RemoteIpAddress);
                 return Results.Json(new { error = "Usuario o contraseña incorrectos." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
 
             if (passwords.IsExpired(user))
                 return Results.Json(
@@ -28,6 +33,8 @@ public static class AuthApi
                     statusCode: StatusCodes.Status403Forbidden);
 
             var (token, session) = tokens.Issue(user.Id, user.Username, user.Role);
+            logger.LogInformation("Auth: sesión iniciada por {Username} desde {Ip}.",
+                user.Username, ctx.Connection.RemoteIpAddress);
             return Results.Ok(new LoginResponse(token, user.Username, user.Role, session.ExpiresAt));
         });
 
