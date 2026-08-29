@@ -67,7 +67,7 @@ Hub SignalR `/hubs/vms`, eventos servidor→cliente: `DeviceStatusChanged(Device
 
 ## API REST (resumen)
 
-`POST /api/auth/login|logout` · `GET /api/health` · `GET /api/drivers` · CRUD `/api/devices` + `POST /api/devices/probe` (valida credenciales y devuelve info SIN persistir — botón "Probar" del wizard) + `/{id}/channels` + `/{id}/snapshot/{ch}` · `POST /api/streams/request` → `{rtspUrl, token, expira}` · `POST /api/streaming/auth` (callback MediaMTX, solo loopback) · `GET /api/streams/active` · `GET /api/discovery/sadp` · CRUD `/api/users`.
+`POST /api/auth/login|logout` · `GET /api/health` · `GET /api/drivers` · CRUD `/api/devices` + `POST /api/devices/probe` (valida credenciales y devuelve info SIN persistir — botón "Probar" del wizard) + `/{id}/channels` + `/{id}/snapshot/{ch}` · `POST /api/streams/request` → `{rtspUrl, token, expira}` · `POST /api/streaming/auth` (callback MediaMTX, solo loopback) · `GET /api/streams/active` · `GET /api/discovery/scan` (SADP + DHDiscover Dahua + WS-Discovery ONVIF; `?host=IP` sondea unicast un Dahua remoto) · CRUD `/api/users`.
 
 Auth: tokens opacos 32 bytes, 12 h, `Bearer` o `?access_token=` (SignalR) — copiado de vwcontroller (`ApiSecurity`, `TokenService`, `PasswordHasher`).
 

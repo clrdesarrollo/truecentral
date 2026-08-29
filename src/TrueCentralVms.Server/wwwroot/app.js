@@ -436,11 +436,12 @@ async function renderDevices() {
       </table></div>`}
     ${isAdmin ? `
     <div class="toolbar" style="margin-top:28px">
-      <h3>Equipos en línea <span class="muted" style="font-weight:normal;font-size:12px">(descubrimiento SADP en la red local)</span></h3>
+      <h3>Equipos en línea <span class="muted" style="font-weight:normal;font-size:12px">(SADP · Dahua · ONVIF en la red local)</span></h3>
       <button class="btn ghost" id="btn-device-scan">Buscar</button>
     </div>
     <div id="online-devices">
-      ${lastScan ? "" : `<div class="info-box">Use <b>Buscar</b> para sondear el segmento de red del servidor.
+      ${lastScan ? "" : `<div class="info-box">Use <b>Buscar</b> para sondear el segmento de red del servidor
+        (SADP para Hikvision, DHDiscover para Dahua y WS-Discovery para cualquier marca ONVIF).
         Solo se listan equipos de video (cámaras, DVR, NVR, decodificadores); los controles de acceso y alarmas se omiten.</div>`}
     </div>` : ""}`;
 
@@ -488,7 +489,7 @@ async function runDiscovery(devices) {
   scanButton.textContent = "Buscando…";
   box.innerHTML = `<div class="info-box">Sondeando la red… (unos segundos)</div>`;
   try {
-    lastScan = await Api.get("/api/discovery/sadp");
+    lastScan = await Api.get("/api/discovery/scan");
     renderOnlineDevices(devices);
   } catch (err) {
     box.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
@@ -509,7 +510,7 @@ function renderOnlineDevices(devices) {
   box.innerHTML = `
     <div class="table-scroll"><table class="grid">
       <thead><tr>
-        <th>IP</th><th>Tipo</th><th>Modelo</th><th>N° serie</th><th>Puerto SDK</th>
+        <th>IP</th><th>Marca</th><th>Tipo</th><th>Modelo</th><th>N° serie</th><th>Puerto SDK</th>
         <th>MAC</th><th>Estado</th><th></th>
       </tr></thead>
       <tbody>${lastScan.map((d, i) => {
@@ -517,6 +518,7 @@ function renderOnlineDevices(devices) {
         return `
         <tr>
           <td>${esc(d.ip)}</td>
+          <td>${esc(d.brand)}</td>
           <td>${esc(d.category)}</td>
           <td>${esc(d.model)}</td>
           <td class="muted">${esc(d.serial)}</td>
@@ -538,7 +540,7 @@ function renderOnlineDevices(devices) {
       name: d.model || d.ip,
       host: d.ip,
       sdkPort: d.commandPort || 8000,
-      driverKey: "hikvision-netsdk",
+      driverKey: d.driverKey || "hikvision-netsdk",
     });
   }));
 }
