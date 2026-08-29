@@ -290,6 +290,63 @@ public sealed class MediaMtxManager(
 
     private static readonly HttpClient ApiHttp = new() { Timeout = TimeSpan.FromSeconds(3) };
 
+    // ------------------------------------------------------------------
+    // Rutas dinámicas de reproducción (pb-...): cada concesión de playback
+    // monta por la API de control una ruta cuyo source es la URL RTSP de
+    // reproducción del equipo (con el rango horario pedido). Las rutas
+    // viejas se barren al crear nuevas; una regeneración de la
+    // configuración (RefreshPaths) también las descarta.
+    // ------------------------------------------------------------------
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _playbackPaths = new();
+
+    /// <summary>Crea una ruta de reproducción bajo demanda; false si MediaMTX no está o la rechazó.</summary>
+    public async Task<bool> AddPlaybackPathAsync(string name, string sourceUrl, CancellationToken ct = default)
+    {
+        if (!IsRunning) return false;
+        await SweepPlaybackPathsAsync(TimeSpan.FromHours(2), ct);
+        var payload = new
+        {
+            source = sourceUrl,
+            sourceOnDemand = true,
+            sourceOnDemandStartTimeout = "15s",
+            sourceOnDemandCloseAfter = "10s",
+        };
+        try
+        {
+            using var response = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(
+                ApiHttp, $"{ApiBaseUrl}/v3/config/paths/add/{name}", payload, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning("MediaMTX: no aceptó la ruta de reproducción '{Name}' ({Status}).",
+                    name, (int)response.StatusCode);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("MediaMTX: error creando la ruta de reproducción '{Name}': {Error}", name, ex.Message);
+            return false;
+        }
+        _playbackPaths[name] = DateTime.UtcNow;
+        return true;
+    }
+
+    /// <summary>Elimina las rutas de reproducción más viejas que maxAge (mejor esfuerzo).</summary>
+    private async Task SweepPlaybackPathsAsync(TimeSpan maxAge, CancellationToken ct)
+    {
+        foreach (var (name, created) in _playbackPaths)
+        {
+            if (DateTime.UtcNow - created < maxAge) continue;
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Delete, $"{ApiBaseUrl}/v3/config/paths/delete/{name}");
+                using var _ = await ApiHttp.SendAsync(request, ct);
+            }
+            catch { /* si MediaMTX se reinició, la ruta ya no existe */ }
+            _playbackPaths.TryRemove(name, out _);
+        }
+    }
+
     /// <summary>
     /// Expulsa a un lector cortando su sesión RTSP en MediaMTX. El espectador
     /// puede volver a pedir una concesión (sigue autenticado): expulsar corta

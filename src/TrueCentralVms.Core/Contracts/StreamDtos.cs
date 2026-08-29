@@ -21,3 +21,14 @@ public sealed record ActiveSessionDto(
     string Profile,
     string ClientIp,
     DateTime StartedAt);
+
+// ---------------------------------------------------------------------------
+// Reproducción remota (las grabaciones viven en el DVR/NVR/tarjeta del equipo)
+// ---------------------------------------------------------------------------
+
+/// <summary>Tramo grabado de un canal, en hora LOCAL del equipo.
+/// Kind: Continuous | Motion | Alarm | Manual | Other.</summary>
+public sealed record RecordingSegmentDto(DateTime Start, DateTime End, string Kind);
+
+/// <summary>Solicitud de reproducción de un rango grabado (hora local del equipo).</summary>
+public sealed record PlaybackRequestDto(int DeviceId, int RtspChannel, DateTime StartLocal, DateTime EndLocal);

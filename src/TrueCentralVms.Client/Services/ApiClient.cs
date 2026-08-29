@@ -97,6 +97,18 @@ public sealed class ApiClient
         SendAsync<StreamGrantDto>(HttpMethod.Post, "/api/streams/request",
             new StreamRequestDto(deviceId, rtspChannel, profile), ct);
 
+    /// <summary>Segmentos grabados de un canal para un día (hora local del equipo).</summary>
+    public Task<List<RecordingSegmentDto>> GetRecordingSegmentsAsync(int deviceId, int channelNumber, DateTime date,
+        CancellationToken ct = default) =>
+        SendAsync<List<RecordingSegmentDto>>(HttpMethod.Get,
+            $"/api/playback/{deviceId}/{channelNumber}/segments?date={date:yyyy-MM-dd}", null, ct);
+
+    /// <summary>Concesión de reproducción de un rango grabado (hora local del equipo).</summary>
+    public Task<StreamGrantDto> RequestPlaybackAsync(int deviceId, int rtspChannel, DateTime startLocal, DateTime endLocal,
+        CancellationToken ct = default) =>
+        SendAsync<StreamGrantDto>(HttpMethod.Post, "/api/playback/request",
+            new PlaybackRequestDto(deviceId, rtspChannel, startLocal, endLocal), ct);
+
     /// <summary>Orden PTZ continua (stop=false inicia, stop=true detiene).</summary>
     public Task PtzAsync(int deviceId, int channelNumber, PtzCommand command, int speed, bool stop, CancellationToken ct = default) =>
         SendAsync<object?>(HttpMethod.Post, $"/api/devices/{deviceId}/channels/{channelNumber}/ptz",

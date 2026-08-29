@@ -1,0 +1,169 @@
+<UserControl x:Class="TrueCentralVms.Client.Views.PlaybackView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:fl="clr-namespace:FlyleafLib.Controls.WPF;assembly=FlyleafLib"
+             xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
+             xmlns:views="clr-namespace:TrueCentralVms.Client.Views"
+             Background="{StaticResource BgBrush}">
+    <UserControl.Resources>
+        <Style x:Key="LegendChip" TargetType="Border">
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="Height" Value="10"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="Margin" Value="10,0,4,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="LegendLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </UserControl.Resources>
+    <DockPanel>
+        <!-- Árbol de canales -->
+        <Border DockPanel.Dock="Left" Width="250" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="GRABACIONES" Margin="14,12,14,8" FontSize="11"
+                           FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"/>
+                <TextBlock DockPanel.Dock="Top" Margin="14,0,14,8" FontSize="10.5" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           Text="Doble clic en un canal para consultar sus grabaciones (viven en el disco del equipo)."/>
+                <TreeView x:Name="PlaybackTree" ItemsSource="{Binding Devices}"
+                          Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
+                          MouseDoubleClick="OnTreeDoubleClick">
+                    <TreeView.ItemContainerStyle>
+                        <Style TargetType="TreeViewItem">
+                            <Setter Property="IsExpanded" Value="True"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+                    <TreeView.Resources>
+                        <HierarchicalDataTemplate DataType="{x:Type vm:DeviceNode}" ItemsSource="{Binding Channels}">
+                            <TextBlock Text="{Binding Header}" FontWeight="SemiBold" Margin="0,2"/>
+                        </HierarchicalDataTemplate>
+                        <DataTemplate DataType="{x:Type vm:ChannelNode}">
+                            <StackPanel Orientation="Horizontal" Margin="0,1" ToolTip="Doble clic para ver sus grabaciones">
+                                <TextBlock Text="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="9"
+                                           Foreground="{StaticResource MutedBrush}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding Header}"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </TreeView.Resources>
+                </TreeView>
+            </DockPanel>
+        </Border>
+
+        <!-- Barra superior: fecha + leyenda -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,6">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Border Style="{StaticResource LegendChip}" Background="#2E6BC4"/>
+                    <TextBlock Text="Continua" Style="{StaticResource LegendLabel}"/>
+                    <Border Style="{StaticResource LegendChip}" Background="#F59E0B"/>
+                    <TextBlock Text="Movimiento" Style="{StaticResource LegendLabel}"/>
+                    <Border Style="{StaticResource LegendChip}" Background="#EF4444"/>
+                    <TextBlock Text="Alarma" Style="{StaticResource LegendLabel}"/>
+                    <Border Style="{StaticResource LegendChip}" Background="#A78BFA"/>
+                    <TextBlock Text="Manual" Style="{StaticResource LegendLabel}"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Día:" VerticalAlignment="Center" Margin="0,0,8,0"
+                               Foreground="{StaticResource MutedBrush}"/>
+                    <Button Content="&#xE76B;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                            Style="{StaticResource GhostButton}" Padding="8,5"
+                            Command="{Binding Playback.PreviousDayCommand}" ToolTip="Día anterior"/>
+                    <TextBlock Text="{Binding Playback.Date, StringFormat='dddd dd-MM-yyyy'}" Width="170"
+                               TextAlignment="Center" VerticalAlignment="Center" Margin="6,0"
+                               Foreground="{StaticResource TextBrush}" FontWeight="SemiBold"/>
+                    <Button Content="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                            Style="{StaticResource GhostButton}" Padding="8,5"
+                            Command="{Binding Playback.NextDayCommand}" ToolTip="Día siguiente"/>
+                    <Button Content="Hoy" Style="{StaticResource GhostButton}" Padding="10,5" Margin="8,0,0,0"
+                            Command="{Binding Playback.GoTodayCommand}"/>
+                    <TextBlock Text="{Binding Playback.Channel.Channel.Name, StringFormat='— {0}'}"
+                               VerticalAlignment="Center" Margin="14,0,0,0"
+                               Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Controles + línea de tiempo -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">
+            <StackPanel>
+                <DockPanel Margin="10,8,10,4">
+                    <StackPanel Orientation="Horizontal">
+                        <!-- Pausa / reanudar -->
+                        <Button Command="{Binding Playback.TogglePauseCommand}" Style="{StaticResource GhostButton}"
+                                Padding="12,6" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                IsEnabled="{Binding Playback.IsPlaying}">
+                            <Button.Content>
+                                <TextBlock FontFamily="Segoe MDL2 Assets">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="&#xE769;"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Playback.IsPaused}" Value="True">
+                                                    <Setter Property="Text" Value="&#xE768;"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button.Content>
+                        </Button>
+                        <!-- Detener -->
+                        <Button Content="&#xE71A;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                Style="{StaticResource GhostButton}" Padding="12,6" Margin="6,0,0,0"
+                                Command="{Binding Playback.StopCommand}" IsEnabled="{Binding Playback.IsPlaying}"
+                                ToolTip="Detener la reproducción"/>
+                        <!-- Audio -->
+                        <Button Command="{Binding Playback.ToggleAudioCommand}" Padding="12,6" Margin="6,0,0,0"
+                                Style="{StaticResource GhostButton}" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                ToolTip="Audio de la reproducción">
+                            <Button.Content>
+                                <TextBlock FontFamily="Segoe MDL2 Assets">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="&#xE74F;"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Playback.IsAudioOn}" Value="True">
+                                                    <Setter Property="Text" Value="&#xE767;"/>
+                                                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button.Content>
+                        </Button>
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding Playback.Playhead, StringFormat='HH:mm:ss'}"
+                               Foreground="{StaticResource AccentBrush}" FontSize="15" FontWeight="Bold"
+                               VerticalAlignment="Center" Margin="10,0,4,0"/>
+                    <TextBlock Text="{Binding Playback.Status}" Foreground="{StaticResource MutedBrush}"
+                               FontSize="11.5" VerticalAlignment="Center" Margin="14,0,0,0"
+                               TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+                <views:TimelineBar x:Name="Timeline" Height="62" Margin="10,2,10,10"
+                                   Segments="{Binding Playback.Segments}"
+                                   Day="{Binding Playback.Date}"
+                                   Playhead="{Binding Playback.Playhead}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Video -->
+        <Grid Background="#06090D">
+            <fl:FlyleafHost Player="{Binding Playback.Player}" AttachedDragMove="None"
+                            KeyBindings="None" OpenOnDrop="None" SwapOnDrop="None"
+                            ToggleFullScreenOnDoubleClick="None"
+                            Visibility="{Binding Playback.IsPlaying, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+            <TextBlock Text="Elija un canal (doble clic en el árbol) y luego haga clic en la línea de tiempo para reproducir."
+                       HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
+                       TextAlignment="Center" MaxWidth="420" Foreground="#3A4654" FontSize="12.5"
+                       Visibility="{Binding Playback.IsPlaying, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+        </Grid>
+    </DockPanel>
+</UserControl>

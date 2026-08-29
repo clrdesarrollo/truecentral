@@ -36,6 +36,14 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="RailPlaybackButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveSection}" Value="Playback">
+                    <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
 
         <!-- Indicadores de recursos del servidor: gris normal, amarillo ≥70 %,
              rojo ≥90 % (el nivel llega en Tag; el detalle, en el ToolTip). -->
@@ -153,6 +161,22 @@
                                 Command="{Binding CloseLiveViewCommand}"
                                 ToolTip="Cerrar Vista en Vivo (detiene los streams)"/>
                     </Grid>
+                    <Grid Visibility="{Binding IsPlaybackOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
+                                     Padding="14,0,34,0"
+                                     IsChecked="{Binding ActiveSection, Mode=TwoWay,
+                                                 Converter={x:Static vm:SectionEquals.Instance}, ConverterParameter=Playback}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE768;" FontSize="12"
+                                           VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="Reproducción" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+                        <Button Style="{StaticResource TabCloseButton}" Content="&#xE8BB;"
+                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
+                                Command="{Binding ClosePlaybackCommand}"
+                                ToolTip="Cerrar Reproducción (detiene el video)"/>
+                    </Grid>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -179,9 +203,9 @@
                                 Command="{Binding GoHomeCommand}"/>
                         <Button Style="{StaticResource RailLiveButton}" Content="&#xE714;" ToolTip="Vista en Vivo"
                                 Command="{Binding OpenLiveViewCommand}"/>
-                        <Button Style="{StaticResource RailButton}" Content="&#xE768;"
-                                ToolTip="Reproducción (próximamente)"
-                                Command="{Binding ShowComingSoonCommand}" CommandParameter="Reproducción"/>
+                        <Button Style="{StaticResource RailPlaybackButton}" Content="&#xE768;"
+                                ToolTip="Reproducción"
+                                Command="{Binding OpenPlaybackCommand}"/>
                         <Button Style="{StaticResource RailButton}" Content="&#xE7BA;"
                                 ToolTip="Centro de eventos (próximamente)"
                                 Command="{Binding ShowComingSoonCommand}" CommandParameter="Centro de eventos"/>
@@ -196,6 +220,8 @@
                                 Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Home}"/>
                 <views:LiveView Visibility="{Binding ActiveSection,
                                 Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Live}"/>
+                <views:PlaybackView Visibility="{Binding ActiveSection,
+                                    Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Playback}"/>
             </Grid>
         </Grid>
 

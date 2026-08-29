@@ -135,6 +135,7 @@ app.MapUsersApi();
 app.MapDevicesApi();
 app.MapStreamsApi();
 app.MapStreamingAuthApi();
+app.MapPlaybackApi();
 app.MapDiscoveryApi();
 app.MapSystemApi();
 

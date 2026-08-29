@@ -69,21 +69,17 @@
                     </DockPanel>
                 </Button>
 
-                <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
-                        CommandParameter="Reproducción">
-                    <Grid>
-                        <DockPanel Margin="16,0">
-                            <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#3322C55E">
-                                <TextBlock Text="&#xE768;" Foreground="#22C55E" Style="{StaticResource CardIcon}"/>
-                            </Border>
-                            <StackPanel Style="{StaticResource CardBody}">
-                                <TextBlock Text="Reproducción" Style="{StaticResource CardTitle}"/>
-                                <TextBlock Text="Búsqueda y reproducción de grabaciones del servidor y de los equipos."
-                                           Style="{StaticResource CardDescription}"/>
-                            </StackPanel>
-                        </DockPanel>
-                        <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
-                    </Grid>
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenPlaybackCommand}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#3322C55E">
+                            <TextBlock Text="&#xE768;" Foreground="#22C55E" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Reproducción" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Búsqueda y reproducción de las grabaciones almacenadas en los equipos."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
                 </Button>
 
                 <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"

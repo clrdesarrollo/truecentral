@@ -41,6 +41,30 @@ public partial class MainViewModel : ObservableObject
     /// inicio o el menú lateral y se cierra con su ✕).</summary>
     [ObservableProperty] private bool _isLiveViewOpen;
 
+    /// <summary>La viñeta "Reproducción" existe en el navbar.</summary>
+    [ObservableProperty] private bool _isPlaybackOpen;
+
+    /// <summary>Módulo Reproducción (grabaciones remotas del DVR/NVR).</summary>
+    public PlaybackViewModel Playback { get; }
+
+    [RelayCommand]
+    private void OpenPlayback()
+    {
+        IsPlaybackOpen = true;
+        ActiveSection = "Playback";
+        StatusMessage = "Reproducción: doble clic en un canal del árbol y luego clic en la línea de tiempo.";
+    }
+
+    /// <summary>Cerrar la viñeta detiene la reproducción en curso.</summary>
+    [RelayCommand]
+    private void ClosePlayback()
+    {
+        Playback.StopCommand.Execute(null);
+        IsPlaybackOpen = false;
+        ActiveSection = "Home";
+        StatusMessage = ReadyMessage;
+    }
+
     [RelayCommand]
     private void GoHome() => ActiveSection = "Home";
 
@@ -264,6 +288,8 @@ public partial class MainViewModel : ObservableObject
             IsConnected = ok;
             ConnectionStatus = ok ? "Conectado" : "Reconectando…";
         });
+
+        Playback = new PlaybackViewModel(api, _settings);
 
         // Preferencia local: se abre con la última división que usó el usuario
         // (asíncrono: las celdas se crean por tandas sin congelar el arranque).
@@ -565,6 +591,7 @@ public partial class MainViewModel : ObservableObject
         _metricsTimer.Stop();
         foreach (var cell in Cells)
             cell.Dispose();
+        Playback.Dispose();
         _ = _hub.DisposeAsync();
     }
 }

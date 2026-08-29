@@ -91,7 +91,36 @@ public interface IDeviceDriver
     /// </summary>
     Task<bool> PtzPresetAsync(DeviceConnectionInfo info, int channelNumber, PtzPresetAction action, int presetIndex,
         CancellationToken ct = default) => Task.FromResult(false);
+
+    // ------------------------------------------------------------------
+    // Reproducción remota: el video grabado vive en el DVR/NVR/tarjeta del
+    // propio equipo; el VMS consulta los segmentos y reproduce por RTSP.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Segmentos grabados en el almacenamiento del equipo para un canal y un
+    /// rango horario, en HORA LOCAL del equipo (los grabadores operan y
+    /// responden en su propia hora). Lista vacía = sin grabaciones o sin
+    /// soporte (implementación por defecto).
+    /// </summary>
+    Task<IReadOnlyList<RecordingSegment>> QueryRecordingsAsync(DeviceConnectionInfo info, int channelNumber,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<RecordingSegment>>([]);
+
+    /// <summary>
+    /// URL RTSP de reproducción del almacenamiento del equipo para el rango
+    /// dado (hora local del equipo), con credenciales embebidas y URL-encoded;
+    /// null si el driver no soporta playback remoto.
+    /// </summary>
+    string? BuildPlaybackUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd) => null;
 }
+
+/// <summary>Tramo grabado en el equipo (horas locales del equipo).</summary>
+public sealed record RecordingSegment(DateTime Start, DateTime End, RecordingKind Kind);
+
+/// <summary>Origen de la grabación (colorea la línea de tiempo del cliente).</summary>
+public enum RecordingKind { Continuous, Motion, Alarm, Manual, Other }
 
 /// <summary>Capacidades del driver, para que el panel adapte el asistente.</summary>
 public sealed record DriverCapabilities(bool SupportsSnapshot, bool SupportsDiscovery, int DefaultSdkPort, int DefaultRtspPort);

@@ -218,6 +218,125 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
         return CHCNetSDK.NET_DVR_PTZPreset_Other(userId, channelNumber, presetCommand, (uint)presetIndex);
     }, ct);
 
+    // ------------------------------------------------------------------
+    // Reproducción remota: las grabaciones viven en el disco del equipo.
+    // Los segmentos se consultan por SDK y el video viaja por la URL RTSP
+    // de tracks (igual que el vivo, pero contra el almacenamiento).
+    // ------------------------------------------------------------------
+
+    public Task<IReadOnlyList<RecordingSegment>> QueryRecordingsAsync(DeviceConnectionInfo info, int channelNumber,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default) => Task.Run<IReadOnlyList<RecordingSegment>>(() =>
+    {
+        HikvisionSdk.EnsureInitialized();
+
+        // Sesión cacheada: la línea de tiempo se consulta de forma interactiva.
+        int userId = HikvisionSessionCache.GetOrLogin(info);
+        var segments = TryFindSegments(userId, channelNumber, localStart, localEnd);
+        if (segments is null)
+        {
+            // Sesión vencida (reinicio del equipo, timeout): UNA vez con login limpio.
+            HikvisionSessionCache.Invalidate(info);
+            userId = HikvisionSessionCache.GetOrLogin(info);
+            segments = TryFindSegments(userId, channelNumber, localStart, localEnd);
+        }
+        if (segments is null)
+        {
+            uint code = CHCNetSDK.NET_DVR_GetLastError();
+            throw new DriverException(
+                $"No se pudieron consultar las grabaciones: {HikvisionException.DescribeForUser(code)} (error {code}).");
+        }
+        return segments;
+    }, ct);
+
+    public string? BuildPlaybackUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd)
+    {
+        // Grabación del stream principal: track = canal*100 + 1. El sufijo Z es
+        // parte del formato de la URL, pero el equipo la interpreta en SU hora
+        // local (la misma en la que responde la búsqueda de segmentos).
+        int track = rtspChannel * 100 + 1;
+        return $"rtsp://{Uri.EscapeDataString(info.Username)}:{Uri.EscapeDataString(info.Password)}" +
+               $"@{info.Host}:{rtspPort}/Streaming/tracks/{track}" +
+               $"?starttime={localStart:yyyyMMdd}T{localStart:HHmmss}Z&endtime={localEnd:yyyyMMdd}T{localEnd:HHmmss}Z";
+    }
+
+    private static List<RecordingSegment>? TryFindSegments(int userId, int channel, DateTime start, DateTime end)
+    {
+        var cond = new CHCNetSDK.NET_DVR_FILECOND_V40
+        {
+            lChannel = channel,
+            dwFileType = 0xff, // todos los tipos de grabación
+            dwIsLocked = 0xff, // bloqueadas y normales
+            sCardNumber = new byte[CHCNetSDK.CARDNUM_LEN_OUT],
+            byWorkingDeviceGUID = new byte[CHCNetSDK.GUID_LEN],
+            uSpecialFindInfo = new CHCNetSDK.NET_DVR_SPECIAL_FINDINFO_UNION { byLenth = new byte[8] },
+            byRes2 = new byte[32],
+            struStartTime = ToSdkTime(start),
+            struStopTime = ToSdkTime(end),
+        };
+        int handle = CHCNetSDK.NET_DVR_FindFile_V40(userId, ref cond);
+        if (handle < 0) return null; // sesión vencida u otro error: decide el llamador
+
+        try
+        {
+            var segments = new List<RecordingSegment>();
+            while (true)
+            {
+                var data = new CHCNetSDK.NET_DVR_FINDDATA_V40
+                {
+                    sFileName = "",
+                    sCardNum = "",
+                    byRes1 = new byte[128],
+                };
+                int result = CHCNetSDK.NET_DVR_FindNextFile_V40(handle, ref data);
+                if (result == CHCNetSDK.NET_DVR_ISFINDING) { Thread.Sleep(30); continue; }
+                if (result != CHCNetSDK.NET_DVR_FILE_SUCCESS) break; // sin (más) archivos o excepción
+                var from = FromSdkTime(data.struStartTime);
+                var to = FromSdkTime(data.struStopTime);
+                if (from == DateTime.MinValue || to <= from) continue;
+                segments.Add(new RecordingSegment(from, to, MapKind(data.byFileType)));
+            }
+            return segments;
+        }
+        finally
+        {
+            CHCNetSDK.NET_DVR_FindClose_V30(handle);
+        }
+    }
+
+    private static CHCNetSDK.NET_DVR_TIME ToSdkTime(DateTime t) => new()
+    {
+        dwYear = (uint)t.Year,
+        dwMonth = (uint)t.Month,
+        dwDay = (uint)t.Day,
+        dwHour = (uint)t.Hour,
+        dwMinute = (uint)t.Minute,
+        dwSecond = (uint)t.Second,
+    };
+
+    private static DateTime FromSdkTime(CHCNetSDK.NET_DVR_TIME t)
+    {
+        try
+        {
+            return new DateTime((int)t.dwYear, (int)t.dwMonth, (int)t.dwDay,
+                (int)t.dwHour, (int)t.dwMinute, Math.Min(59, (int)t.dwSecond));
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return DateTime.MinValue; // basura del equipo: el llamador la filtra
+        }
+    }
+
+    /// <summary>byFileType del SDK → categoría para colorear la línea de tiempo.</summary>
+    private static RecordingKind MapKind(byte fileType) => fileType switch
+    {
+        0 => RecordingKind.Continuous,
+        1 or 3 or 4 => RecordingKind.Motion,
+        2 or 7 or 8 or 9 or 10 or 11 or 12 => RecordingKind.Alarm,
+        6 => RecordingKind.Manual,
+        _ => RecordingKind.Other,
+    };
+
     /// <summary>
     /// El canal tiene PTZ si el equipo responde a la consulta de posición PTZ
     /// (NET_DVR_GET_PTZPOS): las cámaras fijas devuelven "no soportado".
