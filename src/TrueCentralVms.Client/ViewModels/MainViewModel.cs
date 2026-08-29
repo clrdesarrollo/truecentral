@@ -265,8 +265,9 @@ public partial class MainViewModel : ObservableObject
             ConnectionStatus = ok ? "Conectado" : "Reconectando…";
         });
 
-        // Preferencia local: se abre con la última división que usó el usuario.
-        ApplyLayout(Layouts.FirstOrDefault(l => l.Name == _settings.LastLayout) ?? VideoLayout.Default);
+        // Preferencia local: se abre con la última división que usó el usuario
+        // (asíncrono: las celdas se crean por tandas sin congelar el arranque).
+        _ = ApplyLayoutAsync(Layouts.FirstOrDefault(l => l.Name == _settings.LastLayout) ?? VideoLayout.Default);
 
         // Indicadores CPU/RAM/disco del servidor: sondeo liviano cada 5 s.
         _metricsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
@@ -317,9 +318,17 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void EnterGridFullscreen() => IsGridFullscreen = true;
 
+    /// <summary>Cuadro promovido a stream principal por estar maximizado (y el
+    /// canal que tenía): al restaurar vuelve al secundario, pero SOLO si nadie
+    /// lo cambió a mano ni le asignó otro canal en el intertanto.</summary>
+    private VideoCellViewModel? _autoPromotedCell;
+    private ChannelNode? _autoPromotedChannel;
+
     /// <summary>Doble clic en un cuadro: alterna entre verlo solo (división de
     /// 1 temporal) y la grilla anterior. Maximizar exige un cuadro con video;
-    /// restaurar funciona siempre.</summary>
+    /// restaurar funciona siempre. Un cuadro en secundario se promueve al
+    /// stream principal mientras está maximizado (a pantalla grande se nota la
+    /// calidad) y regresa al secundario al restaurar.</summary>
     public void ToggleMaximize(VideoCellViewModel cell)
     {
         int index = Cells.IndexOf(cell);
@@ -327,20 +336,38 @@ public partial class MainViewModel : ObservableObject
         if (MaximizedIndex == index)
         {
             MaximizedIndex = -1;
+            if (_autoPromotedCell == cell && cell.AssignedChannel == _autoPromotedChannel &&
+                cell.Profile == StreamProfile.Main && _autoPromotedChannel is { } channel)
+                _ = cell.OpenAsync(channel, StreamProfile.Sub);
+            _autoPromotedCell = null;
+            _autoPromotedChannel = null;
             return;
         }
         if (cell.IsEmpty) return;
         MaximizedIndex = index;
         SelectedCell = cell;
+        if (cell.Profile == StreamProfile.Sub && cell.AssignedChannel is { } node)
+        {
+            _autoPromotedCell = cell;
+            _autoPromotedChannel = node;
+            _ = cell.OpenAsync(node, StreamProfile.Main);
+        }
     }
 
     /// <summary>División activa de la grilla (el panel de video la dibuja).</summary>
     [ObservableProperty] private VideoLayout _currentLayout = VideoLayout.Default;
 
+    /// <summary>Cambio de división en curso (los clics rápidos del selector se
+    /// ignoran mientras se aplica el anterior).</summary>
+    private bool _layoutBusy;
+
     [RelayCommand]
-    private void SelectLayout(VideoLayout layout)
+    private async Task SelectLayoutAsync(VideoLayout layout)
     {
-        ApplyLayout(layout);
+        if (_layoutBusy) return;
+        _layoutBusy = true;
+        try { await ApplyLayoutAsync(layout); }
+        finally { _layoutBusy = false; }
         // La elección del usuario se recuerda para la próxima sesión.
         if (_settings.LastLayout != layout.Name)
         {
@@ -349,8 +376,13 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Cambia la división conservando lo que quepa (las celdas sobrantes se liberan).</summary>
-    public void ApplyLayout(VideoLayout layout)
+    /// <summary>
+    /// Cambia la división conservando lo que quepa (las celdas sobrantes se
+    /// liberan). Crear o destruir players es CARO (superficies de GPU): se
+    /// hace por tandas cediendo ciclos al dispatcher, así la UI sigue viva
+    /// (sin el "no responde" de Windows) y los cuadros aparecen progresivos.
+    /// </summary>
+    public async Task ApplyLayoutAsync(VideoLayout layout)
     {
         MaximizedIndex = -1; // los índices cambian con la división
         CurrentLayout = layout;
@@ -360,7 +392,10 @@ public partial class MainViewModel : ObservableObject
             var cell = Cells[^1];
             Cells.RemoveAt(Cells.Count - 1);
             cell.AudioActivated -= OnCellAudioActivated;
+            cell.MediaSaved -= OnCellMediaSaved;
             cell.Dispose();
+            if (Cells.Count % 4 == 0)
+                await Dispatcher.Yield(DispatcherPriority.Background);
         }
         while (Cells.Count < count)
         {
@@ -368,6 +403,8 @@ public partial class MainViewModel : ObservableObject
             cell.AudioActivated += OnCellAudioActivated;
             cell.MediaSaved += OnCellMediaSaved;
             Cells.Add(cell);
+            if (Cells.Count % 2 == 0)
+                await Dispatcher.Yield(DispatcherPriority.Background);
         }
         for (int i = 0; i < Cells.Count; i++)
             Cells[i].Index = i + 1;
@@ -431,23 +468,32 @@ public partial class MainViewModel : ObservableObject
         IsBulkOpening = true;
         BulkOpeningText = $"Abriendo {channels.Count} canal(es) de \"{device.Device.Name}\"…";
         StatusMessage = BulkOpeningText;
+        // Bloquea la interfaz mientras dura: aviso centrado (ventana propia y
+        // Topmost, sobre el video) y la ventana principal deshabilitada.
+        var loading = Application.Current.MainWindow is { IsLoaded: true } owner
+            ? Views.LoadingWindow.Open(owner, BulkOpeningText)
+            : null;
         System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
         try
         {
-            // Que el indicador alcance a pintarse antes del trabajo pesado.
+            // Que el aviso alcance a pintarse antes del trabajo pesado.
             await Dispatcher.Yield(DispatcherPriority.Render);
 
             if (_settings.FitGridToDevice)
             {
                 // Grilla a medida (sin cuadros de sobra). No queda como división
                 // recordada: no es una de las estándar del selector.
-                ApplyLayout(VideoLayout.FitFor(channels.Count));
+                await ApplyLayoutAsync(VideoLayout.FitFor(channels.Count));
             }
             else
             {
                 var layout = Layouts.FirstOrDefault(l => l.CellCount >= channels.Count) ?? Layouts[^1];
                 if (CurrentLayout != layout)
-                    SelectLayout(layout);
+                {
+                    await ApplyLayoutAsync(layout);
+                    _settings.LastLayout = layout.Name; // división estándar: sí se recuerda
+                    _settings.Save();
+                }
             }
 
             SelectedCell = null;
@@ -466,6 +512,7 @@ public partial class MainViewModel : ObservableObject
         finally
         {
             System.Windows.Input.Mouse.OverrideCursor = null;
+            loading?.Finish();
             IsBulkOpening = false;
         }
     }
