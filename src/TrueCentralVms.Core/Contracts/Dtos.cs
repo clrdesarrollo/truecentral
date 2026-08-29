@@ -35,6 +35,19 @@ public sealed record UserDto(int Id, string Username, string Role, bool Enabled,
 public sealed record UserWriteDto(string Username, string? Password, string Role, bool Enabled);
 
 // ---------------------------------------------------------------------------
+// Salud del sistema
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Uso de recursos de la máquina del servidor (indicadores CPU/RAM/disco del
+/// cliente y del panel). Los GB vienen redondeados a 1 decimal.
+/// </summary>
+public sealed record SystemMetricsDto(
+    double CpuPercent,
+    double RamPercent, double RamUsedGb, double RamTotalGb,
+    double DiskPercent, double DiskUsedGb, double DiskTotalGb, string DiskName);
+
+// ---------------------------------------------------------------------------
 // Contrato del hub SignalR
 // ---------------------------------------------------------------------------
 

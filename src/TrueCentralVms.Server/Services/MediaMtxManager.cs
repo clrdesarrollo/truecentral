@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Drivers;
@@ -36,6 +37,17 @@ public sealed class MediaMtxManager(
     public int RtspPort => config.GetValue("Streaming:RtspPort", 8654);
     public int ApiPort => config.GetValue("Streaming:ApiPort", 9911);
     public string ApiBaseUrl => $"http://127.0.0.1:{ApiPort}";
+
+    /// <summary>
+    /// Secreto por arranque que autoriza a los relés FFmpeg locales (rutas con
+    /// runOnDemand) a PUBLICAR en MediaMTX. Solo lo conocen este proceso y las
+    /// líneas de comando que él mismo genera; el callback de autorización lo
+    /// exige junto con conexión desde loopback.
+    /// </summary>
+    public string PublishSecret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+
+    private string? _ffmpegPath;
+    private bool _ffmpegWarned;
 
     public bool IsRunning => _process is { HasExited: false };
 
@@ -124,6 +136,20 @@ public sealed class MediaMtxManager(
         return null;
     }
 
+    /// <summary>tools\ffmpeg\bin\ffmpeg.exe (relé para cámaras con SDP inválido).</summary>
+    private static string? FindFfmpeg()
+    {
+        string? dir = AppContext.BaseDirectory;
+        while (dir is not null)
+        {
+            string candidate = Path.Combine(dir, "tools", "ffmpeg", "bin", "ffmpeg.exe");
+            if (File.Exists(candidate))
+                return candidate;
+            dir = Path.GetDirectoryName(dir);
+        }
+        return null;
+    }
+
     private async Task WriteConfigAsync(CancellationToken ct)
     {
         await _configLock.WaitAsync(ct);
@@ -198,7 +224,32 @@ public sealed class MediaMtxManager(
                                 ? InjectCredentials(stored, conn)
                                 : driver.BuildRtspUrl(conn, device.RtspPort, channel.RtspChannel, profile);
                             yml.AppendLine($"  {name}:");
-                            yml.AppendLine($"    source: {source}");
+                            if (channel.UseFfmpegProxy && ResolveFfmpeg() is { } ffmpeg)
+                            {
+                                // Cámaras con SDP inválido que gortsplib rechaza
+                                // ("media N config is missing"): FFmpeg sí tolera
+                                // ese SDP, así que MediaMTX lo lanza bajo demanda
+                                // para que pull-ee la cámara y publique de vuelta
+                                // SOLO el video (-an: el audio mal anunciado se
+                                // descarta). La publicación se autoriza con el
+                                // secreto por arranque + loopback.
+                                string publish = $"rtsp://127.0.0.1:{RtspPort}/{name}?token={PublishSecret}";
+                                string command =
+                                    $"\"{ffmpeg}\" -hide_banner -loglevel error -rtsp_transport tcp " +
+                                    $"-i \"{source}\" -c copy -an -f rtsp \"{publish}\"";
+                                // Estas rutas no tienen "source" (publica el relé):
+                                // anular el sourceOnDemand heredado de pathDefaults,
+                                // o MediaMTX rechaza la configuración completa.
+                                yml.AppendLine("    sourceOnDemand: no");
+                                yml.AppendLine($"    runOnDemand: '{command.Replace("'", "''")}'");
+                                yml.AppendLine("    runOnDemandRestart: yes");
+                                yml.AppendLine("    runOnDemandStartTimeout: 15s");
+                                yml.AppendLine("    runOnDemandCloseAfter: 10s");
+                            }
+                            else
+                            {
+                                yml.AppendLine($"    source: {source}");
+                            }
                             pathCount++;
                         }
                     }
@@ -218,6 +269,43 @@ public sealed class MediaMtxManager(
 
     public static string PathName(int deviceId, int rtspChannel, StreamProfile profile) =>
         $"ch/{deviceId}/{rtspChannel}/{(profile == StreamProfile.Main ? "main" : "sub")}";
+
+    /// <summary>Ubica ffmpeg.exe una sola vez; sin él, los canales marcados
+    /// con proxy caen al pull directo (y se avisa una vez en el log).</summary>
+    private string? ResolveFfmpeg()
+    {
+        _ffmpegPath ??= FindFfmpeg();
+        if (_ffmpegPath is null && !_ffmpegWarned)
+        {
+            _ffmpegWarned = true;
+            logger.LogWarning(
+                "Hay canales marcados con proxy FFmpeg pero no se encontró tools\\ffmpeg\\bin\\ffmpeg.exe: " +
+                "esos canales usarán el pull directo (probablemente fallarán por su SDP inválido).");
+        }
+        return _ffmpegPath;
+    }
+
+    private static readonly HttpClient ApiHttp = new() { Timeout = TimeSpan.FromSeconds(3) };
+
+    /// <summary>
+    /// Expulsa a un lector cortando su sesión RTSP en MediaMTX. El espectador
+    /// puede volver a pedir una concesión (sigue autenticado): expulsar corta
+    /// la sesión en curso, no bloquea la cuenta.
+    /// </summary>
+    public async Task<bool> KickSessionAsync(string mtxSessionId, CancellationToken ct = default)
+    {
+        if (!IsRunning || string.IsNullOrEmpty(mtxSessionId)) return false;
+        try
+        {
+            using var response = await ApiHttp.PostAsync(
+                $"{ApiBaseUrl}/v3/rtspsessions/kick/{Uri.EscapeDataString(mtxSessionId)}", null, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     /// <summary>Inserta usuario:contraseña (URL-encoded) en una URL RTSP guardada sin credenciales.</summary>
     private static string InjectCredentials(string rtspUrl, DeviceConnectionInfo conn)

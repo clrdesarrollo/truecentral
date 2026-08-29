@@ -25,4 +25,12 @@ public class Channel
     /// </summary>
     public string? RtspMainUrl { get; set; }
     public string? RtspSubUrl { get; set; }
+
+    /// <summary>
+    /// El video pasa por un relé FFmpeg bajo demanda en vez del pull directo
+    /// de MediaMTX. Para cámaras con SDP inválido que gortsplib rechaza
+    /// ("media N config is missing", audio AAC mal anunciado): FFmpeg tolera
+    /// el SDP y republica SOLO el video (sin audio). Marcable en el panel.
+    /// </summary>
+    public bool UseFfmpegProxy { get; set; }
 }

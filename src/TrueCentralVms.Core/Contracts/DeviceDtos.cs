@@ -55,7 +55,7 @@ public sealed record DeviceProbeResultDto(
 
 public sealed record ProbedChannelDto(int ChannelNumber, int RtspChannel, string Name, bool IsOnline);
 
-public sealed record ChannelDto(int Id, int DeviceId, int ChannelNumber, int RtspChannel, string Name, bool Enabled, bool IsOnline, bool SupportsPtz);
+public sealed record ChannelDto(int Id, int DeviceId, int ChannelNumber, int RtspChannel, string Name, bool Enabled, bool IsOnline, bool SupportsPtz, bool UseFfmpegProxy = false);
 
 /// <summary>Orden PTZ del cliente (Speed 1..7; Stop=true detiene el movimiento en curso).</summary>
 public sealed record PtzRequestDto(Drivers.PtzCommand Command, int Speed, bool Stop);
@@ -64,10 +64,11 @@ public sealed record PtzRequestDto(Drivers.PtzCommand Command, int Speed, bool S
 public sealed record PtzPresetRequestDto(Drivers.PtzPresetAction Action, int Index);
 
 /// <summary>
-/// Edición de un canal: nombre visible, habilitado, y marca PTZ manual (para
-/// domos que la detección automática no ve, ej. conectados al DVR por ONVIF).
+/// Edición de un canal: nombre visible, habilitado, marca PTZ manual (para
+/// domos que la detección automática no ve, ej. conectados al DVR por ONVIF)
+/// y proxy FFmpeg (cámaras cuyo SDP inválido rechaza MediaMTX).
 /// </summary>
-public sealed record ChannelWriteDto(string Name, bool Enabled, bool SupportsPtz);
+public sealed record ChannelWriteDto(string Name, bool Enabled, bool SupportsPtz, bool UseFfmpegProxy = false);
 
 public sealed record DriverDto(
     string Key,

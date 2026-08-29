@@ -31,7 +31,7 @@ public static class DevicesApi
     /// </summary>
     private static ChannelDto ToDto(Channel c, DeviceStatus deviceStatus) =>
         new(c.Id, c.DeviceId, c.ChannelNumber, c.RtspChannel, c.Name, c.Enabled,
-            c.IsOnline && deviceStatus == DeviceStatus.Online, c.SupportsPtz);
+            c.IsOnline && deviceStatus == DeviceStatus.Online, c.SupportsPtz, c.UseFfmpegProxy);
 
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
@@ -334,13 +334,15 @@ public static class DevicesApi
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre del canal es obligatorio (máximo 128 caracteres).");
 
-            bool enabledChanged = channel.Enabled != request.Enabled;
+            bool pathsChanged = channel.Enabled != request.Enabled
+                || channel.UseFfmpegProxy != request.UseFfmpegProxy;
             channel.Name = request.Name.Trim();
             channel.Enabled = request.Enabled;
             channel.SupportsPtz = request.SupportsPtz;
+            channel.UseFfmpegProxy = request.UseFfmpegProxy;
             await db.SaveChangesAsync(ct);
-            if (enabledChanged)
-                await mtx.RefreshPathsAsync(ct); // habilitar/deshabilitar agrega o quita la ruta
+            if (pathsChanged)
+                await mtx.RefreshPathsAsync(ct); // habilitar/deshabilitar o proxy cambian la ruta
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "channels", cancellationToken: ct);
             return Results.Ok(ToDto(channel, channel.Device.Status));
         });

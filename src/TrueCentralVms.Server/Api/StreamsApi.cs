@@ -45,6 +45,28 @@ public static class StreamsApi
         });
 
         // ------------------------------------------------------------------
+        // Expulsar una sesión: corta la conexión RTSP en MediaMTX y cierra la
+        // auditoría. No bloquea al usuario (puede volver a conectarse).
+        // ------------------------------------------------------------------
+        app.MapPost("/api/streams/{id:int}/kick", async (HttpContext ctx, int id, VmsDbContext db,
+            MediaMtxManager mtx, Microsoft.AspNetCore.SignalR.IHubContext<Hubs.VmsHub> hub,
+            ILogger<Program> logger) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out var admin) is { } failure) return failure;
+
+            var session = await db.StreamSessions.FirstOrDefaultAsync(s => s.Id == id && s.EndedAt == null);
+            if (session is null) return Results.NotFound();
+
+            bool kicked = await mtx.KickSessionAsync(session.MtxSessionId);
+            session.EndedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            await SessionAccounting.BroadcastActiveSessionsAsync(db, hub);
+            logger.LogInformation("Streaming: {Admin} expulsó la sesión de {User} ({Device} canal {Channel}).",
+                admin.Username, session.Username, session.DeviceName, session.RtspChannel);
+            return Results.Ok(new { kicked });
+        });
+
+        // ------------------------------------------------------------------
         // Sesiones activas (dashboard de administración)
         // ------------------------------------------------------------------
         app.MapGet("/api/streams/active", async (HttpContext ctx, VmsDbContext db) =>

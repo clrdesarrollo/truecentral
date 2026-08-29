@@ -41,6 +41,7 @@ builder.Services.AddDbContext<VmsDbContext>(o => o.UseNpgsql(postgres.Connection
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<PasswordGovernance>();
 builder.Services.AddSingleton<CredentialProtector>();
+builder.Services.AddSingleton<SystemMetrics>();
 
 // Registro de drivers de dispositivos. Para soportar una marca nueva (Dahua,
 // ONVIF, ...) basta con implementar IDeviceDriverFactory en su propio
@@ -135,6 +136,7 @@ app.MapDevicesApi();
 app.MapStreamsApi();
 app.MapStreamingAuthApi();
 app.MapDiscoveryApi();
+app.MapSystemApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);
 

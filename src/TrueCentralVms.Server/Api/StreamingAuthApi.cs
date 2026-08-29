@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using TrueCentralVms.Server.Auth;
@@ -22,7 +23,7 @@ public static class StreamingAuthApi
     public static void MapStreamingAuthApi(this WebApplication app)
     {
         app.MapPost("/api/streaming/auth", async (HttpContext ctx, StreamTokenService streamTokens,
-            VmsDbContext db, IHubContext<VmsHub> hub, ILogger<Program> logger) =>
+            VmsDbContext db, IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, ILogger<Program> logger) =>
         {
             if (!ApiSecurity.IsLoopback(ctx))
                 return Results.NotFound(); // ni siquiera revelar que existe
@@ -38,12 +39,6 @@ public static class StreamingAuthApi
             string ip = GetString("ip");
             string mtxId = GetString("id");
 
-            if (action != "read")
-            {
-                logger.LogWarning("MediaMTX: acción '{Action}' rechazada (ruta '{Path}', ip {Ip}).", action, path, ip);
-                return Results.Unauthorized();
-            }
-
             // El token viaja en el query de la URL RTSP (?token=...).
             string? token = null;
             foreach (string pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
@@ -55,6 +50,26 @@ public static class StreamingAuthApi
                 }
             }
             token ??= GetString("token") is { Length: > 0 } t ? t : null;
+
+            // Publicar solo puede hacerlo el relé FFmpeg local (rutas con
+            // runOnDemand para cámaras de SDP inválido): loopback + secreto
+            // por arranque. Nada más publica en este producto.
+            if (action == "publish")
+            {
+                if (ip is "127.0.0.1" or "::1" && token is not null &&
+                    CryptographicOperations.FixedTimeEquals(
+                        System.Text.Encoding.UTF8.GetBytes(token),
+                        System.Text.Encoding.UTF8.GetBytes(mtx.PublishSecret)))
+                    return Results.Ok();
+                logger.LogWarning("MediaMTX: publicación rechazada en '{Path}' desde {Ip}.", path, ip);
+                return Results.Unauthorized();
+            }
+
+            if (action != "read")
+            {
+                logger.LogWarning("MediaMTX: acción '{Action}' rechazada (ruta '{Path}', ip {Ip}).", action, path, ip);
+                return Results.Unauthorized();
+            }
 
             if (token is null || streamTokens.Validate(token, path) is not { } grant)
             {
