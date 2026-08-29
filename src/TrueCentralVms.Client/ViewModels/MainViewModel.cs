@@ -361,6 +361,7 @@ public partial class MainViewModel : ObservableObject
         {
             var cell = new VideoCellViewModel(_api, _settings);
             cell.AudioActivated += OnCellAudioActivated;
+            cell.MediaSaved += OnCellMediaSaved;
             Cells.Add(cell);
         }
         for (int i = 0; i < Cells.Count; i++)
@@ -404,6 +405,15 @@ public partial class MainViewModel : ObservableObject
         "sub" => StreamProfile.Sub,
         _ => Cells.Count <= 4 ? StreamProfile.Main : StreamProfile.Sub,
     };
+
+    /// <summary>Captura o cápsula guardada: notificación flotante con el link
+    /// a la ubicación del archivo.</summary>
+    private void OnCellMediaSaved(string title, string glyph, string path) =>
+        Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            if (Application.Current.MainWindow is { IsLoaded: true } owner)
+                Views.ToastWindow.ShowSaved(owner, title, glyph, path);
+        });
 
     /// <summary>Audio exclusivo: encender el audio de un cuadro apaga el resto.</summary>
     private void OnCellAudioActivated(VideoCellViewModel active)

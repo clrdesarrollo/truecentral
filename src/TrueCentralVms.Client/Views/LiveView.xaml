@@ -471,6 +471,11 @@
                                         Background="Transparent" Foreground="{StaticResource MutedBrush}"
                                         BorderThickness="0" Padding="9,2" Cursor="Hand" FontSize="11"
                                         Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                                <!-- Contador de la cápsula en curso (00:12) -->
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding RecordingElapsed}"
+                                           Foreground="{StaticResource DangerBrush}" FontSize="10.5"
+                                           FontWeight="Bold" VerticalAlignment="Center" Margin="2,0,0,0"
+                                           Visibility="{Binding IsRecordingClip, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                 <!-- Grabación de cápsula local: ● rojo mientras graba -->
                                 <Button DockPanel.Dock="Right" Command="{Binding ToggleRecordingCommand}"
                                         Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"

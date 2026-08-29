@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FlyleafLib;
 using FlyleafLib.MediaPlayer;
@@ -29,6 +29,13 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     /// <summary>Se encendió el audio de este cuadro (el dueño silencia el resto).</summary>
     public event Action<VideoCellViewModel>? AudioActivated;
 
+    /// <summary>Se guardó un archivo local (título, glifo MDL2, ruta completa):
+    /// el shell muestra la notificación con el link a la ubicación.</summary>
+    public event Action<string, string, string>? MediaSaved;
+
+    /// <summary>Ruta de la cápsula en curso (Flyleaf le agrega la extensión).</summary>
+    private string? _recordingFile;
+
     [ObservableProperty] private string? _title;
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private bool _isEmpty = true;
@@ -42,6 +49,8 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     [ObservableProperty] private StreamProfile _profile;
     /// <summary>Grabando una cápsula local de este cuadro (botón ● en rojo).</summary>
     [ObservableProperty] private bool _isRecordingClip;
+    /// <summary>Tiempo transcurrido de la cápsula ("00:12"); vacío si no graba.</summary>
+    [ObservableProperty] private string _recordingElapsed = "";
 
     public VideoCellViewModel(ApiClient api, ClientSettings settings)
     {
@@ -76,8 +85,13 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         // invalidan la secuencia ANTES de detener, así que no reintentan.
         Player.PlaybackStopped += (_, e) =>
         {
-            // Flyleaf corta la grabación junto con el stream: reflejarlo.
-            if (IsRecordingClip && !Player.IsRecording) IsRecordingClip = false;
+            // Flyleaf corta la grabación junto con el stream: reflejar y avisar
+            // (la cápsula quedó guardada hasta el momento del corte).
+            if (IsRecordingClip && !Player.IsRecording)
+            {
+                IsRecordingClip = false;
+                NotifyClipSaved(notify: true);
+            }
             if (_assigned is null) return;
             if (!e.Success) Status = "Sin señal — reintentando…";
             ScheduleRetry(_openSequence);
@@ -88,7 +102,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     public async Task OpenAsync(ChannelNode node, StreamProfile profile)
     {
         int sequence = ++_openSequence;
-        StopClipRecording(silent: true);
+        StopClipRecording(notify: true);
         ResetDigitalZoom();
         _assigned = node;
         Profile = profile;
@@ -170,7 +184,8 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
             string extension = _settings.SnapshotFormat.Equals("png", StringComparison.OrdinalIgnoreCase) ? ".png" : ".jpg";
             string file = MediaFileBase(_settings.EffectiveSnapshotFolder, extension);
             Player.TakeSnapshotToFile(file);
-            FlashStatus($"Captura guardada: {System.IO.Path.GetFileName(file)}");
+            FlashStatus("Captura guardada");
+            MediaSaved?.Invoke("Captura guardada", "\uE722", file);
         }
         catch (Exception ex)
         {
@@ -188,16 +203,18 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         if (_assigned is null) return;
         if (IsRecordingClip)
         {
-            StopClipRecording(silent: false);
+            StopClipRecording(notify: true);
             return;
         }
         try
         {
-            // Sin extensión: Flyleaf agrega la recomendada según el contenedor.
+            // Sin extensión: Flyleaf agrega la recomendada según el contenedor
+            // (y actualiza la ruta por el parámetro ref).
             string file = MediaFileBase(_settings.EffectiveRecordingFolder, "");
             Player.StartRecording(ref file, useRecommendedExtension: true);
+            _recordingFile = file;
             IsRecordingClip = true;
-            FlashStatus("Grabando cápsula local…");
+            RunRecordingTicker();
         }
         catch (Exception ex)
         {
@@ -205,12 +222,42 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void StopClipRecording(bool silent)
+    private void StopClipRecording(bool notify)
     {
         if (!IsRecordingClip) return;
         try { Player.StopRecording(); } catch { }
         IsRecordingClip = false;
-        if (!silent) FlashStatus($"Grabación guardada en {_settings.EffectiveRecordingFolder}");
+        NotifyClipSaved(notify);
+    }
+
+    /// <summary>
+    /// Contador de la cápsula en la barra del cuadro (mm:ss, o h:mm:ss al pasar
+    /// la hora). Corre en el hilo de UI (lo dispara el comando del botón) y
+    /// muere solo cuando la grabación termina por cualquier vía.
+    /// </summary>
+    private async void RunRecordingTicker()
+    {
+        var started = DateTime.UtcNow;
+        while (IsRecordingClip)
+        {
+            var elapsed = DateTime.UtcNow - started;
+            RecordingElapsed = elapsed.TotalHours >= 1
+                ? elapsed.ToString(@"h\:mm\:ss")
+                : elapsed.ToString(@"mm\:ss");
+            await Task.Delay(500);
+        }
+        RecordingElapsed = "";
+    }
+
+    /// <summary>Cierra el ciclo de una cápsula: avisa con la ruta final (el
+    /// toast del shell muestra el link) salvo en cierres silenciosos.</summary>
+    private void NotifyClipSaved(bool notify)
+    {
+        string? file = _recordingFile;
+        _recordingFile = null;
+        if (!notify || file is null) return;
+        FlashStatus("Grabación guardada");
+        MediaSaved?.Invoke("Grabación guardada", "\uE714", file);
     }
 
     /// <summary>Mensaje transitorio en la barra del cuadro (no pisa los estados
@@ -261,7 +308,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     public void Clear()
     {
         _openSequence++;
-        StopClipRecording(silent: false);
+        StopClipRecording(notify: true);
         ResetDigitalZoom();
         _assigned = null;
         AssignedChannel = null;
@@ -275,7 +322,9 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _openSequence++;
-        StopClipRecording(silent: true);
+        // Silencioso: la celda muere (cambio de división o cierre de la app);
+        // la cápsula igual queda guardada, pero sin ventana que lo anuncie.
+        StopClipRecording(notify: false);
         _assigned = null;
         Player.Dispose();
     }
