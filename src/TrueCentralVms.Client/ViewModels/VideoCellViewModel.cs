@@ -148,44 +148,51 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         StopClipRecording(notify: true);
         Status = target == StreamProfile.Main ? "Cambiando a principal…" : "Cambiando a secundario…";
 
-        var fresh = CreatePlayer();
-        try
+        // Hasta 2 intentos: el primero puede pillar el pull hacia el equipo
+        // recién partiendo (sourceOnDemand) o el enlace saturado y quedarse
+        // corto; el reintento encuentra ese pull ya tibio en MediaMTX y suele
+        // enganchar de inmediato. Todo ocurre detrás del video vigente.
+        for (int attempt = 1; attempt <= 2; attempt++)
         {
-            var grant = await _api.RequestStreamAsync(node.Device.Id, node.Channel.RtspChannel, target);
-            if (sequence != _openSequence) { fresh.Dispose(); return; }
-            fresh.OpenAsync(grant.RtspUrl);
+            var fresh = CreatePlayer();
+            try
+            {
+                var grant = await _api.RequestStreamAsync(node.Device.Id, node.Channel.RtspChannel, target);
+                if (sequence != _openSequence) { fresh.Dispose(); return; }
+                fresh.OpenAsync(grant.RtspUrl);
 
-            // Esperar la primera imagen real: el reloj del player parte a
-            // correr con el primer cuadro presentado.
-            var deadline = DateTime.UtcNow.AddSeconds(10);
-            while (DateTime.UtcNow < deadline && fresh.CurTime == 0 &&
-                   fresh.Status is not (FlyleafLib.MediaPlayer.Status.Failed or FlyleafLib.MediaPlayer.Status.Stopped))
-                await Task.Delay(100);
+                // Esperar la primera imagen real: el reloj del player parte a
+                // correr con el primer cuadro presentado.
+                var deadline = DateTime.UtcNow.AddSeconds(15);
+                while (DateTime.UtcNow < deadline && fresh.CurTime == 0 &&
+                       fresh.Status is not (FlyleafLib.MediaPlayer.Status.Failed or FlyleafLib.MediaPlayer.Status.Stopped))
+                    await Task.Delay(100);
 
-            if (sequence != _openSequence)
+                if (sequence != _openSequence)
+                {
+                    fresh.Dispose();
+                    return;
+                }
+                if (fresh.CurTime > 0)
+                {
+                    var retired = Player;
+                    Profile = target;
+                    fresh.Config.Audio.Enabled = IsAudioOn;
+                    Player = fresh; // FlyleafHost reengancha la superficie: corte mínimo
+                    Status = "";
+                    retired.Dispose();
+                    return;
+                }
+                fresh.Dispose(); // sin imagen: reintentar o rendirse
+            }
+            catch (ApiException ex)
             {
                 fresh.Dispose();
+                if (sequence == _openSequence) FlashStatus("No se pudo cambiar el stream: " + ex.Message);
                 return;
             }
-            if (fresh.CurTime == 0)
-            {
-                fresh.Dispose();
-                FlashStatus("No se pudo cambiar el stream: sin señal del perfil destino.");
-                return;
-            }
-
-            var retired = Player;
-            Profile = target;
-            fresh.Config.Audio.Enabled = IsAudioOn;
-            Player = fresh; // FlyleafHost reengancha la superficie: corte mínimo
-            Status = "";
-            retired.Dispose();
         }
-        catch (ApiException ex)
-        {
-            fresh.Dispose();
-            if (sequence == _openSequence) FlashStatus("No se pudo cambiar el stream: " + ex.Message);
-        }
+        FlashStatus("El stream destino no entregó imagen (¿perfil no disponible o enlace del equipo saturado?). Se mantiene el actual.");
     }
 
     /// <summary>Pide una concesión nueva y abre la URL RTSP resultante.</summary>
