@@ -68,6 +68,50 @@ public partial class MainWindow : Window
         }
     }
 
+    // ------------------------------------------------------------------
+    // Maximizado que respeta la barra de tareas: una ventana sin marco
+    // (WindowStyle=None) maximizada ocupa por defecto la PANTALLA completa,
+    // tapando la barra. WM_GETMINMAXINFO limita el tamaño y la posición del
+    // maximizado al área de trabajo del monitor donde esté la ventana.
+    // (La pantalla completa de la grilla no pasa por aquí: usa estado Normal
+    // con límites de monitor puestos a mano, y ahí tapar la barra es la idea.)
+    // ------------------------------------------------------------------
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        if (PresentationSource.FromVisual(this) is HwndSource source)
+            source.AddHook(WindowProc);
+    }
+
+    private const int WM_GETMINMAXINFO = 0x0024;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize;
+    }
+
+    private IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != WM_GETMINMAXINFO) return IntPtr.Zero;
+        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info)) return IntPtr.Zero;
+
+        var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
+        // Coordenadas relativas al monitor, en píxeles de dispositivo.
+        mmi.ptMaxPosition.X = info.rcWork.Left - info.rcMonitor.Left;
+        mmi.ptMaxPosition.Y = info.rcWork.Top - info.rcMonitor.Top;
+        mmi.ptMaxSize.X = info.rcWork.Right - info.rcWork.Left;
+        mmi.ptMaxSize.Y = info.rcWork.Bottom - info.rcWork.Top;
+        Marshal.StructureToPtr(mmi, lParam, false);
+        handled = true;
+        return IntPtr.Zero;
+    }
+
     private const uint MONITOR_DEFAULTTONEAREST = 2;
 
     [StructLayout(LayoutKind.Sequential)]

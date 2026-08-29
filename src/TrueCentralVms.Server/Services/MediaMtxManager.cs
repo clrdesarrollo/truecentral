@@ -191,7 +191,10 @@ public sealed class MediaMtxManager(
                 pathDefaults:
                   sourceOnDemand: yes
                   sourceOnDemandStartTimeout: 15s
-                  sourceOnDemandCloseAfter: 10s
+                  # 30 s tibio tras perder al último lector: los cambios de
+                  # stream main↔sub y los ciclos maximizar/restaurar del
+                  # cliente re-enganchan sin pagar el arranque en frío.
+                  sourceOnDemandCloseAfter: 30s
                   rtspTransport: tcp
 
                 paths:
@@ -244,7 +247,7 @@ public sealed class MediaMtxManager(
                                 yml.AppendLine($"    runOnDemand: '{command.Replace("'", "''")}'");
                                 yml.AppendLine("    runOnDemandRestart: yes");
                                 yml.AppendLine("    runOnDemandStartTimeout: 15s");
-                                yml.AppendLine("    runOnDemandCloseAfter: 10s");
+                                yml.AppendLine("    runOnDemandCloseAfter: 30s");
                             }
                             else
                             {
