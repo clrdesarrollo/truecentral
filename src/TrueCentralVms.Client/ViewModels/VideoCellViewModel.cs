@@ -20,7 +20,6 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
 
     private readonly ApiClient _api;
     private ChannelNode? _assigned;
-    private StreamProfile _profile;
     private int _openSequence;
     private bool _retryPending;
 
@@ -38,6 +37,8 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     [ObservableProperty] private ChannelNode? _assignedChannel;
     /// <summary>Audio del cuadro. Exclusivo: la grilla silencia los demás.</summary>
     [ObservableProperty] private bool _isAudioOn;
+    /// <summary>Stream en uso (Main/Sub). El botón P/S de la barra lo alterna.</summary>
+    [ObservableProperty] private StreamProfile _profile;
 
     public VideoCellViewModel(ApiClient api)
     {
@@ -81,12 +82,24 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     {
         int sequence = ++_openSequence;
         _assigned = node;
-        _profile = profile;
+        Profile = profile;
         AssignedChannel = node;
         IsEmpty = false;
         Title = $"{node.Device.Name} · {node.Channel.Name}";
         Status = "Conectando…";
         await ConnectAsync(sequence);
+    }
+
+    /// <summary>
+    /// Alterna entre stream principal y secundario del canal en pantalla.
+    /// Reabre por el flujo normal: concesión nueva y misma lógica de
+    /// reintentos; el fan-out de MediaMTX hace el resto.
+    /// </summary>
+    [RelayCommand]
+    private async Task SwitchProfileAsync()
+    {
+        if (_assigned is not { } node) return;
+        await OpenAsync(node, Profile == StreamProfile.Main ? StreamProfile.Sub : StreamProfile.Main);
     }
 
     /// <summary>Pide una concesión nueva y abre la URL RTSP resultante.</summary>
@@ -95,7 +108,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         if (_assigned is not { } node) return;
         try
         {
-            var grant = await _api.RequestStreamAsync(node.Device.Id, node.Channel.RtspChannel, _profile);
+            var grant = await _api.RequestStreamAsync(node.Device.Id, node.Channel.RtspChannel, Profile);
             if (sequence != _openSequence) return; // la celda ya se reasignó
             Player.OpenAsync(grant.RtspUrl);
         }

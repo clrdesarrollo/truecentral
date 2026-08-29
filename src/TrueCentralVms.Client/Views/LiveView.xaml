@@ -471,6 +471,27 @@
                                         Background="Transparent" Foreground="{StaticResource MutedBrush}"
                                         BorderThickness="0" Padding="9,2" Cursor="Hand" FontSize="11"
                                         Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                                <!-- Stream del cuadro: P = principal, S = secundario (clic alterna).
+                                     Va en la barra porque el video de Flyleaf se traga los clics. -->
+                                <Button DockPanel.Dock="Right" Command="{Binding SwitchProfileCommand}"
+                                        Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"
+                                        Focusable="False" FontSize="10" FontWeight="Bold"
+                                        Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Content" Value="P"/>
+                                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                            <Setter Property="ToolTip" Value="Stream principal (máxima calidad) — clic para cambiar al secundario"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Profile}" Value="Sub">
+                                                    <Setter Property="Content" Value="S"/>
+                                                    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                    <Setter Property="ToolTip" Value="Stream secundario (liviano) — clic para cambiar al principal"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
                                 <!-- Audio del cuadro (exclusivo: encenderlo silencia los demás) -->
                                 <Button DockPanel.Dock="Right" Command="{Binding ToggleAudioCommand}"
                                         Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"
