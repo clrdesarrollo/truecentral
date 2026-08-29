@@ -6,10 +6,17 @@ namespace TrueCentralVms.Client.Services;
 /// <summary>
 /// Conexión SignalR al hub del VMS con reconexión automática. Solo eventos
 /// servidor→cliente; los comandos siempre van por la API REST.
+///
+/// El token se consulta en cada intento de (re)conexión: tras un reinicio
+/// del servidor el ApiClient renueva la sesión y la próxima reconexión ya
+/// sale con el token nuevo. Y cuando la reconexión automática de SignalR se
+/// rinde (~40 s de servidor caído), se sigue reintentando cada 5 s hasta que
+/// vuelva o se cierre la aplicación.
 /// </summary>
 public sealed class VmsHubClient : IAsyncDisposable
 {
     private readonly HubConnection _connection;
+    private volatile bool _disposed;
 
     /// <summary>Cambió una entidad de configuración ("devices" | "channels" | "users"): recargar.</summary>
     public event Action<string>? ConfigChanged;
@@ -20,10 +27,15 @@ public sealed class VmsHubClient : IAsyncDisposable
     /// <summary>true = conectado al hub; false = reconectando/caído.</summary>
     public event Action<bool>? ConnectionStateChanged;
 
-    public VmsHubClient(string baseUrl, string token)
+    public VmsHubClient(string baseUrl, Func<string?> tokenProvider)
     {
         _connection = new HubConnectionBuilder()
-            .WithUrl($"{baseUrl.TrimEnd('/')}{VmsHubContract.HubPath}?access_token={Uri.EscapeDataString(token)}")
+            .WithUrl($"{baseUrl.TrimEnd('/')}{VmsHubContract.HubPath}", options =>
+            {
+                // SignalR lo envía como ?access_token=, que el middleware del
+                // servidor acepta además del header Bearer.
+                options.AccessTokenProvider = () => Task.FromResult(tokenProvider());
+            })
             .WithAutomaticReconnect()
             .Build();
 
@@ -32,7 +44,11 @@ public sealed class VmsHubClient : IAsyncDisposable
 
         _connection.Reconnecting += _ => { ConnectionStateChanged?.Invoke(false); return Task.CompletedTask; };
         _connection.Reconnected += _ => { ConnectionStateChanged?.Invoke(true); return Task.CompletedTask; };
-        _connection.Closed += _ => { ConnectionStateChanged?.Invoke(false); return Task.CompletedTask; };
+        _connection.Closed += async _ =>
+        {
+            ConnectionStateChanged?.Invoke(false);
+            await RestartLoopAsync();
+        };
     }
 
     public async Task StartAsync(CancellationToken ct = default)
@@ -41,5 +57,31 @@ public sealed class VmsHubClient : IAsyncDisposable
         ConnectionStateChanged?.Invoke(true);
     }
 
-    public ValueTask DisposeAsync() => _connection.DisposeAsync();
+    private async Task RestartLoopAsync()
+    {
+        while (!_disposed)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            try
+            {
+                await _connection.StartAsync();
+                ConnectionStateChanged?.Invoke(true);
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+            catch
+            {
+                // servidor aún caído: seguir intentando
+            }
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        return _connection.DisposeAsync();
+    }
 }

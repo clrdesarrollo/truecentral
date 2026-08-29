@@ -137,7 +137,7 @@ public partial class LoginWindow : Window
             _settings.AutoLogin = AutoLoginCheck.IsChecked == true;
             _settings.RecordLogin(serverUrl, username, _settings.RememberPassword ? password : null);
 
-            var hub = new VmsHubClient(serverUrl, api.Token!);
+            var hub = new VmsHubClient(serverUrl, () => api.Token);
             try { await hub.StartAsync(); }
             catch { /* el hub reintenta; el cliente funciona igual sin tiempo real */ }
 
