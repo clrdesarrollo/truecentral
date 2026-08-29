@@ -1,6 +1,7 @@
+using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
 using TrueCentralVms.Client.ViewModels;
 
 namespace TrueCentralVms.Client.Views;
@@ -16,70 +17,97 @@ public partial class MainWindow : Window
         InitializeComponent();
         Loaded += async (_, _) => await _vm.LoadTreeAsync();
         Closed += (_, _) => _vm.Shutdown();
+        StateChanged += OnWindowStateChanged;
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.IsGridFullscreen))
+                ApplyGridFullscreen(_vm.IsGridFullscreen);
+        };
     }
-
-    /// <summary>Doble clic en un canal del árbol: abrirlo en la grilla.</summary>
-    private async void OnTreeDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (DeviceTree.SelectedItem is ChannelNode node)
-            await _vm.OpenChannelAsync(node);
-    }
-
-    /// <summary>Clic en la barra del cuadro (o en el hueco vacío): seleccionarlo.</summary>
-    private void OnCellClick(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell })
-            SelectCell(cell);
-    }
-
-    /// <summary>
-    /// Clic sobre el video en reproducción: el Border transparente vive en la
-    /// ventana "Overlay" de FlyleafLib (árbol visual separado del nuestro), así
-    /// que su DataContext no es el VideoCellViewModel sino el propio
-    /// FlyleafHost — de ahí se recupera vía HostDataContext (ver XAML).
-    /// </summary>
-    private void OnVideoOverlayClick(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: FlyleafLib.Controls.WPF.FlyleafHost host } &&
-            host.HostDataContext is VideoCellViewModel cell)
-            SelectCell(cell);
-    }
-
-    private void SelectCell(VideoCellViewModel cell) => _vm.SelectedCell = _vm.SelectedCell == cell ? null : cell;
 
     // ------------------------------------------------------------------
-    // PTZ: movimiento continuo — presionar inicia, soltar (o salir del
-    // botón con el mouse presionado) detiene.
+    // Pantalla completa de la grilla: el XAML ya ocultó todo el cromo
+    // (bindings a IsGridFullscreen); aquí la ventana pasa a cubrir el
+    // monitor COMPLETO (una ventana sin marco maximizada respeta la barra
+    // de tareas, así que se fijan los límites del monitor a mano).
     // ------------------------------------------------------------------
-    private string? _activePtzCommand;
+    private Rect _fullscreenRestoreBounds;
+    private WindowState _fullscreenRestoreState;
 
-    private void OnPtzPress(object sender, MouseButtonEventArgs e)
+    private void ApplyGridFullscreen(bool on)
     {
-        if (sender is not FrameworkElement { Tag: string command } || command.Length == 0) return;
-        _activePtzCommand = command;
-        _ = _vm.PtzAsync(Enum.Parse<TrueCentralVms.Core.Drivers.PtzCommand>(command), stop: false);
+        if (on)
+        {
+            _fullscreenRestoreState = WindowState;
+            _fullscreenRestoreBounds = new Rect(Left, Top, Width, Height);
+
+            var hwnd = new WindowInteropHelper(this).Handle;
+            var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            var dpi = VisualTreeHelper.GetDpi(this);
+            WindowState = WindowState.Normal;
+            if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
+            {
+                Left = info.rcMonitor.Left / dpi.DpiScaleX;
+                Top = info.rcMonitor.Top / dpi.DpiScaleY;
+                Width = (info.rcMonitor.Right - info.rcMonitor.Left) / dpi.DpiScaleX;
+                Height = (info.rcMonitor.Bottom - info.rcMonitor.Top) / dpi.DpiScaleY;
+            }
+            else
+            {
+                WindowState = WindowState.Maximized; // respaldo: al menos maximizada
+            }
+        }
+        else
+        {
+            Left = _fullscreenRestoreBounds.Left;
+            Top = _fullscreenRestoreBounds.Top;
+            Width = _fullscreenRestoreBounds.Width;
+            Height = _fullscreenRestoreBounds.Height;
+            WindowState = _fullscreenRestoreState;
+        }
     }
 
-    private void OnPtzRelease(object sender, MouseButtonEventArgs e) => StopPtz(sender);
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
 
-    private void OnPtzLeave(object sender, MouseEventArgs e)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
     {
-        if (e.LeftButton == MouseButtonState.Pressed)
-            StopPtz(sender);
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
     }
 
-    private void StopPtz(object sender)
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    // ------------------------------------------------------------------
+    // Controles de la barra de título propia (la ventana no tiene el
+    // marco estándar de Windows; ver WindowChrome en el XAML).
+    // ------------------------------------------------------------------
+
+    /// <summary>Al maximizar una ventana sin marco, Windows la extiende más
+    /// allá de los bordes de la pantalla por el grosor del marco invisible:
+    /// se compensa con un margen para que nada quede cortado.</summary>
+    private void OnWindowStateChanged(object? sender, EventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: string command } || command.Length == 0) return;
-        if (_activePtzCommand != command) return;
-        _activePtzCommand = null;
-        _ = _vm.PtzAsync(Enum.Parse<TrueCentralVms.Core.Drivers.PtzCommand>(command), stop: true);
+        bool maximized = WindowState == WindowState.Maximized;
+        RootShell.Margin = maximized ? new Thickness(7) : new Thickness(0);
+        MaxGlyph.Text = maximized ? "" : ""; // ChromeRestore / ChromeMaximize
+        MaxButton.ToolTip = maximized ? "Restaurar" : "Maximizar";
     }
 
-    /// <summary>Botones de preset (Ir / Guardar / Borrar): órdenes de un solo clic.</summary>
-    private void OnPtzPreset(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { Tag: string action })
-            _ = _vm.PtzPresetAsync(Enum.Parse<TrueCentralVms.Core.Drivers.PtzPresetAction>(action));
-    }
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void OnMaxRestoreClick(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 }

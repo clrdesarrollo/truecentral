@@ -10,6 +10,12 @@ public partial class DeviceNode(DeviceDto device) : ObservableObject
     [ObservableProperty]
     private DeviceDto _device = device;
 
+    /// <summary>Visible según el buscador del árbol (vacío = todos).</summary>
+    [ObservableProperty] private bool _isVisible = true;
+
+    /// <summary>Selección del TreeView (enlazada al contenedor).</summary>
+    [ObservableProperty] private bool _isSelected;
+
     public ObservableCollection<ChannelNode> Channels { get; } = [];
 
     public string Header => Device.Name;
@@ -27,7 +33,7 @@ public partial class DeviceNode(DeviceDto device) : ObservableObject
 }
 
 /// <summary>Nodo de canal (hoja): lo que se abre con doble clic en la grilla.</summary>
-public sealed class ChannelNode(DeviceNode deviceNode, ChannelDto channel) : ObservableObject
+public sealed partial class ChannelNode(DeviceNode deviceNode, ChannelDto channel) : ObservableObject
 {
     private readonly DeviceNode _deviceNode = deviceNode;
 
@@ -36,6 +42,14 @@ public sealed class ChannelNode(DeviceNode deviceNode, ChannelDto channel) : Obs
 
     public ChannelDto Channel { get; } = channel;
     public string Header => Channel.Name;
+
+    /// <summary>Visible según el buscador del árbol (vacío = todos).</summary>
+    [ObservableProperty] private bool _isVisible = true;
+
+    /// <summary>Selección del TreeView. Además de los clics del usuario, la
+    /// fija el ViewModel: seleccionar un cuadro de la grilla selecciona aquí
+    /// su canal.</summary>
+    [ObservableProperty] private bool _isSelected;
 
     /// <summary>El canal está en línea solo si además su equipo lo está.</summary>
     public bool IsOnline => _deviceNode.IsOnline && Channel.IsOnline;

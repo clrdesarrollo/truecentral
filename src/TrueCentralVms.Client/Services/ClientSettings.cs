@@ -31,6 +31,9 @@ public sealed class ClientSettings
     public string Username { get; set; } = "";
     public bool RememberPassword { get; set; }
     public bool AutoLogin { get; set; }
+    /// <summary>Última división de pantalla usada en Vista en Vivo (nombre del
+    /// layout, ej. "4", "6", "13"); null = la por defecto.</summary>
+    public string? LastLayout { get; set; }
     /// <summary>Últimos inicios de sesión, el más reciente primero.</summary>
     public List<SavedAccount> Accounts { get; set; } = [];
 

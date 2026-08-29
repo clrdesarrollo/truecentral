@@ -106,6 +106,9 @@ public partial class LoginWindow : Window
             SetPassword(password);
     }
 
+    /// <summary>✕ de la barra de título propia (ventana sin marco de Windows).</summary>
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
     // ------------------------------------------------------------------
     // Inicio de sesión
     // ------------------------------------------------------------------

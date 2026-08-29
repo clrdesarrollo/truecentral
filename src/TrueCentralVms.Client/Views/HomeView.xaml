@@ -1,0 +1,159 @@
+<UserControl x:Class="TrueCentralVms.Client.Views.HomeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource BgBrush}">
+    <UserControl.Resources>
+        <!-- Piezas repetidas de las tarjetas de módulo -->
+        <Style x:Key="CardIcon" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="CardIconBox" TargetType="Border">
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="Height" Value="46"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        </Style>
+        <Style x:Key="CardDescription" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,4,0,0"/>
+        </Style>
+        <Style x:Key="CardBody" TargetType="StackPanel">
+            <Setter Property="Margin" Value="14,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <!-- Distintivo de los módulos aún no implementados -->
+        <Style x:Key="SoonBadge" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="Margin" Value="0,10,10,0"/>
+        </Style>
+        <Style x:Key="SoonBadgeText" TargetType="TextBlock">
+            <Setter Property="Text" Value="Próximamente"/>
+            <Setter Property="FontSize" Value="9.5"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="30,26,16,20" MaxWidth="1040" HorizontalAlignment="Left">
+            <TextBlock Text="{Binding WelcomeTitle}" FontSize="21" FontWeight="Bold"
+                       Foreground="{StaticResource TextBrush}"/>
+            <TextBlock Text="Seleccione un módulo para comenzar." FontSize="12.5"
+                       Foreground="{StaticResource MutedBrush}" Margin="0,4,0,22"/>
+
+            <WrapPanel>
+                <!-- Vista en Vivo: el único módulo operativo por ahora -->
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenLiveViewCommand}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#333B82F6">
+                            <TextBlock Text="&#xE714;" Foreground="#3B82F6" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Vista en Vivo" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Monitoreo en tiempo real, control PTZ y grillas de 1 a 16 cámaras."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Button>
+
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
+                        CommandParameter="Reproducción">
+                    <Grid>
+                        <DockPanel Margin="16,0">
+                            <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#3322C55E">
+                                <TextBlock Text="&#xE768;" Foreground="#22C55E" Style="{StaticResource CardIcon}"/>
+                            </Border>
+                            <StackPanel Style="{StaticResource CardBody}">
+                                <TextBlock Text="Reproducción" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="Búsqueda y reproducción de grabaciones del servidor y de los equipos."
+                                           Style="{StaticResource CardDescription}"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
+                    </Grid>
+                </Button>
+
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
+                        CommandParameter="Centro de eventos">
+                    <Grid>
+                        <DockPanel Margin="16,0">
+                            <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33F87171">
+                                <TextBlock Text="&#xE7BA;" Foreground="#F87171" Style="{StaticResource CardIcon}"/>
+                            </Border>
+                            <StackPanel Style="{StaticResource CardBody}">
+                                <TextBlock Text="Centro de eventos" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="Alarmas y eventos del sistema en tiempo real, con historial y filtros."
+                                           Style="{StaticResource CardDescription}"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
+                    </Grid>
+                </Button>
+
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
+                        CommandParameter="Mapa electrónico">
+                    <Grid>
+                        <DockPanel Margin="16,0">
+                            <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#3322D3EE">
+                                <TextBlock Text="&#xE774;" Foreground="#22D3EE" Style="{StaticResource CardIcon}"/>
+                            </Border>
+                            <StackPanel Style="{StaticResource CardBody}">
+                                <TextBlock Text="Mapa electrónico" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="Ubicación de cámaras y dispositivos sobre planos y mapas."
+                                           Style="{StaticResource CardDescription}"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
+                    </Grid>
+                </Button>
+
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
+                        CommandParameter="Muro de video">
+                    <Grid>
+                        <DockPanel Margin="16,0">
+                            <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33A78BFA">
+                                <TextBlock Text="&#xE7F4;" Foreground="#A78BFA" Style="{StaticResource CardIcon}"/>
+                            </Border>
+                            <StackPanel Style="{StaticResource CardBody}">
+                                <TextBlock Text="Muro de video" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="Decodificación de canales hacia muros de monitores."
+                                           Style="{StaticResource CardDescription}"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
+                    </Grid>
+                </Button>
+
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
+                        CommandParameter="Centro de descargas">
+                    <Grid>
+                        <DockPanel Margin="16,0">
+                            <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33F59E0B">
+                                <TextBlock Text="&#xE896;" Foreground="#F59E0B" Style="{StaticResource CardIcon}"/>
+                            </Border>
+                            <StackPanel Style="{StaticResource CardBody}">
+                                <TextBlock Text="Centro de descargas" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="Exportación de video y evidencia desde el servidor central."
+                                           Style="{StaticResource CardDescription}"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
+                    </Grid>
+                </Button>
+            </WrapPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

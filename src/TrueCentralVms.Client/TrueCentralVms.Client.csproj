@@ -8,7 +8,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyTitle>CLR TrueCentral VMS — Cliente</AssemblyTitle>
+    <ApplicationIcon>Assets\truecentral.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Logo del producto (compartido con vwcontroller/installer) -->
+    <Resource Include="Assets\logo.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\TrueCentralVms.Core\TrueCentralVms.Core.csproj" />

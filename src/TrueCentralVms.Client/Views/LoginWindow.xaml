@@ -4,15 +4,26 @@
         Title="CLR TrueCentral VMS — Iniciar sesión"
         Width="420" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        Icon="/Assets/logo.png"
         Background="{StaticResource BgBrush}">
-    <Border Background="{StaticResource PanelBrush}" Margin="18" CornerRadius="10"
+    <!-- Sin marco estándar de Windows: la franja superior (CaptionHeight)
+         permite arrastrar la ventana y el ✕ propio la cierra. -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="52" ResizeBorderThickness="0"
+                      GlassFrameThickness="0,0,0,1" CornerRadius="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    <Grid>
+    <Button Style="{StaticResource TitleBarCloseButton}" Content="&#xE8BB;" Height="30"
+            HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,4,0" Panel.ZIndex="1"
+            Click="OnCloseClick" ToolTip="Cerrar"/>
+    <Border Background="{StaticResource PanelBrush}" Margin="18,22,18,18" CornerRadius="10"
             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="24">
         <StackPanel>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
-                <Border Width="40" Height="40" CornerRadius="9" Background="{StaticResource AccentBrush}">
-                    <TextBlock Text="TC" Foreground="White" FontWeight="Bold"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
+                <Image Source="/Assets/logo.png" Width="40" Height="40" VerticalAlignment="Center"
+                       RenderOptions.BitmapScalingMode="HighQuality"/>
                 <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
                     <TextBlock FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}">
                         CLR TrueCentral <Run Foreground="{StaticResource AccentBrush}">VMS</Run>
@@ -92,4 +103,5 @@
                     Click="OnLoginClick" IsDefault="True"/>
         </StackPanel>
     </Border>
+    </Grid>
 </Window>

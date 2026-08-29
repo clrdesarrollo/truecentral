@@ -45,6 +45,10 @@ public sealed class ApiClient
     public Task<List<ChannelDto>> GetChannelsAsync(int deviceId, CancellationToken ct = default) =>
         SendAsync<List<ChannelDto>>(HttpMethod.Get, $"/api/devices/{deviceId}/channels", null, ct);
 
+    /// <summary>Uso de CPU/RAM/disco de la máquina del servidor (indicadores del navbar).</summary>
+    public Task<SystemMetricsDto> GetSystemMetricsAsync(CancellationToken ct = default) =>
+        SendAsync<SystemMetricsDto>(HttpMethod.Get, "/api/system/metrics", null, ct);
+
     public Task<StreamGrantDto> RequestStreamAsync(int deviceId, int rtspChannel, StreamProfile profile, CancellationToken ct = default) =>
         SendAsync<StreamGrantDto>(HttpMethod.Post, "/api/streams/request",
             new StreamRequestDto(deviceId, rtspChannel, profile), ct);
