@@ -407,6 +407,12 @@ public partial class MainViewModel : ObservableObject
     /// adapta la división a la más chica donde quepan (estilo iVMS-4200). Los
     /// cuadros sobrantes de la división elegida quedan libres.
     /// </summary>
+    /// <summary>Apertura masiva en curso (indicador en la barra de herramientas:
+    /// crear decenas de players congela la UI unos segundos y sin aviso parece
+    /// que la aplicación se colgó).</summary>
+    [ObservableProperty] private bool _isBulkOpening;
+    [ObservableProperty] private string _bulkOpeningText = "";
+
     public async Task OpenDeviceAsync(DeviceNode device)
     {
         var channels = device.Channels.ToList();
@@ -416,31 +422,52 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var layout = Layouts.FirstOrDefault(l => l.CellCount >= channels.Count) ?? Layouts[^1];
-        if (channels.Count > layout.CellCount)
+        if (channels.Count > 64)
         {
-            StatusMessage = $"\"{device.Device.Name}\" tiene {channels.Count} canales: se abren los primeros {layout.CellCount}.";
-            channels = channels.Take(layout.CellCount).ToList();
-        }
-        else
-        {
-            StatusMessage = $"Abriendo {channels.Count} canal(es) de \"{device.Device.Name}\".";
+            StatusMessage = $"\"{device.Device.Name}\" tiene {channels.Count} canales: se abren los primeros 64.";
+            channels = channels.Take(64).ToList();
         }
 
-        if (CurrentLayout != layout)
-            SelectLayout(layout); // también queda como división recordada
-
-        SelectedCell = null;
-        var profile = DefaultProfileForOpen();
-        var openings = new List<Task>();
-        for (int i = 0; i < Cells.Count; i++)
+        IsBulkOpening = true;
+        BulkOpeningText = $"Abriendo {channels.Count} canal(es) de \"{device.Device.Name}\"…";
+        StatusMessage = BulkOpeningText;
+        System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
+        try
         {
-            if (i < channels.Count)
-                openings.Add(Cells[i].OpenAsync(channels[i], profile));
+            // Que el indicador alcance a pintarse antes del trabajo pesado.
+            await Dispatcher.Yield(DispatcherPriority.Render);
+
+            if (_settings.FitGridToDevice)
+            {
+                // Grilla a medida (sin cuadros de sobra). No queda como división
+                // recordada: no es una de las estándar del selector.
+                ApplyLayout(VideoLayout.FitFor(channels.Count));
+            }
             else
-                Cells[i].Clear();
+            {
+                var layout = Layouts.FirstOrDefault(l => l.CellCount >= channels.Count) ?? Layouts[^1];
+                if (CurrentLayout != layout)
+                    SelectLayout(layout);
+            }
+
+            SelectedCell = null;
+            var profile = DefaultProfileForOpen();
+            var openings = new List<Task>();
+            for (int i = 0; i < Cells.Count; i++)
+            {
+                if (i < channels.Count)
+                    openings.Add(Cells[i].OpenAsync(channels[i], profile));
+                else
+                    Cells[i].Clear();
+            }
+            await Task.WhenAll(openings);
+            StatusMessage = $"{channels.Count} canal(es) de \"{device.Device.Name}\" en pantalla.";
         }
-        await Task.WhenAll(openings);
+        finally
+        {
+            System.Windows.Input.Mouse.OverrideCursor = null;
+            IsBulkOpening = false;
+        }
     }
 
     /// <summary>Stream al abrir un canal según Configuración → Video: fijo, o

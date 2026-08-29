@@ -419,6 +419,16 @@
                 </Popup>
                 <Button Content="Limpiar todo" Style="{StaticResource GhostButton}" Padding="12,5"
                         Command="{Binding ClearAllCommand}"/>
+                <!-- Indicador de apertura masiva (va en la barra porque el video
+                     de Flyleaf taparía cualquier overlay sobre la grilla) -->
+                <StackPanel Orientation="Horizontal" Margin="16,0,0,0"
+                            Visibility="{Binding IsBulkOpening, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                    <ProgressBar IsIndeterminate="True" Width="90" Height="5" VerticalAlignment="Center"
+                                 Foreground="{StaticResource AccentBrush}" Background="{StaticResource Panel2Brush}"
+                                 BorderThickness="0"/>
+                    <TextBlock Text="{Binding BulkOpeningText}" Margin="10,0,0,0" VerticalAlignment="Center"
+                               Foreground="{StaticResource AccentBrush}" FontSize="11.5"/>
+                </StackPanel>
             </StackPanel>
             </DockPanel>
         </Border>

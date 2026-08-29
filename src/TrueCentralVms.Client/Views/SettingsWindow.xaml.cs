@@ -34,6 +34,7 @@ public partial class SettingsWindow : Window
             ? FormatPng : FormatJpg).IsChecked = true;
 
         (settings.StretchVideo ? FitStretch : FitKeep).IsChecked = true;
+        (settings.FitGridToDevice ? GridFit : GridStandard).IsChecked = true;
 
         VolumeSlider.Value = Math.Clamp(settings.DefaultVolume, 0, 100);
         TimeoutBox.Text = settings.ApiTimeoutSeconds.ToString();
@@ -89,6 +90,7 @@ public partial class SettingsWindow : Window
             : ProfileSub.IsChecked == true ? "sub" : "auto";
         _settings.SnapshotFormat = FormatPng.IsChecked == true ? "png" : "jpg";
         _settings.StretchVideo = FitStretch.IsChecked == true;
+        _settings.FitGridToDevice = GridFit.IsChecked == true;
         _settings.DefaultVolume = (int)VolumeSlider.Value;
         _settings.ApiTimeoutSeconds = timeout;
         _settings.Save();

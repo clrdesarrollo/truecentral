@@ -131,6 +131,16 @@
                 <TextBlock Style="{StaticResource SettingHint}"
                            Text="Estirar llena cada cuadro por completo (sin barras negras) deformando levemente la imagen. Se aplica a todos los cuadros al guardar."/>
 
+                <TextBlock Text="Al abrir un equipo completo (doble clic en el árbol)" Style="{StaticResource FieldLabel}" Margin="0,18,0,4"/>
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="GridFit" Content="Grilla ajustada al equipo" Style="{StaticResource OptionRadio}"
+                                 GroupName="DeviceGrid"/>
+                    <RadioButton x:Name="GridStandard" Content="División estándar más cercana" Style="{StaticResource OptionRadio}"
+                                 GroupName="DeviceGrid"/>
+                </StackPanel>
+                <TextBlock Style="{StaticResource SettingHint}"
+                           Text="Ajustada arma una cuadrícula a medida sin cuadros de sobra (ej.: 40 cámaras → 8×5). La división estándar usa el selector de siempre (…16/25/36/64)."/>
+
                 <TextBlock Text="Carpeta de grabaciones locales" Style="{StaticResource FieldLabel}" Margin="0,18,0,4"/>
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Content="Examinar…" Style="{StaticResource GhostButton}"

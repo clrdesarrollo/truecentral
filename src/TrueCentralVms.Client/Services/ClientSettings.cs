@@ -52,6 +52,9 @@ public sealed class ClientSettings
     public string DefaultProfile { get; set; } = "auto";
     /// <summary>true = estirar el video al cuadro (sin barras negras); false = mantener proporción.</summary>
     public bool StretchVideo { get; set; }
+    /// <summary>Al abrir un equipo completo: true = grilla a medida (columnas×filas
+    /// sin cuadros de sobra); false = la división estándar más cercana.</summary>
+    public bool FitGridToDevice { get; set; } = true;
     /// <summary>Tiempo de espera de la API en segundos (se aplica al iniciar la aplicación).</summary>
     public int ApiTimeoutSeconds { get; set; } = 20;
 

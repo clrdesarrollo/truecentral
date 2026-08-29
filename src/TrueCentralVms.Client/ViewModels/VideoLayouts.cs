@@ -55,6 +55,38 @@ public sealed class VideoLayout
         return new VideoLayout { Name = "13", Columns = 4, Rows = 4, Cells = cells };
     }
 
+    /// <summary>
+    /// Cuadrícula a medida para abrir un equipo completo sin cuadros de sobra:
+    /// la combinación columnas×filas con el mínimo de celdas sobrantes que
+    /// contenga <paramref name="count"/> cuadros, prefiriendo formas parejas
+    /// (algo más anchas que altas, como los monitores). Ej.: 40 → 8×5 exacto,
+    /// 15 → 5×3 exacto, 13 → 5×3 con 2 libres.
+    /// </summary>
+    public static VideoLayout FitFor(int count)
+    {
+        count = Math.Clamp(count, 1, 64);
+        int bestCols = 1, bestRows = count;
+        long bestScore = long.MaxValue;
+        for (int cols = 1; cols <= count; cols++)
+        {
+            int rows = (count + cols - 1) / cols;
+            if (cols < rows) continue;         // pantallas anchas: columnas >= filas
+            if (cols > rows * 2 + 1) continue; // sin tiras demasiado alargadas
+            long score = (cols * rows - count) * 100L + (cols - rows); // 1º mínimo sobrante, 2º lo más cuadrado
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestCols = cols;
+                bestRows = rows;
+            }
+        }
+        var cells = new List<LayoutCell>(bestCols * bestRows);
+        for (int row = 0; row < bestRows; row++)
+            for (int col = 0; col < bestCols; col++)
+                cells.Add(new LayoutCell(col, row));
+        return new VideoLayout { Name = $"{bestCols}×{bestRows}", Columns = bestCols, Rows = bestRows, Cells = cells };
+    }
+
     /// <summary>Divisiones estándar, en el orden del selector.</summary>
     public static readonly IReadOnlyList<VideoLayout> Standard =
     [
