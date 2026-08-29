@@ -301,7 +301,8 @@
                     </TreeView.ItemContainerStyle>
                     <TreeView.Resources>
                         <HierarchicalDataTemplate DataType="{x:Type vm:DeviceNode}" ItemsSource="{Binding Channels}">
-                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                            <StackPanel Orientation="Horizontal" Margin="0,2"
+                                        ToolTip="Doble clic para abrir todos sus canales">
                                 <Ellipse Width="8" Height="8" Margin="0,0,7,0" VerticalAlignment="Center">
                                     <Ellipse.Style>
                                         <Style TargetType="Ellipse">

@@ -397,6 +397,47 @@ public partial class MainViewModel : ObservableObject
     public async Task OpenChannelInCellAsync(ChannelNode node, VideoCellViewModel cell) =>
         await cell.OpenAsync(node, DefaultProfileForOpen());
 
+    /// <summary>
+    /// Doble clic en un equipo del árbol: abre TODOS sus canales habilitados y
+    /// adapta la división a la más chica donde quepan (estilo iVMS-4200). Los
+    /// cuadros sobrantes de la división elegida quedan libres.
+    /// </summary>
+    public async Task OpenDeviceAsync(DeviceNode device)
+    {
+        var channels = device.Channels.ToList();
+        if (channels.Count == 0)
+        {
+            StatusMessage = $"\"{device.Device.Name}\" no tiene canales habilitados.";
+            return;
+        }
+
+        var layout = Layouts.FirstOrDefault(l => l.CellCount >= channels.Count) ?? Layouts[^1];
+        if (channels.Count > layout.CellCount)
+        {
+            StatusMessage = $"\"{device.Device.Name}\" tiene {channels.Count} canales: se abren los primeros {layout.CellCount}.";
+            channels = channels.Take(layout.CellCount).ToList();
+        }
+        else
+        {
+            StatusMessage = $"Abriendo {channels.Count} canal(es) de \"{device.Device.Name}\".";
+        }
+
+        if (CurrentLayout != layout)
+            SelectLayout(layout); // también queda como división recordada
+
+        SelectedCell = null;
+        var profile = DefaultProfileForOpen();
+        var openings = new List<Task>();
+        for (int i = 0; i < Cells.Count; i++)
+        {
+            if (i < channels.Count)
+                openings.Add(Cells[i].OpenAsync(channels[i], profile));
+            else
+                Cells[i].Clear();
+        }
+        await Task.WhenAll(openings);
+    }
+
     /// <summary>Stream al abrir un canal según Configuración → Video: fijo, o
     /// automático (principal en grillas chicas, secundario en grandes).</summary>
     private StreamProfile DefaultProfileForOpen() => _settings.DefaultProfile switch

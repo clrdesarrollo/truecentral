@@ -87,11 +87,14 @@ public partial class LiveView : UserControl
         e.Handled = true;
     }
 
-    /// <summary>Doble clic en un canal del árbol: abrirlo en la grilla.</summary>
+    /// <summary>Doble clic en el árbol: un canal se abre en la grilla; un
+    /// equipo abre todos sus canales adaptando la división.</summary>
     private async void OnTreeDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (DeviceTree.SelectedItem is ChannelNode node)
             await Vm.OpenChannelAsync(node);
+        else if (DeviceTree.SelectedItem is DeviceNode device)
+            await Vm.OpenDeviceAsync(device);
     }
 
     /// <summary>El nodo seleccionado (por clic o desde la grilla) queda a la
