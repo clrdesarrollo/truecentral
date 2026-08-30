@@ -103,6 +103,16 @@ solo acepta conexiones desde la propia máquina del servidor.
   (pan/tilt/zoom/foco/iris continuos + presets 1..300). Manejo por teclado:
   **flechas** = pan/tilt, **+/−** = zoom, y **Shift sostenido** = modo
   precisión (velocidad mínima, con píldora indicadora en el panel).
+- Reproducción: las grabaciones viven en el disco del propio equipo (el VMS
+  no almacena video). Se eligen hasta **4 canales sincronizados** (Ctrl +
+  doble clic suma canales), la línea de tiempo de 24 h muestra una pista por
+  canal con los tramos coloreados por tipo, y el clic sobre ella reproduce
+  esa hora en todos los cuadros a la vez. Saltos de ±30 s y ±5 min,
+  velocidad 0,5×–4×, y **arrastre** sobre la línea para marcar un tramo:
+  reproducirlo o **exportarlo a MP4** a la carpeta de grabaciones (el
+  servidor lo arma con FFmpeg mientras el equipo lo entrega; se puede
+  cancelar). Hikvision y Dahua se posicionan a la hora exacta; en ONVIF el
+  estándar no lo permite y el cliente avisa.
 - Credenciales recordadas cifradas con DPAPI, inicio de sesión automático
   opcional, lista de usuarios recientes.
 
@@ -136,12 +146,15 @@ real: los canales 3–10 del NVR CIAPCO.
 - **M1** esqueleto + PG embebido + auth + panel: ✅
 - **M2** CRUD dispositivos + driver Hikvision (validado con hardware real): ✅
 - **M3** MediaMTX + concesiones + cliente WPF (verificado E2E): ✅
-- **M4** Dahua + ONVIF + SADP: ✅ código completo — **pendiente validar Dahua
-  y ONVIF contra hardware real** (todos los equipos en producción son Hikvision).
+- **M4** Dahua + ONVIF + SADP: ✅ validado con hardware real (cámara Dahua
+  DH-IPC-HDW2449T-S-PRO por SDK nativo y por ONVIF).
 - **M5** pulido (sesiones + kick, reconexión de celdas, audio por cuadro,
   drag & drop, divisiones iVMS, buscador, indicadores de salud, README): ✅
 
-Pendientes conocidos: transporte por SDK para equipos sin RTSP; re-login
-automático del cliente cuando el servidor se reinicia (hoy pide entrar de
-nuevo); playback, mapas, muro de video y eventos (la arquitectura no los
-bloquea); foco/iris por ONVIF (servicio de imagen).
+- **M6** reproducción remota de grabaciones (Hikvision/Dahua/ONVIF, línea de
+  tiempo multicanal, velocidad, saltos y exportación a MP4): ✅ — **pendiente
+  validar Dahua y ONVIF contra hardware real** (Hikvision verificado E2E).
+
+Pendientes conocidos: transporte por SDK para equipos sin RTSP; mapas, muro
+de video y eventos (la arquitectura no los bloquea); foco/iris por ONVIF
+(servicio de imagen).
