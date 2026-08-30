@@ -60,6 +60,7 @@ public partial class MainViewModel : ObservableObject
     private void ClosePlayback()
     {
         Playback.StopCommand.Execute(null);
+        IsGridFullscreen = false; // la pantalla completa es del módulo, no del shell
         IsPlaybackOpen = false;
         ActiveSection = "Home";
         StatusMessage = ReadyMessage;

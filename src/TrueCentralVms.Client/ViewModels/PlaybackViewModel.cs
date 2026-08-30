@@ -25,7 +25,7 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     /// desde el equipo, y los grabadores limitan las sesiones de playback.</summary>
     public const int MaxChannels = 4;
 
-    private static readonly double[] Speeds = [0.5, 1, 2, 4];
+    private static readonly double[] Speeds = [0.25, 0.5, 1, 2, 4, 8];
 
     private readonly ApiClient _api;
     private readonly ClientSettings _settings;
@@ -41,7 +41,9 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     [ObservableProperty] private VideoLayout _layout = VideoLayout.Standard[0];
 
     /// <summary>Día visible en la línea de tiempo (hora local del equipo).</summary>
-    [ObservableProperty] private DateTime _date = DateTime.Today;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PlayheadText))]
+    private DateTime _date = DateTime.Today;
 
     /// <summary>Una pista por canal abierto (las dibuja la línea de tiempo).</summary>
     [ObservableProperty] private List<TimelineTrack> _tracks = [];
@@ -49,7 +51,17 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _status = EmptyMessage;
 
     /// <summary>Hora local que se está reproduciendo (aguja de la línea de tiempo).</summary>
-    [ObservableProperty] private DateTime? _playhead;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PlayheadText))]
+    private DateTime? _playhead;
+
+    /// <summary>Hora bajo el cursor mientras se arrastra la aguja (null si no se arrastra).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PlayheadText))]
+    private DateTime? _scrubTime;
+
+    /// <summary>Modo recorte: el arrastre sobre la línea marca un tramo en vez de navegar.</summary>
+    [ObservableProperty] private bool _isSelectionMode;
     [ObservableProperty] private bool _isPlaying;
     [ObservableProperty] private bool _isPaused;
     [ObservableProperty] private bool _isLoadingSegments;
@@ -75,6 +87,15 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     /// <summary>Se guardó un archivo local (título, glifo MDL2, ruta): el
     /// shell lo muestra como notificación con el enlace a la carpeta.</summary>
     public event Action<string, string, string>? MediaSaved;
+
+    /// <summary>
+    /// Reloj de la barra de reproducción, con fecha completa como en los
+    /// grabadores. Mientras se arrastra la aguja manda la hora arrastrada:
+    /// el operador ve a dónde va a saltar antes de soltar.
+    /// </summary>
+    public string PlayheadText => (ScrubTime ?? Playhead) is { } time
+        ? time.ToString("yyyy-MM-dd HH:mm:ss")
+        : $"{Date:yyyy-MM-dd} --:--:--";
 
     public bool HasSelection => SelectionStart is not null && SelectionEnd is not null;
 
@@ -103,11 +124,13 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Doble clic en un canal del árbol: reemplaza el conjunto de canales, o
-    /// lo agrega a la reproducción sincronizada si <paramref name="add"/>
-    /// (Ctrl + doble clic).
+    /// Doble clic en un canal del árbol: se SUMA a la reproducción
+    /// sincronizada (hasta <see cref="MaxChannels"/>, como la vista en vivo va
+    /// llenando cuadros). Con la grilla llena reemplaza el cuadro con foco.
+    /// Con <paramref name="replaceAll"/> (Ctrl + doble clic) deja solo ese
+    /// canal.
     /// </summary>
-    public async Task SelectChannelAsync(ChannelNode node, bool add = false)
+    public async Task SelectChannelAsync(ChannelNode node, bool replaceAll = false)
     {
         if (Cells.FirstOrDefault(c => c.Channel.Device.Id == node.Device.Id &&
                                       c.Channel.Channel.ChannelNumber == node.Channel.ChannelNumber) is { } existing)
@@ -116,7 +139,7 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!add)
+        if (replaceAll)
         {
             // Primero salen de la colección (la grilla suelta sus superficies)
             // y recién ahí se liberan los players, como en la vista en vivo.
@@ -126,16 +149,25 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
             Playhead = null;
             IsPaused = false;
         }
-        else if (Cells.Count >= MaxChannels)
-        {
-            Status = $"La reproducción sincronizada admite hasta {MaxChannels} canales.";
-            return;
-        }
 
         var created = new PlaybackCellViewModel(_api, _settings, node);
         created.AudioActivated += OnCellAudioActivated;
         created.CloseRequested += cell => RemoveCell(cell);
-        Cells.Add(created);
+
+        // Grilla llena: el canal nuevo entra en el cuadro con foco (mismo
+        // criterio que la vista en vivo al abrir sobre un cuadro ocupado).
+        if (Cells.Count >= MaxChannels)
+        {
+            int index = SelectedCell is { } focused ? Cells.IndexOf(focused) : 0;
+            if (index < 0) index = 0;
+            var replaced = Cells[index];
+            Cells[index] = created;
+            Detach(replaced);
+        }
+        else
+        {
+            Cells.Add(created);
+        }
         SelectedCell = created;
         Layout = LayoutFor(Cells.Count);
 
@@ -314,18 +346,27 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
         await SeekToAsync(target);
     }
 
-    /// <summary>
-    /// Velocidad de reproducción. El equipo entrega el video grabado a su
-    /// propio ritmo: acelerar consume lo que haya llegado y puede quedarse
-    /// esperando datos en enlaces lentos.
-    /// </summary>
+    /// <summary>Velocidad más lenta (« de la barra).</summary>
     [RelayCommand]
-    private void CycleSpeed()
+    private void SlowDown() => StepSpeed(-1);
+
+    /// <summary>Velocidad más rápida (» de la barra).</summary>
+    [RelayCommand]
+    private void SpeedUp() => StepSpeed(1);
+
+    /// <summary>
+    /// Cambia la velocidad de reproducción. El equipo entrega el video
+    /// grabado a su propio ritmo: acelerar consume lo que ya llegó y puede
+    /// quedarse esperando datos en enlaces lentos.
+    /// </summary>
+    private void StepSpeed(int step)
     {
-        int index = Array.IndexOf(Speeds, Speed);
-        Speed = Speeds[(index + 1) % Speeds.Length];
+        int index = Math.Max(0, Array.IndexOf(Speeds, Speed));
+        int next = Math.Clamp(index + step, 0, Speeds.Length - 1);
+        if (next == index) return;
+        Speed = Speeds[next];
         foreach (var cell in Cells) cell.ApplySpeed(Speed);
-        Status = Speed == 1 ? "" : $"Velocidad {Speed:0.#}× (depende de lo que alcance a entregar el equipo).";
+        Status = Speed == 1 ? "" : $"Velocidad {Speed:0.##}× (depende de lo que alcance a entregar el equipo).";
     }
 
     [RelayCommand]
@@ -355,6 +396,11 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
         SelectionStart = from;
         SelectionEnd = to;
     }
+
+    partial void OnIsSelectionModeChanged(bool value) =>
+        Status = value
+            ? "Modo recorte: arrastre sobre la línea de tiempo para marcar el tramo a exportar."
+            : "";
 
     [RelayCommand]
     private void ClearSelection() => SetSelection(null, null);
