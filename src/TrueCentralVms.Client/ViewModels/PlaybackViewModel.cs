@@ -1,90 +1,222 @@
+using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using FlyleafLib;
-using FlyleafLib.MediaPlayer;
 using TrueCentralVms.Client.Services;
 using TrueCentralVms.Core.Contracts;
 
 namespace TrueCentralVms.Client.ViewModels;
 
+/// <summary>Pista de la línea de tiempo: los tramos grabados de un canal.</summary>
+public sealed record TimelineTrack(string Name, IReadOnlyList<RecordingSegmentDto> Segments);
+
 /// <summary>
-/// Módulo Reproducción: las grabaciones viven en el DVR/NVR del equipo. Se
-/// elige canal y día, la línea de tiempo muestra los segmentos grabados, y el
-/// clic sobre ella pide una concesión de reproducción al servidor (que monta
-/// la ruta en MediaMTX) y abre el video con Flyleaf, igual que el vivo.
+/// Módulo Reproducción: las grabaciones viven en el disco del DVR/NVR (o en
+/// la tarjeta de la cámara). Se eligen hasta cuatro canales, la línea de
+/// tiempo muestra una pista por canal y el clic sobre ella pide al servidor
+/// una concesión de reproducción por canal — todos abren el MISMO instante,
+/// así que la reproducción multicanal queda sincronizada por la hora del
+/// equipo. Arrastrando sobre la línea se marca un tramo para exportarlo a MP4.
 /// </summary>
 public partial class PlaybackViewModel : ObservableObject, IDisposable
 {
+    /// <summary>Tope de canales simultáneos: cada uno es un pull de video
+    /// desde el equipo, y los grabadores limitan las sesiones de playback.</summary>
+    public const int MaxChannels = 4;
+
+    private static readonly double[] Speeds = [0.5, 1, 2, 4];
+
     private readonly ApiClient _api;
     private readonly ClientSettings _settings;
     private readonly DispatcherTimer _clock;
-    private int _openSequence;
-    private DateTime _rangeStart;
+    private CancellationTokenSource? _downloadCancel;
 
-    public Player Player { get; }
+    public ObservableCollection<PlaybackCellViewModel> Cells { get; } = [];
 
-    /// <summary>Canal en reproducción (se elige con doble clic en el árbol).</summary>
-    [ObservableProperty] private ChannelNode? _channel;
+    /// <summary>Cuadro con el foco: manda en el audio y en la exportación.</summary>
+    [ObservableProperty] private PlaybackCellViewModel? _selectedCell;
+
+    /// <summary>División de la grilla según cuántos canales haya abiertos.</summary>
+    [ObservableProperty] private VideoLayout _layout = VideoLayout.Standard[0];
+
     /// <summary>Día visible en la línea de tiempo (hora local del equipo).</summary>
     [ObservableProperty] private DateTime _date = DateTime.Today;
-    /// <summary>Segmentos grabados del día (pinta la línea de tiempo).</summary>
-    [ObservableProperty] private List<RecordingSegmentDto> _segments = [];
-    [ObservableProperty] private string _status = "Elija un canal del árbol (doble clic) para ver sus grabaciones.";
+
+    /// <summary>Una pista por canal abierto (las dibuja la línea de tiempo).</summary>
+    [ObservableProperty] private List<TimelineTrack> _tracks = [];
+
+    [ObservableProperty] private string _status = EmptyMessage;
+
     /// <summary>Hora local que se está reproduciendo (aguja de la línea de tiempo).</summary>
     [ObservableProperty] private DateTime? _playhead;
     [ObservableProperty] private bool _isPlaying;
     [ObservableProperty] private bool _isPaused;
-    [ObservableProperty] private bool _isAudioOn;
     [ObservableProperty] private bool _isLoadingSegments;
+
+    /// <summary>Velocidad de reproducción (0,5× a 4×).</summary>
+    [ObservableProperty] private double _speed = 1;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SelectionText))]
+    [NotifyPropertyChangedFor(nameof(HasSelection))]
+    private DateTime? _selectionStart;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SelectionText))]
+    [NotifyPropertyChangedFor(nameof(HasSelection))]
+    private DateTime? _selectionEnd;
+
+    [ObservableProperty] private bool _isDownloading;
+    [ObservableProperty] private string _downloadStatus = "";
+
+    private const string EmptyMessage = "Elija un canal del árbol (doble clic) para ver sus grabaciones.";
+
+    /// <summary>Se guardó un archivo local (título, glifo MDL2, ruta): el
+    /// shell lo muestra como notificación con el enlace a la carpeta.</summary>
+    public event Action<string, string, string>? MediaSaved;
+
+    public bool HasSelection => SelectionStart is not null && SelectionEnd is not null;
+
+    public string SelectionText => SelectionStart is { } from && SelectionEnd is { } to
+        ? $"{from:HH:mm:ss} – {to:HH:mm:ss}  ({(to - from).TotalMinutes:0.#} min)"
+        : "Arrastre sobre la línea de tiempo para marcar un tramo";
 
     public PlaybackViewModel(ApiClient api, ClientSettings settings)
     {
         _api = api;
         _settings = settings;
 
-        var config = new Config();
-        config.Player.AutoPlay = true;
-        config.Audio.Enabled = false;
-        config.Demuxer.FormatOpt["rtsp_transport"] = "tcp";
-        config.Demuxer.FormatOpt["analyzeduration"] = "500000";
-        config.Demuxer.FormatOpt["probesize"] = "524288";
-        Player = new Player(config);
-        Player.Audio.Volume = Math.Clamp(settings.DefaultVolume, 0, 100);
-        Player.Config.Video.AspectRatio = settings.StretchVideo ? AspectRatio.Fill : AspectRatio.Keep;
-
-        Player.OpenCompleted += (_, e) =>
-        {
-            if (e.Success) { Status = ""; return; }
-            if (IsPlaying) Status = "No se pudo abrir la grabación: " + (e.Error ?? "error desconocido");
-            IsPlaying = false;
-        };
-        Player.PlaybackStopped += (_, _) =>
-        {
-            if (!IsPlaying) return;
-            IsPlaying = false;
-            Status = "Fin del tramo reproducido.";
-        };
-
-        // Aguja de la línea de tiempo: hora de inicio del rango + reloj del player.
+        // Aguja de la línea de tiempo: hora de inicio del tramo + reloj del player.
         _clock = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _clock.Tick += (_, _) =>
         {
-            if (IsPlaying && Player.CurTime > 0)
-                Playhead = _rangeStart.AddTicks(Player.CurTime);
+            if (Cells.FirstOrDefault(c => c.Playhead is not null)?.Playhead is { } time)
+                Playhead = time;
+            IsPlaying = Cells.Any(c => c.IsPlaying);
         };
         _clock.Start();
     }
 
-    /// <summary>Doble clic en un canal del árbol estando en Reproducción.</summary>
-    public async Task SelectChannelAsync(ChannelNode node)
+    // ------------------------------------------------------------------
+    // Canales
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Doble clic en un canal del árbol: reemplaza el conjunto de canales, o
+    /// lo agrega a la reproducción sincronizada si <paramref name="add"/>
+    /// (Ctrl + doble clic).
+    /// </summary>
+    public async Task SelectChannelAsync(ChannelNode node, bool add = false)
     {
-        Channel = node;
-        Stop();
-        await LoadSegmentsAsync();
+        if (Cells.FirstOrDefault(c => c.Channel.Device.Id == node.Device.Id &&
+                                      c.Channel.Channel.ChannelNumber == node.Channel.ChannelNumber) is { } existing)
+        {
+            SelectedCell = existing;
+            return;
+        }
+
+        if (!add)
+        {
+            // Primero salen de la colección (la grilla suelta sus superficies)
+            // y recién ahí se liberan los players, como en la vista en vivo.
+            var previous = Cells.ToList();
+            Cells.Clear();
+            foreach (var cell in previous) Detach(cell);
+            Playhead = null;
+            IsPaused = false;
+        }
+        else if (Cells.Count >= MaxChannels)
+        {
+            Status = $"La reproducción sincronizada admite hasta {MaxChannels} canales.";
+            return;
+        }
+
+        var created = new PlaybackCellViewModel(_api, _settings, node);
+        created.AudioActivated += OnCellAudioActivated;
+        created.CloseRequested += cell => RemoveCell(cell);
+        Cells.Add(created);
+        SelectedCell = created;
+        Layout = LayoutFor(Cells.Count);
+
+        IsLoadingSegments = true;
+        Status = $"Consultando grabaciones de \"{node.Channel.Name}\" del {Date:dd-MM-yyyy}…";
+        try
+        {
+            await created.LoadSegmentsAsync(Date);
+        }
+        finally
+        {
+            IsLoadingSegments = false;
+        }
+        RefreshTracks();
+        DescribeSegments();
+
+        // Con la reproducción andando, el canal recién sumado se engancha a la
+        // misma hora en vez de quedarse en negro.
+        if (Playhead is { } playhead && Cells.Count > 1 && Cells.Any(c => c.IsPlaying))
+        {
+            await created.OpenAtAsync(playhead, Date.Date.AddDays(1));
+            created.ApplySpeed(Speed);
+        }
     }
 
-    partial void OnDateChanged(DateTime value) => _ = LoadSegmentsAsync();
+    /// <summary>Quita un canal de la reproducción (su ✕).</summary>
+    public void RemoveCell(PlaybackCellViewModel cell)
+    {
+        if (!Cells.Remove(cell)) return;
+        Detach(cell);
+        if (ReferenceEquals(SelectedCell, cell)) SelectedCell = Cells.FirstOrDefault();
+        Layout = LayoutFor(Math.Max(Cells.Count, 1));
+        RefreshTracks();
+        if (Cells.Count == 0)
+        {
+            Playhead = null;
+            Status = EmptyMessage;
+        }
+    }
+
+    private void Detach(PlaybackCellViewModel cell)
+    {
+        cell.AudioActivated -= OnCellAudioActivated;
+        cell.Stop();
+        cell.Dispose();
+    }
+
+    /// <summary>Audio exclusivo: el cuadro que lo enciende silencia a los demás.</summary>
+    private void OnCellAudioActivated(PlaybackCellViewModel owner)
+    {
+        foreach (var cell in Cells)
+            if (!ReferenceEquals(cell, owner)) cell.MuteQuietly();
+    }
+
+    private static VideoLayout LayoutFor(int count) => count switch
+    {
+        <= 1 => VideoLayout.Standard[0], // 1
+        2 => VideoLayout.FitFor(2),      // 2×1
+        _ => VideoLayout.Standard[1],    // 2×2
+    };
+
+    private void RefreshTracks() =>
+        Tracks = Cells.Select(c => new TimelineTrack(c.Channel.Channel.Name, c.Segments)).ToList();
+
+    private void DescribeSegments()
+    {
+        int total = Cells.Sum(c => c.Segments.Count);
+        Status = total == 0
+            ? $"Sin grabaciones el {Date:dd-MM-yyyy}. El equipo conserva según su propio disco y política."
+            : "Clic en la línea de tiempo para reproducir; arrastre para marcar un tramo.";
+    }
+
+    // ------------------------------------------------------------------
+    // Día visible
+    // ------------------------------------------------------------------
+
+    partial void OnDateChanged(DateTime value)
+    {
+        SelectionStart = SelectionEnd = null;
+        _ = LoadSegmentsAsync();
+    }
 
     [RelayCommand]
     private void PreviousDay() => Date = Date.AddDays(-1);
@@ -98,95 +230,233 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void GoToday() => Date = DateTime.Today;
 
+    /// <summary>Recarga los tramos de todos los canales abiertos.</summary>
     public async Task LoadSegmentsAsync()
     {
-        if (Channel is not { } node) return;
+        if (Cells.Count == 0) return;
         IsLoadingSegments = true;
-        Status = $"Consultando grabaciones de \"{node.Channel.Name}\" del {Date:dd-MM-yyyy}…";
+        Status = $"Consultando grabaciones del {Date:dd-MM-yyyy}…";
         try
         {
-            Segments = await _api.GetRecordingSegmentsAsync(node.Device.Id, node.Channel.ChannelNumber, Date);
-            Status = Segments.Count == 0
-                ? $"Sin grabaciones el {Date:dd-MM-yyyy}. El equipo conserva según su propio disco y política."
-                : $"{Segments.Count} tramo(s) grabado(s). Clic en la línea de tiempo para reproducir.";
-        }
-        catch (ApiException ex)
-        {
-            Segments = [];
-            Status = ex.Message;
+            await Task.WhenAll(Cells.Select(c => c.LoadSegmentsAsync(Date)));
         }
         finally
         {
             IsLoadingSegments = false;
         }
+        RefreshTracks();
+        DescribeSegments();
     }
 
-    /// <summary>Clic en la línea de tiempo: reproducir desde esa hora.</summary>
+    // ------------------------------------------------------------------
+    // Reproducción
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Clic en la línea de tiempo: TODOS los canales abren esa hora. Si el
+    /// instante cae fuera de lo grabado, salta al inicio del siguiente tramo.
+    /// </summary>
     public async Task SeekToAsync(DateTime localTime)
     {
-        if (Channel is not { } node) return;
-        // Fuera de un tramo grabado: saltar al inicio del siguiente tramo.
-        if (!Segments.Any(s => localTime >= s.Start && localTime < s.End))
+        if (Cells.Count == 0)
         {
-            var next = Segments.Where(s => s.End > localTime).OrderBy(s => s.Start).FirstOrDefault();
+            Status = EmptyMessage;
+            return;
+        }
+
+        if (!Cells.Any(c => c.Segments.Any(s => localTime >= s.Start && localTime < s.End)))
+        {
+            var next = Cells.SelectMany(c => c.Segments)
+                .Where(s => s.Start > localTime)
+                .OrderBy(s => s.Start)
+                .FirstOrDefault();
             if (next is null)
             {
                 Status = "No hay grabación desde esa hora en adelante.";
                 return;
             }
-            if (localTime < next.Start) localTime = next.Start;
+            localTime = next.Start;
         }
 
-        int sequence = ++_openSequence;
+        IsPaused = false;
+        Playhead = localTime;
         Status = $"Abriendo grabación de las {localTime:HH:mm:ss}…";
-        try
-        {
-            var grant = await _api.RequestPlaybackAsync(node.Device.Id, node.Channel.RtspChannel,
-                localTime, Date.AddDays(1));
-            if (sequence != _openSequence) return;
-            _rangeStart = localTime;
-            Playhead = localTime;
-            IsPlaying = true;
-            IsPaused = false;
-            Player.Config.Audio.Enabled = IsAudioOn;
-            Player.OpenAsync(grant.RtspUrl);
-        }
-        catch (ApiException ex)
-        {
-            if (sequence == _openSequence) Status = ex.Message;
-        }
+        var endOfDay = Date.Date.AddDays(1);
+        await Task.WhenAll(Cells.Select(c => c.OpenAtAsync(localTime, endOfDay)));
+        foreach (var cell in Cells) cell.ApplySpeed(Speed);
+        // ONVIF no admite posicionar por hora: conviene decirlo donde se ve.
+        Status = Cells.Any(c => c.IsPlaying && !c.IsSeekExact)
+            ? "El equipo ONVIF reproduce desde el inicio de su grabación: no permite posicionarse por hora."
+            : "";
     }
 
     [RelayCommand]
     private void TogglePause()
     {
         if (!IsPlaying) return;
-        if (IsPaused) { Player.Play(); IsPaused = false; }
-        else { Player.Pause(); IsPaused = true; }
+        IsPaused = !IsPaused;
+        foreach (var cell in Cells)
+        {
+            if (IsPaused) cell.Pause();
+            else cell.Resume();
+        }
+    }
+
+    /// <summary>Salto relativo en segundos (los botones de ±30 s y ±5 min).</summary>
+    [RelayCommand]
+    private async Task SkipAsync(string seconds)
+    {
+        if (!int.TryParse(seconds, out int delta)) return;
+        var from = Playhead ?? Date.Date;
+        var target = from.AddSeconds(delta);
+        if (target < Date.Date) target = Date.Date;
+        if (target >= Date.Date.AddDays(1)) target = Date.Date.AddDays(1).AddSeconds(-1);
+        await SeekToAsync(target);
+    }
+
+    /// <summary>
+    /// Velocidad de reproducción. El equipo entrega el video grabado a su
+    /// propio ritmo: acelerar consume lo que haya llegado y puede quedarse
+    /// esperando datos en enlaces lentos.
+    /// </summary>
+    [RelayCommand]
+    private void CycleSpeed()
+    {
+        int index = Array.IndexOf(Speeds, Speed);
+        Speed = Speeds[(index + 1) % Speeds.Length];
+        foreach (var cell in Cells) cell.ApplySpeed(Speed);
+        Status = Speed == 1 ? "" : $"Velocidad {Speed:0.#}× (depende de lo que alcance a entregar el equipo).";
     }
 
     [RelayCommand]
-    private void Stop()
+    private void Stop() => StopAll();
+
+    private void StopAll()
     {
-        _openSequence++;
+        foreach (var cell in Cells) cell.Stop();
         IsPlaying = false;
         IsPaused = false;
         Playhead = null;
-        Player.Stop();
-        Status = Channel is null ? "Elija un canal del árbol (doble clic) para ver sus grabaciones." : "";
+        Status = Cells.Count == 0 ? EmptyMessage : "";
+    }
+
+    // ------------------------------------------------------------------
+    // Selección y exportación de tramos
+    // ------------------------------------------------------------------
+
+    /// <summary>Arrastre sobre la línea de tiempo (null = limpiar la marca).</summary>
+    public void SetSelection(DateTime? from, DateTime? to)
+    {
+        if (from is null || to is null || to <= from)
+        {
+            SelectionStart = SelectionEnd = null;
+            return;
+        }
+        SelectionStart = from;
+        SelectionEnd = to;
     }
 
     [RelayCommand]
-    private void ToggleAudio()
+    private void ClearSelection() => SetSelection(null, null);
+
+    [RelayCommand]
+    private async Task PlaySelectionAsync()
     {
-        IsAudioOn = !IsAudioOn;
-        Player.Config.Audio.Enabled = IsAudioOn;
+        if (SelectionStart is { } from) await SeekToAsync(from);
+    }
+
+    /// <summary>
+    /// Exporta el tramo marcado del cuadro con foco a un MP4 en la carpeta de
+    /// grabaciones. El servidor tira del equipo con FFmpeg y va enviando el
+    /// archivo: avanza al ritmo al que el grabador entrega el video.
+    /// </summary>
+    [RelayCommand]
+    private async Task DownloadAsync()
+    {
+        if (IsDownloading) return;
+        if (SelectedCell is not { } cell)
+        {
+            Status = "Elija primero un canal.";
+            return;
+        }
+        if (SelectionStart is not { } from || SelectionEnd is not { } to)
+        {
+            Status = "Arrastre sobre la línea de tiempo para marcar el tramo a exportar.";
+            return;
+        }
+        if (to - from > TimeSpan.FromHours(2))
+        {
+            Status = "El tramo a exportar no puede superar 2 horas.";
+            return;
+        }
+
+        string folder = _settings.EffectiveRecordingFolder;
+        string file = Path.Combine(folder,
+            $"{SafeName(cell.Channel.Device.Name)}_{SafeName(cell.Channel.Channel.Name)}_{from:yyyyMMdd_HHmmss}.mp4");
+
+        _downloadCancel = new CancellationTokenSource();
+        IsDownloading = true;
+        DownloadStatus = "Preparando la exportación…";
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var progress = new Progress<long>(bytes =>
+                DownloadStatus = $"Exportando… {bytes / 1024d / 1024d:0.0} MB");
+            await _api.DownloadPlaybackAsync(cell.Channel.Device.Id, cell.Channel.Channel.RtspChannel,
+                from, to, file, progress, _downloadCancel.Token);
+            Status = $"Tramo exportado ({(to - from).TotalMinutes:0.#} min).";
+            MediaSaved?.Invoke("Grabación exportada", "\uE896", file);
+        }
+        catch (OperationCanceledException)
+        {
+            TryDelete(file);
+            Status = "Exportación cancelada.";
+        }
+        catch (Exception ex)
+        {
+            TryDelete(file);
+            Status = ex is ApiException ? ex.Message : $"No se pudo exportar el tramo: {ex.Message}";
+        }
+        finally
+        {
+            IsDownloading = false;
+            DownloadStatus = "";
+            _downloadCancel?.Dispose();
+            _downloadCancel = null;
+        }
+    }
+
+    [RelayCommand]
+    private void CancelDownload() => _downloadCancel?.Cancel();
+
+    private static void TryDelete(string file)
+    {
+        try
+        {
+            if (File.Exists(file)) File.Delete(file);
+        }
+        catch
+        {
+            // Archivo parcial tomado por otro programa: queda en la carpeta.
+        }
+    }
+
+    /// <summary>Nombre de equipo/canal apto para un archivo de Windows.</summary>
+    private static string SafeName(string name)
+    {
+        var clean = name.Trim();
+        foreach (char invalid in Path.GetInvalidFileNameChars())
+            clean = clean.Replace(invalid, '_');
+        clean = clean.Replace(' ', '_');
+        return clean.Length > 0 ? clean : "canal";
     }
 
     public void Dispose()
     {
         _clock.Stop();
-        _openSequence++;
-        Player.Dispose();
+        _downloadCancel?.Cancel();
+        var open = Cells.ToList();
+        Cells.Clear();
+        foreach (var cell in open) Detach(cell);
     }
 }

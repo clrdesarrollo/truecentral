@@ -45,6 +45,15 @@ public sealed class SectionEquals : IValueConverter
         value is true ? (p as string ?? "") : Binding.DoNothing;
 }
 
+/// <summary>0 → Visible; cualquier otro número → Collapsed (mensajes de "aún no hay nada").</summary>
+public sealed class ZeroToVisibility : IValueConverter
+{
+    public static readonly ZeroToVisibility Instance = new();
+    public object Convert(object value, Type t, object p, CultureInfo c) =>
+        value is int and 0 ? Visibility.Visible : Visibility.Collapsed;
+    public object ConvertBack(object value, Type t, object p, CultureInfo c) => throw new NotSupportedException();
+}
+
 /// <summary>true si la celda del template es la celda seleccionada (borde acento).</summary>
 public sealed class SelectedCellComparer : IMultiValueConverter
 {

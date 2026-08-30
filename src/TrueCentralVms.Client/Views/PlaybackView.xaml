@@ -28,7 +28,7 @@
                            FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"/>
                 <TextBlock DockPanel.Dock="Top" Margin="14,0,14,8" FontSize="10.5" TextWrapping="Wrap"
                            Foreground="{StaticResource MutedBrush}"
-                           Text="Doble clic en un canal para consultar sus grabaciones (viven en el disco del equipo)."/>
+                           Text="Doble clic en un canal para ver sus grabaciones (viven en el disco del equipo). Ctrl + doble clic agrega el canal a la reproducción sincronizada (hasta 4)."/>
                 <TreeView x:Name="PlaybackTree" ItemsSource="{Binding Devices}"
                           Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
                           MouseDoubleClick="OnTreeDoubleClick">
@@ -67,6 +67,8 @@
                     <TextBlock Text="Alarma" Style="{StaticResource LegendLabel}"/>
                     <Border Style="{StaticResource LegendChip}" Background="#A78BFA"/>
                     <TextBlock Text="Manual" Style="{StaticResource LegendLabel}"/>
+                    <Border Style="{StaticResource LegendChip}" Background="#6B7280"/>
+                    <TextBlock Text="Otra" Style="{StaticResource LegendLabel}"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="Día:" VerticalAlignment="Center" Margin="0,0,8,0"
@@ -82,9 +84,11 @@
                             Command="{Binding Playback.NextDayCommand}" ToolTip="Día siguiente"/>
                     <Button Content="Hoy" Style="{StaticResource GhostButton}" Padding="10,5" Margin="8,0,0,0"
                             Command="{Binding Playback.GoTodayCommand}"/>
-                    <TextBlock Text="{Binding Playback.Channel.Channel.Name, StringFormat='— {0}'}"
-                               VerticalAlignment="Center" Margin="14,0,0,0"
-                               Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold"/>
+                    <!-- Consulta de grabaciones en curso -->
+                    <ProgressBar IsIndeterminate="True" Width="70" Height="4" VerticalAlignment="Center" Margin="14,0,0,0"
+                                 Foreground="{StaticResource AccentBrush}" Background="{StaticResource Panel2Brush}"
+                                 BorderThickness="0"
+                                 Visibility="{Binding Playback.IsLoadingSegments, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -98,7 +102,7 @@
                         <!-- Pausa / reanudar -->
                         <Button Command="{Binding Playback.TogglePauseCommand}" Style="{StaticResource GhostButton}"
                                 Padding="12,6" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                                IsEnabled="{Binding Playback.IsPlaying}">
+                                IsEnabled="{Binding Playback.IsPlaying}" ToolTip="Pausar / reanudar">
                             <Button.Content>
                                 <TextBlock FontFamily="Segoe MDL2 Assets">
                                     <TextBlock.Style>
@@ -119,26 +123,24 @@
                                 Style="{StaticResource GhostButton}" Padding="12,6" Margin="6,0,0,0"
                                 Command="{Binding Playback.StopCommand}" IsEnabled="{Binding Playback.IsPlaying}"
                                 ToolTip="Detener la reproducción"/>
-                        <!-- Audio -->
-                        <Button Command="{Binding Playback.ToggleAudioCommand}" Padding="12,6" Margin="6,0,0,0"
-                                Style="{StaticResource GhostButton}" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                                ToolTip="Audio de la reproducción">
-                            <Button.Content>
-                                <TextBlock FontFamily="Segoe MDL2 Assets">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Text" Value="&#xE74F;"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Playback.IsAudioOn}" Value="True">
-                                                    <Setter Property="Text" Value="&#xE767;"/>
-                                                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </Button.Content>
-                        </Button>
+                        <!-- Saltos relativos (piden un tramo nuevo al equipo) -->
+                        <Button Content="−5 m" Style="{StaticResource GhostButton}" Padding="10,6" Margin="10,0,0,0"
+                                Command="{Binding Playback.SkipCommand}" CommandParameter="-300"
+                                ToolTip="Retroceder 5 minutos"/>
+                        <Button Content="−30 s" Style="{StaticResource GhostButton}" Padding="10,6" Margin="4,0,0,0"
+                                Command="{Binding Playback.SkipCommand}" CommandParameter="-30"
+                                ToolTip="Retroceder 30 segundos"/>
+                        <Button Content="+30 s" Style="{StaticResource GhostButton}" Padding="10,6" Margin="4,0,0,0"
+                                Command="{Binding Playback.SkipCommand}" CommandParameter="30"
+                                ToolTip="Avanzar 30 segundos"/>
+                        <Button Content="+5 m" Style="{StaticResource GhostButton}" Padding="10,6" Margin="4,0,0,0"
+                                Command="{Binding Playback.SkipCommand}" CommandParameter="300"
+                                ToolTip="Avanzar 5 minutos"/>
+                        <!-- Velocidad -->
+                        <Button Style="{StaticResource GhostButton}" Padding="10,6" Margin="10,0,0,0"
+                                Command="{Binding Playback.CycleSpeedCommand}"
+                                Content="{Binding Playback.Speed, StringFormat='{}{0:0.#}×'}"
+                                ToolTip="Velocidad de reproducción (el equipo entrega el video a su propio ritmo)"/>
                     </StackPanel>
                     <TextBlock DockPanel.Dock="Right" Text="{Binding Playback.Playhead, StringFormat='HH:mm:ss'}"
                                Foreground="{StaticResource AccentBrush}" FontSize="15" FontWeight="Bold"
@@ -147,23 +149,134 @@
                                FontSize="11.5" VerticalAlignment="Center" Margin="14,0,0,0"
                                TextTrimming="CharacterEllipsis"/>
                 </DockPanel>
-                <views:TimelineBar x:Name="Timeline" Height="62" Margin="10,2,10,10"
-                                   Segments="{Binding Playback.Segments}"
+
+                <!-- Tramo marcado y exportación -->
+                <DockPanel Margin="10,0,10,4">
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                        <TextBlock Text="{Binding Playback.DownloadStatus}" VerticalAlignment="Center"
+                                   Foreground="{StaticResource AccentBrush}" FontSize="11.5" Margin="0,0,10,0"/>
+                        <Button Content="Cancelar" Style="{StaticResource GhostButton}" Padding="10,5"
+                                Command="{Binding Playback.CancelDownloadCommand}"
+                                Visibility="{Binding Playback.IsDownloading, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <Button Style="{StaticResource GhostButton}" Padding="10,5" Margin="6,0,0,0"
+                                Command="{Binding Playback.PlaySelectionCommand}"
+                                IsEnabled="{Binding Playback.HasSelection}"
+                                Content="Reproducir tramo"/>
+                        <Button Style="{StaticResource GhostButton}" Padding="10,5" Margin="6,0,0,0"
+                                Command="{Binding Playback.DownloadCommand}"
+                                IsEnabled="{Binding Playback.HasSelection}"
+                                ToolTip="Guarda el tramo marcado del cuadro seleccionado como MP4 en la carpeta de grabaciones">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                           VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBlock Text="Exportar MP4"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Tramo:" Foreground="{StaticResource MutedBrush}" FontSize="11.5"
+                                   VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="{Binding Playback.SelectionText}" VerticalAlignment="Center"
+                                   Foreground="{StaticResource TextBrush}" FontSize="11.5"/>
+                        <Button Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="9"
+                                Style="{StaticResource GhostButton}" Padding="7,4" Margin="8,0,0,0"
+                                Command="{Binding Playback.ClearSelectionCommand}"
+                                Visibility="{Binding Playback.HasSelection, Converter={x:Static vm:BoolToVisibility.Instance}}"
+                                ToolTip="Borrar la marca"/>
+                    </StackPanel>
+                </DockPanel>
+
+                <views:TimelineBar x:Name="Timeline" Height="70" Margin="10,2,10,10"
+                                   Tracks="{Binding Playback.Tracks}"
                                    Day="{Binding Playback.Date}"
-                                   Playhead="{Binding Playback.Playhead}"/>
+                                   Playhead="{Binding Playback.Playhead}"
+                                   SelectionStart="{Binding Playback.SelectionStart}"
+                                   SelectionEnd="{Binding Playback.SelectionEnd}"/>
             </StackPanel>
         </Border>
 
-        <!-- Video -->
+        <!-- Grilla de reproducción (un cuadro por canal, todos a la misma hora) -->
         <Grid Background="#06090D">
-            <fl:FlyleafHost Player="{Binding Playback.Player}" AttachedDragMove="None"
-                            KeyBindings="None" OpenOnDrop="None" SwapOnDrop="None"
-                            ToggleFullScreenOnDoubleClick="None"
-                            Visibility="{Binding Playback.IsPlaying, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+            <ItemsControl ItemsSource="{Binding Playback.Cells}" Margin="4">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <views:VideoLayoutPanel Layout="{Binding Playback.Layout}"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:PlaybackCellViewModel}">
+                        <!-- El video de FlyleafLib vive en una ventana nativa superpuesta:
+                             los clics sobre él NO llegan a WPF, así que la barra del
+                             cuadro es la que selecciona, silencia y cierra. -->
+                        <Border Margin="3" Background="#0A0E13" CornerRadius="4" BorderThickness="2"
+                                MouseLeftButtonDown="OnCellClick">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{x:Static vm:SelectedCellComparer.Instance}">
+                                                    <Binding/>
+                                                    <Binding Path="DataContext.Playback.SelectedCell"
+                                                             RelativeSource="{RelativeSource AncestorType=Window}"/>
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <DockPanel Grid.Row="0" Background="#151D26" Cursor="Hand">
+                                    <Button DockPanel.Dock="Right" Content="&#x2715;" Command="{Binding CloseCommand}"
+                                            Background="Transparent" Foreground="{StaticResource MutedBrush}"
+                                            BorderThickness="0" Padding="9,2" Cursor="Hand" FontSize="11"
+                                            ToolTip="Quitar el canal de la reproducción"/>
+                                    <Button DockPanel.Dock="Right" Command="{Binding ToggleAudioCommand}"
+                                            Background="Transparent" BorderThickness="0" Padding="8,2" Cursor="Hand"
+                                            ToolTip="Audio de este cuadro">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="11">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="&#xE74F;"/>
+                                                    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsAudioOn}" Value="True">
+                                                            <Setter Property="Text" Value="&#xE767;"/>
+                                                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Button>
+                                    <TextBlock Text="{Binding Title}" Margin="10,4" FontSize="11.5"
+                                               Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
+                                <Grid Grid.Row="1">
+                                    <fl:FlyleafHost Player="{Binding Player}" AttachedDragMove="None"
+                                                    KeyBindings="None" OpenOnDrop="None" SwapOnDrop="None"
+                                                    ToggleFullScreenOnDoubleClick="None"
+                                                    Visibility="{Binding IsPlaying, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                    <TextBlock Text="{Binding Status}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360"
+                                               Foreground="#5A6674" FontSize="11.5"
+                                               Visibility="{Binding IsPlaying, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
             <TextBlock Text="Elija un canal (doble clic en el árbol) y luego haga clic en la línea de tiempo para reproducir."
                        HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
                        TextAlignment="Center" MaxWidth="420" Foreground="#3A4654" FontSize="12.5"
-                       Visibility="{Binding Playback.IsPlaying, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                       Visibility="{Binding Playback.Cells.Count, Converter={x:Static vm:ZeroToVisibility.Instance}}"/>
         </Grid>
     </DockPanel>
 </UserControl>

@@ -290,6 +290,8 @@ public partial class MainViewModel : ObservableObject
         });
 
         Playback = new PlaybackViewModel(api, _settings);
+        // Los tramos exportados avisan igual que las capturas y cápsulas del vivo.
+        Playback.MediaSaved += OnCellMediaSaved;
 
         // Preferencia local: se abre con la última división que usó el usuario
         // (asíncrono: las celdas se crean por tandas sin congelar el arranque).

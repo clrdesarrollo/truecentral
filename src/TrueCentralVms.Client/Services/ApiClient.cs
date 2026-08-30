@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -29,6 +30,11 @@ public sealed class ApiClient
         // Configurable en Configuración → Red (se aplica al iniciar la app).
         Timeout = TimeSpan.FromSeconds(Math.Clamp(ClientSettings.Load().ApiTimeoutSeconds, 5, 120)),
     };
+
+    /// <summary>Cliente aparte para las exportaciones: una descarga dura lo
+    /// que el equipo tarde en entregar el tramo, muy por encima del tiempo
+    /// límite razonable para una llamada de API.</summary>
+    private readonly HttpClient _downloads = new() { Timeout = Timeout.InfiniteTimeSpan };
 
     private readonly SemaphoreSlim _reloginLock = new(1, 1);
     private string? _password;
@@ -118,6 +124,81 @@ public sealed class ApiClient
     public Task PtzPresetAsync(int deviceId, int channelNumber, PtzPresetAction action, int index, CancellationToken ct = default) =>
         SendAsync<object?>(HttpMethod.Post, $"/api/devices/{deviceId}/channels/{channelNumber}/ptz-preset",
             new PtzPresetRequestDto(action, index), ct);
+
+    /// <summary>
+    /// Exporta un tramo grabado a un archivo MP4 local. El servidor lo arma
+    /// con FFmpeg mientras el equipo va entregando el video, así que la
+    /// descarga avanza al ritmo del grabador y puede cancelarse. Usa su
+    /// propio HttpClient SIN tiempo límite: el de la API cortaría la
+    /// transferencia a los pocos segundos.
+    /// </summary>
+    public async Task DownloadPlaybackAsync(int deviceId, int rtspChannel, DateTime startLocal, DateTime endLocal,
+        string destinationPath, IProgress<long>? progress, CancellationToken ct = default)
+    {
+        if (BaseUrl is null)
+            throw new ApiException("Sin conexión con el servidor.");
+
+        string path = $"/api/playback/{deviceId}/{rtspChannel}/download" +
+                      $"?start={Uri.EscapeDataString(startLocal.ToString("s"))}" +
+                      $"&end={Uri.EscapeDataString(endLocal.ToString("s"))}";
+
+        using var response = await SendDownloadAsync(path, ct, allowRelogin: true);
+
+        using var file = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        using var stream = await response.Content.ReadAsStreamAsync(ct);
+        byte[] buffer = new byte[128 * 1024];
+        long total = 0;
+        int read;
+        while ((read = await stream.ReadAsync(buffer, ct)) > 0)
+        {
+            await file.WriteAsync(buffer.AsMemory(0, read), ct);
+            total += read;
+            progress?.Report(total);
+        }
+        if (total == 0)
+            throw new ApiException("El servidor no entregó video para ese tramo.");
+    }
+
+    private async Task<HttpResponseMessage> SendDownloadAsync(string path, CancellationToken ct, bool allowRelogin)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + path);
+        if (Token is not null)
+            request.Headers.Authorization = new("Bearer", Token);
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _downloads.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (HttpRequestException)
+        {
+            throw new ApiException("No se pudo conectar con el servidor. Verifique la URL y la red.");
+        }
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && allowRelogin)
+        {
+            string? staleToken = Token;
+            response.Dispose();
+            if (await TryReloginAsync(staleToken, ct))
+                return await SendDownloadAsync(path, ct, allowRelogin: false);
+            throw new ApiException("La sesión expiró y no se pudo renovar. Vuelva a iniciar sesión.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            string? error = null;
+            try
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                if (doc.RootElement.TryGetProperty("error", out var e))
+                    error = e.GetString();
+            }
+            catch { /* cuerpo no JSON */ }
+            response.Dispose();
+            throw new ApiException(error ?? "No se pudo exportar el tramo.");
+        }
+        return response;
+    }
 
     private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct,
         bool allowRelogin = true)
