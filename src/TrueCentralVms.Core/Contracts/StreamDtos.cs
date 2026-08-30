@@ -10,7 +10,9 @@ public sealed record StreamRequestDto(int DeviceId, int RtspChannel, StreamProfi
 /// token de sesión embebido. El token expira pronto (solo autoriza el inicio
 /// de la conexión): ante una reconexión SIEMPRE se pide una concesión nueva.
 /// </summary>
-public sealed record StreamGrantDto(string RtspUrl, string Token, DateTime ExpiresAt);
+/// <param name="ExactSeek">Solo reproducción: false cuando el equipo no
+/// arranca exactamente en el instante pedido (ONVIF Perfil G).</param>
+public sealed record StreamGrantDto(string RtspUrl, string Token, DateTime ExpiresAt, bool ExactSeek = true);
 
 /// <summary>Sesión de streaming activa (para el dashboard de administración).</summary>
 public sealed record ActiveSessionDto(

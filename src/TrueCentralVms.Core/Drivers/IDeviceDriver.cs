@@ -114,6 +114,15 @@ public interface IDeviceDriver
     /// </summary>
     string? BuildPlaybackUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
         DateTime localStart, DateTime localEnd) => null;
+
+    /// <summary>
+    /// true si la URL de <see cref="BuildPlaybackUrl"/> arranca exactamente en
+    /// el instante pedido (Hikvision y Dahua llevan el rango en la propia
+    /// URL). ONVIF no lo cumple: su posicionamiento viaja en una cabecera
+    /// RTSP que el media server no envía, así que el equipo reproduce desde el
+    /// comienzo de la grabación y el cliente lo avisa.
+    /// </summary>
+    bool SupportsExactPlaybackSeek => true;
 }
 
 /// <summary>Tramo grabado en el equipo (horas locales del equipo).</summary>
