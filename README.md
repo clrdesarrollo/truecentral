@@ -104,11 +104,18 @@ solo acepta conexiones desde la propia máquina del servidor.
   **flechas** = pan/tilt, **+/−** = zoom, y **Shift sostenido** = modo
   precisión (velocidad mínima, con píldora indicadora en el panel).
 - Reproducción: las grabaciones viven en el disco del propio equipo (el VMS
-  no almacena video). Se eligen hasta **4 canales sincronizados** (Ctrl +
-  doble clic suma canales), la línea de tiempo de 24 h muestra una pista por
-  canal con los tramos coloreados por tipo, y el clic sobre ella reproduce
-  esa hora en todos los cuadros a la vez. Saltos de ±30 s y ±5 min,
-  velocidad 0,5×–4×, y **arrastre** sobre la línea para marcar un tramo:
+  no almacena video). El doble clic en el árbol suma canales hasta **4
+  sincronizados** (con la grilla llena reemplaza el cuadro con foco; Ctrl +
+  doble clic deja solo ese canal) y todos reproducen el mismo instante.
+- Línea de tiempo con una pista por canal, tramos coloreados por tipo y
+  **zoom de 24 h a 1 minuto** (botones − / + o rueda del mouse): el clic
+  salta a esa hora y el **arrastre** mueve la aguja mostrando la hora de
+  destino. Reloj con fecha y hora completas, saltos de ±30 s y ±5 min y
+  velocidad 0,25×–8×.
+- Doble clic sobre el video como en un reproductor: tercio izquierdo −30 s,
+  tercio derecho +30 s y centro para entrar o salir de pantalla completa
+  (Esc también sale).
+- Botón **Recorte**: arrastrando sobre la línea se marca un tramo para
   reproducirlo o **exportarlo a MP4** a la carpeta de grabaciones (el
   servidor lo arma con FFmpeg mientras el equipo lo entrega; se puede
   cancelar). Hikvision y Dahua se posicionan a la hora exacta; en ONVIF el
