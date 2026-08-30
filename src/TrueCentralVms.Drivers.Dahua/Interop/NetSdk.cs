@@ -160,4 +160,54 @@ internal static class NetSdk
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
     public static extern bool CLIENT_QueryChannelName(long lLoginID,
         IntPtr pChannelName, int maxlen, ref int nChannelCount, int waittime);
+
+    // ------------------------------------------------------------------
+    // Reproducción remota: búsqueda de grabaciones en el disco del equipo
+    // ------------------------------------------------------------------
+
+    /// <summary>EM_QUERY_RECORD_TYPE.EM_RECORD_TYPE_ALL: todos los tipos de grabación.</summary>
+    public const int RecordTypeAll = 0;
+
+    /// <summary>NET_NO_RECORD_FOUND: la búsqueda terminó sin resultados (no es un fallo).</summary>
+    public const uint ErrorNoRecordFound = 0x80000018;
+
+    /// <summary>
+    /// NET_RECORDFILE_INFO (dhnetsdk.h línea ~6177). 196 bytes exactos: la
+    /// estructura no lleva padding porque todos sus campos son de 4 bytes o
+    /// múltiplos, y los cuatro BYTE finales completan la última palabra.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public struct NET_RECORDFILE_INFO
+    {
+        public uint ch;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 124)] public string filename;
+        public uint framenum;
+        public uint size;                       // en KB
+        public NET_TIME starttime;
+        public NET_TIME endtime;
+        public uint driveno;
+        public uint startcluster;
+        /// <summary>0 continua, 1 alarma, 2 detección de movimiento, 3 tarjeta, 4 imagen, 19 POS.</summary>
+        public byte nRecordFileType;
+        public byte bImportantRecID;
+        public byte bHint;
+        /// <summary>0 stream principal, 1..3 secundarios.</summary>
+        public byte bRecType;
+    }
+
+    /// <summary>
+    /// Abre una búsqueda de grabaciones (devuelve 0 si falla o si no hay
+    /// resultados: distinguir con CLIENT_GetLastError). cardid puede ir nulo.
+    /// </summary>
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+    public static extern long CLIENT_FindFile(long lLoginID, int nChannelId, int nRecordFileType,
+        IntPtr cardid, ref NET_TIME tmStart, ref NET_TIME tmEnd,
+        [MarshalAs(UnmanagedType.Bool)] bool bTime, int waittime);
+
+    /// <summary>Siguiente archivo de la búsqueda: 1 = entregado, 0 = no hay más, &lt;0 = error.</summary>
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+    public static extern int CLIENT_FindNextFile(long lFindHandle, ref NET_RECORDFILE_INFO lpFindData);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool CLIENT_FindClose(long lFindHandle);
 }

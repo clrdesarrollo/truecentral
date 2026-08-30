@@ -160,6 +160,93 @@ public sealed class OnvifDeviceDriver : IDeviceDriver
         }
     }
 
+    // ------------------------------------------------------------------
+    // Reproducción remota (ONVIF Perfil G: grabación en la tarjeta del equipo)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// El posicionamiento exacto de ONVIF viaja en la cabecera RTSP
+    /// "Range: clock=..." del PLAY, que el media server no envía: el equipo
+    /// entrega la grabación desde su comienzo. El servidor lo informa en la
+    /// concesión para que el cliente lo avise en pantalla.
+    /// </summary>
+    public bool SupportsExactPlaybackSeek => false;
+
+    /// <summary>Grabación ONVIF ubicada en el equipo (hora local del equipo).</summary>
+    private sealed record ReplayEntry(DateTime From, DateTime Until, string Uri);
+
+    /// <summary>
+    /// URI de reproducción por equipo, resueltas al consultar las grabaciones:
+    /// <see cref="BuildPlaybackUrl"/> es síncrono y no puede hablar SOAP, y el
+    /// cliente siempre pide primero la línea de tiempo del día.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, List<ReplayEntry>> ReplayCache = new();
+
+    private static string CacheKey(DeviceConnectionInfo info) => $"{info.Host}:{info.Port}";
+
+    public async Task<IReadOnlyList<RecordingSegment>> QueryRecordingsAsync(DeviceConnectionInfo info, int channelNumber,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default)
+    {
+        using var client = new OnvifClient(info.Host, info.Port, info.Username, info.Password);
+        await client.InitializeAsync(ct);
+
+        if (await client.GetSearchServiceAsync(ct) is null)
+            throw new DriverException(
+                "El equipo ONVIF no ofrece el servicio de búsqueda de grabaciones (Perfil G): " +
+                "no se pueden consultar sus grabaciones desde el VMS.");
+
+        var tokens = await client.GetRecordingTokensAsync(ct);
+        if (tokens.Count == 0) return [];
+
+        var segments = new List<RecordingSegment>();
+        var entries = new List<ReplayEntry>();
+        foreach (string token in tokens)
+        {
+            if (await client.GetRecordingRangeAsync(token, ct) is not { } range) continue;
+
+            // El estándar informa en UTC; el VMS trabaja en la hora local del equipo.
+            var from = range.FromUtc + client.DeviceUtcOffset;
+            var until = range.UntilUtc + client.DeviceUtcOffset;
+
+            if (await client.GetReplayUriAsync(token, ct) is { } replayUri)
+                entries.Add(new ReplayEntry(from, until, replayUri));
+
+            if (until <= localStart || from >= localEnd) continue;
+            // ONVIF solo obliga a informar el extremo más antiguo y el más
+            // nuevo de cada grabación: el tramo puede tener huecos, así que se
+            // marca como "Otro" (gris) en vez de fingir grabación continua.
+            segments.Add(new RecordingSegment(
+                from < localStart ? localStart : from,
+                until > localEnd ? localEnd : until,
+                RecordingKind.Other));
+        }
+
+        if (entries.Count > 0)
+            ReplayCache[CacheKey(info)] = entries;
+        return segments;
+    }
+
+    /// <summary>
+    /// URI de reproducción de la grabación que cubre la hora pedida, con las
+    /// credenciales embebidas (el media server las usa para el RTSP). null si
+    /// el equipo no expone reproducción ONVIF o si aún no se consultó su
+    /// línea de tiempo.
+    /// </summary>
+    public string? BuildPlaybackUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd)
+    {
+        if (!ReplayCache.TryGetValue(CacheKey(info), out var entries) || entries.Count == 0)
+            return null;
+
+        var match = entries.FirstOrDefault(e => localStart >= e.From && localStart < e.Until)
+                    ?? entries.OrderBy(e => e.From).Last();
+        if (!Uri.TryCreate(match.Uri, UriKind.Absolute, out var uri))
+            return null;
+
+        return $"rtsp://{Uri.EscapeDataString(info.Username)}:{Uri.EscapeDataString(info.Password)}" +
+               $"@{uri.Host}:{(uri.IsDefaultPort ? 554 : uri.Port)}{uri.PathAndQuery}";
+    }
+
     public async Task<byte[]?> CaptureSnapshotAsync(DeviceConnectionInfo info, int channelNumber, CancellationToken ct = default)
     {
         try

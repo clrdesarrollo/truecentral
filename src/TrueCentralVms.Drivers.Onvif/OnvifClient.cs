@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -48,6 +49,13 @@ internal sealed class OnvifClient : IDisposable
 
     public void Dispose() => _http.Dispose();
 
+    /// <summary>
+    /// Desfase del reloj del equipo respecto de UTC (su hora local menos UTC).
+    /// Las grabaciones ONVIF se informan en UTC y la línea de tiempo del VMS
+    /// trabaja en la hora local del grabador, como el resto de los drivers.
+    /// </summary>
+    public TimeSpan DeviceUtcOffset { get; private set; } = TimeSpan.Zero;
+
     /// <summary>Sincroniza el reloj (sin autenticación) y valida que el servicio ONVIF responda.</summary>
     public async Task InitializeAsync(CancellationToken ct)
     {
@@ -55,17 +63,33 @@ internal sealed class OnvifClient : IDisposable
             <tds:GetSystemDateAndTime xmlns:tds="http://www.onvif.org/ver10/device/wsdl"/>
             """, withAuth: false, ct);
 
-        // UTCDateTime → Date(Year,Month,Day) + Time(Hour,Minute,Second)
-        var utc = Descend(response, "GetSystemDateAndTimeResponse", "SystemDateAndTime", "UTCDateTime");
-        if (utc is not null &&
-            int.TryParse(Find(utc, "Year")?.Value, out int y) &&
-            int.TryParse(Find(utc, "Month")?.Value, out int mo) &&
-            int.TryParse(Find(utc, "Day")?.Value, out int d) &&
-            int.TryParse(Find(utc, "Hour")?.Value, out int h) &&
-            int.TryParse(Find(utc, "Minute")?.Value, out int mi) &&
-            int.TryParse(Find(utc, "Second")?.Value, out int s))
+        var systemTime = Descend(response, "GetSystemDateAndTimeResponse", "SystemDateAndTime");
+        if (ReadDateTime(Descend(systemTime, "UTCDateTime")) is { } deviceUtc)
         {
-            _clockSkew = new DateTime(y, mo, d, h, mi, s, DateTimeKind.Utc) - DateTime.UtcNow;
+            _clockSkew = DateTime.SpecifyKind(deviceUtc, DateTimeKind.Utc) - DateTime.UtcNow;
+            if (ReadDateTime(Descend(systemTime, "LocalDateTime")) is { } deviceLocal)
+                DeviceUtcOffset = TimeSpan.FromMinutes(Math.Round((deviceLocal - deviceUtc).TotalMinutes));
+        }
+    }
+
+    /// <summary>Hora ONVIF: Date(Year,Month,Day) + Time(Hour,Minute,Second).</summary>
+    private static DateTime? ReadDateTime(XElement? node)
+    {
+        if (node is null) return null;
+        if (!int.TryParse(Descend(node, "Year")?.Value, out int year) ||
+            !int.TryParse(Descend(node, "Month")?.Value, out int month) ||
+            !int.TryParse(Descend(node, "Day")?.Value, out int day) ||
+            !int.TryParse(Descend(node, "Hour")?.Value, out int hour) ||
+            !int.TryParse(Descend(node, "Minute")?.Value, out int minute) ||
+            !int.TryParse(Descend(node, "Second")?.Value, out int second))
+            return null;
+        try
+        {
+            return new DateTime(year, month, day, hour, minute, Math.Min(59, second));
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null; // hora imposible: se trabaja sin corrección
         }
     }
 
@@ -244,6 +268,150 @@ internal sealed class OnvifClient : IDisposable
             return $"http://{_host}:{(parsed.IsDefaultPort ? 80 : parsed.Port)}{parsed.PathAndQuery}";
         return uri;
     }
+
+    // ------------------------------------------------------------------
+    // Perfil G (grabación en el equipo): servicios Recording / Search / Replay
+    // ------------------------------------------------------------------
+
+    private Dictionary<string, string>? _services;
+
+    /// <summary>
+    /// XAddr de los servicios del equipo por espacio de nombres. GetServices
+    /// es el único lugar donde se anuncian Recording/Search/Replay
+    /// (GetCapabilities solo cubre los servicios clásicos). Como con el resto
+    /// de las URL ONVIF se conserva la ruta pero se fuerza el host configurado.
+    /// </summary>
+    private async Task<string?> GetServiceUrlAsync(string wsdlNamespace, CancellationToken ct)
+    {
+        if (_services is null)
+        {
+            var response = await CallAsync(DeviceUrl, """
+                <tds:GetServices xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+                  <tds:IncludeCapability>false</tds:IncludeCapability>
+                </tds:GetServices>
+                """, withAuth: true, ct);
+            _services = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var service in Descend(response, "GetServicesResponse")?
+                         .Elements().Where(e => e.Name.LocalName == "Service") ?? [])
+            {
+                string? ns = Find(service, "Namespace")?.Value.Trim();
+                string? xaddr = Find(service, "XAddr")?.Value.Trim();
+                if (string.IsNullOrEmpty(ns) || string.IsNullOrEmpty(xaddr)) continue;
+                _services[ns] = Uri.TryCreate(xaddr, UriKind.Absolute, out var parsed)
+                    ? $"http://{_host}:{_port}{parsed.PathAndQuery}"
+                    : xaddr;
+            }
+        }
+        return _services.TryGetValue(wsdlNamespace, out string? url) ? url : null;
+    }
+
+    public Task<string?> GetSearchServiceAsync(CancellationToken ct) =>
+        GetServiceUrlAsync("http://www.onvif.org/ver10/search/wsdl", ct);
+
+    public Task<string?> GetReplayServiceAsync(CancellationToken ct) =>
+        GetServiceUrlAsync("http://www.onvif.org/ver10/replay/wsdl", ct);
+
+    /// <summary>
+    /// Tokens de las grabaciones del equipo. Primero por el servicio de
+    /// grabación (una sola llamada); si no está, por la búsqueda del Perfil G
+    /// (FindRecordings abre la sesión de búsqueda y GetRecordingSearchResults
+    /// entrega el resultado).
+    /// </summary>
+    public async Task<List<string>> GetRecordingTokensAsync(CancellationToken ct)
+    {
+        if (await GetServiceUrlAsync("http://www.onvif.org/ver10/recording/wsdl", ct) is { } recordingUrl)
+        {
+            try
+            {
+                var response = await CallAsync(recordingUrl, """
+                    <trc:GetRecordings xmlns:trc="http://www.onvif.org/ver10/recording/wsdl"/>
+                    """, withAuth: true, ct);
+                var tokens = TokensIn(response);
+                if (tokens.Count > 0) return tokens;
+            }
+            catch (DriverException)
+            {
+                // Servicio anunciado pero no operativo: se intenta por la búsqueda.
+            }
+        }
+
+        if (await GetSearchServiceAsync(ct) is not { } searchUrl)
+            return [];
+
+        var started = await CallAsync(searchUrl, """
+            <tse:FindRecordings xmlns:tse="http://www.onvif.org/ver10/search/wsdl">
+              <tse:Scope/>
+            </tse:FindRecordings>
+            """, withAuth: true, ct);
+        string? searchToken = Descend(started, "FindRecordingsResponse", "SearchToken")?.Value.Trim();
+        if (string.IsNullOrEmpty(searchToken)) return [];
+
+        var results = await CallAsync(searchUrl, $"""
+            <tse:GetRecordingSearchResults xmlns:tse="http://www.onvif.org/ver10/search/wsdl">
+              <tse:SearchToken>{System.Security.SecurityElement.Escape(searchToken)}</tse:SearchToken>
+              <tse:MinResults>1</tse:MinResults>
+              <tse:MaxResults>100</tse:MaxResults>
+              <tse:WaitTime>PT5S</tse:WaitTime>
+            </tse:GetRecordingSearchResults>
+            """, withAuth: true, ct);
+        return TokensIn(results);
+    }
+
+    private static List<string> TokensIn(XElement response) =>
+        response.Descendants()
+            .Where(e => e.Name.LocalName == "RecordingToken")
+            .Select(e => e.Value.Trim())
+            .Where(t => t.Length > 0)
+            .Distinct()
+            .ToList();
+
+    /// <summary>
+    /// Rango grabado de una grabación (UTC). El Perfil G solo obliga a
+    /// informar el extremo más antiguo y el más nuevo: es el detalle máximo
+    /// que entrega el estándar sin recorrer eventos de grabación.
+    /// </summary>
+    public async Task<(DateTime FromUtc, DateTime UntilUtc)?> GetRecordingRangeAsync(string recordingToken, CancellationToken ct)
+    {
+        if (await GetSearchServiceAsync(ct) is not { } searchUrl) return null;
+        var response = await CallAsync(searchUrl, $"""
+            <tse:GetRecordingInformation xmlns:tse="http://www.onvif.org/ver10/search/wsdl">
+              <tse:RecordingToken>{System.Security.SecurityElement.Escape(recordingToken)}</tse:RecordingToken>
+            </tse:GetRecordingInformation>
+            """, withAuth: true, ct);
+        var info = Descend(response, "GetRecordingInformationResponse", "RecordingInformation");
+        if (info is null) return null;
+        if (ParseUtc(Find(info, "EarliestRecording")?.Value) is not { } from) return null;
+        var until = ParseUtc(Find(info, "LatestRecording")?.Value) ?? DateTime.UtcNow;
+        return until > from ? (from, until) : null;
+    }
+
+    /// <summary>URI RTSP de reproducción de una grabación (sin credenciales).</summary>
+    public async Task<string?> GetReplayUriAsync(string recordingToken, CancellationToken ct)
+    {
+        if (await GetReplayServiceAsync(ct) is not { } replayUrl) return null;
+        var response = await CallAsync(replayUrl, $"""
+            <trp:GetReplayUri xmlns:trp="http://www.onvif.org/ver10/replay/wsdl">
+              <trp:StreamSetup>
+                <tt:Stream xmlns:tt="http://www.onvif.org/ver10/schema">RTP-Unicast</tt:Stream>
+                <tt:Transport xmlns:tt="http://www.onvif.org/ver10/schema">
+                  <tt:Protocol>RTSP</tt:Protocol>
+                </tt:Transport>
+              </trp:StreamSetup>
+              <trp:RecordingToken>{System.Security.SecurityElement.Escape(recordingToken)}</trp:RecordingToken>
+            </trp:GetReplayUri>
+            """, withAuth: true, ct);
+        string? uri = Descend(response, "GetReplayUriResponse", "Uri")?.Value.Trim();
+        if (string.IsNullOrEmpty(uri)) return null;
+        return Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+            ? $"rtsp://{_host}:{(parsed.IsDefaultPort ? 554 : parsed.Port)}{parsed.PathAndQuery}"
+            : uri;
+    }
+
+    private static DateTime? ParseUtc(string? value) =>
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed)
+            ? parsed.UtcDateTime
+            : null;
 
     // ------------------------------------------------------------------
     // SOAP

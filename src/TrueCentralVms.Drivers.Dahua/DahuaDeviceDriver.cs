@@ -82,7 +82,127 @@ public sealed class DahuaDeviceDriver : IDeviceDriver
         }
     }
 
-    private static (long LoginId, NetSdk.NET_DEVICEINFO_Ex Info) Login(DeviceConnectionInfo info)
+    // ------------------------------------------------------------------
+    // Reproducción remota: las grabaciones viven en el disco del equipo
+    // (HDD del NVR/XVR o tarjeta SD de la cámara) y se consultan por SDK.
+    // ------------------------------------------------------------------
+
+    public Task<IReadOnlyList<RecordingSegment>> QueryRecordingsAsync(DeviceConnectionInfo info, int channelNumber,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default) => Task.Run<IReadOnlyList<RecordingSegment>>(() =>
+    {
+        DahuaSdk.EnsureInitialized();
+
+        // Sesión cacheada: la línea de tiempo se consulta de forma interactiva.
+        long loginId = DahuaSessionCache.GetOrLogin(info);
+        var segments = TryFindSegments(loginId, channelNumber, localStart, localEnd, out uint error);
+        if (segments is null && error != NetSdk.ErrorNoRecordFound)
+        {
+            // Sesión vencida (reinicio del equipo, timeout): UNA vez con login limpio.
+            DahuaSessionCache.Invalidate(info);
+            loginId = DahuaSessionCache.GetOrLogin(info);
+            segments = TryFindSegments(loginId, channelNumber, localStart, localEnd, out error);
+        }
+        if (segments is null)
+        {
+            // "Sin resultados" no es un fallo: ese día el equipo no grabó.
+            if (error == NetSdk.ErrorNoRecordFound) return [];
+            throw new DriverException(
+                $"No se pudieron consultar las grabaciones del equipo (error 0x{error:X8} del NetSDK).");
+        }
+        return segments;
+    }, ct);
+
+    /// <summary>
+    /// RTSP de reproducción de Dahua. El rango viaja en la propia URL con el
+    /// formato del fabricante (YYYY_MM_DD_HH_MM_SS) y en HORA LOCAL del
+    /// equipo, la misma en la que responde la búsqueda de grabaciones.
+    /// </summary>
+    public string? BuildPlaybackUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd) =>
+        $"rtsp://{Uri.EscapeDataString(info.Username)}:{Uri.EscapeDataString(info.Password)}" +
+        $"@{info.Host}:{rtspPort}/cam/playback?channel={rtspChannel}" +
+        $"&starttime={FormatPlaybackTime(localStart)}&endtime={FormatPlaybackTime(localEnd)}";
+
+    private static string FormatPlaybackTime(DateTime t) => t.ToString("yyyy_MM_dd_HH_mm_ss");
+
+    /// <summary>
+    /// Recorre la búsqueda del SDK. Devuelve null si el equipo rechazó la
+    /// consulta (el llamador decide si reintentar con sesión nueva) y deja el
+    /// código del NetSDK en <paramref name="error"/>.
+    /// </summary>
+    private static List<RecordingSegment>? TryFindSegments(long loginId, int channelNumber,
+        DateTime start, DateTime end, out uint error)
+    {
+        error = 0;
+        var from = ToSdkTime(start);
+        var to = ToSdkTime(end);
+        // Los canales del NetSDK son base 0: el canal 1 del equipo es el índice 0.
+        long handle = NetSdk.CLIENT_FindFile(loginId, channelNumber - 1, NetSdk.RecordTypeAll,
+            IntPtr.Zero, ref from, ref to, bTime: false, waittime: 5000);
+        if (handle == 0)
+        {
+            error = NetSdk.CLIENT_GetLastError();
+            return null;
+        }
+
+        try
+        {
+            var segments = new List<RecordingSegment>();
+            // Tope de cortesía: un día de grabación continua son cientos de
+            // archivos, nunca decenas de miles (equipo con datos corruptos).
+            while (segments.Count < 20000)
+            {
+                var data = new NetSdk.NET_RECORDFILE_INFO { filename = "" };
+                if (NetSdk.CLIENT_FindNextFile(handle, ref data) != 1)
+                    break; // 0 = no hay más archivos, negativo = error
+                var fileStart = FromSdkTime(data.starttime);
+                var fileEnd = FromSdkTime(data.endtime);
+                if (fileStart == DateTime.MinValue || fileEnd <= fileStart) continue;
+                // No se filtra por bRecType: si el equipo graba también el
+                // stream secundario, sus tramos coinciden con los del
+                // principal y el servidor los fusiona al armar la línea.
+                segments.Add(new RecordingSegment(fileStart, fileEnd, MapKind(data.nRecordFileType)));
+            }
+            return segments;
+        }
+        finally
+        {
+            NetSdk.CLIENT_FindClose(handle);
+        }
+    }
+
+    private static NetSdk.NET_TIME ToSdkTime(DateTime t) => new()
+    {
+        dwYear = t.Year,
+        dwMonth = t.Month,
+        dwDay = t.Day,
+        dwHour = t.Hour,
+        dwMinute = t.Minute,
+        dwSecond = t.Second,
+    };
+
+    private static DateTime FromSdkTime(NetSdk.NET_TIME t)
+    {
+        try
+        {
+            return new DateTime(t.dwYear, t.dwMonth, t.dwDay, t.dwHour, t.dwMinute, Math.Min(59, t.dwSecond));
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return DateTime.MinValue; // basura del equipo: el llamador la filtra
+        }
+    }
+
+    /// <summary>nRecordFileType del NetSDK → categoría para colorear la línea de tiempo.</summary>
+    private static RecordingKind MapKind(byte recordFileType) => recordFileType switch
+    {
+        0 => RecordingKind.Continuous,
+        1 => RecordingKind.Alarm,
+        2 => RecordingKind.Motion,
+        _ => RecordingKind.Other,
+    };
+
+    internal static (long LoginId, NetSdk.NET_DEVICEINFO_Ex Info) Login(DeviceConnectionInfo info)
     {
         var input = new NetSdk.NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY
         {
