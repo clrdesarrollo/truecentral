@@ -137,6 +137,10 @@ public sealed class MediaMtxManager(
     }
 
     /// <summary>tools\ffmpeg\bin\ffmpeg.exe (relé para cámaras con SDP inválido).</summary>
+    /// <summary>ffmpeg.exe distribuido con el sistema, o null si falta (lo
+    /// usan los relés de canales con proxy y la descarga de clips).</summary>
+    public static string? LocateFfmpeg() => FindFfmpeg();
+
     private static string? FindFfmpeg()
     {
         string? dir = AppContext.BaseDirectory;
