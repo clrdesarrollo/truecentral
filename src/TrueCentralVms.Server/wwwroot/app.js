@@ -392,6 +392,9 @@ async function getDrivers() {
 
 let lastScan = null; // resultados del último sondeo (persisten al re-renderizar)
 
+/** Drivers que entregan reconocimientos de patentes (ver DriverCapabilities.SupportsAnpr). */
+const ANPR_DRIVERS = ["hikvision-netsdk"];
+
 async function renderDevices() {
   $("#page-title").textContent = "Dispositivos";
   let devices;
@@ -413,7 +416,7 @@ async function renderDevices() {
       <div class="table-scroll"><table class="grid">
         <thead><tr>
           <th>Nombre</th><th>Tipo</th><th>Marca</th><th>Dirección</th><th>Modelo</th>
-          <th>N° serie</th><th>Firmware</th><th>Canales</th><th>Estado</th><th></th>
+          <th>N° serie</th><th>Firmware</th><th>Canales</th><th>Patentes</th><th>Estado</th><th></th>
         </tr></thead>
         <tbody>
           ${devices.map((d) => `
@@ -426,6 +429,7 @@ async function renderDevices() {
               <td class="muted">${esc(d.serialNumber ?? "—")}</td>
               <td class="muted">${esc(d.firmwareVersion ?? "—")}</td>
               <td>${d.channelCount}</td>
+              <td>${anprCell(d, isAdmin)}</td>
               <td>${statusTag(d.status)}</td>
               <td class="row-actions">
                 <button class="btn ghost btn-channels">Canales</button>
@@ -447,6 +451,18 @@ async function renderDevices() {
         Solo se listan equipos de video (cámaras, DVR, NVR, decodificadores); los controles de acceso y alarmas se omiten.</div>`}
     </div>` : ""}`;
 
+  $$("#view .btn-anpr").forEach((b) => b.addEventListener("click", async (e) => {
+    const id = Number(e.target.closest("tr").dataset.id);
+    const enabled = e.target.dataset.on !== "1";
+    e.target.disabled = true;
+    try {
+      await Api.put(`/api/anpr/sources/${id}`, { enabled });
+      toast(enabled
+        ? "Equipo encendido como fuente de patentes."
+        : "Equipo apagado como fuente de patentes.");
+      renderDevices();
+    } catch (err) { toast(err.error, true); e.target.disabled = false; }
+  }));
   $("#btn-device-new")?.addEventListener("click", () => deviceModal(null));
   $("#btn-device-scan")?.addEventListener("click", () => runDiscovery(devices));
   if (lastScan) renderOnlineDevices(devices);
@@ -482,6 +498,18 @@ async function renderDevices() {
       renderDevices();
     } catch (err) { toast(err.error, true); }
   }));
+}
+
+/**
+ * Celda "Patentes": interruptor de la fuente ANPR. Solo tiene sentido en
+ * equipos cuyo driver sabe entregar lecturas (hoy, Hikvision por SDK); en el
+ * resto se muestra un guion en vez de un botón que fallaría.
+ */
+function anprCell(device, isAdmin) {
+  if (!ANPR_DRIVERS.includes(device.driverKey)) return `<span class="muted">—</span>`;
+  if (!isAdmin) return device.anprEnabled ? "Sí" : `<span class="muted">No</span>`;
+  return `<button class="btn ghost btn-anpr" data-on="${device.anprEnabled ? 1 : 0}"
+    title="Recibir los reconocimientos de patentes de este equipo">${device.anprEnabled ? "Activo" : "Activar"}</button>`;
 }
 
 async function runDiscovery(devices) {

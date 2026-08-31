@@ -61,6 +61,13 @@ builder.Services.AddSingleton<DecoderDriverRegistry>();
 builder.Services.AddSingleton<DecoderSessionManager>();
 builder.Services.AddScoped<WallService>();
 
+// Aplicaciones → Reconocimiento de patentes: el servicio mantiene abierto el
+// canal de eventos ANPR de cada equipo marcado como fuente y guarda las fotos
+// en disco (la base solo lleva la ruta).
+builder.Services.AddSingleton<AnprStore>();
+builder.Services.AddSingleton<AnprService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprService>());
+
 // Plano de media: MediaMTX embebido + tokens de streaming + contabilidad.
 builder.Services.AddSingleton<StreamTokenService>();
 builder.Services.AddSingleton<MediaMtxManager>();
@@ -149,6 +156,7 @@ app.MapDiscoveryApi();
 app.MapSystemApi();
 app.MapDecodersApi();
 app.MapWallsApi();
+app.MapAnprApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);
 

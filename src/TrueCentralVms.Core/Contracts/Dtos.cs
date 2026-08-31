@@ -1,4 +1,4 @@
-namespace TrueCentralVms.Core.Contracts;
+﻿namespace TrueCentralVms.Core.Contracts;
 
 // DTOs compartidos entre el servidor, el cliente WPF y (vía JSON) el panel
 // web. Son el contrato de la API: cualquier cambio aquí es un cambio de
@@ -62,7 +62,7 @@ public static class VmsHubContract
     /// <summary>Cambió el estado de un dispositivo (payload: DeviceDto).</summary>
     public const string DeviceStatusChanged = nameof(DeviceStatusChanged);
 
-    /// <summary>Cambió la configuración de una entidad; recargar (payload: string "devices" | "channels" | "users" | "decoders" | "walls").</summary>
+    /// <summary>Cambió la configuración de una entidad; recargar (payload: string "devices" | "channels" | "users" | "decoders" | "walls" | "anpr-sources").</summary>
     public const string ConfigChanged = nameof(ConfigChanged);
 
     /// <summary>Cambió el estado de un muro de video (payload: WallDto).</summary>
@@ -70,4 +70,7 @@ public static class VmsHubContract
 
     /// <summary>Cambió el conjunto de sesiones de streaming activas (payload: ActiveSessionDto[]).</summary>
     public const string SessionsChanged = nameof(SessionsChanged);
+
+    /// <summary>Llegó un reconocimiento de patente nuevo (payload: PlateEventDto).</summary>
+    public const string PlateRecognized = nameof(PlateRecognized);
 }

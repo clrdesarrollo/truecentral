@@ -241,6 +241,55 @@ public sealed class ApiClient
         }
     }
 
+    // -----------------------------------------------------------------
+    // Aplicaciones → Reconocimiento de patentes
+    // -----------------------------------------------------------------
+
+    /// <summary>
+    /// Historial de reconocimientos, del más reciente al más antiguo. Los
+    /// filtros son opcionales; las fechas van en HORA LOCAL DEL EQUIPO (es la
+    /// que fecha las lecturas).
+    /// </summary>
+    public Task<List<PlateEventDto>> GetPlateEventsAsync(int? deviceId = null, string? plate = null,
+        DateTime? from = null, DateTime? to = null, int take = 100, CancellationToken ct = default)
+    {
+        var query = new List<string> { $"take={take}" };
+        if (deviceId is > 0) query.Add($"deviceId={deviceId}");
+        if (!string.IsNullOrWhiteSpace(plate)) query.Add($"plate={Uri.EscapeDataString(plate)}");
+        if (from is { } f) query.Add($"from={Uri.EscapeDataString(f.ToString("s"))}");
+        if (to is { } t) query.Add($"to={Uri.EscapeDataString(t.ToString("s"))}");
+        return SendAsync<List<PlateEventDto>>(HttpMethod.Get, $"/api/anpr/events?{string.Join('&', query)}", null, ct);
+    }
+
+    /// <summary>Equipos capaces de entregar patentes, con su estado como fuente.</summary>
+    public Task<List<AnprSourceDto>> GetAnprSourcesAsync(CancellationToken ct = default) =>
+        SendAsync<List<AnprSourceDto>>(HttpMethod.Get, "/api/anpr/sources", null, ct);
+
+    /// <summary>Enciende o apaga un equipo como fuente de patentes (solo administrador).</summary>
+    public Task SetAnprSourceAsync(int deviceId, bool enabled, CancellationToken ct = default) =>
+        SendAsync<object?>(HttpMethod.Put, $"/api/anpr/sources/{deviceId}", new AnprSourceWriteDto(enabled), ct);
+
+    /// <summary>
+    /// Foto de un reconocimiento: "scene" (escena completa) o "plate" (primer
+    /// plano de la placa). null si el equipo no la envió.
+    /// </summary>
+    public async Task<byte[]?> GetPlateImageAsync(long eventId, string kind, CancellationToken ct = default)
+    {
+        if (BaseUrl is null) return null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/api/anpr/events/{eventId}/{kind}");
+            if (Token is not null)
+                request.Headers.Authorization = new("Bearer", Token);
+            using var response = await _http.SendAsync(request, ct);
+            return response.IsSuccessStatusCode ? await response.Content.ReadAsByteArrayAsync(ct) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>Uso de CPU/RAM/disco de la máquina del servidor (indicadores del navbar).</summary>
     public Task<SystemMetricsDto> GetSystemMetricsAsync(CancellationToken ct = default) =>
         SendAsync<SystemMetricsDto>(HttpMethod.Get, "/api/system/metrics", null, ct);
@@ -255,11 +304,25 @@ public sealed class ApiClient
         SendAsync<List<RecordingSegmentDto>>(HttpMethod.Get,
             $"/api/playback/{deviceId}/{channelNumber}/segments?date={date:yyyy-MM-dd}", null, ct);
 
-    /// <summary>Concesión de reproducción de un rango grabado (hora local del equipo).</summary>
-    public Task<StreamGrantDto> RequestPlaybackAsync(int deviceId, int rtspChannel, DateTime startLocal, DateTime endLocal,
+    /// <summary>
+    /// Días del mes (1..31) con grabación en el canal, para las marcas del
+    /// calendario. Lista vacía = el equipo no lo informa.
+    /// </summary>
+    public Task<List<int>> GetRecordedDaysAsync(int deviceId, int channelNumber, int year, int month,
         CancellationToken ct = default) =>
+        SendAsync<List<int>>(HttpMethod.Get,
+            $"/api/playback/{deviceId}/{channelNumber}/days?year={year}&month={month}", null, ct);
+
+    /// <summary>Concesión de reproducción de un rango grabado (hora local del equipo).</summary>
+    /// <summary>
+    /// Concesión de reproducción. <paramref name="speed"/> distinto de 1 hace
+    /// que el servidor le pida al EQUIPO esa velocidad (el grabador entrega a
+    /// tiempo real salvo que se le pida otra cosa).
+    /// </summary>
+    public Task<StreamGrantDto> RequestPlaybackAsync(int deviceId, int rtspChannel, DateTime startLocal, DateTime endLocal,
+        double speed = 1, CancellationToken ct = default) =>
         SendAsync<StreamGrantDto>(HttpMethod.Post, "/api/playback/request",
-            new PlaybackRequestDto(deviceId, rtspChannel, startLocal, endLocal), ct);
+            new PlaybackRequestDto(deviceId, rtspChannel, startLocal, endLocal, speed), ct);
 
     /// <summary>Orden PTZ continua (stop=false inicia, stop=true detiene).</summary>
     public Task PtzAsync(int deviceId, int channelNumber, PtzCommand command, int speed, bool stop, CancellationToken ct = default) =>

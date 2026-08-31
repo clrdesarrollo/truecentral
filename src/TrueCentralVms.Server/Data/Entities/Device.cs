@@ -1,4 +1,4 @@
-using TrueCentralVms.Core.Contracts;
+﻿using TrueCentralVms.Core.Contracts;
 
 namespace TrueCentralVms.Server.Data.Entities;
 
@@ -25,6 +25,12 @@ public class Device
     public string? Model { get; set; }
     public string? SerialNumber { get; set; }
     public string? FirmwareVersion { get; set; }
+
+    /// <summary>
+    /// El equipo es fuente del módulo Reconocimiento de patentes: el servidor
+    /// le mantiene abierto el canal de eventos ANPR mientras esté en línea.
+    /// </summary>
+    public bool AnprEnabled { get; set; }
 
     public DeviceStatus Status { get; set; } = DeviceStatus.Unknown;
     public DateTime? LastSeenAt { get; set; }

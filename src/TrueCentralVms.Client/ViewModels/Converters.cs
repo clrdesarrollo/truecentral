@@ -54,6 +54,33 @@ public sealed class ZeroToVisibility : IValueConverter
     public object ConvertBack(object value, Type t, object p, CultureInfo c) => throw new NotSupportedException();
 }
 
+/// <summary>null → Visible; con valor → Collapsed (estados "no hay nada seleccionado").</summary>
+public sealed class NullToVisibility : IValueConverter
+{
+    public static readonly NullToVisibility Instance = new();
+    public object Convert(object value, Type t, object p, CultureInfo c) =>
+        value is null ? Visibility.Visible : Visibility.Collapsed;
+    public object ConvertBack(object value, Type t, object p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>Con valor → Visible; null → Collapsed.</summary>
+public sealed class NotNullToVisibility : IValueConverter
+{
+    public static readonly NotNullToVisibility Instance = new();
+    public object Convert(object value, Type t, object p, CultureInfo c) =>
+        value is null ? Visibility.Collapsed : Visibility.Visible;
+    public object ConvertBack(object value, Type t, object p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>Texto con contenido → Visible; vacío o null → Collapsed (avisos y errores).</summary>
+public sealed class NonEmptyToVisibility : IValueConverter
+{
+    public static readonly NonEmptyToVisibility Instance = new();
+    public object Convert(object value, Type t, object p, CultureInfo c) =>
+        string.IsNullOrWhiteSpace(value as string) ? Visibility.Collapsed : Visibility.Visible;
+    public object ConvertBack(object value, Type t, object p, CultureInfo c) => throw new NotSupportedException();
+}
+
 /// <summary>true si la celda del template es la celda seleccionada (borde acento).</summary>
 public sealed class SelectedCellComparer : IMultiValueConverter
 {

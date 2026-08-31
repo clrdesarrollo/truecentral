@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TrueCentralVms.Server.Data;
@@ -11,9 +12,11 @@ using TrueCentralVms.Server.Data;
 namespace TrueCentralVms.Server.Migrations
 {
     [DbContext(typeof(VmsDbContext))]
-    partial class VmsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260831015527_Anpr")]
+    partial class Anpr
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -313,10 +316,6 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<int?>("SpeedKmh")
                         .HasColumnType("integer");
-
-                    b.Property<string>("VehicleAttributes")
-                        .HasMaxLength(160)
-                        .HasColumnType("character varying(160)");
 
                     b.Property<string>("VehicleBrand")
                         .HasMaxLength(32)

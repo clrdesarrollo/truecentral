@@ -1,4 +1,4 @@
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
@@ -69,7 +69,8 @@ public sealed class DeviceStatusMonitor(
                 changed.Add(new DeviceDto(
                     device.Id, device.Name, device.DeviceType, device.DriverKey, device.Host,
                     device.SdkPort, device.RtspPort, device.Username, device.Model, device.SerialNumber,
-                    device.FirmwareVersion, channelCount, device.Status, device.LastSeenAt, device.CreatedAt));
+                    device.FirmwareVersion, channelCount, device.Status, device.LastSeenAt, device.CreatedAt,
+                    device.AnprEnabled));
             }
         }
         await db.SaveChangesAsync(ct);

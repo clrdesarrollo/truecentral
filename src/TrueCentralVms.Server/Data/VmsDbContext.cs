@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Server.Data.Entities;
 
 namespace TrueCentralVms.Server.Data;
@@ -14,6 +14,9 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<StreamSession> StreamSessions => Set<StreamSession>();
+
+    /// <summary>Reconocimientos de patentes (módulo Aplicaciones → ANPR).</summary>
+    public DbSet<PlateEvent> PlateEvents => Set<PlateEvent>();
 
     // Muro de video
     public DbSet<Decoder> Decoders => Set<Decoder>();
@@ -78,6 +81,36 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(s => s.MtxSessionId).HasMaxLength(64);
             e.HasIndex(s => s.EndedAt);   // las activas se consultan seguido
             e.HasIndex(s => s.MtxSessionId);
+        });
+
+        modelBuilder.Entity<PlateEvent>(e =>
+        {
+            e.Property(p => p.PlateNumber).HasMaxLength(24);
+            // CapturedAt es la hora de PARED del equipo (su propio reloj), no
+            // un instante UTC: va sin zona, como la trae la cámara. ReceivedAt
+            // sí es UTC del servidor y queda con zona (el resto del esquema).
+            e.Property(p => p.CapturedAt).HasColumnType("timestamp without time zone");
+            e.Property(p => p.CharConfidences).HasMaxLength(96);
+            e.Property(p => p.PlateColor).HasMaxLength(32);
+            e.Property(p => p.PlateType).HasMaxLength(32);
+            e.Property(p => p.VehicleType).HasMaxLength(32);
+            e.Property(p => p.VehicleColor).HasMaxLength(32);
+            e.Property(p => p.VehicleBrand).HasMaxLength(32);
+            e.Property(p => p.VehicleAttributes).HasMaxLength(160);
+            e.Property(p => p.Direction).HasMaxLength(32);
+            e.Property(p => p.DetectionMethod).HasMaxLength(32);
+            e.Property(p => p.Violation).HasMaxLength(64);
+            e.Property(p => p.SceneImagePath).HasMaxLength(160);
+            e.Property(p => p.PlateImagePath).HasMaxLength(160);
+            e.HasOne(p => p.Device)
+                .WithMany()
+                .HasForeignKey(p => p.DeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // La lista en vivo lee siempre por recepción descendente, y el
+            // buscador por patente y por equipo.
+            e.HasIndex(p => p.ReceivedAt);
+            e.HasIndex(p => p.PlateNumber);
+            e.HasIndex(p => new { p.DeviceId, p.ReceivedAt });
         });
 
         // -------------------------------------------------------------------

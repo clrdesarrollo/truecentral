@@ -40,6 +40,13 @@
             <Setter Property="VerticalAlignment" Value="Top"/>
             <Setter Property="Margin" Value="0,10,10,0"/>
         </Style>
+        <!-- Encabezado de apartado del menú principal -->
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Margin" Value="4,0,0,10"/>
+        </Style>
         <Style x:Key="SoonBadgeText" TargetType="TextBlock">
             <Setter Property="Text" Value="Próximamente"/>
             <Setter Property="FontSize" Value="9.5"/>
@@ -53,6 +60,8 @@
                        Foreground="{StaticResource TextBrush}"/>
             <TextBlock Text="Seleccione un módulo para comenzar." FontSize="12.5"
                        Foreground="{StaticResource MutedBrush}" Margin="0,4,0,22"/>
+
+            <TextBlock Text="MÓDULOS" Style="{StaticResource SectionHeader}"/>
 
             <WrapPanel>
                 <!-- Vista en Vivo: el único módulo operativo por ahora -->
@@ -146,6 +155,24 @@
                         </DockPanel>
                         <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
                     </Grid>
+                </Button>
+            </WrapPanel>
+
+            <!-- ===== Aplicaciones: módulos verticales sobre el inventario ===== -->
+            <TextBlock Text="APLICACIONES" Style="{StaticResource SectionHeader}" Margin="4,26,0,10"/>
+
+            <WrapPanel>
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenLprCommand}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33FBBF24">
+                            <TextBlock Text="&#xE804;" Foreground="#FBBF24" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Reconocimiento de patentes" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Lecturas en vivo de las cámaras ANPR, con la ficha del vehículo y el historial."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
                 </Button>
             </WrapPanel>
         </StackPanel>

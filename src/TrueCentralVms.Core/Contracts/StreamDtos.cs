@@ -32,5 +32,11 @@ public sealed record ActiveSessionDto(
 /// Kind: Continuous | Motion | Alarm | Manual | Other.</summary>
 public sealed record RecordingSegmentDto(DateTime Start, DateTime End, string Kind);
 
-/// <summary>Solicitud de reproducción de un rango grabado (hora local del equipo).</summary>
-public sealed record PlaybackRequestDto(int DeviceId, int RtspChannel, DateTime StartLocal, DateTime EndLocal);
+/// <summary>
+/// Solicitud de reproducción de un rango grabado (hora local del equipo).
+/// <paramref name="Speed"/> 1 = camino normal (MediaMTX pulsa el equipo);
+/// distinto de 1 = el servidor toma la sesión RTSP y le pide al equipo esa
+/// velocidad, que es la única forma de que el grabador entregue más rápido.
+/// </summary>
+public sealed record PlaybackRequestDto(int DeviceId, int RtspChannel, DateTime StartLocal, DateTime EndLocal,
+    double Speed = 1);
