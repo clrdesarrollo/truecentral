@@ -36,6 +36,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _connectionStatus = "Conectado";
     [ObservableProperty] private bool _isConnected = true;
     [ObservableProperty] private VideoCellViewModel? _selectedCell;
+    /// <summary>Cuadro bajo el puntero durante un arrastre (se ilumina para
+    /// mostrar dónde va a caer la cámara). null = no hay arrastre encima.</summary>
+    [ObservableProperty] private VideoCellViewModel? _dropTargetCell;
     [ObservableProperty] private string _statusMessage = ReadyMessage;
 
     // ---------- Navegación (navbar superior + menú lateral) ----------
@@ -71,6 +74,42 @@ public partial class MainViewModel : ObservableObject
     private void CloseWall()
     {
         IsWallOpen = false;
+        ActiveSection = "Home";
+        StatusMessage = ReadyMessage;
+    }
+
+    /// <summary>La viñeta "Reconocimiento de patentes" existe en el navbar.</summary>
+    [ObservableProperty] private bool _isLprOpen;
+
+    /// <summary>
+    /// Aplicaciones → Reconocimiento de patentes. El historial se carga una
+    /// sola vez: después el módulo se mantiene solo con lo que empuja el hub,
+    /// así que volver a abrir la viñeta no vuelve a golpear la API.
+    /// </summary>
+    public LprViewModel Lpr { get; }
+
+    private bool _lprLoaded;
+
+    [RelayCommand]
+    private void OpenLpr()
+    {
+        IsLprOpen = true;
+        ActiveSection = "Lpr";
+        StatusMessage = LprHintMessage;
+        if (_lprLoaded) return;
+        _lprLoaded = true;
+        _ = Lpr.InitializeAsync();
+    }
+
+    /// <summary>
+    /// Cerrar la viñeta solo saca el módulo de la vista: el servidor sigue
+    /// recibiendo y guardando los reconocimientos (las cámaras no dejan de
+    /// leer porque el operador cambie de pantalla).
+    /// </summary>
+    [RelayCommand]
+    private void CloseLpr()
+    {
+        IsLprOpen = false;
         ActiveSection = "Home";
         StatusMessage = ReadyMessage;
     }
@@ -138,6 +177,18 @@ public partial class MainViewModel : ObservableObject
             StatusMessage = "Configuración guardada.";
         }
     }
+
+    /// <summary>
+    /// Modo zoom digital de la Vista en Vivo: el puntero pasa a lupa y
+    /// arrastrar sobre un cuadro marca el área a acercar. Es zoom sobre la
+    /// imagen ya recibida (no mueve la cámara ni pide otro stream).
+    /// </summary>
+    [ObservableProperty] private bool _isDigitalZoomMode;
+
+    partial void OnIsDigitalZoomModeChanged(bool value) =>
+        StatusMessage = value
+            ? "Zoom digital: arrastre sobre el video para marcar el área; clic derecho vuelve a 1×."
+            : HintMessage;
 
     // ---------- PTZ ----------
     // El panel está siempre presente (minimizado por defecto); sus controles
@@ -296,6 +347,9 @@ public partial class MainViewModel : ObservableObject
 
     private const string ReadyMessage = "Listo.";
 
+    private const string LprHintMessage =
+        "Reconocimiento de patentes: las lecturas llegan solas; elija una de la lista para ver su ficha completa.";
+
     private const string WallHintMessage =
         "Muro de video: arrastre un canal a una ventana; doble clic para pantalla completa.";
 
@@ -327,6 +381,9 @@ public partial class MainViewModel : ObservableObject
         Playback = new PlaybackViewModel(api, _settings);
         // Los tramos exportados avisan igual que las capturas y cápsulas del vivo.
         Playback.MediaSaved += OnCellMediaSaved;
+
+        Lpr = new LprViewModel(api, hub, _settings);
+        Lpr.MediaSaved += OnCellMediaSaved;
 
         // Preferencia local: se abre con la última división que usó el usuario
         // (asíncrono: las celdas se crean por tandas sin congelar el arranque).
@@ -511,6 +568,34 @@ public partial class MainViewModel : ObservableObject
     /// la grilla): sin avanzar la selección.</summary>
     public async Task OpenChannelInCellAsync(ChannelNode node, VideoCellViewModel cell) =>
         await cell.OpenAsync(node, DefaultProfileForOpen());
+
+    /// <summary>
+    /// Arrastrar un cuadro sobre otro (estilo iVMS-4200): las cámaras cambian
+    /// de ubicación en la grilla. Si el destino tiene video se intercambian; si
+    /// está libre, la cámara se muda y el origen queda libre. Los números de
+    /// cuadro no se mueven — son la posición — y el video NO se corta: viaja el
+    /// player, no el canal, así que también funciona entre cuadros de distinto
+    /// tamaño (por ejemplo el cuadro grande de las divisiones asimétricas).
+    /// </summary>
+    public void SwapCells(VideoCellViewModel source, VideoCellViewModel target)
+    {
+        if (ReferenceEquals(source, target)) return;
+        if (!Cells.Contains(source) || !Cells.Contains(target)) return;
+        if (source.IsEmpty && target.IsEmpty) return;
+
+        bool exchange = !target.IsEmpty;
+        string moved = source.Title ?? "";
+        string displaced = target.Title ?? "";
+        int from = source.Index, to = target.Index;
+
+        VideoCellViewModel.SwapContent(source, target);
+
+        // La selección (y con ella el panel PTZ) sigue a la cámara movida.
+        SelectedCell = target;
+        StatusMessage = exchange
+            ? $"Cuadros {from} y {to} intercambiados: \"{moved}\" ↔ \"{displaced}\"."
+            : $"\"{moved}\" movida del cuadro {from} al {to}.";
+    }
 
     /// <summary>
     /// Doble clic en un equipo del árbol: abre TODOS sus canales habilitados y

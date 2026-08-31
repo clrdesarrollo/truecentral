@@ -6,33 +6,7 @@
              xmlns:views="clr-namespace:TrueCentralVms.Client.Views"
              Background="{StaticResource BgBrush}">
     <UserControl.Resources>
-        <!-- Botón del selector de división (borde tipo GhostButton) -->
-        <Style x:Key="GhostToggle" TargetType="ToggleButton">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Padding" Value="10,5"/>
-            <Setter Property="Focusable" Value="False"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
-                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#1D2733"/>
-                            </Trigger>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#1D2733"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        <!-- GhostToggle vive en App.xaml: lo comparte con Reproducción. -->
 
         <!-- Botón de cada división dentro del popup (miniatura + número) -->
         <Style x:Key="LayoutPresetButton" TargetType="Button">
@@ -417,6 +391,17 @@
                         </StackPanel>
                     </Border>
                 </Popup>
+                <!-- Zoom digital: recorta la imagen ya recibida (no mueve la cámara) -->
+                <ToggleButton Style="{StaticResource GhostToggle}" Padding="10,5" Margin="0,0,6,0"
+                              IsChecked="{Binding IsDigitalZoomMode, Mode=TwoWay}"
+                              Checked="OnDigitalZoomToggled" Unchecked="OnDigitalZoomToggled"
+                              ToolTip="Zoom digital: arrastre sobre el video para marcar el área a acercar (clic derecho vuelve a 1×)">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE71E;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="Zoom" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </ToggleButton>
                 <Button Content="Limpiar todo" Style="{StaticResource GhostButton}" Padding="12,5"
                         Command="{Binding ClearAllCommand}"/>
                 <!-- Indicador de apertura masiva (va en la barra porque el video
@@ -449,7 +434,9 @@
                          seleccionarlo, y el cuerpo solo es clickeable cuando está vacío. -->
                     <Border Margin="3" Background="#0A0E13" CornerRadius="4"
                             BorderThickness="2" MouseLeftButtonDown="OnCellClick"
-                            AllowDrop="True" Drop="OnCellDrop">
+                            MouseMove="OnCellMouseMove"
+                            AllowDrop="True" Drop="OnCellDrop"
+                            DragOver="OnCellDragOver" DragLeave="OnCellDragLeave">
                         <Border.Style>
                             <Style TargetType="Border">
                                 <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
@@ -463,6 +450,16 @@
                                         </DataTrigger.Binding>
                                         <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
                                     </DataTrigger>
+                                    <!-- Destino del arrastre en curso: dónde va a caer la cámara -->
+                                    <DataTrigger Value="True">
+                                        <DataTrigger.Binding>
+                                            <MultiBinding Converter="{x:Static vm:SelectedCellComparer.Instance}">
+                                                <Binding/>
+                                                <Binding Path="DataContext.DropTargetCell" RelativeSource="{RelativeSource AncestorType=Window}"/>
+                                            </MultiBinding>
+                                        </DataTrigger.Binding>
+                                        <Setter Property="BorderBrush" Value="#FCD34D"/>
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
@@ -473,6 +470,17 @@
                             </Grid.RowDefinitions>
                             <!-- Barra del cuadro: número, título, estado y cerrar -->
                             <DockPanel Grid.Row="0" Background="#151D26" Cursor="Hand">
+                                <DockPanel.Style>
+                                    <Style TargetType="DockPanel">
+                                        <Setter Property="ToolTip"
+                                                Value="Arrastre este cuadro sobre otro para cambiar la cámara de ubicación (si el otro tiene video, se intercambian)"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsEmpty}" Value="True">
+                                                <Setter Property="ToolTip" Value="{x:Null}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DockPanel.Style>
                                 <Border DockPanel.Dock="Left" Background="{StaticResource Panel2Brush}"
                                         CornerRadius="4" Margin="5,3" Padding="6,1">
                                     <TextBlock Text="{Binding Index}" Foreground="{StaticResource MutedBrush}"
@@ -557,6 +565,13 @@
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding Status}" Foreground="#FCD34D"
                                            FontSize="10.5" Margin="6,0" VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis" MaxWidth="220"/>
+                                <Ellipse Style="{StaticResource LoadingSpinner}" Width="11" Height="11"
+                                         Margin="4,0,0,0" VerticalAlignment="Center"
+                                         ToolTip="Conectando con la cámara…"
+                                         Visibility="{Binding IsConnecting,
+                                                      Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                    <Ellipse.RenderTransform><RotateTransform/></Ellipse.RenderTransform>
+                                </Ellipse>
                                 <TextBlock Foreground="{StaticResource TextBrush}" FontSize="11.5"
                                            Margin="4,3" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
                                     <TextBlock.Style>

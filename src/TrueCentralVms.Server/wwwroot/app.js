@@ -392,6 +392,9 @@ async function getDrivers() {
 
 let lastScan = null; // resultados del último sondeo (persisten al re-renderizar)
 
+/** Drivers que entregan reconocimientos de patentes (ver DriverCapabilities.SupportsAnpr). */
+const ANPR_DRIVERS = ["hikvision-netsdk"];
+
 async function renderDevices() {
   $("#page-title").textContent = "Dispositivos";
   let devices;
@@ -413,7 +416,7 @@ async function renderDevices() {
       <div class="table-scroll"><table class="grid">
         <thead><tr>
           <th>Nombre</th><th>Tipo</th><th>Marca</th><th>Dirección</th><th>Modelo</th>
-          <th>N° serie</th><th>Firmware</th><th>Canales</th><th>Estado</th><th></th>
+          <th>N° serie</th><th>Firmware</th><th>Canales</th><th>Patentes</th><th>Estado</th><th></th>
         </tr></thead>
         <tbody>
           ${devices.map((d) => `
@@ -426,6 +429,7 @@ async function renderDevices() {
               <td class="muted">${esc(d.serialNumber ?? "—")}</td>
               <td class="muted">${esc(d.firmwareVersion ?? "—")}</td>
               <td>${d.channelCount}</td>
+              <td>${anprCell(d, isAdmin)}</td>
               <td>${statusTag(d.status)}</td>
               <td class="row-actions">
                 <button class="btn ghost btn-channels">Canales</button>
@@ -438,18 +442,31 @@ async function renderDevices() {
       </table></div>`}
     ${isAdmin ? `
     <div class="toolbar" style="margin-top:28px">
-      <h3>Equipos en línea <span class="muted" style="font-weight:normal;font-size:12px">(SADP · Dahua · ONVIF en la red local)</span></h3>
+      <h3>Equipos en línea <span class="muted" style="font-weight:normal;font-size:12px">(SADP · Dahua · ONVIF en la red local · se actualiza cada 30 s)</span></h3>
       <button class="btn ghost" id="btn-device-scan">Buscar</button>
     </div>
     <div id="online-devices">
-      ${lastScan ? "" : `<div class="info-box">Use <b>Buscar</b> para sondear el segmento de red del servidor
+      ${lastScan ? "" : `<div class="info-box">Sondeando el segmento de red del servidor…
         (SADP para Hikvision, DHDiscover para Dahua y WS-Discovery para cualquier marca ONVIF).
         Solo se listan equipos de video (cámaras, DVR, NVR, decodificadores); los controles de acceso y alarmas se omiten.</div>`}
     </div>` : ""}`;
 
+  $$("#view .btn-anpr").forEach((b) => b.addEventListener("click", async (e) => {
+    const id = Number(e.target.closest("tr").dataset.id);
+    const enabled = e.target.dataset.on !== "1";
+    e.target.disabled = true;
+    try {
+      await Api.put(`/api/anpr/sources/${id}`, { enabled });
+      toast(enabled
+        ? "Equipo encendido como fuente de patentes."
+        : "Equipo apagado como fuente de patentes.");
+      renderDevices();
+    } catch (err) { toast(err.error, true); e.target.disabled = false; }
+  }));
   $("#btn-device-new")?.addEventListener("click", () => deviceModal(null));
   $("#btn-device-scan")?.addEventListener("click", () => runDiscovery(devices));
   if (lastScan) renderOnlineDevices(devices);
+  if (isAdmin) startDiscoveryPolling(devices);
   $$("#view .btn-revalidate").forEach((b) => b.addEventListener("click", async (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
     e.target.disabled = true;
@@ -484,26 +501,76 @@ async function renderDevices() {
   }));
 }
 
-async function runDiscovery(devices) {
-  const box = $("#online-devices");
+/**
+ * Celda "Patentes": interruptor de la fuente ANPR. Solo tiene sentido en
+ * equipos cuyo driver sabe entregar lecturas (hoy, Hikvision por SDK); en el
+ * resto se muestra un guion en vez de un botón que fallaría.
+ */
+function anprCell(device, isAdmin) {
+  if (!ANPR_DRIVERS.includes(device.driverKey)) return `<span class="muted">—</span>`;
+  if (!isAdmin) return device.anprEnabled ? "Sí" : `<span class="muted">No</span>`;
+  return `<button class="btn ghost btn-anpr" data-on="${device.anprEnabled ? 1 : 0}"
+    title="Recibir los reconocimientos de patentes de este equipo">${device.anprEnabled ? "Activo" : "Activar"}</button>`;
+}
+
+let discoveryTimer = null;
+let discoveryBusy = false;
+let lastScanAt = 0;
+
+/**
+ * Los equipos entran y salen de la red sin avisar, así que la lista se sondea
+ * al abrir la página y se refresca sola cada 30 s (el sondeo dura ~4 s: es la
+ * ventana que espera el servidor por SADP, DHDiscover y WS-Discovery).
+ */
+function startDiscoveryPolling(devices) {
+  clearInterval(discoveryTimer);
+  // renderDevices() se repite al agregar, editar o revalidar un equipo: ahí no
+  // se vuelve a sondear si el último resultado todavía está fresco.
+  if (!lastScan || Date.now() - lastScanAt >= 30000) {
+    runDiscovery(devices, !lastScan); // con resultados en pantalla, el refresco es silencioso
+  }
+  discoveryTimer = setInterval(() => {
+    if (!$("#online-devices")) { clearInterval(discoveryTimer); return; }
+    runDiscovery(devices, false);
+  }, 30000);
+}
+
+/** @param showProgress muestra el aviso de "sondeando" y los errores; falso en los refrescos automáticos. */
+async function runDiscovery(devices, showProgress = true) {
+  if (discoveryBusy) return; // no encimar el sondeo automático con el del botón
+  if (!$("#online-devices")) return;
+  discoveryBusy = true;
   const scanButton = $("#btn-device-scan");
-  scanButton.disabled = true;
-  scanButton.textContent = "Buscando…";
-  box.innerHTML = `<div class="info-box">Sondeando la red… (unos segundos)</div>`;
+  if (scanButton) { scanButton.disabled = true; scanButton.textContent = "Buscando…"; }
+  if (showProgress) {
+    const box = $("#online-devices");
+    box.innerHTML = `<div class="info-box">Sondeando la red… (unos segundos)</div>`;
+    box.dataset.signature = ""; // se reemplazó la tabla: hay que volver a pintarla aunque el resultado repita
+  }
   try {
     lastScan = await Api.get("/api/discovery/scan");
+    lastScanAt = Date.now();
     renderOnlineDevices(devices);
   } catch (err) {
-    box.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    // En el refresco automático se conserva la última lista buena: un aviso
+    // cada 30 s por un sondeo fallido sería solo ruido.
+    const box = showProgress ? $("#online-devices") : null;
+    if (box) { box.innerHTML = `<div class="error-box">${esc(err.error)}</div>`; box.dataset.signature = ""; }
   } finally {
-    scanButton.disabled = false;
-    scanButton.textContent = "Buscar";
+    discoveryBusy = false;
+    const btn = $("#btn-device-scan");
+    if (btn) { btn.disabled = false; btn.textContent = "Buscar"; }
   }
 }
 
 /// Tabla de equipos descubiertos, al estilo "Online Device" de HikCentral.
 function renderOnlineDevices(devices) {
   const box = $("#online-devices");
+  if (!box) return; // la página cambió mientras corría el sondeo
+  // El refresco automático no debe repintar la tabla si nada cambió.
+  const signature = JSON.stringify(lastScan) + "|" + devices.map((d) => d.host).join(",");
+  if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature;
   if (!lastScan || !lastScan.length) {
     box.innerHTML = `<div class="warn-box">No se encontraron equipos de video en este segmento de red.</div>`;
     return;
@@ -856,17 +923,74 @@ const routes = {
   "#/users": renderUsers,
 };
 
+// --- Menú lateral: nodos desplegables -------------------------------------
+// El estado abierto/cerrado se guarda por navegador para no reabrir a mano
+// los mismos nodos en cada visita.
+const NAV_STATE_KEY = "tcvms.nav.open";
+
+function loadNavState() {
+  try { return new Set(JSON.parse(localStorage.getItem(NAV_STATE_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+function saveNavState() {
+  const open = $$("#nav .nav-group.open").map((g) => g.dataset.group);
+  try { localStorage.setItem(NAV_STATE_KEY, JSON.stringify(open)); } catch { /* modo privado */ }
+}
+
+let navReady = false;
+
+function setupNav() {
+  if (navReady) return; // enterApp() puede repetirse tras un nuevo login
+  navReady = true;
+  const open = loadNavState();
+  $$("#nav .nav-group").forEach((g) => g.classList.toggle("open", open.has(g.dataset.group)));
+  $$("#nav .nav-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const group = btn.closest(".nav-group");
+      group.classList.toggle("open");
+      btn.setAttribute("aria-expanded", group.classList.contains("open") ? "true" : "false");
+      saveNavState();
+    });
+  });
+  syncNavAria();
+}
+
+function syncNavAria() {
+  $$("#nav .nav-group").forEach((g) => {
+    g.querySelector(".nav-toggle")?.setAttribute("aria-expanded", g.classList.contains("open") ? "true" : "false");
+  });
+}
+
+// Deja visible el enlace activo abriendo los nodos que lo contienen.
+function revealActiveNav(link) {
+  $$("#nav .nav-group").forEach((g) => g.classList.remove("has-active"));
+  if (!link) return;
+  for (let g = link.closest(".nav-group"); g; g = g.parentElement?.closest(".nav-group")) {
+    g.classList.add("open", "has-active");
+  }
+  saveNavState();
+  syncNavAria();
+}
+
 function navigate() {
-  clearInterval(sessionsTimer); // el sondeo de sesiones vive solo en su página
-  clearInterval(wallsTimer);    // ídem el del estado de los muros
+  clearInterval(sessionsTimer);  // el sondeo de sesiones vive solo en su página
+  clearInterval(wallsTimer);     // ídem el del estado de los muros
+  clearInterval(discoveryTimer); // ídem el de equipos en línea
   const hash = location.hash || "#/";
   const render = routes[hash] || renderDashboard;
-  $$("#nav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === hash));
+  let active = null;
+  $$("#nav a").forEach((a) => {
+    const on = a.getAttribute("href") === hash;
+    a.classList.toggle("active", on);
+    if (on) active = a;
+  });
+  revealActiveNav(active);
   render();
 }
 
 function enterApp() {
   showAppShell();
+  setupNav();
   if (!location.hash || !routes[location.hash]) location.hash = "#/";
   navigate();
 }

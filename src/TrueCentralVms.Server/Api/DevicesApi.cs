@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.SignalR;
+﻿using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using TrueCentralVms.Core.Contracts;
@@ -22,7 +22,8 @@ public static class DevicesApi
 
     private static DeviceDto ToDto(Device d, int channelCount) => new(
         d.Id, d.Name, d.DeviceType, d.DriverKey, d.Host, d.SdkPort, d.RtspPort, d.Username,
-        d.Model, d.SerialNumber, d.FirmwareVersion, channelCount, d.Status, d.LastSeenAt, d.CreatedAt);
+        d.Model, d.SerialNumber, d.FirmwareVersion, channelCount, d.Status, d.LastSeenAt, d.CreatedAt,
+        d.AnprEnabled);
 
     /// <summary>
     /// Un canal solo se reporta en línea si su equipo también lo está: con el
@@ -194,7 +195,7 @@ public static class DevicesApi
 
         app.MapPut("/api/devices/{id:int}", async (HttpContext ctx, int id, DeviceWriteDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, Services.AnprService anpr, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -234,6 +235,14 @@ public static class DevicesApi
             device.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
 
+            // El canal de eventos de patentes cuelga de estas credenciales: si
+            // la conexión cambió hay que rehacerlo con las nuevas.
+            if (connectionChanged)
+            {
+                await anpr.DetachAsync(device.Id);
+                anpr.RequestReconcile();
+            }
+
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
             return Results.Ok(ToDto(device, device.Channels.Count));
@@ -241,11 +250,15 @@ public static class DevicesApi
 
         app.MapDelete("/api/devices/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, Services.WallService walls,
-            CancellationToken ct) =>
+            Services.AnprService anpr, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var device = await db.Devices.FindAsync([id], ct);
             if (device is null) return Results.NotFound();
+
+            // El canal de eventos de patentes es una sesión viva contra el
+            // equipo: se cierra antes de que la fila desaparezca.
+            await anpr.DetachAsync(id);
 
             // El muro de video sigue decodificando por su cuenta: hay que
             // apagar sus ventanas ANTES de que el borrado en cascada se lleve

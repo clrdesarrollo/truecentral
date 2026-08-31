@@ -1,4 +1,5 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+﻿using System.Runtime.CompilerServices;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FlyleafLib;
 using FlyleafLib.MediaPlayer;
@@ -14,7 +15,7 @@ namespace TrueCentralVms.Client.ViewModels;
 /// stream se corta (red, equipo reiniciado, expulsión), la celda reintenta
 /// sola mientras siga asignada.
 /// </summary>
-public partial class VideoCellViewModel : ObservableObject, IDisposable
+public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDisposable
 {
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
 
@@ -23,6 +24,18 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     private ChannelNode? _assigned;
     private int _openSequence;
     private bool _retryPending;
+
+    /// <summary>
+    /// Cuadro dueño de cada player. Los manejadores del player NO capturan el
+    /// cuadro que lo creó: al arrastrar un cuadro sobre otro el player se muda
+    /// con el video andando, y sus avisos (apertura fallida, fin de stream)
+    /// tienen que llegar al cuadro donde quedó. Tabla débil: un player
+    /// descartado se recolecta sin dejar rastro.
+    /// </summary>
+    private static readonly ConditionalWeakTable<Player, VideoCellViewModel> PlayerOwners = new();
+
+    private static VideoCellViewModel? OwnerOf(object? sender) =>
+        sender is Player player && PlayerOwners.TryGetValue(player, out var owner) ? owner : null;
 
     /// <summary>Player visible del cuadro. Observable porque el cambio suave de
     /// stream lo REEMPLAZA: el nuevo se abre en un player de reserva mientras
@@ -39,10 +52,21 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
 
     /// <summary>Ruta de la cápsula en curso (Flyleaf le agrega la extensión).</summary>
     private string? _recordingFile;
+    /// <summary>Inicio de la cápsula: viaja con el cuadro en un intercambio,
+    /// así el contador sigue marcando el tiempo real y no vuelve a cero.</summary>
+    private DateTime _recordingStarted;
+    /// <summary>Ya hay un contador corriendo para esta cápsula (no duplicar).</summary>
+    private bool _tickerRunning;
 
     [ObservableProperty] private string? _title;
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private bool _isEmpty = true;
+
+    /// <summary>
+    /// El cuadro está pidiendo la concesión y abriendo el stream. Sin aviso, el
+    /// par de segundos hasta el primer cuadro parece un cuadro colgado.
+    /// </summary>
+    [ObservableProperty] private bool _isConnecting;
     /// <summary>Número del cuadro en la grilla (1..N), visible en su barra.</summary>
     [ObservableProperty] private int _index;
     /// <summary>Canal asignado al cuadro (null = libre). Lo usa el panel PTZ.</summary>
@@ -83,15 +107,18 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         config.Demuxer.FormatOpt["analyzeduration"] = "500000"; // 0,5 s (µs)
         config.Demuxer.FormatOpt["probesize"] = "524288";       // 512 KB
         var player = new Player(config);
+        PlayerOwners.AddOrUpdate(player, this);
         player.Audio.Volume = Math.Clamp(_settings.DefaultVolume, 0, 100);
         player.Config.Video.AspectRatio = _settings.StretchVideo ? AspectRatio.Fill : AspectRatio.Keep;
 
         player.OpenCompleted += (sender, e) =>
         {
-            if (!ReferenceEquals(sender, Player) || _assigned is null) return;
-            if (e.Success) { Status = ""; return; }
-            Status = "No se pudo abrir el video: " + (e.Error ?? "error desconocido");
-            ScheduleRetry(_openSequence);
+            if (OwnerOf(sender) is not { } cell) return;
+            if (!ReferenceEquals(sender, cell.Player) || cell._assigned is null) return;
+            cell.IsConnecting = false;
+            if (e.Success) { cell.Status = ""; return; }
+            cell.Status = "No se pudo abrir el video: " + (e.Error ?? "error desconocido");
+            cell.ScheduleRetry(cell._openSequence);
         };
 
         // Fin de reproducción no pedido (caída de red, equipo apagado,
@@ -99,17 +126,17 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         // invalidan la secuencia ANTES de detener, así que no reintentan.
         player.PlaybackStopped += (sender, e) =>
         {
-            if (!ReferenceEquals(sender, Player)) return;
+            if (OwnerOf(sender) is not { } cell || !ReferenceEquals(sender, cell.Player)) return;
             // Flyleaf corta la grabación junto con el stream: reflejar y avisar
             // (la cápsula quedó guardada hasta el momento del corte).
-            if (IsRecordingClip && !Player.IsRecording)
+            if (cell.IsRecordingClip && !cell.Player.IsRecording)
             {
-                IsRecordingClip = false;
-                NotifyClipSaved(notify: true);
+                cell.IsRecordingClip = false;
+                cell.NotifyClipSaved(notify: true);
             }
-            if (_assigned is null) return;
-            if (!e.Success) Status = "Sin señal — reintentando…";
-            ScheduleRetry(_openSequence);
+            if (cell._assigned is null) return;
+            if (!e.Success) cell.Status = "Sin señal — reintentando…";
+            cell.ScheduleRetry(cell._openSequence);
         };
         return player;
     }
@@ -126,29 +153,57 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         IsEmpty = false;
         Title = $"{node.Device.Name} · {node.Channel.Name}";
         Status = "Conectando…";
+        IsConnecting = true;
         await ConnectAsync(sequence);
     }
 
-    /// <summary>Alterna entre stream principal y secundario del canal en pantalla.</summary>
+    /// <summary>Alterna entre stream principal y secundario del canal en
+    /// pantalla. Parte del destino del cambio en vuelo (si lo hay): así un
+    /// segundo clic rápido significa "vuelve al que estaba" en lugar de
+    /// relanzar el mismo cambio una y otra vez.</summary>
     [RelayCommand]
-    private async Task SwitchProfileAsync() =>
-        await SwitchToProfileAsync(Profile == StreamProfile.Main ? StreamProfile.Sub : StreamProfile.Main);
+    private async Task SwitchProfileAsync()
+    {
+        var current = PendingSwitchTarget ?? Profile;
+        await SwitchToProfileAsync(current == StreamProfile.Main ? StreamProfile.Sub : StreamProfile.Main);
+    }
+
+    /// <summary>Anula un cambio de stream en vuelo: el player de reserva se
+    /// descarta solo al despertar (ve la secuencia vencida).</summary>
+    public void CancelPendingSwitch() => _openSequence++;
+
+    /// <summary>Destino del cambio suave en vuelo, atado a la secuencia que lo
+    /// lanzó: cualquier bump (reasignación, Clear, intercambio, cancelación)
+    /// lo invalida solo, sin limpieza explícita en cada camino.</summary>
+    private int _pendingSwitchSequence = -1;
+    private StreamProfile _pendingSwitchTarget;
+    private StreamProfile? PendingSwitchTarget =>
+        _pendingSwitchSequence == _openSequence ? _pendingSwitchTarget : null;
 
     /// <summary>
     /// Cambio SUAVE de stream: el destino se abre en un player de reserva
     /// mientras el actual sigue reproduciendo, y solo cuando el nuevo ya tiene
     /// imagen (primer keyframe decodificado) se intercambian — el corte pasa de
     /// varios segundos en negro a un parpadeo. Si el nuevo no logra imagen en
-    /// 10 s, se descarta y el cuadro sigue con el stream que tenía.
+    /// 20 s (2 intentos), se descarta y el cuadro sigue con el stream que tenía.
     /// </summary>
-    /// <summary>Anula un cambio de stream en vuelo: el player de reserva se
-    /// descarta solo al despertar (ve la secuencia vencida).</summary>
-    public void CancelPendingSwitch() => _openSequence++;
-
     public async Task SwitchToProfileAsync(StreamProfile target, bool hardFallbackOnFailure = false)
     {
-        if (_assigned is not { } node || Profile == target) return;
+        if (_assigned is not { } node) return;
+        // Clics rápidos: un cambio ya en camino hacia ese destino se deja
+        // terminar (relanzarlo descarta una conexión a medio abrir para
+        // volver a empezar de cero: puro costo). Pedir el stream visible con
+        // un cambio en vuelo significa "quédate como estás": basta abortarlo.
+        if ((PendingSwitchTarget ?? Profile) == target) return;
+        if (target == Profile && PendingSwitchTarget is not null)
+        {
+            CancelPendingSwitch();
+            Status = "";
+            return;
+        }
         int sequence = ++_openSequence; // invalida reintentos del stream visible
+        _pendingSwitchSequence = sequence;
+        _pendingSwitchTarget = target;
         StopClipRecording(notify: true);
         Status = target == StreamProfile.Main ? "Cambiando a principal…" : "Cambiando a secundario…";
 
@@ -163,12 +218,26 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
             {
                 var grant = await _api.RequestStreamAsync(node.Device.Id, node.Channel.RtspChannel, target);
                 if (sequence != _openSequence) { fresh.Dispose(); return; }
+
+                // OpenAsync de Flyleaf despacha a un hilo propio y retorna al
+                // tiro: el Status sigue en Stopped hasta que ese hilo parte.
+                // Mirar el Status de inmediato daba el cambio por muerto en
+                // milisegundos (con el pool ocupado por clics rápidos, casi
+                // siempre). La señal fiable de apertura es OpenCompleted.
+                var opened = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                fresh.OpenCompleted += (_, e) => opened.TrySetResult(e.Success);
                 fresh.OpenAsync(grant.RtspUrl);
 
-                // Esperar la primera imagen real: el reloj del player parte a
-                // correr con el primer cuadro presentado.
-                var deadline = DateTime.UtcNow.AddSeconds(15);
-                while (DateTime.UtcNow < deadline && fresh.CurTime == 0 &&
+                var deadline = DateTime.UtcNow.AddSeconds(20);
+                bool openOk = await Task.WhenAny(opened.Task, Task.Delay(TimeSpan.FromSeconds(15))) == opened.Task
+                    && opened.Task.Result;
+
+                // Con la apertura confirmada, esperar la primera imagen real:
+                // el reloj del player parte a correr con el primer cuadro
+                // presentado (recién ahí el intercambio es invisible). Un
+                // Status terminal aquí sí significa que el stream murió.
+                while (openOk && sequence == _openSequence &&
+                       DateTime.UtcNow < deadline && fresh.CurTime == 0 &&
                        fresh.Status is not (FlyleafLib.MediaPlayer.Status.Failed or FlyleafLib.MediaPlayer.Status.Stopped))
                     await Task.Delay(100);
 
@@ -181,6 +250,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
                 {
                     var retired = Player;
                     Profile = target;
+                    _pendingSwitchSequence = -1;
                     fresh.Config.Audio.Enabled = IsAudioOn;
                     Player = fresh; // FlyleafHost reengancha la superficie: corte mínimo
                     Status = "";
@@ -192,10 +262,13 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
             catch (ApiException ex)
             {
                 fresh.Dispose();
-                if (sequence == _openSequence) FlashStatus("No se pudo cambiar el stream: " + ex.Message);
+                if (sequence != _openSequence) return;
+                _pendingSwitchSequence = -1;
+                FlashStatus("No se pudo cambiar el stream: " + ex.Message);
                 return;
             }
         }
+        if (sequence == _openSequence) _pendingSwitchSequence = -1;
         if (hardFallbackOnFailure)
         {
             // El destino es obligatorio (ej. volver a secundario al restaurar
@@ -206,6 +279,10 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
             return;
         }
         FlashStatus("El stream destino no entregó imagen (¿perfil no disponible o enlace del equipo saturado?). Se mantiene el actual.");
+        // El cambio pudo intentarse sobre un cuadro ya sin señal, y su
+        // reintento murió con el bump de secuencia de este cambio: se re-arma
+        // (si el stream visible sigue andando, el reintento se descarta solo).
+        ScheduleRetry(sequence);
     }
 
     /// <summary>Pide una concesión nueva y abre la URL RTSP resultante.</summary>
@@ -296,6 +373,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
             string file = MediaFileBase(_settings.EffectiveRecordingFolder, "");
             Player.StartRecording(ref file, useRecommendedExtension: true);
             _recordingFile = file;
+            _recordingStarted = DateTime.UtcNow;
             IsRecordingClip = true;
             RunRecordingTicker();
         }
@@ -320,16 +398,25 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     /// </summary>
     private async void RunRecordingTicker()
     {
-        var started = DateTime.UtcNow;
+        if (_tickerRunning) return;
+        _tickerRunning = true;
         while (IsRecordingClip)
         {
-            var elapsed = DateTime.UtcNow - started;
+            var elapsed = DateTime.UtcNow - _recordingStarted;
             RecordingElapsed = elapsed.TotalHours >= 1
                 ? elapsed.ToString(@"h\:mm\:ss")
                 : elapsed.ToString(@"mm\:ss");
             await Task.Delay(500);
         }
+        _tickerRunning = false;
         RecordingElapsed = "";
+    }
+
+    /// <summary>Arranca el contador si este cuadro quedó con la cápsula en
+    /// curso (tras un intercambio la grabación cambia de cuadro).</summary>
+    private void EnsureRecordingTicker()
+    {
+        if (IsRecordingClip) RunRecordingTicker();
     }
 
     /// <summary>Cierra el ciclo de una cápsula: avisa con la ruta final (el
@@ -368,17 +455,104 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     public void DigitalZoomStep(bool zoomIn, System.Windows.Point center)
     {
         double target = Math.Clamp(Player.Config.Video.Zoom + (zoomIn ? 20 : -20), 100, 600);
-        if (target <= 100)
+        if (target <= ViewModels.DigitalZoom.NoZoom)
             ResetDigitalZoom();
         else
             Player.Config.Video.SetZoomAndCenter(target, center);
-        FlashStatus(target <= 100 ? "Zoom 1x" : $"Zoom digital {target / 100.0:0.#}x");
+        FlashStatus(ViewModels.DigitalZoom.Describe(target));
     }
 
-    private void ResetDigitalZoom()
+    /// <summary>Un cuadro vacío no tiene nada que acercar.</summary>
+    public bool CanDigitalZoom => !IsEmpty;
+
+    /// <summary>Acerca el área marcada con el mouse (píxeles físicos de la ventana de video).</summary>
+    public void DigitalZoomToArea(System.Windows.Rect areaPx) =>
+        FlashStatus(ViewModels.DigitalZoom.Describe(ViewModels.DigitalZoom.ApplyArea(Player, areaPx)));
+
+    /// <summary>Rueda del mouse: un paso de zoom que deja quieto el punto bajo el cursor.</summary>
+    public void DigitalZoomStepAt(System.Windows.Point pointPx, bool zoomIn) =>
+        FlashStatus(ViewModels.DigitalZoom.Describe(
+            ViewModels.DigitalZoom.StepAtPoint(Player, zoomIn, pointPx)));
+
+    /// <summary>Vuelve a 1× (se hace también al abrir otro canal en el cuadro).</summary>
+    public void ResetDigitalZoom() => ViewModels.DigitalZoom.Reset(Player);
+
+    // ------------------------------------------------------------------
+    // Intercambio de cuadros (arrastrar un cuadro sobre otro en la grilla)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Intercambia el CONTENIDO de dos cuadros: las cámaras cambian de
+    /// ubicación en la grilla, no los cuadros (el número y la posición son del
+    /// cuadro). Viaja el player entero — con su imagen ya andando, su zoom
+    /// digital y su cápsula en curso —, así que no se corta el video ni se pide
+    /// una concesión nueva al servidor: el mismo stream aparece en el otro
+    /// lugar. Si el destino está libre, el intercambio equivale a mudar la
+    /// cámara y dejar libre el origen.
+    /// </summary>
+    public static void SwapContent(VideoCellViewModel a, VideoCellViewModel b)
     {
-        Player.Config.Video.Zoom = 100;
-        Player.Config.Video.ZoomCenter = new System.Windows.Point(0.5, 0.5);
+        if (ReferenceEquals(a, b)) return;
+
+        // Lo que esté en vuelo (apertura o reintento) queda sin efecto: apunta
+        // al cuadro que ya no tiene ese canal. Más abajo se relanza si hace falta.
+        a._openSequence++;
+        b._openSequence++;
+
+        // El audio se apaga en el player que lo tenía y se enciende en el que
+        // llega: el flag toca la configuración del player vigente del cuadro.
+        (bool audioA, bool audioB) = (a.IsAudioOn, b.IsAudioOn);
+        a.IsAudioOn = false;
+        b.IsAudioOn = false;
+
+        // Los players se SUELTAN antes de reasignarse. Entregarle a un host un
+        // player que todavía pertenece a otro hace que FlyleafHost se lo quite
+        // al otro escribiendo directo en su propiedad Player, y esa escritura
+        // borra el enlace del host con su cuadro: quedaría negro para siempre.
+        (var playerA, var playerB) = (a.Player, b.Player);
+        a.Player = null!;
+        b.Player = null!;
+        a.Player = playerB;
+        b.Player = playerA;
+        PlayerOwners.AddOrUpdate(playerB, a);
+        PlayerOwners.AddOrUpdate(playerA, b);
+
+        (a._assigned, b._assigned) = (b._assigned, a._assigned);
+        (a.AssignedChannel, b.AssignedChannel) = (b.AssignedChannel, a.AssignedChannel);
+        (a.Title, b.Title) = (b.Title, a.Title);
+        (a.Status, b.Status) = (b.Status, a.Status);
+        (a.Profile, b.Profile) = (b.Profile, a.Profile);
+        (a.IsConnecting, b.IsConnecting) = (b.IsConnecting, a.IsConnecting);
+        (a._recordingFile, b._recordingFile) = (b._recordingFile, a._recordingFile);
+        (a._recordingStarted, b._recordingStarted) = (b._recordingStarted, a._recordingStarted);
+        (a.IsRecordingClip, b.IsRecordingClip) = (b.IsRecordingClip, a.IsRecordingClip);
+        (a.RecordingElapsed, b.RecordingElapsed) = (b.RecordingElapsed, a.RecordingElapsed);
+        (a.IsEmpty, b.IsEmpty) = (b.IsEmpty, a.IsEmpty);
+
+        a.IsAudioOn = audioB;
+        b.IsAudioOn = audioA;
+
+        // El contador de la cápsula corre en el cuadro que quedó grabando.
+        a.EnsureRecordingTicker();
+        b.EnsureRecordingTicker();
+
+        // Un cuadro que venía conectando (o reintentando) perdió su intento al
+        // invalidarse la secuencia: se vuelve a lanzar en su nuevo lugar.
+        a.RestartConnect();
+        b.RestartConnect();
+    }
+
+    /// <summary>Retoma la conexión si el stream no viene en camino (tras un
+    /// intercambio puede haber quedado una apertura a medio hacer).</summary>
+    private void RestartConnect()
+    {
+        if (_assigned is null) return;
+        if (Player.Status is FlyleafLib.MediaPlayer.Status.Opening
+            or FlyleafLib.MediaPlayer.Status.Playing
+            or FlyleafLib.MediaPlayer.Status.Paused) return;
+        Status = "Reconectando…";
+        IsConnecting = true;
+        _ = ConnectAsync(_openSequence);
     }
 
     [RelayCommand]
@@ -404,6 +578,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         Player.Stop();
         Title = null;
         Status = "";
+        IsConnecting = false;
         IsEmpty = true;
     }
 

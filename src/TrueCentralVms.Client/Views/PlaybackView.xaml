@@ -6,6 +6,56 @@
              xmlns:views="clr-namespace:TrueCentralVms.Client.Views"
              Background="{StaticResource BgBrush}">
     <UserControl.Resources>
+        <!-- Casilla de día del calendario: número, marca de grabación y estados
+             (fuera del mes, futuro, hoy, seleccionado). El orden de los
+             disparadores importa: el seleccionado va último para que gane
+             sobre el paso del mouse. -->
+        <Style x:Key="CalendarDayButton" TargetType="Button">
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Margin" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="5" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1">
+                            <Grid>
+                                <TextBlock x:Name="Num" Text="{Binding Label}" FontSize="12"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextBrush}"/>
+                                <Border x:Name="Mark" Width="5" Height="5" CornerRadius="1.5"
+                                        Background="{StaticResource AccentBrush}" Visibility="Collapsed"
+                                        HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,3,3"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <DataTrigger Binding="{Binding HasRecordings}" Value="True">
+                                <Setter TargetName="Mark" Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsCurrentMonth}" Value="False">
+                                <Setter TargetName="Num" Property="Foreground" Value="#3A4654"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsFuture}" Value="True">
+                                <Setter TargetName="Num" Property="Foreground" Value="#2C3846"/>
+                                <Setter Property="IsEnabled" Value="False"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource MutedBrush}"/>
+                            </DataTrigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Num" Property="Foreground" Value="White"/>
+                                <Setter TargetName="Mark" Property="Background" Value="White"/>
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="LegendChip" TargetType="Border">
             <Setter Property="Width" Value="10"/>
             <Setter Property="Height" Value="10"/>
@@ -36,7 +86,9 @@
                            Text="Doble clic en un canal para sumarlo a la reproducción sincronizada (hasta 4; con la grilla llena reemplaza el cuadro seleccionado). Ctrl + doble clic deja solo ese canal."/>
                 <TreeView x:Name="PlaybackTree" ItemsSource="{Binding Devices}"
                           Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
-                          MouseDoubleClick="OnTreeDoubleClick">
+                          MouseDoubleClick="OnTreeDoubleClick"
+                          PreviewMouseLeftButtonDown="OnTreeMouseDown"
+                          PreviewMouseMove="OnTreeMouseMove">
                     <TreeView.ItemContainerStyle>
                         <Style TargetType="TreeViewItem">
                             <Setter Property="IsExpanded" Value="True"/>
@@ -82,9 +134,86 @@
                     <Button Content="&#xE76B;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                             Style="{StaticResource GhostButton}" Padding="8,5"
                             Command="{Binding Playback.PreviousDayCommand}" ToolTip="Día anterior"/>
-                    <TextBlock Text="{Binding Playback.Date, StringFormat='dddd dd-MM-yyyy'}" Width="170"
-                               TextAlignment="Center" VerticalAlignment="Center" Margin="6,0"
-                               Foreground="{StaticResource TextBrush}" FontWeight="SemiBold"/>
+                    <!-- La fecha abre el calendario: llegar a un día de la semana
+                         pasada con las flechas era el camino largo. -->
+                    <ToggleButton x:Name="CalendarToggle" Style="{StaticResource GhostToggle}"
+                                  Width="196" Padding="6,5" Margin="6,0"
+                                  IsChecked="{Binding Playback.Calendar.IsOpen, Mode=TwoWay}"
+                                  ToolTip="Elegir fecha en el calendario">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <TextBlock Text="&#xE787;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                       VerticalAlignment="Center" Margin="0,0,7,0"
+                                       Foreground="{StaticResource MutedBrush}"/>
+                            <TextBlock Text="{Binding Playback.Date, StringFormat='dddd dd-MM-yyyy'}"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource TextBrush}" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </ToggleButton>
+                    <Popup PlacementTarget="{Binding ElementName=CalendarToggle}" Placement="Bottom"
+                           IsOpen="{Binding Playback.Calendar.IsOpen, Mode=TwoWay}" StaysOpen="False"
+                           AllowsTransparency="True" HorizontalOffset="-10" VerticalOffset="4">
+                        <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,10,10"
+                                DataContext="{Binding Playback.Calendar}">
+                            <StackPanel Width="252">
+                                <!-- Mes visible -->
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button DockPanel.Dock="Left" Content="&#xE76B;" FontFamily="Segoe MDL2 Assets"
+                                            FontSize="9" Style="{StaticResource GhostButton}" Padding="7,4"
+                                            Command="{Binding PreviousMonthCommand}" ToolTip="Mes anterior"/>
+                                    <Button DockPanel.Dock="Right" Content="&#xE76C;" FontFamily="Segoe MDL2 Assets"
+                                            FontSize="9" Style="{StaticResource GhostButton}" Padding="7,4"
+                                            Command="{Binding NextMonthCommand}" ToolTip="Mes siguiente"/>
+                                    <TextBlock Text="{Binding MonthLabel}" TextAlignment="Center"
+                                               VerticalAlignment="Center" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextBrush}"/>
+                                </DockPanel>
+
+                                <!-- Iniciales de los días (la semana parte el lunes) -->
+                                <ItemsControl ItemsSource="{Binding WeekdayHeaders}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><UniformGrid Columns="7"/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" TextAlignment="Center" FontSize="10.5"
+                                                       Margin="0,0,0,4" Foreground="{StaticResource MutedBrush}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <ItemsControl ItemsSource="{Binding Days}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><UniformGrid Columns="7"/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Style="{StaticResource CalendarDayButton}"
+                                                    Command="{Binding DataContext.PickDayCommand,
+                                                              RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <DockPanel Margin="0,8,0,0">
+                                    <ProgressBar DockPanel.Dock="Right" IsIndeterminate="True" Width="54" Height="3"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{StaticResource AccentBrush}"
+                                                 Background="{StaticResource Panel2Brush}"
+                                                 Visibility="{Binding IsLoading,
+                                                              Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border Width="7" Height="7" CornerRadius="1.5" VerticalAlignment="Center"
+                                                Background="{StaticResource AccentBrush}"/>
+                                        <TextBlock Text="con grabación" Margin="6,0,0,0" FontSize="10.5"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{StaticResource MutedBrush}"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </StackPanel>
+                        </Border>
+                    </Popup>
                     <Button Content="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                             Style="{StaticResource GhostButton}" Padding="8,5"
                             Command="{Binding Playback.NextDayCommand}" ToolTip="Día siguiente"/>
@@ -111,7 +240,7 @@
                     <StackPanel Orientation="Horizontal">
                         <Button Command="{Binding Playback.TogglePauseCommand}" Style="{StaticResource TransportButton}"
                                 Margin="0" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                                IsEnabled="{Binding Playback.IsPlaying}" ToolTip="Pausar / reanudar">
+                                IsEnabled="{Binding Playback.CanControl}" ToolTip="Pausar / reanudar">
                             <Button.Content>
                                 <TextBlock FontFamily="Segoe MDL2 Assets">
                                     <TextBlock.Style>
@@ -129,7 +258,7 @@
                         </Button>
                         <Button Content="&#xE71A;" FontFamily="Segoe MDL2 Assets" FontSize="11"
                                 Style="{StaticResource TransportButton}"
-                                Command="{Binding Playback.StopCommand}" IsEnabled="{Binding Playback.IsPlaying}"
+                                Command="{Binding Playback.StopCommand}" IsEnabled="{Binding Playback.CanControl}"
                                 ToolTip="Detener la reproducción"/>
                         <!-- Saltos relativos (piden un tramo nuevo al equipo) -->
                         <Button Content="−5 m" Style="{StaticResource TransportButton}" Margin="10,0,0,0"
@@ -158,6 +287,16 @@
 
                     <!-- Herramientas -->
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                        <ToggleButton IsChecked="{Binding Playback.IsDigitalZoomMode, Mode=TwoWay}"
+                                      Checked="OnDigitalZoomToggled" Unchecked="OnDigitalZoomToggled"
+                                      Style="{StaticResource GhostToggle}" Padding="10,6" Margin="0,0,6,0"
+                                      ToolTip="Zoom digital: arrastre sobre el video para marcar el área a acercar (clic derecho vuelve a 1×)">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE71E;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="Zoom" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
                         <ToggleButton IsChecked="{Binding Playback.IsSelectionMode, Mode=TwoWay}"
                                       Style="{StaticResource GhostToggle}" Padding="10,6" Margin="0,0,6,0"
                                       ToolTip="Modo recorte: arrastrar sobre la línea de tiempo marca el tramo a exportar">
@@ -286,6 +425,37 @@
                                             Background="Transparent" Foreground="{StaticResource MutedBrush}"
                                             BorderThickness="0" Padding="9,2" Cursor="Hand" FontSize="11"
                                             ToolTip="Quitar el canal de la reproducción"/>
+                                    <!-- Captura y cápsula: mismas carpetas y avisos que la Vista en Vivo -->
+                                    <Button DockPanel.Dock="Right" Command="{Binding SnapshotCommand}"
+                                            Background="Transparent" BorderThickness="0" Padding="8,2" Cursor="Hand"
+                                            ToolTip="Guardar una captura del cuadro que se está viendo">
+                                        <TextBlock Text="&#xE722;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                                   Foreground="{StaticResource MutedBrush}"/>
+                                    </Button>
+                                    <Button DockPanel.Dock="Right" Command="{Binding ToggleRecordingCommand}"
+                                            Background="Transparent" BorderThickness="0" Padding="8,2" Cursor="Hand"
+                                            ToolTip="Grabar una cápsula de lo que se está reproduciendo">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                                       VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Text" Value="&#xE7C8;"/>
+                                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsRecordingClip}" Value="True">
+                                                                <Setter Property="Text" Value="&#xE71A;"/>
+                                                                <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding RecordingElapsed}" Margin="5,0,0,0" FontSize="10.5"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{StaticResource DangerBrush}"/>
+                                        </StackPanel>
+                                    </Button>
                                     <Button DockPanel.Dock="Right" Command="{Binding ToggleAudioCommand}"
                                             Background="Transparent" BorderThickness="0" Padding="8,2" Cursor="Hand"
                                             ToolTip="Audio de este cuadro">
@@ -304,6 +474,13 @@
                                             </TextBlock.Style>
                                         </TextBlock>
                                     </Button>
+                                    <Ellipse DockPanel.Dock="Left" Style="{StaticResource LoadingSpinner}"
+                                             Margin="10,0,0,0" VerticalAlignment="Center"
+                                             ToolTip="Abriendo la grabación en el equipo…"
+                                             Visibility="{Binding IsOpening,
+                                                          Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                        <Ellipse.RenderTransform><RotateTransform/></Ellipse.RenderTransform>
+                                    </Ellipse>
                                     <TextBlock Text="{Binding Title}" Margin="10,4" FontSize="11.5"
                                                Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
                                 </DockPanel>

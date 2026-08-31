@@ -1,0 +1,350 @@
+<UserControl x:Class="TrueCentralVms.Client.Views.LprView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
+             Background="{StaticResource BgBrush}">
+    <UserControl.Resources>
+        <!-- Etiqueta y valor de la ficha de detalle -->
+        <Style x:Key="DetailLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <Style x:Key="DetailValue" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,1,0,0"/>
+        </Style>
+
+        <!-- Fila de la lista de reconocimientos -->
+        <Style x:Key="PlateListItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Root" Background="Transparent" BorderThickness="3,0,0,1"
+                                BorderBrush="Transparent" Padding="8,7">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                                <!-- Barra de acento a la izquierda: marca la fila
+                                     sin teñir el fondo (las miniaturas se leen mejor). -->
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- ===== Barra de herramientas ===== -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,8">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE804;" FontSize="16"
+                               Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                    <StackPanel Margin="10,0,20,0" VerticalAlignment="Center">
+                        <TextBlock Text="Reconocimiento de patentes" FontSize="13.5" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                            <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{StaticResource OkBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding LiveSourceCount}" Value="0">
+                                                <Setter Property="Fill" Value="{StaticResource MutedBrush}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding SourcesSummary}" FontSize="11"
+                                       Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Acciones de la derecha -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <CheckBox Content="Seguir en vivo" IsChecked="{Binding FollowLive}" Margin="0,0,12,0"
+                              VerticalAlignment="Center" Foreground="{StaticResource TextBrush}" FontSize="12"
+                              ToolTip="La ficha salta sola al último reconocimiento que llega"/>
+                    <Button Style="{StaticResource GhostButton}" Content="Fuentes"
+                            Command="{Binding ToggleSourcesPanelCommand}"
+                            ToolTip="Elegir qué cámaras entregan patentes"/>
+                </StackPanel>
+
+                <!-- Filtros -->
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <ComboBox Width="190" Height="30" VerticalAlignment="Center" FontSize="12"
+                              ItemsSource="{Binding Sources}" SelectedItem="{Binding DeviceFilter}"
+                              DisplayMemberPath="DeviceName"
+                              ToolTip="Filtrar por equipo (vacío = todos)"/>
+                    <TextBox Style="{StaticResource DarkTextBox}" Width="150" Height="30" Margin="8,0,0,0"
+                             Padding="8,0" VerticalAlignment="Center" VerticalContentAlignment="Center"
+                             Text="{Binding PlateFilter, UpdateSourceTrigger=PropertyChanged}"
+                             KeyDown="OnPlateFilterKeyDown"
+                             ToolTip="Buscar patente (parcial: “bb12” encuentra “BBBB12”)"/>
+                    <Button Style="{StaticResource PrimaryButton}" Content="Buscar" Margin="8,0,0,0"
+                            Height="30" Padding="14,0"
+                            Command="{Binding SearchCommand}"/>
+                    <Button Style="{StaticResource GhostButton}" Content="Limpiar" Margin="6,0,0,0"
+                            Height="30" Padding="14,0"
+                            Command="{Binding ClearFiltersCommand}"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ===== Panel de fuentes (desplegable) ===== -->
+        <Border Grid.Row="1" Background="{StaticResource Panel2Brush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,10"
+                Visibility="{Binding IsSourcesPanelOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+            <StackPanel>
+                <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap"
+                           Text="Equipos del inventario capaces de entregar patentes. Al encender uno, el servidor le abre el canal de eventos y las lecturas empiezan a llegar solas."/>
+                <ItemsControl ItemsSource="{Binding Sources}" Margin="0,8,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="10,7"
+                                    Margin="0,0,0,5">
+                                <DockPanel>
+                                    <CheckBox DockPanel.Dock="Left" IsChecked="{Binding Enabled, Mode=OneWay}"
+                                              Click="OnSourceToggleClick" VerticalAlignment="Center" Margin="0,0,10,0"
+                                              IsEnabled="{Binding DataContext.IsAdmin,
+                                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                              ToolTip="Encender o apagar este equipo como fuente (requiere administrador)"/>
+                                    <!-- Semáforo del canal de eventos: verde solo si el
+                                         servidor lo tiene realmente abierto ahora mismo. -->
+                                    <Ellipse DockPanel.Dock="Right" Width="9" Height="9" VerticalAlignment="Center"
+                                             Margin="10,0,0,0">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="{StaticResource MutedBrush}"/>
+                                                <Setter Property="ToolTip" Value="Canal de eventos cerrado"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Live}" Value="True">
+                                                        <Setter Property="Fill" Value="{StaticResource OkBrush}"/>
+                                                        <Setter Property="ToolTip" Value="Recibiendo eventos del equipo"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="11"
+                                               Foreground="{StaticResource MutedBrush}" Margin="14,0,0,0"
+                                               Text="{Binding EventCount, StringFormat={}{0} lectura(s)}"/>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DeviceName}" FontSize="12.5" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock Text="{Binding Host}" FontSize="10.5"
+                                                   Foreground="{StaticResource MutedBrush}"/>
+                                        <TextBlock Text="{Binding LastError}" FontSize="10.5" TextWrapping="Wrap"
+                                                   Foreground="{StaticResource DangerBrush}" Margin="0,2,0,0"
+                                                   Visibility="{Binding LastError,
+                                                                Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <!-- ===== Aviso / estado del módulo ===== -->
+        <Border Grid.Row="2" Background="#1A3B82F6" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1" Padding="12,7"
+                Visibility="{Binding StatusMessage, Converter={x:Static vm:NonEmptyToVisibility.Instance}}">
+            <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource TextBrush}" FontSize="12"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- ===== Lista + ficha de detalle ===== -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="360" MinWidth="280"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*" MinWidth="380"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Últimos reconocimientos -->
+            <Border Grid.Column="0" Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Padding="12,9"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+                        <DockPanel>
+                            <TextBlock Text="Últimos reconocimientos" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                            <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" FontSize="11"
+                                       Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"
+                                       Text="{Binding Events.Count, StringFormat={}{0} en pantalla}"/>
+                        </DockPanel>
+                    </Border>
+
+                    <TextBlock DockPanel.Dock="Top" Margin="14,20,14,0" TextWrapping="Wrap" FontSize="12"
+                               Foreground="{StaticResource MutedBrush}"
+                               Text="Aún no hay reconocimientos. Cuando pase un vehículo frente a una cámara encendida, su patente aparecerá aquí al instante."
+                               Visibility="{Binding Events.Count, Converter={x:Static vm:ZeroToVisibility.Instance}}"/>
+
+                    <ListBox ItemsSource="{Binding Events}" SelectedItem="{Binding Selected}"
+                             Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
+                             ItemContainerStyle="{StaticResource PlateListItem}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel>
+                                    <!-- Miniatura: primer plano de la placa (o la escena si no vino) -->
+                                    <Border DockPanel.Dock="Left" Width="86" Height="42" CornerRadius="4"
+                                            Background="{StaticResource BgBrush}" Margin="0,0,10,0"
+                                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" Margin="1"
+                                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    </Border>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <DockPanel>
+                                            <TextBlock Text="{Binding PlateNumber}" FontSize="15" FontWeight="Bold"
+                                                       Foreground="{StaticResource TextBrush}"/>
+                                            <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                                       Text="{Binding ConfidenceText}" FontSize="10.5"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{StaticResource MutedBrush}"/>
+                                        </DockPanel>
+                                        <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                                   TextTrimming="CharacterEllipsis">
+                                            <Run Text="{Binding TimeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding SourceText, Mode=OneWay}"/>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding VehicleSummary}" FontSize="10.5"
+                                                   Foreground="{StaticResource MutedBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Visibility="{Binding VehicleSummary,
+                                                                Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+                          Background="{StaticResource BorderBrush}"/>
+
+            <!-- Ficha del reconocimiento seleccionado -->
+            <Grid Grid.Column="2">
+                <TextBlock Text="Seleccione un reconocimiento de la lista para ver su ficha."
+                           HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12.5"
+                           Foreground="{StaticResource MutedBrush}"
+                           Visibility="{Binding Selected, Converter={x:Static vm:NullToVisibility.Instance}}"/>
+
+                <!-- La visibilidad se ata al Selected del ViewModel, NO al
+                     DataContext propio: con DataContext nulo el enlace queda
+                     sin origen y WPF usaría el valor por omisión (visible). -->
+                <Grid DataContext="{Binding Selected}"
+                      Visibility="{Binding DataContext.Selected,
+                                   RelativeSource={RelativeSource AncestorType=UserControl},
+                                   Converter={x:Static vm:NotNullToVisibility.Instance}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Cabecera: la patente en grande, como en la caseta -->
+                    <Border Grid.Row="0" Padding="16,12" Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Style="{StaticResource GhostButton}" Content="Copiar patente"
+                                        Height="30" Padding="14,0"
+                                        Command="{Binding DataContext.CopyPlateCommand,
+                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                                <Button Style="{StaticResource GhostButton}" Content="Guardar imágenes"
+                                        Height="30" Padding="14,0" Margin="6,0,0,0"
+                                        Command="{Binding DataContext.SaveImagesCommand,
+                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="{Binding PlateNumber}" FontSize="30" FontWeight="Bold"
+                                           FontFamily="Consolas, Segoe UI"
+                                           Foreground="{StaticResource TextBrush}"/>
+                                <TextBlock FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0">
+                                    <Run Text="{Binding DateText, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding TimeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding SourceText, Mode=OneWay}"/><Run Text="  ·  confianza "/><Run Text="{Binding ConfidenceText, Mode=OneWay}"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="300"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Escena capturada, con el recuadro que marcó la cámara -->
+                        <Grid Grid.Column="0" Margin="12" x:Name="SceneHost">
+                            <TextBlock Text="El equipo no envió la imagen de la escena."
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       Visibility="{Binding SceneImage,
+                                                    Converter={x:Static vm:NullToVisibility.Instance}}"/>
+                            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Image x:Name="SceneImageElement" Source="{Binding SceneImage}" Stretch="Uniform"
+                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       SizeChanged="OnSceneSizeChanged"/>
+                                <!-- El recuadro se posiciona en código: depende del
+                                     tamaño REAL con que se pintó la imagen. -->
+                                <Canvas x:Name="SceneOverlay" IsHitTestVisible="False"/>
+                            </Grid>
+                        </Grid>
+
+                        <!-- Primer plano de la placa + todo lo que informó el equipo -->
+                        <Border Grid.Column="1" Background="{StaticResource PanelBrush}"
+                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="14,12,14,16">
+                                    <Border Background="{StaticResource BgBrush}" CornerRadius="6" Padding="6"
+                                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                            Visibility="{Binding PlateImage,
+                                                         Converter={x:Static vm:NotNullToVisibility.Instance}}">
+                                        <Image Source="{Binding PlateImage}" Stretch="Uniform" MaxHeight="90"
+                                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    </Border>
+
+                                    <ItemsControl ItemsSource="{Binding Details}" Margin="0,12,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="0,0,0,9">
+                                                    <TextBlock Text="{Binding Label}" Style="{StaticResource DetailLabel}"/>
+                                                    <TextBlock Text="{Binding Value}" Style="{StaticResource DetailValue}"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

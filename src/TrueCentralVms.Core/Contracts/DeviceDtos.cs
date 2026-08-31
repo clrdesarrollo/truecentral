@@ -1,4 +1,4 @@
-namespace TrueCentralVms.Core.Contracts;
+﻿namespace TrueCentralVms.Core.Contracts;
 
 // DTOs del mantenedor de dispositivos. Los enums viajan como texto en JSON
 // (JsonStringEnumConverter registrado en el servidor).
@@ -23,7 +23,9 @@ public sealed record DeviceDto(
     int ChannelCount,
     DeviceStatus Status,
     DateTime? LastSeenAt,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    /// <summary>El equipo es fuente del módulo Reconocimiento de patentes.</summary>
+    bool AnprEnabled = false);
 
 /// <summary>
 /// Alta/edición de dispositivo. En edición, Password null o vacía = mantener

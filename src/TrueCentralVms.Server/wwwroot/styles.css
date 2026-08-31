@@ -116,6 +116,36 @@ body {
 .sidebar nav a:hover { background: var(--panel-2); color: var(--text); }
 .sidebar nav a.active { background: rgba(59,130,246,.14); color: var(--accent); font-weight: 600; }
 .sidebar nav a.disabled { opacity: .4; pointer-events: none; }
+
+/* Menú: divisor de sección y nodos desplegables */
+.nav-divider {
+  margin: 12px 0 2px; padding: 0 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--muted); opacity: .75;
+}
+.nav-group { display: flex; flex-direction: column; gap: 4px; }
+.nav-toggle {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 9px 12px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.nav-toggle:hover { background: var(--panel-2); color: var(--text); }
+.nav-toggle .caret {
+  width: 0; height: 0; flex: none;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  transition: transform .15s ease;
+}
+.nav-group.open > .nav-toggle { color: var(--text); }
+.nav-group.open > .nav-toggle .caret { transform: rotate(90deg); }
+/* Nodo cerrado con la página activa adentro: se marca para no perder el contexto. */
+.nav-group.has-active > .nav-toggle { color: var(--text); font-weight: 600; }
+.nav-children {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-left: 12px; padding-left: 8px; border-left: 1px solid var(--border);
+}
+.nav-group:not(.open) > .nav-children { display: none; }
 .sidebar-footer { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .dot.ok { background: var(--ok); }

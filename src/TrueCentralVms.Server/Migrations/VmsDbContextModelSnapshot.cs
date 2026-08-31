@@ -139,6 +139,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("AnprEnabled")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -235,6 +238,114 @@ namespace TrueCentralVms.Server.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("PasswordHistories");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PlateEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CapturedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("ChannelNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CharConfidences")
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<int>("Confidence")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DetectionMethod")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("DeviceId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Direction")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int?>("Lane")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PlateColor")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<double>("PlateHeight")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("PlateImagePath")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("PlateNumber")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<string>("PlateType")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<double>("PlateWidth")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("PlateX")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("PlateY")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SceneImagePath")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<int?>("SpeedKmh")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("VehicleAttributes")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("VehicleBrand")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("VehicleColor")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int?>("VehicleLengthCm")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("VehicleType")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Violation")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlateNumber");
+
+                    b.HasIndex("ReceivedAt");
+
+                    b.HasIndex("DeviceId", "ReceivedAt");
+
+                    b.ToTable("PlateEvents");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.ScreenWindow", b =>
@@ -636,6 +747,17 @@ namespace TrueCentralVms.Server.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PlateEvent", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Device", "Device")
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Device");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.ScreenWindow", b =>

@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Text;
 using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Drivers.Hikvision.Interop;
@@ -260,6 +260,52 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
                $"?starttime={localStart:yyyyMMdd}T{localStart:HHmmss}Z&endtime={localEnd:yyyyMMdd}T{localEnd:HHmmss}Z";
     }
 
+    /// <summary>
+    /// Días del mes con grabación (marcas del calendario de Reproducción).
+    ///
+    /// Se resuelve con UNA búsqueda de archivos sobre el mes completo y se
+    /// quedan los días distintos. Descartadas dos alternativas: preguntar día
+    /// por día son 31 viajes contra el equipo (inaceptable sobre un enlace
+    /// remoto), y el comando mensual del SDK
+    /// (NET_DVR_GET_MONTHLY_RECORD_DISTRIBUTION) está declarado pero su
+    /// cabecera no publica las estructuras. La vía ISAPI tampoco sirve como
+    /// única opción: en equipos remotos tras NAT el puerto HTTP no suele estar
+    /// publicado, solo el del SDK.
+    /// </summary>
+    public Task<IReadOnlyList<int>> QueryRecordedDaysAsync(DeviceConnectionInfo info, int channelNumber,
+        int year, int month, CancellationToken ct = default) => Task.Run<IReadOnlyList<int>>(() =>
+    {
+        HikvisionSdk.EnsureInitialized();
+
+        var from = new DateTime(year, month, 1);
+        var to = from.AddMonths(1).AddSeconds(-1);
+
+        int userId = HikvisionSessionCache.GetOrLogin(info);
+        var segments = TryFindSegments(userId, channelNumber, from, to);
+        if (segments is null)
+        {
+            HikvisionSessionCache.Invalidate(info);
+            userId = HikvisionSessionCache.GetOrLogin(info);
+            segments = TryFindSegments(userId, channelNumber, from, to);
+        }
+        if (segments is null)
+            return [];
+
+        // Un archivo puede cruzar la medianoche: cuentan todos los días que toca.
+        var days = new SortedSet<int>();
+        foreach (var segment in segments)
+        {
+            var day = segment.Start.Date;
+            while (day <= segment.End.Date && day <= to)
+            {
+                if (day.Year == year && day.Month == month)
+                    days.Add(day.Day);
+                day = day.AddDays(1);
+            }
+        }
+        return [.. days];
+    }, ct);
+
     private static List<RecordingSegment>? TryFindSegments(int userId, int channel, DateTime start, DateTime end)
     {
         var cond = new CHCNetSDK.NET_DVR_FILECOND_V40
@@ -458,6 +504,21 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
             return Encoding.Latin1.GetString(span).Trim();
         }
     }
+
+    // ------------------------------------------------------------------
+    // Reconocimiento de patentes (ANPR)
+    // ------------------------------------------------------------------
+
+    public bool SupportsAnpr => true;
+
+    /// <summary>
+    /// Abre el canal de alarma ITS del equipo. El login y el
+    /// NET_DVR_SetupAlarmChan_V41 son bloqueantes: van a un hilo del pool para
+    /// no frenar el reconciliador de fuentes del servidor.
+    /// </summary>
+    public Task<IPlateSubscription> SubscribePlatesAsync(DeviceConnectionInfo info, Action<PlateRecognition> onPlate,
+        CancellationToken ct = default) =>
+        Task.Run(() => HikvisionAnpr.Subscribe(info, onPlate), ct);
 }
 
 /// <summary>Fábrica del driver Hikvision (clave estable para la base de datos).</summary>
@@ -469,7 +530,8 @@ public sealed class HikvisionDeviceDriverFactory : IDeviceDriverFactory
         SupportsSnapshot: true,
         SupportsDiscovery: false, // SADP se habilita en el hito M4
         DefaultSdkPort: 8000,
-        DefaultRtspPort: 554);
+        DefaultRtspPort: 554,
+        SupportsAnpr: true);
 
     public IDeviceDriver Create() => new HikvisionDeviceDriver();
 }

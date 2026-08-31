@@ -30,3 +30,6 @@ admin-initial.txt
 mediamtx.runtime.yml
 # Ajustes por instalación (puertos, rutas)
 appsettings.Local.json
+# Fotos de los reconocimientos de patentes (las guarda el servidor en runtime;
+# en la base solo queda su ruta)
+anpr/

@@ -146,6 +146,16 @@ public sealed class TimelineBar : FrameworkElement
 
     private int _zoom;                 // índice en ZoomMinutes (0 = día completo)
     private DateTime? _center;         // centro de la ventana; null = seguir a la aguja
+
+    /// <summary>
+    /// La ventana visible acompaña a la aguja. Se apaga en cuanto el usuario
+    /// mueve la vista a mano (rueda, o arrastre que empuja la tira): si no, el
+    /// tick de la aguja —dos por segundo— le devolvería la vista a la hora que
+    /// se está reproduciendo y sería imposible mirar otro momento del día
+    /// mientras el video corre. Vuelve a encenderse con un clic para
+    /// reproducir, con los botones − / + y al cambiar de día.
+    /// </summary>
+    private bool _followPlayhead = true;
     private static readonly Typeface Font = new("Segoe UI");
 
     private TimeSpan Span => TimeSpan.FromMinutes(ZoomMinutes[_zoom]);
@@ -165,16 +175,22 @@ public sealed class TimelineBar : FrameworkElement
     }
 
     /// <summary>Acerca la línea de tiempo (más detalle) alrededor de la aguja.</summary>
-    public void ZoomIn() => SetZoom(_zoom + 1);
+    public void ZoomIn() => SetZoom(_zoom + 1, follow: true);
 
     /// <summary>Aleja la línea de tiempo (menos detalle).</summary>
-    public void ZoomOut() => SetZoom(_zoom - 1);
+    public void ZoomOut() => SetZoom(_zoom - 1, follow: true);
 
-    private void SetZoom(int level, DateTime? anchor = null)
+    /// <param name="follow">true: los botones − / + recentran en la aguja y
+    /// retoman el seguimiento; false (rueda): el usuario manda hasta que
+    /// vuelva a hacer clic para reproducir.</param>
+    private void SetZoom(int level, DateTime? anchor = null, bool follow = false)
     {
         level = Math.Clamp(level, 0, ZoomMinutes.Length - 1);
         if (level == _zoom) return;
-        _center = anchor ?? _center ?? Playhead ?? ViewStart + TimeSpan.FromTicks(Span.Ticks / 2);
+        _followPlayhead = follow;
+        _center = follow
+            ? Playhead ?? _center ?? ViewStart + TimeSpan.FromTicks(Span.Ticks / 2)
+            : anchor ?? _center ?? Playhead ?? ViewStart + TimeSpan.FromTicks(Span.Ticks / 2);
         _zoom = level;
         SpanLabel = ZoomMinutes[_zoom] >= 60 ? $"{ZoomMinutes[_zoom] / 60} h" : $"{ZoomMinutes[_zoom]} min";
         InvalidateVisual();
@@ -183,14 +199,15 @@ public sealed class TimelineBar : FrameworkElement
     private static void OnDayChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         // Otro día: la ventana vuelve a arrancar centrada en la aguja (o al medio).
-        if (d is TimelineBar bar) bar._center = null;
+        if (d is TimelineBar bar) { bar._center = null; bar._followPlayhead = true; }
     }
 
     private static void OnPlayheadChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         // Mientras se reproduce, la vista acompaña a la aguja (la tira corre
-        // bajo ella); durante un arrastre manda el usuario.
-        if (d is TimelineBar { _dragStartX: < 0 } bar && e.NewValue is DateTime playhead)
+        // bajo ella); durante un arrastre —o si el usuario se fue a mirar otra
+        // hora— manda el usuario.
+        if (d is TimelineBar { _dragStartX: < 0, _followPlayhead: true } bar && e.NewValue is DateTime playhead)
             bar._center = playhead;
     }
 
@@ -352,14 +369,25 @@ public sealed class TimelineBar : FrameworkElement
         return time < day ? day : time >= day.AddDays(1) ? day.AddDays(1).AddSeconds(-1) : time;
     }
 
-    /// <summary>Arrastre fuera del control: la ventana acompaña al cursor.</summary>
+    /// <summary>
+    /// Arrastre fuera del control: la ventana acompaña al cursor. El centro se
+    /// mantiene DENTRO del día — sin ese tope, arrastrar unos segundos contra
+    /// el borde lo deja horas fuera de rango y después hay que "desandar" todo
+    /// ese recorrido para que la vista vuelva a moverse.
+    /// </summary>
     private void PanIfOutside(double x)
     {
         double overflow = x < 0 ? x : x > ActualWidth ? x - ActualWidth : 0;
         if (overflow == 0 || ActualWidth <= 0) return;
+        _followPlayhead = false; // el usuario está eligiendo qué mirar
         var span = Span;
-        _center = (_center ?? ViewStart + TimeSpan.FromTicks(span.Ticks / 2))
+        var moved = (_center ?? ViewStart + TimeSpan.FromTicks(span.Ticks / 2))
             + TimeSpan.FromSeconds(overflow / ActualWidth * span.TotalSeconds);
+        var day = Day.Date;
+        var half = TimeSpan.FromTicks(span.Ticks / 2);
+        var first = day + half;
+        var last = day.AddDays(1) - half;
+        _center = moved < first ? first : moved > last ? last : moved;
     }
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
@@ -414,6 +442,9 @@ public sealed class TimelineBar : FrameworkElement
         var target = _scrubTime ?? TimeAt(startX);
         _scrubTime = null;
         _dragging = false;
+        // Pedir reproducción desde una hora vuelve a atar la vista a la aguja.
+        _followPlayhead = true;
+        _center = target;
         Scrubbing?.Invoke(null);
         InvalidateVisual();
         SeekRequested?.Invoke(target);
@@ -432,7 +463,7 @@ public sealed class TimelineBar : FrameworkElement
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
         base.OnMouseWheel(e);
-        SetZoom(_zoom + (e.Delta > 0 ? 1 : -1), anchor: TimeAt(e.GetPosition(this).X));
+        SetZoom(_zoom + (e.Delta > 0 ? 1 : -1), anchor: TimeAt(e.GetPosition(this).X), follow: false);
         e.Handled = true;
     }
 }

@@ -1,4 +1,4 @@
-namespace TrueCentralVms.Core.Drivers;
+﻿namespace TrueCentralVms.Core.Drivers;
 
 /// <summary>Datos de conexión de gestión a un dispositivo (puerto SDK/ONVIF, no RTSP).</summary>
 public sealed record DeviceConnectionInfo(string Host, int Port, string Username, string Password);
@@ -108,6 +108,16 @@ public interface IDeviceDriver
         Task.FromResult<IReadOnlyList<RecordingSegment>>([]);
 
     /// <summary>
+    /// Días del mes (1..31) que tienen grabación en el canal. Lo usa el
+    /// calendario del módulo Reproducción para marcar de un vistazo dónde
+    /// buscar. Lista vacía = el equipo no sabe responderlo (el calendario
+    /// simplemente no muestra marcas); no significa "sin grabaciones".
+    /// </summary>
+    Task<IReadOnlyList<int>> QueryRecordedDaysAsync(DeviceConnectionInfo info, int channelNumber,
+        int year, int month, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<int>>([]);
+
+    /// <summary>
     /// URL RTSP de reproducción del almacenamiento del equipo para el rango
     /// dado (hora local del equipo), con credenciales embebidas y URL-encoded;
     /// null si el driver no soporta playback remoto.
@@ -123,6 +133,23 @@ public interface IDeviceDriver
     /// comienzo de la grabación y el cliente lo avisa.
     /// </summary>
     bool SupportsExactPlaybackSeek => true;
+
+    // ------------------------------------------------------------------
+    // Reconocimiento de patentes (ANPR/LPR): la cámara ITS empuja cada
+    // lectura por su canal de alarma; el VMS no analiza video.
+    // ------------------------------------------------------------------
+
+    /// <summary>true si el driver sabe recibir reconocimientos de patentes del equipo.</summary>
+    bool SupportsAnpr => false;
+
+    /// <summary>
+    /// Abre el canal de eventos de patentes del equipo. Cada reconocimiento
+    /// llega por <paramref name="onPlate"/> (en un hilo del SDK: el manejador
+    /// debe encolar y volver rápido). Liberar la suscripción cierra el canal.
+    /// </summary>
+    Task<IPlateSubscription> SubscribePlatesAsync(DeviceConnectionInfo info, Action<PlateRecognition> onPlate,
+        CancellationToken ct = default) =>
+        throw new DriverException("Este driver no entrega reconocimientos de patentes.");
 }
 
 /// <summary>Tramo grabado en el equipo (horas locales del equipo).</summary>
@@ -132,7 +159,10 @@ public sealed record RecordingSegment(DateTime Start, DateTime End, RecordingKin
 public enum RecordingKind { Continuous, Motion, Alarm, Manual, Other }
 
 /// <summary>Capacidades del driver, para que el panel adapte el asistente.</summary>
-public sealed record DriverCapabilities(bool SupportsSnapshot, bool SupportsDiscovery, int DefaultSdkPort, int DefaultRtspPort);
+public sealed record DriverCapabilities(bool SupportsSnapshot, bool SupportsDiscovery, int DefaultSdkPort,
+    int DefaultRtspPort,
+    /// <summary>El driver puede recibir reconocimientos de patentes (módulo Aplicaciones).</summary>
+    bool SupportsAnpr = false);
 
 /// <summary>
 /// Fábrica de un driver, identificada por una clave estable que se guarda en

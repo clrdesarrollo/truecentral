@@ -52,6 +52,14 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="RailLprButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveSection}" Value="Lpr">
+                    <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
 
         <!-- Indicadores de recursos del servidor: gris normal, amarillo ≥70 %,
              rojo ≥90 % (el nivel llega en Tag; el detalle, en el ToolTip). -->
@@ -203,6 +211,25 @@
                                 Command="{Binding CloseWallCommand}"
                                 ToolTip="Cerrar Muro de video"/>
                     </Grid>
+                    <!-- Aplicaciones → Reconocimiento de patentes. Cerrar la
+                         viñeta no detiene nada: el servidor sigue recibiendo
+                         y guardando las lecturas de las cámaras. -->
+                    <Grid Visibility="{Binding IsLprOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
+                                     Padding="14,0,34,0"
+                                     IsChecked="{Binding ActiveSection, Mode=TwoWay,
+                                                 Converter={x:Static vm:SectionEquals.Instance}, ConverterParameter=Lpr}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE804;" FontSize="12"
+                                           VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="Reconocimiento de patentes" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+                        <Button Style="{StaticResource TabCloseButton}" Content="&#xE8BB;"
+                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
+                                Command="{Binding CloseLprCommand}"
+                                ToolTip="Cerrar Reconocimiento de patentes"/>
+                    </Grid>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -238,6 +265,11 @@
                         <Button Style="{StaticResource RailButton}" Content="&#xE7BA;"
                                 ToolTip="Centro de eventos (próximamente)"
                                 Command="{Binding ShowComingSoonCommand}" CommandParameter="Centro de eventos"/>
+                        <!-- Aplicaciones: módulos verticales sobre el inventario -->
+                        <Separator Background="{StaticResource BorderBrush}" Margin="12,7" Height="1"/>
+                        <Button Style="{StaticResource RailLprButton}" Content="&#xE804;"
+                                ToolTip="Aplicaciones · Reconocimiento de patentes"
+                                Command="{Binding OpenLprCommand}"/>
                     </StackPanel>
                 </DockPanel>
             </Border>
@@ -253,6 +285,12 @@
                                     Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Playback}"/>
                 <views:WallView Visibility="{Binding ActiveSection,
                                 Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Wall}"/>
+                <!-- Este módulo tiene ViewModel propio, así que su DataContext
+                     NO es el de la ventana: la visibilidad se ata al shell. -->
+                <views:LprView DataContext="{Binding Lpr}"
+                               Visibility="{Binding DataContext.ActiveSection,
+                                            RelativeSource={RelativeSource AncestorType=Window},
+                                            Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Lpr}"/>
             </Grid>
         </Grid>
 
