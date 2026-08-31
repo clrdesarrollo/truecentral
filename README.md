@@ -40,9 +40,12 @@ HikCentral / SmartPSS / iVMS-4200).
 | PostgreSQL embebido | **25490** | 127.0.0.1 |
 | MediaMTX RTSP (espectadores) | **8654** | 0.0.0.0, solo TCP |
 | MediaMTX API de control | **9911** | 127.0.0.1 |
+| MediaMTX del **cliente** (solo al proyectar la pantalla al muro) | **8554** | 0.0.0.0, TCP |
 
-(El producto videowall `vwcontroller` usa 5080/25480/8554: coexisten en la
-misma máquina.)
+El 8554 lo abre el propio puesto de operación mientras transmite su pantalla
+al muro (lo consume el decodificador); el resto del tiempo no escucha nada.
+El producto videowall `vwcontroller`, del que se portó el muro, usa
+5080/25480/8554: coexisten en la misma máquina.
 
 ## Estructura de la solución
 
@@ -123,11 +126,61 @@ solo acepta conexiones desde la propia máquina del servidor.
 - Credenciales recordadas cifradas con DPAPI, inicio de sesión automático
   opcional, lista de usuarios recientes.
 
+## Muro de video
+
+Decodificación por hardware hacia muros de monitores, portada del producto
+`vwcontroller`. La diferencia con aquel producto: **las cámaras salen del
+inventario del VMS** (Devices/Channels), no de un registro aparte.
+
+El decodificador se conecta **directo al equipo**, no a MediaMTX: las
+concesiones de streaming del VMS son tokens de 60 s pensados para
+espectadores y un muro decodifica durante días. Con Hikvision usa el
+protocolo privado del fabricante (IP/puerto/usuario/canal); con Dahua y ONVIF,
+la URL RTSP que arma el driver del dispositivo.
+
+**Configuración (panel web, rol Admin)**
+
+- `#/decoders` — registre el decodificador (IP, puerto 8000, credenciales,
+  driver *Hikvision (HCNetSDK)*). Al guardar se valida contra el equipo.
+  **Probar** lee sus salidas físicas (HDMI/VGA/BNC/DVI) y sus canales de
+  decodificación; **Diagnóstico** vuelca el estado real del muro.
+- `#/walls` — cree el muro: filas × columnas y, por cada posición, qué salida
+  física alimenta esa pantalla y en cuántas ventanas se divide. Los canales
+  de decodificación se asignan solos (uno por ventana). Desde la misma página
+  se opera el muro y se guardan/aplican layouts.
+
+**Operación (cliente WPF → Muro de video)**
+
+- Arrastre un canal del panel derecho a una ventana; arrastre una ventana
+  sobre otra para intercambiar sus cámaras; clic derecho para dividirla en
+  4/9/16; **✕** para liberarla.
+- **Doble clic**: la cámara ocupa su monitor completo (instantáneo: el equipo
+  solo agranda esa ventana, el resto sigue decodificando). **Ctrl+doble
+  clic**: ocupa TODO el muro. Cada monitor tiene un selector de división
+  (1/2/4/6/8/9/12/16/25/36) que re-asigna canales y re-decodifica solo.
+- **⊞ Agrupar** fusiona ventanas contiguas en una grande; **▣ Flotante**
+  dibuja una ventana de rect libre encima del mosaico (puede cruzar
+  monitores); **👁 Vista previa** muestra un fotograma de cada cámara dentro
+  de su ventana; **Layouts** guarda el estado con nombre y lo aplica de una
+  vez; **Sincronizar** re-empuja la división al equipo si estaba apagado.
+- **🖥 Proyectar** transmite una pantalla de este PC (o un archivo de video)
+  al muro: el puesto levanta MediaMTX + FFmpeg locales y el decodificador lee
+  ese RTSP. Es temporal: al detenerla, cada ventana vuelve a su cámara
+  anterior. Requiere `tools\mediamtx` y `tools\ffmpeg` junto al cliente y que
+  el firewall permita `mediamtx.exe` (8554/TCP).
+- Los cambios se propagan en vivo a todos los clientes y al panel por SignalR.
+
+Notas del equipo (validadas contra un DS-6908UDI real en `vwcontroller`): en
+la familia video wall cada sub-ventana es una **ventana del muro** y el
+equipo tiene un presupuesto total de ventanas simultáneas; si se excede, el
+sistema lo avisa y hay que reducir la división de otros monitores.
+
 ## Panel web
 
 `#/` dashboard (salud, dispositivos, sesiones activas) · `#/devices`
 mantenedor con wizard "Probar conexión", canales, revalidación, snapshots y
-descubrimiento SADP · `#/sessions` sesiones de video en vivo con **Expulsar**
+descubrimiento SADP · `#/decoders` decodificadores de muro · `#/walls` muros
+de video (estructura y operación) · `#/sessions` sesiones de video en vivo con **Expulsar**
 (corta la sesión RTSP en MediaMTX; el espectador puede reconectarse — no
 bloquea la cuenta) · `#/users` mantenedor de usuarios.
 
@@ -162,6 +215,13 @@ real: los canales 3–10 del NVR CIAPCO.
   tiempo multicanal, velocidad, saltos y exportación a MP4): ✅ — **pendiente
   validar Dahua y ONVIF contra hardware real** (Hikvision verificado E2E).
 
-Pendientes conocidos: transporte por SDK para equipos sin RTSP; mapas, muro
-de video y eventos (la arquitectura no los bloquea); foco/iris por ONVIF
-(servicio de imagen).
+- **M7** muro de video (módulo completo portado desde `vwcontroller`:
+  decodificadores, muros, layouts, ventanas agrupadas/flotantes y proyección
+  de pantalla, con las cámaras del inventario del VMS): ✅ — **pendiente
+  validar contra el decodificador real** (el módulo original está verificado
+  E2E contra un DS-6908UDI; aquí cambió el origen de las cámaras y el
+  transporte de credenciales, no el driver).
+
+Pendientes conocidos: transporte por SDK para equipos sin RTSP; mapas y
+eventos (la arquitectura no los bloquea); foco/iris por ONVIF (servicio de
+imagen).
