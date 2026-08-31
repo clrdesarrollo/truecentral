@@ -210,3 +210,47 @@ table.grid tr:hover td { background: rgba(255,255,255,.02); }
 .channel-row .btn { padding: 5px 10px; font-size: 12.5px; flex: none; }
 
 .modal.wide { width: 560px; }
+
+/* ---------- Muro de video ---------- */
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  font-size: 11.5px; color: var(--muted);
+}
+pre.diag { white-space: pre-wrap; font-size: 12px; margin: 0; color: var(--muted); }
+
+.wall-card { margin-bottom: 18px; }
+.wall-grid { display: grid; gap: 10px; }
+.wall-cell {
+  position: relative;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px;
+  display: flex; flex-direction: column; gap: 6px; min-height: 92px;
+}
+.wall-cell.unused { opacity: .45; }
+.wall-cell .cell-pos { font-size: 11px; color: var(--muted); }
+.wall-cell label.mini { font-size: 11px; color: var(--muted); display: block; }
+.wall-cell label.mini select {
+  width: 100%; margin-top: 2px; padding: 4px 6px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 12px;
+}
+
+.win-grid { flex: 1; display: grid; gap: 4px; }
+.win-cell {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  min-height: 40px; padding: 4px 6px; cursor: pointer; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.win-cell:hover { border-color: var(--accent); }
+.win-cell.busy { background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.45); }
+.win-cell .win-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.win-cell .win-detail { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.win-cell .win-free { font-size: 11px; color: var(--muted); text-align: center; }
+
+.screen-overlay {
+  position: absolute; inset: 0; border-radius: 8px;
+  background: rgba(15,20,26,.78); color: var(--muted);
+  display: flex; align-items: center; justify-content: center; font-size: 12px;
+}

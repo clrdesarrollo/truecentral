@@ -51,7 +51,9 @@ function toast(message, isError) {
   toastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
 }
 
-function openModal(html) {
+function openModal(html, wide) {
+  // `wide` lo usan los formularios con grilla (editor de muros).
+  $("#modal").className = "modal" + (wide ? " wide" : "");
   $("#modal").innerHTML = html;
   $("#modal-backdrop").classList.remove("hidden");
 }
@@ -848,12 +850,15 @@ const routes = {
   "": renderDashboard,
   "#/": renderDashboard,
   "#/devices": renderDevices,
+  "#/decoders": renderDecoders,
+  "#/walls": renderWalls,
   "#/sessions": renderSessions,
   "#/users": renderUsers,
 };
 
 function navigate() {
   clearInterval(sessionsTimer); // el sondeo de sesiones vive solo en su página
+  clearInterval(wallsTimer);    // ídem el del estado de los muros
   const hash = location.hash || "#/";
   const render = routes[hash] || renderDashboard;
   $$("#nav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === hash));
