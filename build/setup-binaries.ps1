@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Prepara los binarios de terceros que CLR TrueCentral VMS necesita en runtime
     y que no viven en el repositorio (cientos de MB de redistribuibles).
@@ -11,6 +11,8 @@
       tools\postgres    PostgreSQL portable (base embebida del servidor)
       tools\mediamtx    MediaMTX (media server que hace el fan-out RTSP)
       tools\ffmpeg-flyleaf  FFmpeg compartido que exige FlyleafLib (cliente WPF)
+      tools\ffmpeg         FFmpeg y ffprobe de línea de comandos (exportación de
+                           tramos en el servidor y proyección de pantalla al muro)
 
     Las DLLs nativas salen de Resources\ (los SDK tal como los entrega el
     fabricante). PostgreSQL y MediaMTX se copian desde otra instalación del
@@ -97,7 +99,7 @@ Write-Host ""
 Write-Host "[2/2] Herramientas redistribuibles (tools\)"
 
 if ($FromProduct) {
-    foreach ($tool in 'postgres', 'mediamtx', 'ffmpeg-flyleaf') {
+    foreach ($tool in 'postgres', 'mediamtx', 'ffmpeg', 'ffmpeg-flyleaf') {
         Copy-Tree -Source (Join-Path $FromProduct "tools\$tool") `
                   -Destination (Join-Path $repo "tools\$tool") -Label $tool | Out-Null
     }
@@ -116,6 +118,7 @@ $checks = [ordered]@{
     'tools\postgres\pgsql\bin\pg_ctl.exe'    = 'PostgreSQL embebido (servidor)'
     'tools\mediamtx\mediamtx.exe'            = 'MediaMTX (streaming)'
     'tools\ffmpeg-flyleaf\avcodec-63.dll'    = 'FFmpeg (cliente WPF)'
+    'tools\ffmpeg\bin\ffmpeg.exe'           = 'FFmpeg CLI (exportación y proyección al muro)'
 }
 $missing = 0
 foreach ($path in $checks.Keys) {
@@ -136,6 +139,7 @@ if ($missing -gt 0) {
     Write-Host "  - MediaMTX v1.20      : https://github.com/bluenviron/mediamtx/releases -> tools\mediamtx"
     Write-Host "  - FFmpeg para Flyleaf : asset del release de FlyleafLib con la MISMA versión que el paquete NuGet"
     Write-Host "                          https://github.com/SuRGeoNix/Flyleaf/releases -> carpeta FFmpeg\ -> tools\ffmpeg-flyleaf"
+    Write-Host "  - FFmpeg CLI          : build de Windows (gyan.dev / BtbN) -> tools\ffmpeg (con bin\ffmpeg.exe y bin\ffprobe.exe)"
 } else {
     Write-Host ""
     Write-Host "Todo listo. Compile con: dotnet build CLRTrueCentralVMS.slnx" -ForegroundColor Green
