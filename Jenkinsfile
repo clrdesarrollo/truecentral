@@ -158,6 +158,10 @@ pipeline {
                                 # usa 0-7 para exito y 8+ para error real.
                                 robocopy $origen (Join-Path $env:WORKSPACE $carpeta) /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
                                 if ($LASTEXITCODE -ge 8) { throw ("{0}: robocopy fallo con codigo {1}." -f $carpeta, $LASTEXITCODE) }
+                                # Y hay que blanquearlo: un 1 (copio archivos) es exito para
+                                # robocopy, pero Jenkins toma el ultimo codigo de salida del
+                                # bloque como el del paso y daria la etapa por fallida.
+                                $global:LASTEXITCODE = 0
                                 $mb = [math]::Round((Get-ChildItem $carpeta -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
                                 Write-Host ("  OK  {0} ({1} MB)" -f $carpeta, $mb) -ForegroundColor Green
                             }
@@ -308,6 +312,9 @@ pipeline {
                         New-Item -ItemType Directory -Force $destino | Out-Null
                         robocopy $origen $destino /E /NFL /NDL /NJH /NJS /NP | Out-Null
                         if ($LASTEXITCODE -ge 8) { throw ("{0}: robocopy fallo con codigo {1}." -f $etiqueta, $LASTEXITCODE) }
+                        # Ver la nota de la etapa "Binarios de terceros": un codigo 1 de
+                        # robocopy es exito, pero se lo llevaria Jenkins como fallo del paso.
+                        $global:LASTEXITCODE = 0
                         Write-Host ("  OK  {0}" -f $etiqueta) -ForegroundColor Green
                     }
 
