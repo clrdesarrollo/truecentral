@@ -62,8 +62,11 @@ public static class VmsHubContract
     /// <summary>Cambió el estado de un dispositivo (payload: DeviceDto).</summary>
     public const string DeviceStatusChanged = nameof(DeviceStatusChanged);
 
-    /// <summary>Cambió la configuración de una entidad; recargar (payload: string "devices" | "channels" | "users").</summary>
+    /// <summary>Cambió la configuración de una entidad; recargar (payload: string "devices" | "channels" | "users" | "decoders" | "walls").</summary>
     public const string ConfigChanged = nameof(ConfigChanged);
+
+    /// <summary>Cambió el estado de un muro de video (payload: WallDto).</summary>
+    public const string WallStateChanged = nameof(WallStateChanged);
 
     /// <summary>Cambió el conjunto de sesiones de streaming activas (payload: ActiveSessionDto[]).</summary>
     public const string SessionsChanged = nameof(SessionsChanged);
