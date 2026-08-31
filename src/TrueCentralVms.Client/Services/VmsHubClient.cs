@@ -18,11 +18,14 @@ public sealed class VmsHubClient : IAsyncDisposable
     private readonly HubConnection _connection;
     private volatile bool _disposed;
 
-    /// <summary>Cambió una entidad de configuración ("devices" | "channels" | "users"): recargar.</summary>
+    /// <summary>Cambió una entidad de configuración ("devices" | "channels" | "users" | "decoders" | "walls"): recargar.</summary>
     public event Action<string>? ConfigChanged;
 
     /// <summary>Cambió el estado en línea de un dispositivo.</summary>
     public event Action<DeviceDto>? DeviceStatusChanged;
+
+    /// <summary>Cambió el estado de un muro de video (otro operador o el panel).</summary>
+    public event Action<WallDto>? WallStateChanged;
 
     /// <summary>true = conectado al hub; false = reconectando/caído.</summary>
     public event Action<bool>? ConnectionStateChanged;
@@ -41,6 +44,7 @@ public sealed class VmsHubClient : IAsyncDisposable
 
         _connection.On<string>(VmsHubContract.ConfigChanged, entity => ConfigChanged?.Invoke(entity));
         _connection.On<DeviceDto>(VmsHubContract.DeviceStatusChanged, dto => DeviceStatusChanged?.Invoke(dto));
+        _connection.On<WallDto>(VmsHubContract.WallStateChanged, dto => WallStateChanged?.Invoke(dto));
 
         _connection.Reconnecting += _ => { ConnectionStateChanged?.Invoke(false); return Task.CompletedTask; };
         _connection.Reconnected += _ => { ConnectionStateChanged?.Invoke(true); return Task.CompletedTask; };

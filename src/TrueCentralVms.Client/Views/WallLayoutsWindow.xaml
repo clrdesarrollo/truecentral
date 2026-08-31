@@ -1,0 +1,61 @@
+<Window x:Class="TrueCentralVms.Client.Views.WallLayoutsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Layouts guardados"
+        Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Segoe UI" FontSize="14"
+        Width="480" Height="440"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/TrueCentralVms.Client;component/Views/WallStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <Border Padding="20,16">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock x:Name="TitleText" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+            <DockPanel Grid.Row="1" Margin="0,0,0,14">
+                <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}"
+                        Margin="8,0,0,0" Click="OnSaveClick">Guardar estado actual</Button>
+                <TextBox x:Name="NameBox" VerticalAlignment="Center"/>
+            </DockPanel>
+
+            <ListBox x:Name="LayoutsList" Grid.Row="2"
+                     Background="Transparent" BorderThickness="0"
+                     Foreground="{StaticResource TextBrush}"
+                     HorizontalContentAlignment="Stretch">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{StaticResource Panel2Brush}" CornerRadius="8" Padding="10,8" Margin="0,3">
+                            <DockPanel>
+                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                    <Button Content="Aplicar" Style="{StaticResource PrimaryButton}"
+                                            Padding="9,4" Click="OnApplyClick" Tag="{Binding Id}"/>
+                                    <Button Content="Eliminar" Style="{StaticResource DangerButton}"
+                                            Padding="9,4" Margin="6,0,0,0" Click="OnDeleteClick" Tag="{Binding Id}"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <TextBlock x:Name="StatusText" Grid.Row="3" Foreground="{StaticResource MutedBrush}"
+                       FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"/>
+        </Grid>
+    </Border>
+</Window>

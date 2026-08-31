@@ -1,0 +1,44 @@
+<Window x:Class="TrueCentralVms.Client.Views.WallAssignDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Elegir cámara"
+        Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Segoe UI" FontSize="14"
+        Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize" ShowInTaskbar="False">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/TrueCentralVms.Client;component/Views/WallStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <Border Padding="22,18">
+        <StackPanel>
+            <TextBlock x:Name="HeaderText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <TextBlock x:Name="HintText" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                       TextWrapping="Wrap" Margin="0,4,0,14"/>
+
+            <Label>Dispositivo</Label>
+            <ComboBox x:Name="DeviceCombo" Margin="0,0,0,10" SelectionChanged="OnDeviceChanged"/>
+
+            <Label>Canal</Label>
+            <ComboBox x:Name="ChannelCombo" Margin="0,0,0,10"/>
+
+            <Label>Stream</Label>
+            <ComboBox x:Name="StreamCombo" Margin="0,0,0,18">
+                <ComboBoxItem IsSelected="True">Principal</ComboBoxItem>
+                <ComboBoxItem>Secundario (sub)</ComboBoxItem>
+            </ComboBox>
+
+            <DockPanel LastChildFill="False">
+                <Button x:Name="ProjectButton" DockPanel.Dock="Left" Visibility="Collapsed"
+                        Click="OnProjectClick"
+                        ToolTip="En lugar de una cámara, transmitir en esta ventana la pantalla de este PC o un archivo de video (temporal: al detener la transmisión la ventana flotante se cierra).">🖥 Proyectar aquí…</Button>
+                <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Click="OnOkClick" IsDefault="True">Mostrar</Button>
+                <Button DockPanel.Dock="Right" Click="OnCancelClick" Margin="0,0,8,0" IsCancel="True">Cancelar</Button>
+            </DockPanel>
+        </StackPanel>
+    </Border>
+</Window>

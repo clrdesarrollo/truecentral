@@ -58,6 +58,19 @@ public sealed class ClientSettings
     /// <summary>Tiempo de espera de la API en segundos (se aplica al iniciar la aplicación).</summary>
     public int ApiTimeoutSeconds { get; set; } = 20;
 
+    // ---------- Muro de video ----------
+
+    /// <summary>Lista de cámaras del muro plegada (pestaña « » del borde).</summary>
+    public bool WallSourcesPanelCollapsed { get; set; }
+    /// <summary>
+    /// Última IP local que funcionó al proyectar la pantalla. En redes con
+    /// router la IP correcta es la que ve el decodificador, y no se puede
+    /// deducir: se recuerda la elegida y se ofrece primero.
+    /// </summary>
+    public string? ProjectionIp { get; set; }
+    /// <summary>Reproducir en bucle el archivo de video proyectado.</summary>
+    public bool ProjectionLoop { get; set; }
+
     public static string DefaultSnapshotFolder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "TrueCentral VMS");
 

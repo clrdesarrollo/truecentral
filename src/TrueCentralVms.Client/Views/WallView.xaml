@@ -1,0 +1,149 @@
+<UserControl x:Class="TrueCentralVms.Client.Views.WallView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource BgBrush}"
+             Foreground="{StaticResource TextBrush}"
+             FontFamily="Segoe UI" FontSize="14">
+    <!-- Los estilos implícitos del módulo (botones, combos, menús) viven en su
+         propio diccionario y se fusionan SOLO aquí: el resto del cliente
+         conserva sus estilos con clave. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/TrueCentralVms.Client;component/Views/WallStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Barra de herramientas del muro -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="14,10">
+            <DockPanel>
+                <TextBlock Text="Muro:" Foreground="{StaticResource MutedBrush}"
+                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ComboBox x:Name="WallSelector" Width="240" VerticalAlignment="Center"
+                          DisplayMemberPath="Name" SelectionChanged="OnWallSelected"/>
+
+                <Button x:Name="RefreshButton" Margin="10,0,0,0" Click="OnRefreshClick">Actualizar</Button>
+                <Button x:Name="LayoutsButton" Margin="8,0,0,0" Click="OnLayoutsClick">Layouts</Button>
+                <Button x:Name="SyncButton" Margin="8,0,0,0" Click="OnSyncClick"
+                        ToolTip="Reenviar al decodificador la división de ventanas configurada">Sincronizar</Button>
+                <ToggleButton x:Name="PreviewToggle" Margin="8,0,0,0"
+                              Checked="OnPreviewToggled" Unchecked="OnPreviewToggled"
+                              ToolTip="Mostrar la imagen de cada cámara dentro de su ventana">👁 Vista previa</ToggleButton>
+                <ToggleButton x:Name="GroupModeToggle" Margin="8,0,0,0"
+                              Checked="OnGroupModeToggled" Unchecked="OnGroupModeToggled"
+                              ToolTip="Dibuje un rectángulo sobre un monitor para fusionar esas ventanas en una grande">⊞ Agrupar</ToggleButton>
+                <ToggleButton x:Name="FloatModeToggle" Margin="8,0,0,0"
+                              Checked="OnFloatModeToggled" Unchecked="OnFloatModeToggled"
+                              ToolTip="Dibuje un rectángulo sobre el muro para abrir una ventana flotante encima de los demás videos">▣ Flotante</ToggleButton>
+                <ToggleButton x:Name="ProjectToggle" Margin="8,0,0,0"
+                              Checked="OnProjectToggled" Unchecked="OnProjectToggled"
+                              ToolTip="Transmitir una pantalla de este PC (o un video) como fuente del muro">🖥 Proyectar</ToggleButton>
+                <Button x:Name="ClearAllButton" Margin="8,0,0,0" Style="{StaticResource DangerButton}"
+                        Click="OnClearAllClick">Limpiar todo</Button>
+            </DockPanel>
+        </Border>
+
+        <!-- Contenido -->
+        <Grid Grid.Row="1" Margin="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition x:Name="SourcesColumn" Width="320"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Grilla del muro -->
+            <Border Grid.Column="0" Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="WallTitle" FontSize="15" FontWeight="SemiBold" Margin="2,0,0,10"/>
+                    <!-- Monitores + capa de ventanas flotantes encima. -->
+                    <Grid Grid.Row="1">
+                        <Grid x:Name="WallGrid"/>
+                        <Canvas x:Name="FloatLayer" Background="{x:Null}" ClipToBounds="True"
+                                SizeChanged="OnFloatLayerSizeChanged"/>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- Pestaña para ocultar/mostrar la lista de canales -->
+            <Border x:Name="SourcesToggle" Grid.Column="1" Width="16" Margin="6,0,0,0"
+                    Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1" CornerRadius="5" Cursor="Hand"
+                    VerticalAlignment="Center" MinHeight="72"
+                    ToolTip="Ocultar/mostrar la lista de cámaras"
+                    MouseLeftButtonUp="OnToggleSourcesPanel">
+                <TextBlock x:Name="SourcesToggleGlyph" Text="»" FontSize="13" FontWeight="Bold"
+                           Foreground="{StaticResource MutedBrush}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+
+            <!-- Panel de dispositivos y canales -->
+            <Border x:Name="SourcesPanelBorder" Grid.Column="2" Margin="8,0,0,0" Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock FontSize="15" FontWeight="SemiBold" Margin="2,0,0,10">Cámaras</TextBlock>
+                    <Grid Grid.Row="1" Margin="0,0,0,8">
+                        <TextBox x:Name="ChannelFilterBox" Padding="6,5,24,5"
+                                 TextChanged="OnChannelFilterChanged"/>
+                        <TextBlock x:Name="ChannelFilterHint" Text="Buscar canal…"
+                                   Foreground="{StaticResource MutedBrush}" IsHitTestVisible="False"
+                                   VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    </Grid>
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="SourcesPanel"/>
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="3" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                               TextWrapping="Wrap" Margin="2,10,0,0">
+                        Arrastre un canal sobre una ventana para asignarlo, o una ventana
+                        sobre otra para intercambiar sus cámaras. Doble clic: pantalla
+                        completa; Ctrl+doble clic: la cámara ocupa TODO el muro;
+                        ✕ cierra el video. Clic derecho en una ventana: dividirla
+                        en 4/9/16. Ctrl+clic selecciona varias y "⊞ Agrupar" las fusiona.
+                        "▣ Flotante" dibuja una ventana libre encima de los demás videos;
+                        doble clic en ella: cubre las pantallas que toca / vuelve a su tamaño.
+                        Para transmitir este PC o un video: clic en una ventana y 🖥 Proyectar.
+                    </TextBlock>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Barra de estado del módulo -->
+        <Border Grid.Row="2" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="14,6">
+            <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+        </Border>
+
+        <!-- Velo de bloqueo: cubre el módulo durante operaciones largas
+             (aplicar un layout) para que nadie toque el muro a medio aplicar. -->
+        <Border x:Name="BlockingOverlay" Grid.Row="0" Grid.RowSpan="3"
+                Background="#C80F141A" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="240" Height="6"
+                             Foreground="{StaticResource AccentBrush}"
+                             Background="{StaticResource Panel2Brush}"/>
+                <TextBlock x:Name="BlockingText" Foreground="White" FontSize="13"
+                           HorizontalAlignment="Center" Margin="0,12,0,0"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

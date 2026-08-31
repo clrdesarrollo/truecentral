@@ -22,6 +22,14 @@ public partial class MainViewModel : ObservableObject
     /// el login ya terminó de escribir las suyas cuando esta ventana nace.</summary>
     private readonly ClientSettings _settings = ClientSettings.Load();
 
+    /// <summary>
+    /// Cliente de API y hub del shell. Los usa el módulo Muro de video, cuya
+    /// interfaz se construye en código (la grilla del muro es dinámica) y por
+    /// eso no consume el ViewModel como los demás módulos.
+    /// </summary>
+    public ApiClient Api => _api;
+    public VmsHubClient Hub => _hub;
+
     public ObservableCollection<DeviceNode> Devices { get; } = [];
     public ObservableCollection<VideoCellViewModel> Cells { get; } = [];
 
@@ -43,6 +51,29 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>La viñeta "Reproducción" existe en el navbar.</summary>
     [ObservableProperty] private bool _isPlaybackOpen;
+
+    /// <summary>La viñeta "Muro de video" existe en el navbar.</summary>
+    [ObservableProperty] private bool _isWallOpen;
+
+    [RelayCommand]
+    private void OpenWall()
+    {
+        IsWallOpen = true;
+        ActiveSection = "Wall";
+        StatusMessage = WallHintMessage;
+    }
+
+    /// <summary>
+    /// Cerrar la viñeta solo saca el módulo de la vista: el muro sigue
+    /// mostrando lo que tenga (lo decodifica el equipo, no este cliente).
+    /// </summary>
+    [RelayCommand]
+    private void CloseWall()
+    {
+        IsWallOpen = false;
+        ActiveSection = "Home";
+        StatusMessage = ReadyMessage;
+    }
 
     /// <summary>Módulo Reproducción (grabaciones remotas del DVR/NVR).</summary>
     public PlaybackViewModel Playback { get; }
@@ -264,6 +295,9 @@ public partial class MainViewModel : ObservableObject
         "Clic en la barra de un cuadro para seleccionarlo (borde azul); doble clic en un canal del árbol lo abre ahí.";
 
     private const string ReadyMessage = "Listo.";
+
+    private const string WallHintMessage =
+        "Muro de video: arrastre un canal a una ventana; doble clic para pantalla completa.";
 
     public string UserLabel => $"{_api.Username} ({(_api.Role == "Admin" ? "Administrador" : "Operador")}) — {_api.BaseUrl}";
 

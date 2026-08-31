@@ -116,8 +116,7 @@
                     </Grid>
                 </Button>
 
-                <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
-                        CommandParameter="Muro de video">
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenWallCommand}">
                     <Grid>
                         <DockPanel Margin="16,0">
                             <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33A78BFA">
@@ -129,7 +128,6 @@
                                            Style="{StaticResource CardDescription}"/>
                             </StackPanel>
                         </DockPanel>
-                        <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
                     </Grid>
                 </Button>
 

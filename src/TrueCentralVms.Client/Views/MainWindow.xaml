@@ -44,6 +44,14 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="RailWallButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveSection}" Value="Wall">
+                    <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
 
         <!-- Indicadores de recursos del servidor: gris normal, amarillo ≥70 %,
              rojo ≥90 % (el nivel llega en Tag; el detalle, en el ToolTip). -->
@@ -177,6 +185,24 @@
                                 Command="{Binding ClosePlaybackCommand}"
                                 ToolTip="Cerrar Reproducción (detiene el video)"/>
                     </Grid>
+                    <!-- Viñeta Muro de video: cerrarla solo la saca de la vista;
+                         el muro sigue mostrando lo que tenga (lo decodifica el equipo). -->
+                    <Grid Visibility="{Binding IsWallOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
+                                     Padding="14,0,34,0"
+                                     IsChecked="{Binding ActiveSection, Mode=TwoWay,
+                                                 Converter={x:Static vm:SectionEquals.Instance}, ConverterParameter=Wall}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="12"
+                                           VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="Muro de video" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+                        <Button Style="{StaticResource TabCloseButton}" Content="&#xE8BB;"
+                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
+                                Command="{Binding CloseWallCommand}"
+                                ToolTip="Cerrar Muro de video"/>
+                    </Grid>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -206,6 +232,9 @@
                         <Button Style="{StaticResource RailPlaybackButton}" Content="&#xE768;"
                                 ToolTip="Reproducción"
                                 Command="{Binding OpenPlaybackCommand}"/>
+                        <Button Style="{StaticResource RailWallButton}" Content="&#xE7F4;"
+                                ToolTip="Muro de video"
+                                Command="{Binding OpenWallCommand}"/>
                         <Button Style="{StaticResource RailButton}" Content="&#xE7BA;"
                                 ToolTip="Centro de eventos (próximamente)"
                                 Command="{Binding ShowComingSoonCommand}" CommandParameter="Centro de eventos"/>
@@ -222,6 +251,8 @@
                                 Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Live}"/>
                 <views:PlaybackView Visibility="{Binding ActiveSection,
                                     Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Playback}"/>
+                <views:WallView Visibility="{Binding ActiveSection,
+                                Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Wall}"/>
             </Grid>
         </Grid>
 
