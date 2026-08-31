@@ -34,6 +34,9 @@ public sealed class HikvisionException : Exception
         43 => "memoria insuficiente en el dispositivo",
         47 => "usuario no existe",
         153 => "usuario bloqueado por intentos fallidos",
+        // Específicos del muro de video (familia DS-6900UDI).
+        935 => "la ventana no existe en el decoder",
+        951 => "el decoder alcanzó el máximo de ventanas simultáneas; reduzca la cantidad de ventanas en otras pantallas del muro",
         _ => "ver tabla de errores de HCNetSDK",
     };
 }
