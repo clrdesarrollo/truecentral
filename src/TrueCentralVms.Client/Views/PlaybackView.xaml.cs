@@ -107,6 +107,9 @@ public partial class PlaybackView : UserControl
     // ------------------------------------------------------------------
     private readonly HashSet<FlyleafLib.Controls.WPF.FlyleafHost> _hookedHosts = [];
 
+    /// <summary>Modo zoom digital (lupa + recuadro sobre el video).</summary>
+    private readonly ZoomDragController _zoom = new();
+
     private void OnFlyleafHostLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is not FlyleafLib.Controls.WPF.FlyleafHost host || !_hookedHosts.Add(host))
@@ -120,16 +123,58 @@ public partial class PlaybackView : UserControl
         }));
     }
 
+    // ------------------------------------------------------------------
+    // Arrastrar un canal del árbol y soltarlo sobre un cuadro. El umbral de
+    // arrastre del sistema evita interferir con el clic y el doble clic, que
+    // siguen sirviendo para sumar canales.
+    // ------------------------------------------------------------------
+    private ChannelNode? _dragCandidate;
+    private Point _dragStart;
+
+    private void OnTreeMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragCandidate = (e.OriginalSource as FrameworkElement)?.DataContext as ChannelNode;
+        _dragStart = e.GetPosition(this);
+    }
+
+    private void OnTreeMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed) { _dragCandidate = null; return; }
+        if (_dragCandidate is not { } node) return;
+        var position = e.GetPosition(this);
+        if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        _dragCandidate = null;
+        DragDrop.DoDragDrop(PlaybackTree, new DataObject(typeof(ChannelNode), node), DragDropEffects.Copy);
+    }
+
+    /// <summary>El botón de la barra enciende el modo zoom en todas las ventanas de video.</summary>
+    private void OnDigitalZoomToggled(object sender, RoutedEventArgs e) =>
+        _zoom.SetEnabled(Vm.Playback.IsDigitalZoomMode);
+
     private void HookVideoWindow(FlyleafLib.Controls.WPF.FlyleafHost host, Window? window)
     {
         if (window is null) return;
+        // Con el modo zoom activo el arrastre marca el área: los saltos de
+        // ±30 s por doble clic lateral quedan en pausa mientras tanto.
+        _zoom.Attach(window, () => host.DataContext as PlaybackCellViewModel);
         window.AddHandler(MouseLeftButtonDownEvent, new MouseButtonEventHandler((_, e) =>
         {
+            if (_zoom.IsEnabled) return;
             if (host.DataContext is not PlaybackCellViewModel cell) return;
             HandleVideoClick(cell, e.GetPosition(window).X, window.ActualWidth, e.ClickCount);
         }), handledEventsToo: true);
         // Un clic en el video deja el foco del teclado en la ventana de
         // Flyleaf: Esc también debe salir de la pantalla completa desde ahí.
         window.AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler(OnKeyDown), handledEventsToo: true);
+        // El video tapa el cuadro WPF: el canal arrastrado se suelta
+        // directamente sobre la ventana de Flyleaf, que reemplaza ESE cuadro.
+        window.AllowDrop = true;
+        window.AddHandler(DragDrop.DropEvent, new DragEventHandler(async (_, e) =>
+        {
+            if (host.DataContext is PlaybackCellViewModel cell &&
+                e.Data.GetData(typeof(ChannelNode)) is ChannelNode node)
+                await Vm.Playback.SelectChannelAsync(node, target: cell);
+        }), handledEventsToo: true);
     }
 }

@@ -14,7 +14,7 @@ namespace TrueCentralVms.Client.ViewModels;
 /// stream se corta (red, equipo reiniciado, expulsión), la celda reintenta
 /// sola mientras siga asignada.
 /// </summary>
-public partial class VideoCellViewModel : ObservableObject, IDisposable
+public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDisposable
 {
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
 
@@ -43,6 +43,12 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string? _title;
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private bool _isEmpty = true;
+
+    /// <summary>
+    /// El cuadro está pidiendo la concesión y abriendo el stream. Sin aviso, el
+    /// par de segundos hasta el primer cuadro parece un cuadro colgado.
+    /// </summary>
+    [ObservableProperty] private bool _isConnecting;
     /// <summary>Número del cuadro en la grilla (1..N), visible en su barra.</summary>
     [ObservableProperty] private int _index;
     /// <summary>Canal asignado al cuadro (null = libre). Lo usa el panel PTZ.</summary>
@@ -89,6 +95,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         player.OpenCompleted += (sender, e) =>
         {
             if (!ReferenceEquals(sender, Player) || _assigned is null) return;
+            IsConnecting = false;
             if (e.Success) { Status = ""; return; }
             Status = "No se pudo abrir el video: " + (e.Error ?? "error desconocido");
             ScheduleRetry(_openSequence);
@@ -126,6 +133,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         IsEmpty = false;
         Title = $"{node.Device.Name} · {node.Channel.Name}";
         Status = "Conectando…";
+        IsConnecting = true;
         await ConnectAsync(sequence);
     }
 
@@ -368,18 +376,27 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
     public void DigitalZoomStep(bool zoomIn, System.Windows.Point center)
     {
         double target = Math.Clamp(Player.Config.Video.Zoom + (zoomIn ? 20 : -20), 100, 600);
-        if (target <= 100)
+        if (target <= ViewModels.DigitalZoom.NoZoom)
             ResetDigitalZoom();
         else
             Player.Config.Video.SetZoomAndCenter(target, center);
-        FlashStatus(target <= 100 ? "Zoom 1x" : $"Zoom digital {target / 100.0:0.#}x");
+        FlashStatus(ViewModels.DigitalZoom.Describe(target));
     }
 
-    private void ResetDigitalZoom()
-    {
-        Player.Config.Video.Zoom = 100;
-        Player.Config.Video.ZoomCenter = new System.Windows.Point(0.5, 0.5);
-    }
+    /// <summary>Un cuadro vacío no tiene nada que acercar.</summary>
+    public bool CanDigitalZoom => !IsEmpty;
+
+    /// <summary>Acerca el área marcada con el mouse (píxeles físicos de la ventana de video).</summary>
+    public void DigitalZoomToArea(System.Windows.Rect areaPx) =>
+        FlashStatus(ViewModels.DigitalZoom.Describe(ViewModels.DigitalZoom.ApplyArea(Player, areaPx)));
+
+    /// <summary>Rueda del mouse: un paso de zoom que deja quieto el punto bajo el cursor.</summary>
+    public void DigitalZoomStepAt(System.Windows.Point pointPx, bool zoomIn) =>
+        FlashStatus(ViewModels.DigitalZoom.Describe(
+            ViewModels.DigitalZoom.StepAtPoint(Player, zoomIn, pointPx)));
+
+    /// <summary>Vuelve a 1× (se hace también al abrir otro canal en el cuadro).</summary>
+    public void ResetDigitalZoom() => ViewModels.DigitalZoom.Reset(Player);
 
     [RelayCommand]
     private void ToggleAudio() => IsAudioOn = !IsAudioOn;
@@ -404,6 +421,7 @@ public partial class VideoCellViewModel : ObservableObject, IDisposable
         Player.Stop();
         Title = null;
         Status = "";
+        IsConnecting = false;
         IsEmpty = true;
     }
 

@@ -166,6 +166,9 @@ public partial class LiveView : UserControl
     // ------------------------------------------------------------------
     private readonly HashSet<FlyleafLib.Controls.WPF.FlyleafHost> _hookedHosts = [];
 
+    /// <summary>Modo zoom digital (lupa + recuadro sobre el video).</summary>
+    private readonly ZoomDragController _zoom = new();
+
     private void OnFlyleafHostLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is not FlyleafLib.Controls.WPF.FlyleafHost host || !_hookedHosts.Add(host))
@@ -179,11 +182,19 @@ public partial class LiveView : UserControl
         }));
     }
 
+    /// <summary>El botón de la barra enciende el modo zoom en todas las ventanas de video.</summary>
+    private void OnDigitalZoomToggled(object sender, RoutedEventArgs e) =>
+        _zoom.SetEnabled(Vm.IsDigitalZoomMode);
+
     private void HookVideoWindow(FlyleafLib.Controls.WPF.FlyleafHost host, Window? window)
     {
         if (window is null) return;
+        // El modo zoom se engancha PRIMERO: mientras está activo, el arrastre
+        // sobre el video marca el área y no debe seleccionar ni maximizar.
+        _zoom.Attach(window, () => host.DataContext as VideoCellViewModel);
         window.AddHandler(MouseLeftButtonDownEvent, new MouseButtonEventHandler((_, e) =>
         {
+            if (_zoom.IsEnabled) return;
             if (host.DataContext is not VideoCellViewModel cell) return;
             // Doble clic sobre el video: maximizar/restaurar el cuadro
             // (el fullscreen propio de Flyleaf está deshabilitado).
@@ -209,6 +220,9 @@ public partial class LiveView : UserControl
         // (posición normalizada 0..1 dentro de la ventana de video).
         window.AddHandler(MouseWheelEvent, new MouseWheelEventHandler((_, e) =>
         {
+            // Con el modo zoom activo manda el controlador, que ancla el paso
+            // en el puntero; si no, se aplicaría el zoom dos veces.
+            if (_zoom.IsEnabled) return;
             if (host.DataContext is not VideoCellViewModel cell || cell.IsEmpty) return;
             var position = e.GetPosition(window);
             var center = new Point(

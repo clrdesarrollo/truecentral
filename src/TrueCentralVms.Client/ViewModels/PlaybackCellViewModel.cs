@@ -14,11 +14,21 @@ namespace TrueCentralVms.Client.ViewModels;
 /// reproducción multicanal va sincronizada por hora del equipo, no por
 /// relojes de video independientes).
 /// </summary>
-public partial class PlaybackCellViewModel : ObservableObject, IDisposable
+public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDisposable
 {
     private readonly ApiClient _api;
+    private readonly ClientSettings _settings;
+    private string? _recordingFile;
     private int _openSequence;
     private double _speed = 1;
+
+    /// <summary>
+    /// Aperturas en vuelo. <c>Player.OpenAsync</c> cierra primero el tramo
+    /// anterior, y ese cierre también dispara <c>PlaybackStopped</c>: sin este
+    /// contador, saltar a otra hora mientras se reproduce se interpretaba como
+    /// "terminó el tramo" y la reproducción quedaba detenida en el acto.
+    /// </summary>
+    private int _pendingOpens;
 
     public ChannelNode Channel { get; }
     public Player Player { get; }
@@ -30,6 +40,12 @@ public partial class PlaybackCellViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private bool _isPlaying;
     [ObservableProperty] private bool _isAudioOn;
+
+    /// <summary>
+    /// El tramo se está abriendo: pedir la concesión y que el equipo entregue
+    /// el primer cuadro toma un momento, y sin aviso el cuadro parece colgado.
+    /// </summary>
+    [ObservableProperty] private bool _isOpening;
 
     /// <summary>
     /// false cuando el equipo no arranca exactamente en el instante pedido
@@ -50,9 +66,19 @@ public partial class PlaybackCellViewModel : ObservableObject, IDisposable
     /// <summary>El usuario cerró el cuadro con su ✕.</summary>
     public event Action<PlaybackCellViewModel>? CloseRequested;
 
+    /// <summary>Se guardó un archivo local (título, glifo MDL2, ruta).</summary>
+    public event Action<string, string, string>? MediaSaved;
+
+    /// <summary>Cápsula en curso en este cuadro.</summary>
+    [ObservableProperty] private bool _isRecordingClip;
+
+    /// <summary>Tiempo transcurrido de la cápsula, para la barra del cuadro.</summary>
+    [ObservableProperty] private string _recordingElapsed = "";
+
     public PlaybackCellViewModel(ApiClient api, ClientSettings settings, ChannelNode channel)
     {
         _api = api;
+        _settings = settings;
         Channel = channel;
 
         var config = new Config();
@@ -69,20 +95,47 @@ public partial class PlaybackCellViewModel : ObservableObject, IDisposable
 
         Player.OpenCompleted += (_, e) =>
         {
-            // La velocidad se reafirma con cada apertura: el player arranca
-            // siempre en 1× y el usuario espera seguir en la que eligió.
-            if (e.Success && _speed != 1) ApplySpeed(_speed);
-            if (e.Success) { Status = ""; return; }
+            // Si al descontar esta apertura todavía quedan otras en vuelo, la
+            // que terminó es una que el operador dejó atrás (saltó a otra hora
+            // o cambió la velocidad): su resultado ya no dice nada del cuadro.
+            bool superseded = Interlocked.Decrement(ref _pendingOpens) > 0;
+            if (!superseded) IsOpening = false;
+
+            if (e.Success)
+            {
+                // La velocidad se reafirma con cada apertura: el player arranca
+                // siempre en 1× y el usuario espera seguir en la que eligió.
+                if (_speed != 1) ApplySpeed(_speed);
+                if (!superseded) Status = "";
+                return;
+            }
+
+            // Abrir el tramo nuevo CANCELA el anterior, y esa cancelación llega
+            // como si fuera un fallo. Mostrarla ponía "No se pudo abrir la
+            // grabación: Cancelled" sobre un video que estaba abriendo bien.
+            if (superseded || IsCancellation(e.Error)) return;
+
             if (IsPlaying) Status = "No se pudo abrir la grabación: " + (e.Error ?? "error desconocido");
             IsPlaying = false;
         };
         Player.PlaybackStopped += (_, _) =>
         {
+            // El cierre del tramo anterior que hace la apertura nueva NO es el
+            // fin de la reproducción: es el salto a otra hora.
+            if (Volatile.Read(ref _pendingOpens) > 0) return;
             if (!IsPlaying) return;
             IsPlaying = false;
             Status = "Fin del tramo.";
         };
     }
+
+    /// <summary>
+    /// ¿El error de apertura es una cancelación? Flyleaf informa así la
+    /// apertura que quedó atrás cuando se abre otra encima, y eso no es un
+    /// fallo que mostrarle al operador.
+    /// </summary>
+    private static bool IsCancellation(string? error) =>
+        error is { Length: > 0 } && error.Contains("cancel", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Tramos grabados del canal para un día (hora local del equipo).</summary>
     public async Task LoadSegmentsAsync(DateTime date)
@@ -104,13 +157,19 @@ public partial class PlaybackCellViewModel : ObservableObject, IDisposable
     /// una concesión NUEVA: el servidor monta la ruta de reproducción en el
     /// media server y entrega un token corto.
     /// </summary>
-    public async Task<bool> OpenAtAsync(DateTime localTime, DateTime localEnd)
+    public async Task<bool> OpenAtAsync(DateTime localTime, DateTime localEnd, double speed = 1)
     {
         int sequence = ++_openSequence;
+        IsOpening = true;
         try
         {
+            // La velocidad viaja en la concesión: a más de 1× el servidor toma
+            // la sesión RTSP del equipo y le pide que entregue más rápido. El
+            // player acompaña con la misma velocidad (ApplySpeed más abajo):
+            // llegan más cuadros por segundo y se presentan más rápido.
+            _speed = speed;
             var grant = await _api.RequestPlaybackAsync(Channel.Device.Id, Channel.Channel.RtspChannel,
-                localTime, localEnd);
+                localTime, localEnd, speed);
             if (sequence != _openSequence) return false; // el usuario ya se movió a otra hora
             RangeStart = localTime;
             IsSeekExact = grant.ExactSeek;
@@ -119,16 +178,143 @@ public partial class PlaybackCellViewModel : ObservableObject, IDisposable
                 ? ""
                 : "El equipo reproduce desde el inicio de su grabación (ONVIF no permite posicionar).";
             Player.Config.Audio.Enabled = IsAudioOn;
+            // Se cuenta ANTES de abrir: el cierre del tramo anterior ocurre
+            // dentro de OpenAsync y debe caer dentro de la ventana protegida.
+            Interlocked.Increment(ref _pendingOpens);
             Player.OpenAsync(grant.RtspUrl);
             return true;
         }
         catch (ApiException ex)
         {
             if (sequence != _openSequence) return false;
+            IsOpening = false;
             IsPlaying = false;
             Status = ex.Message;
             return false;
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Captura y cápsula local (mismas carpetas de Configuración que el vivo)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Nombre de archivo con la hora de la GRABACIÓN, no la del reloj del
+    /// puesto: en reproducción lo que identifica a la evidencia es el momento
+    /// que se está viendo.
+    /// </summary>
+    private string MediaFileBase(string folder, string extension)
+    {
+        System.IO.Directory.CreateDirectory(folder);
+        string name = string.Join("_", Title.Split(System.IO.Path.GetInvalidFileNameChars()));
+        var moment = Playhead ?? RangeStart;
+        return System.IO.Path.Combine(folder, $"{name} {moment:yyyy-MM-dd HH.mm.ss}{extension}");
+    }
+
+    /// <summary>Guarda el cuadro actual como imagen en la carpeta de capturas.</summary>
+    [RelayCommand]
+    private void Snapshot()
+    {
+        if (!IsPlaying) return;
+        try
+        {
+            string extension = _settings.SnapshotFormat.Equals("png", StringComparison.OrdinalIgnoreCase) ? ".png" : ".jpg";
+            string file = MediaFileBase(_settings.EffectiveSnapshotFolder, extension);
+            Player.TakeSnapshotToFile(file);
+            Status = "Captura guardada";
+            MediaSaved?.Invoke("Captura guardada", "\uE722", file);
+        }
+        catch (Exception ex)
+        {
+            Status = "No se pudo guardar la captura: " + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Graba una cápsula de lo que se está reproduciendo, tal como llega
+    /// (remux sin recomprimir). Un clic parte, otro detiene. Es distinto de
+    /// "Exportar MP4": eso pide al equipo un tramo por hora exacta; esto
+    /// guarda lo que el operador está mirando ahora.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleRecording()
+    {
+        if (IsRecordingClip)
+        {
+            StopClipRecording(notify: true);
+            return;
+        }
+        if (!IsPlaying) return;
+        try
+        {
+            // Sin extensión: Flyleaf agrega la recomendada según el contenedor
+            // (y actualiza la ruta por el parámetro ref).
+            string file = MediaFileBase(_settings.EffectiveRecordingFolder, "");
+            Player.StartRecording(ref file, useRecommendedExtension: true);
+            _recordingFile = file;
+            IsRecordingClip = true;
+            RunRecordingTicker();
+        }
+        catch (Exception ex)
+        {
+            Status = "No se pudo iniciar la grabación: " + ex.Message;
+        }
+    }
+
+    private void StopClipRecording(bool notify)
+    {
+        if (!IsRecordingClip) return;
+        try { Player.StopRecording(); }
+        catch (Exception) { /* ya estaba cerrada: igual se avisa el archivo */ }
+        IsRecordingClip = false;
+
+        string? file = _recordingFile;
+        _recordingFile = null;
+        if (!notify || file is null) return;
+        Status = "Grabación guardada";
+        MediaSaved?.Invoke("Grabación guardada", "\uE714", file);
+    }
+
+    /// <summary>Contador de la cápsula en la barra del cuadro (mm:ss).</summary>
+    private async void RunRecordingTicker()
+    {
+        var started = DateTime.UtcNow;
+        while (IsRecordingClip)
+        {
+            var elapsed = DateTime.UtcNow - started;
+            RecordingElapsed = elapsed.TotalHours >= 1
+                ? elapsed.ToString(@"h\:mm\:ss")
+                : elapsed.ToString(@"mm\:ss");
+            await Task.Delay(500);
+        }
+        RecordingElapsed = "";
+    }
+
+    // ------------------------------------------------------------------
+    // Zoom digital (mismo comportamiento que la Vista en Vivo)
+    // ------------------------------------------------------------------
+
+    /// <summary>El zoom vale también con la reproducción pausada (revisar un detalle).</summary>
+    public bool CanDigitalZoom => true;
+
+    /// <summary>Acerca el área marcada con el mouse (píxeles físicos de la ventana de video).</summary>
+    public void DigitalZoomToArea(System.Windows.Rect areaPx)
+    {
+        double zoom = DigitalZoom.ApplyArea(Player, areaPx);
+        Status = zoom <= DigitalZoom.NoZoom ? "" : DigitalZoom.Describe(zoom);
+    }
+
+    /// <summary>Rueda del mouse: un paso de zoom que deja quieto el punto bajo el cursor.</summary>
+    public void DigitalZoomStepAt(System.Windows.Point pointPx, bool zoomIn)
+    {
+        double zoom = DigitalZoom.StepAtPoint(Player, zoomIn, pointPx);
+        Status = zoom <= DigitalZoom.NoZoom ? "" : DigitalZoom.Describe(zoom);
+    }
+
+    public void ResetDigitalZoom()
+    {
+        DigitalZoom.Reset(Player);
+        Status = "";
     }
 
     public void Pause() => Player.Pause();
@@ -152,6 +338,8 @@ public partial class PlaybackCellViewModel : ObservableObject, IDisposable
     public void Stop()
     {
         _openSequence++;
+        StopClipRecording(notify: true);
+        IsOpening = false;
         IsPlaying = false;
         Player.Stop();
         Status = "";
@@ -178,6 +366,7 @@ public partial class PlaybackCellViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _openSequence++;
+        StopClipRecording(notify: false);
         Player.Dispose();
     }
 }

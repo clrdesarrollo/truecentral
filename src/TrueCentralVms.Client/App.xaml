@@ -90,6 +90,75 @@
             </Setter>
         </Style>
 
+        <!--
+            Versión ToggleButton de GhostButton (selector de división de la
+            Vista en Vivo, modo Recorte de Reproducción). Vive aquí y no en
+            los recursos de una vista: dos módulos distintos lo usan, y un
+            StaticResource NO alcanza los recursos de otro UserControl —
+            estando solo en LiveView, la carga de PlaybackView reventaba
+            "No se puede encontrar el recurso con el nombre 'GhostToggle'".
+        -->
+        <Style x:Key="GhostToggle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#1D2733"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#1D2733"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+            Indicador de carga: un aro con el trazo cortado que gira. Va en la
+            barra del cuadro y no encima del video porque el video de Flyleaf
+            se pinta en una ventana propia superpuesta, que taparía cualquier
+            elemento WPF puesto sobre ella.
+            El RenderTransform NO se fija aquí a propósito: un transform en un
+            Setter se comparte entre todos los usos y la animación no puede
+            moverlo. Cada uso pone el suyo.
+        -->
+        <Style x:Key="LoadingSpinner" TargetType="Ellipse">
+            <Setter Property="Width" Value="13"/>
+            <Setter Property="Height" Value="13"/>
+            <Setter Property="Stroke" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="StrokeThickness" Value="2"/>
+            <Setter Property="StrokeDashArray" Value="7 4"/>
+            <Setter Property="StrokeDashCap" Value="Round"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Style.Triggers>
+                <Trigger Property="IsVisible" Value="True">
+                    <Trigger.EnterActions>
+                        <BeginStoryboard x:Name="SpinnerStory">
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="RenderTransform.Angle"
+                                                 From="0" To="360" Duration="0:0:1.1" RepeatBehavior="Forever"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.EnterActions>
+                    <Trigger.ExitActions>
+                        <StopStoryboard BeginStoryboardName="SpinnerStory"/>
+                    </Trigger.ExitActions>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- ==============================================================
              Ventana sin marco de Windows: botones de la barra de título
              propia (minimizar / maximizar / cerrar). Necesitan
