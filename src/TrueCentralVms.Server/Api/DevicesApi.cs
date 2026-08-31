@@ -240,11 +240,18 @@ public static class DevicesApi
         });
 
         app.MapDelete("/api/devices/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
-            IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, CancellationToken ct) =>
+            IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, Services.WallService walls,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var device = await db.Devices.FindAsync([id], ct);
             if (device is null) return Results.NotFound();
+
+            // El muro de video sigue decodificando por su cuenta: hay que
+            // apagar sus ventanas ANTES de que el borrado en cascada se lleve
+            // los canales, o el decodificador queda pintando una cámara que el
+            // sistema ya no conoce.
+            await walls.ReleaseDeviceAsync(id);
 
             db.Devices.Remove(device); // canales caen por cascada
             await db.SaveChangesAsync(ct);

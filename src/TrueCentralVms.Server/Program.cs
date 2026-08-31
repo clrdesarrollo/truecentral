@@ -52,6 +52,15 @@ builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Onvif
 builder.Services.AddSingleton<DriverRegistry>();
 builder.Services.AddHostedService<DeviceStatusMonitor>();
 
+// Muro de video: drivers de DECODIFICACIÓN (distintos de los de dispositivo:
+// aquí el equipo pinta las pantallas del muro). Para soportar una marca nueva
+// basta con implementar IDecoderDriverFactory y agregarla aquí.
+builder.Services.AddSingleton<IDecoderDriverFactory, HikvisionDecoderDriverFactory>();
+builder.Services.AddSingleton<IDecoderDriverFactory, TrueCentralVms.Drivers.Onvif.OnvifDecoderDriverFactory>();
+builder.Services.AddSingleton<DecoderDriverRegistry>();
+builder.Services.AddSingleton<DecoderSessionManager>();
+builder.Services.AddScoped<WallService>();
+
 // Plano de media: MediaMTX embebido + tokens de streaming + contabilidad.
 builder.Services.AddSingleton<StreamTokenService>();
 builder.Services.AddSingleton<MediaMtxManager>();
@@ -138,6 +147,8 @@ app.MapStreamingAuthApi();
 app.MapPlaybackApi();
 app.MapDiscoveryApi();
 app.MapSystemApi();
+app.MapDecodersApi();
+app.MapWallsApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);
 
@@ -146,4 +157,22 @@ app.MapFallbackToFile("index.html");
 
 app.Logger.LogInformation("CLR TrueCentral VMS v{Version} escuchando en {Urls}.",
     serverVersion, builder.Configuration["Urls"]);
+
+// Precalentamiento del muro en segundo plano: sincroniza cada muro al arrancar
+// para que el primer comando del operador (p. ej. la pantalla completa por
+// doble clic) sea instantáneo en vez de pagar la sincronización perezosa de la
+// sesión nueva contra el decodificador.
+_ = Task.Run(async () =>
+{
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WallService>().WarmUpDecodersAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "El precalentamiento de los decodificadores del muro falló.");
+    }
+});
+
 app.Run();
