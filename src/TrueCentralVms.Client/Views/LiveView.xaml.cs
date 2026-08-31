@@ -139,20 +139,121 @@ public partial class LiveView : UserControl
     /// <summary>Soltar sobre un cuadro (barra o cuerpo vacío): abrir ahí.</summary>
     private async void OnCellDrop(object sender, DragEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell } &&
-            e.Data.GetData(typeof(ChannelNode)) is ChannelNode node)
-            await Vm.OpenChannelInCellAsync(node, cell);
+        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell })
+            await HandleCellDropAsync(cell, e);
+    }
+
+    private void OnCellDragOver(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell })
+            HandleCellDragOver(cell, e);
+    }
+
+    private void OnCellDragLeave(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell })
+            HandleCellDragLeave(cell);
     }
 
     /// <summary>Clic en la barra del cuadro (o en el hueco vacío): seleccionarlo.</summary>
     private void OnCellClick(object sender, MouseButtonEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: VideoCellViewModel cell }) return;
+        if (sender is not FrameworkElement { DataContext: VideoCellViewModel cell } element) return;
         // Doble clic: alternar entre el cuadro maximizado y la grilla.
         if (e.ClickCount == 2)
+        {
             Vm.ToggleMaximize(cell);
-        else
-            SelectCell(cell);
+            return;
+        }
+        // El mismo clic puede terminar en arrastre: queda armado por si el
+        // puntero se mueve antes de soltar el botón.
+        ArmCellDrag(cell, element, e.GetPosition(element));
+        SelectCell(cell);
+    }
+
+    /// <summary>Movimiento con el botón apretado sobre la barra o el hueco
+    /// vacío del cuadro: puede convertirse en el arrastre del cuadro.</summary>
+    private void OnCellMouseMove(object sender, MouseEventArgs e)
+    {
+        if (sender is UIElement element) TryStartCellDrag(element, e);
+    }
+
+    // ------------------------------------------------------------------
+    // Arrastrar un cuadro sobre otro: las cámaras cambian de ubicación en la
+    // grilla (se intercambian si el destino tiene video; se mudan si está
+    // libre). El gesto se arma tanto desde la barra del cuadro como desde el
+    // video, que vive en ventanas propias de Flyleaf y no comparte los
+    // eventos de mouse con el árbol visual de WPF.
+    // ------------------------------------------------------------------
+    private VideoCellViewModel? _cellDragCandidate;
+    /// <summary>Elemento donde se apretó el botón: el punto de partida está en
+    /// SUS coordenadas (la barra del cuadro y la ventana de video de Flyleaf
+    /// son árboles visuales distintos, sus posiciones no se comparan).</summary>
+    private UIElement? _cellDragOrigin;
+    private Point _cellDragStart;
+
+    /// <summary>Un cuadro vacío no tiene nada que llevarse a otro lado.</summary>
+    private void ArmCellDrag(VideoCellViewModel cell, UIElement origin, Point start)
+    {
+        _cellDragCandidate = cell.IsEmpty ? null : cell;
+        _cellDragOrigin = origin;
+        _cellDragStart = start;
+    }
+
+    /// <summary>El arrastre parte recién al superar el umbral del sistema: así
+    /// el clic (seleccionar) y el doble clic (maximizar) siguen intactos.</summary>
+    private void TryStartCellDrag(UIElement source, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed) { _cellDragCandidate = null; return; }
+        if (_cellDragCandidate is not { } cell) return;
+        // El umbral se mide contra donde se apretó; si el puntero ya salió de
+        // ese elemento, el gesto es un arrastre sin lugar a dudas.
+        if (ReferenceEquals(source, _cellDragOrigin))
+        {
+            var position = e.GetPosition(source);
+            if (Math.Abs(position.X - _cellDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+                Math.Abs(position.Y - _cellDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        }
+        _cellDragCandidate = null;
+        try { DragDrop.DoDragDrop(source, new DataObject(typeof(VideoCellViewModel), cell), DragDropEffects.Move); }
+        finally { Vm.DropTargetCell = null; }
+    }
+
+    /// <summary>Qué acepta un cuadro: otro cuadro (mover o intercambiar la
+    /// cámara) o un canal del árbol (abrirlo ahí).</summary>
+    private static DragDropEffects CellDropEffect(DragEventArgs e, VideoCellViewModel cell) =>
+        e.Data.GetData(typeof(VideoCellViewModel)) is VideoCellViewModel dragged
+            ? ReferenceEquals(dragged, cell) ? DragDropEffects.None : DragDropEffects.Move
+            : e.Data.GetDataPresent(typeof(ChannelNode)) ? DragDropEffects.Copy : DragDropEffects.None;
+
+    /// <summary>El cuadro bajo el puntero se ilumina mientras el arrastre está
+    /// encima (el borde es WPF y se ve alrededor del video).</summary>
+    private void HandleCellDragOver(VideoCellViewModel cell, DragEventArgs e)
+    {
+        e.Effects = CellDropEffect(e, cell);
+        Vm.DropTargetCell = e.Effects == DragDropEffects.None ? null : cell;
+        e.Handled = true;
+    }
+
+    private void HandleCellDragLeave(VideoCellViewModel cell)
+    {
+        if (Vm.DropTargetCell == cell) Vm.DropTargetCell = null;
+    }
+
+    private async Task HandleCellDropAsync(VideoCellViewModel cell, DragEventArgs e)
+    {
+        Vm.DropTargetCell = null;
+        if (e.Data.GetData(typeof(VideoCellViewModel)) is VideoCellViewModel dragged)
+        {
+            e.Handled = true;
+            Vm.SwapCells(dragged, cell);
+            return;
+        }
+        if (e.Data.GetData(typeof(ChannelNode)) is ChannelNode node)
+        {
+            e.Handled = true;
+            await Vm.OpenChannelInCellAsync(node, cell);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -199,18 +300,35 @@ public partial class LiveView : UserControl
             // Doble clic sobre el video: maximizar/restaurar el cuadro
             // (el fullscreen propio de Flyleaf está deshabilitado).
             if (e.ClickCount == 2)
+            {
                 Vm.ToggleMaximize(cell);
-            else
-                SelectCell(cell);
+                return;
+            }
+            ArmCellDrag(cell, window, e.GetPosition(window));
+            SelectCell(cell);
         }), handledEventsToo: true);
-        // El video tapa la celda WPF: el drop de un canal arrastrado desde el
-        // árbol se acepta directamente en la ventana de Flyleaf.
+        // Arrastrar el video hacia otro cuadro cambia la cámara de ubicación.
+        window.AddHandler(MouseMoveEvent, new MouseEventHandler((_, e) =>
+        {
+            // Con el modo zoom encendido el arrastre marca el área a acercar.
+            if (_zoom.IsEnabled) return;
+            TryStartCellDrag(window, e);
+        }), handledEventsToo: true);
+        // El video tapa la celda WPF: lo que se suelte sobre él (un canal del
+        // árbol, o el video de otro cuadro) se acepta directamente en la
+        // ventana de Flyleaf.
         window.AllowDrop = true;
+        window.AddHandler(DragDrop.DragOverEvent, new DragEventHandler((_, e) =>
+        {
+            if (host.DataContext is VideoCellViewModel cell) HandleCellDragOver(cell, e);
+        }), handledEventsToo: true);
+        window.AddHandler(DragDrop.DragLeaveEvent, new DragEventHandler((_, e) =>
+        {
+            if (host.DataContext is VideoCellViewModel cell) HandleCellDragLeave(cell);
+        }), handledEventsToo: true);
         window.AddHandler(DragDrop.DropEvent, new DragEventHandler(async (_, e) =>
         {
-            if (host.DataContext is VideoCellViewModel cell &&
-                e.Data.GetData(typeof(ChannelNode)) is ChannelNode node)
-                await Vm.OpenChannelInCellAsync(node, cell);
+            if (host.DataContext is VideoCellViewModel cell) await HandleCellDropAsync(cell, e);
         }), handledEventsToo: true);
         // Un clic en el video deja el foco del teclado en la ventana de
         // Flyleaf: el PTZ por teclado también debe funcionar desde ahí.

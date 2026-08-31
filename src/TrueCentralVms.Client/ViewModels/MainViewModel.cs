@@ -36,6 +36,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _connectionStatus = "Conectado";
     [ObservableProperty] private bool _isConnected = true;
     [ObservableProperty] private VideoCellViewModel? _selectedCell;
+    /// <summary>Cuadro bajo el puntero durante un arrastre (se ilumina para
+    /// mostrar dónde va a caer la cámara). null = no hay arrastre encima.</summary>
+    [ObservableProperty] private VideoCellViewModel? _dropTargetCell;
     [ObservableProperty] private string _statusMessage = ReadyMessage;
 
     // ---------- Navegación (navbar superior + menú lateral) ----------
@@ -565,6 +568,34 @@ public partial class MainViewModel : ObservableObject
     /// la grilla): sin avanzar la selección.</summary>
     public async Task OpenChannelInCellAsync(ChannelNode node, VideoCellViewModel cell) =>
         await cell.OpenAsync(node, DefaultProfileForOpen());
+
+    /// <summary>
+    /// Arrastrar un cuadro sobre otro (estilo iVMS-4200): las cámaras cambian
+    /// de ubicación en la grilla. Si el destino tiene video se intercambian; si
+    /// está libre, la cámara se muda y el origen queda libre. Los números de
+    /// cuadro no se mueven — son la posición — y el video NO se corta: viaja el
+    /// player, no el canal, así que también funciona entre cuadros de distinto
+    /// tamaño (por ejemplo el cuadro grande de las divisiones asimétricas).
+    /// </summary>
+    public void SwapCells(VideoCellViewModel source, VideoCellViewModel target)
+    {
+        if (ReferenceEquals(source, target)) return;
+        if (!Cells.Contains(source) || !Cells.Contains(target)) return;
+        if (source.IsEmpty && target.IsEmpty) return;
+
+        bool exchange = !target.IsEmpty;
+        string moved = source.Title ?? "";
+        string displaced = target.Title ?? "";
+        int from = source.Index, to = target.Index;
+
+        VideoCellViewModel.SwapContent(source, target);
+
+        // La selección (y con ella el panel PTZ) sigue a la cámara movida.
+        SelectedCell = target;
+        StatusMessage = exchange
+            ? $"Cuadros {from} y {to} intercambiados: \"{moved}\" ↔ \"{displaced}\"."
+            : $"\"{moved}\" movida del cuadro {from} al {to}.";
+    }
 
     /// <summary>
     /// Doble clic en un equipo del árbol: abre TODOS sus canales habilitados y

@@ -434,7 +434,9 @@
                          seleccionarlo, y el cuerpo solo es clickeable cuando está vacío. -->
                     <Border Margin="3" Background="#0A0E13" CornerRadius="4"
                             BorderThickness="2" MouseLeftButtonDown="OnCellClick"
-                            AllowDrop="True" Drop="OnCellDrop">
+                            MouseMove="OnCellMouseMove"
+                            AllowDrop="True" Drop="OnCellDrop"
+                            DragOver="OnCellDragOver" DragLeave="OnCellDragLeave">
                         <Border.Style>
                             <Style TargetType="Border">
                                 <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
@@ -448,6 +450,16 @@
                                         </DataTrigger.Binding>
                                         <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
                                     </DataTrigger>
+                                    <!-- Destino del arrastre en curso: dónde va a caer la cámara -->
+                                    <DataTrigger Value="True">
+                                        <DataTrigger.Binding>
+                                            <MultiBinding Converter="{x:Static vm:SelectedCellComparer.Instance}">
+                                                <Binding/>
+                                                <Binding Path="DataContext.DropTargetCell" RelativeSource="{RelativeSource AncestorType=Window}"/>
+                                            </MultiBinding>
+                                        </DataTrigger.Binding>
+                                        <Setter Property="BorderBrush" Value="#FCD34D"/>
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
@@ -458,6 +470,17 @@
                             </Grid.RowDefinitions>
                             <!-- Barra del cuadro: número, título, estado y cerrar -->
                             <DockPanel Grid.Row="0" Background="#151D26" Cursor="Hand">
+                                <DockPanel.Style>
+                                    <Style TargetType="DockPanel">
+                                        <Setter Property="ToolTip"
+                                                Value="Arrastre este cuadro sobre otro para cambiar la cámara de ubicación (si el otro tiene video, se intercambian)"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsEmpty}" Value="True">
+                                                <Setter Property="ToolTip" Value="{x:Null}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DockPanel.Style>
                                 <Border DockPanel.Dock="Left" Background="{StaticResource Panel2Brush}"
                                         CornerRadius="4" Margin="5,3" Padding="6,1">
                                     <TextBlock Text="{Binding Index}" Foreground="{StaticResource MutedBrush}"
