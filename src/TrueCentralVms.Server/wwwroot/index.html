@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -32,11 +32,44 @@
       </div>
       <nav id="nav">
         <a href="#/" data-route="dashboard">Panel</a>
-        <a href="#/devices" data-route="devices">Dispositivos</a>
-        <a href="#/decoders" data-route="decoders">Decodificadores</a>
-        <a href="#/walls" data-route="walls">Muro de video</a>
-        <a href="#/sessions" data-route="sessions">Sesiones</a>
-        <a href="#/users" data-route="users">Usuarios</a>
+
+        <div class="nav-divider">Configuración</div>
+
+        <div class="nav-group" data-group="devices">
+          <button type="button" class="nav-toggle">
+            <span class="caret" aria-hidden="true"></span><span>Dispositivos</span>
+          </button>
+          <div class="nav-children">
+            <a href="#/devices" data-route="devices">Fuentes de video</a>
+            <div class="nav-group" data-group="videowall">
+              <button type="button" class="nav-toggle">
+                <span class="caret" aria-hidden="true"></span><span>Videowall</span>
+              </button>
+              <div class="nav-children">
+                <a href="#/walls" data-route="walls">Muro de video</a>
+                <a href="#/decoders" data-route="decoders">Decodificadores</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="nav-group" data-group="security">
+          <button type="button" class="nav-toggle">
+            <span class="caret" aria-hidden="true"></span><span>Seguridad</span>
+          </button>
+          <div class="nav-children">
+            <a href="#/users" data-route="users">Usuarios</a>
+          </div>
+        </div>
+
+        <div class="nav-group" data-group="streaming">
+          <button type="button" class="nav-toggle">
+            <span class="caret" aria-hidden="true"></span><span>Streaming</span>
+          </button>
+          <div class="nav-children">
+            <a href="#/sessions" data-route="sessions">Sesiones</a>
+          </div>
+        </div>
       </nav>
       <div class="sidebar-footer">
         <span id="conn-dot" class="dot ok" title="Conexión con el servidor"></span>
@@ -65,6 +98,6 @@
   <script src="api.js?v=1"></script>
   <!-- walls.js va ANTES: app.js referencia sus funciones al armar las rutas. -->
   <script src="walls.js?v=1"></script>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>
