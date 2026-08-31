@@ -335,6 +335,42 @@ public sealed class MediaMtxManager(
         return true;
     }
 
+    /// <summary>
+    /// Crea una ruta SIN fuente: la alimenta un publicador nuestro (el relé de
+    /// velocidad). Se usa solo cuando la reproducción va a velocidad distinta
+    /// de 1×, porque ahí el equipo lo pulsa el servidor y no MediaMTX.
+    /// </summary>
+    public async Task<bool> AddPublishPathAsync(string name, CancellationToken ct = default)
+    {
+        if (!IsRunning) return false;
+        await SweepPlaybackPathsAsync(TimeSpan.FromHours(2), ct);
+        try
+        {
+            using var response = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(
+                ApiHttp, $"{ApiBaseUrl}/v3/config/paths/add/{name}",
+                // Ambos explícitos: la configuración generada trae
+                // sourceOnDemand por omisión y MediaMTX rechaza la ruta si
+                // queda puesto sobre una fuente de tipo "publisher".
+                new { source = "publisher", sourceOnDemand = false }, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning("MediaMTX: no aceptó la ruta de publicación '{Name}' ({Status}).",
+                    name, (int)response.StatusCode);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("MediaMTX: error creando la ruta de publicación '{Name}': {Error}", name, ex.Message);
+            return false;
+        }
+        _playbackPaths[name] = DateTime.UtcNow;
+        return true;
+    }
+
+    /// <summary>URL local con la que un relé nuestro publica en una ruta.</summary>
+    public string PublishUrlFor(string name) => $"rtsp://127.0.0.1:{RtspPort}/{name}?token={PublishSecret}";
+
     /// <summary>Elimina las rutas de reproducción más viejas que maxAge (mejor esfuerzo).</summary>
     private async Task SweepPlaybackPathsAsync(TimeSpan maxAge, CancellationToken ct)
     {

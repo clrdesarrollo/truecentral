@@ -70,6 +70,9 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprService>());
 
 // Plano de media: MediaMTX embebido + tokens de streaming + contabilidad.
 builder.Services.AddSingleton<StreamTokenService>();
+// Relés de reproducción acelerada (el servidor toma la sesión RTSP del equipo
+// para poder pedirle velocidad; a 1× no interviene).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Rtsp.PlaybackRelayManager>();
 builder.Services.AddSingleton<MediaMtxManager>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MediaMtxManager>());
 builder.Services.AddHostedService<SessionAccounting>();

@@ -47,7 +47,7 @@ public static class PlaybackApi
             try
             {
                 var segments = await driver.QueryRecordingsAsync(conn, channelNumber, day, day.AddDays(1), ct);
-                return Results.Ok(Merge(segments)
+                return Results.Ok(ClipToDay(Merge(segments), day)
                     .Select(s => new RecordingSegmentDto(s.Start, s.End, s.Kind.ToString()))
                     .ToList());
             }
@@ -58,11 +58,83 @@ public static class PlaybackApi
         });
 
         // ------------------------------------------------------------------
+        // Diagnóstico: a qué ritmo entrega el equipo una grabación, y si
+        // acepta que se le pida más rápido (Scale / Rate-Control del RTSP).
+        // Es la medición que decide si la velocidad de reproducción puede
+        // funcionar de verdad o el equipo siempre pacea a tiempo real.
+        // ------------------------------------------------------------------
+        app.MapGet("/api/playback/{deviceId:int}/{rtspChannel:int}/rate-probe",
+            async (HttpContext ctx, int deviceId, int rtspChannel, double? scale, bool? rateControlOff,
+                int? seconds, DateTime? start, VmsDbContext db, DriverRegistry drivers,
+                CredentialProtector protector, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+
+            var channel = await db.Channels.Include(c => c.Device)
+                .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.RtspChannel == rtspChannel, ct);
+            if (channel is null) return Results.NotFound();
+
+            var device = channel.Device;
+            if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
+                return Results.Json(new { error = "El driver del equipo no está disponible." },
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+
+            var from = start ?? DateTime.Now.Date.AddHours(14);
+            var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
+                protector.Unprotect(device.PasswordCiphertext));
+            if (driver.BuildPlaybackUrl(conn, device.RtspPort, rtspChannel, from, from.AddHours(1)) is not { } source)
+                return Results.Json(new { error = "Este equipo no soporta reproducción remota." },
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+
+            var result = await RtspRateProbe.MeasureAsync(source, scale ?? 1, rateControlOff ?? false,
+                TimeSpan.FromSeconds(Math.Clamp(seconds ?? 10, 3, 30)), ct);
+            return Results.Ok(result);
+        });
+
+        // ------------------------------------------------------------------
+        // Días con grabación de un mes (marcas del calendario).
+        // ------------------------------------------------------------------
+        app.MapGet("/api/playback/{deviceId:int}/{channelNumber:int}/days",
+            async (HttpContext ctx, int deviceId, int channelNumber, int? year, int? month, VmsDbContext db,
+                DriverRegistry drivers, CredentialProtector protector, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+
+            var now = DateTime.Now;
+            int y = year ?? now.Year, m = month ?? now.Month;
+            if (y is < 2000 or > 2100 || m is < 1 or > 12)
+                return Results.Json(new { error = "Mes inválido." }, statusCode: StatusCodes.Status422UnprocessableEntity);
+
+            var channel = await db.Channels.Include(c => c.Device)
+                .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.ChannelNumber == channelNumber, ct);
+            if (channel is null) return Results.NotFound();
+
+            var device = channel.Device;
+            if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
+                return Results.Ok(Array.Empty<int>());
+
+            var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
+                protector.Unprotect(device.PasswordCiphertext));
+            try
+            {
+                // El calendario usa el índice RTSP del canal (es el que arma el track).
+                var days = await driver.QueryRecordedDaysAsync(conn, channel.RtspChannel, y, m, ct);
+                return Results.Ok(days);
+            }
+            catch (Exception)
+            {
+                // Sin marcas el calendario sigue sirviendo para elegir la fecha.
+                return Results.Ok(Array.Empty<int>());
+            }
+        });
+
+        // ------------------------------------------------------------------
         // Concesión de reproducción: ruta dinámica en MediaMTX + token corto.
         // ------------------------------------------------------------------
         app.MapPost("/api/playback/request", async (HttpContext ctx, PlaybackRequestDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, StreamTokenService streamTokens,
-            MediaMtxManager mtx, IConfiguration config, CancellationToken ct) =>
+            MediaMtxManager mtx, Services.Rtsp.PlaybackRelayManager relays, IConfiguration config,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
 
@@ -98,9 +170,28 @@ public static class PlaybackApi
             // Nombre plano y único: cada espectador/rango tiene su propia ruta.
             string path = $"pb-{device.Id}-{request.RtspChannel}-" +
                           Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
-            if (!await mtx.AddPlaybackPathAsync(path, source, ct))
+
+            // A 1× manda MediaMTX, que pulsa el equipo (camino de siempre).
+            // A otra velocidad el servidor toma la sesión RTSP para poder
+            // pedirle al equipo que entregue más rápido (cabecera Scale), y
+            // publica él mismo en la ruta.
+            double speed = request.Speed;
+            bool accelerated = speed > 0 && Math.Abs(speed - 1) > 0.01;
+            if (accelerated)
+            {
+                if (!await mtx.AddPublishPathAsync(path, ct))
+                    return Results.Json(new { error = "No se pudo preparar la ruta de reproducción en el media server." },
+                        statusCode: StatusCodes.Status503ServiceUnavailable);
+                if (!await relays.StartAsync(path, source, speed, mtx.PublishUrlFor(path), ct))
+                    return Results.Json(
+                        new { error = $"El equipo no aceptó reproducir a {speed:0.##}×." },
+                        statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
+            else if (!await mtx.AddPlaybackPathAsync(path, source, ct))
+            {
                 return Results.Json(new { error = "No se pudo preparar la ruta de reproducción en el media server." },
                     statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
 
             var (token, grant) = streamTokens.Issue(session.UserId, session.Username, path,
                 device.Id, device.Name, request.RtspChannel, "playback");
@@ -169,6 +260,15 @@ public static class PlaybackApi
                          "-t", ((int)(end - start).TotalSeconds).ToString(),
                          "-map", "0:v:0", "-map", "0:a:0?",
                          "-c:v", "copy", "-c:a", "aac",
+                         // Sin esto el MP4 hereda los rótulos del RTSP del
+                         // equipo (Hikvision anuncia su sesión como "HIK Media
+                         // Server Vx.y") y los reproductores los muestran como
+                         // título del archivo. Se reemplazan por el origen real
+                         // del tramo, que es lo que sirve como evidencia.
+                         "-map_metadata", "-1",
+                         "-metadata", $"title={device.Name} · {channel.Name} — {start:dd-MM-yyyy HH:mm:ss}",
+                         "-metadata", $"comment=Exportado por CLR TrueCentral VMS · {device.Name} ({device.Host}) " +
+                                      $"canal {channel.ChannelNumber} · {start:dd-MM-yyyy HH:mm:ss} a {end:HH:mm:ss}",
                          "-movflags", "frag_keyframe+empty_moov+default_base_moof",
                          "-f", "mp4", "pipe:1",
                      })
@@ -253,6 +353,28 @@ public static class PlaybackApi
     /// Une archivos contiguos del mismo tipo: los grabadores parten el día en
     /// trozos (por hora, por evento) y la línea de tiempo quiere tramos limpios.
     /// </summary>
+    /// <summary>
+    /// Recorta los tramos al día consultado. Los grabadores devuelven el
+    /// ARCHIVO completo que cubre el rango, así que uno que empezó a grabar
+    /// antes de la medianoche llega con su hora de inicio del día anterior:
+    /// sin recortar, la línea de tiempo del cliente recibe un tramo que no
+    /// cabe en el día que está dibujando.
+    /// </summary>
+    private static List<RecordingSegment> ClipToDay(List<RecordingSegment> segments, DateTime day)
+    {
+        var from = day;
+        var to = day.AddDays(1);
+        var clipped = new List<RecordingSegment>(segments.Count);
+        foreach (var segment in segments)
+        {
+            var start = segment.Start < from ? from : segment.Start;
+            var end = segment.End > to ? to : segment.End;
+            if (end > start)
+                clipped.Add(segment with { Start = start, End = end });
+        }
+        return clipped;
+    }
+
     private static List<RecordingSegment> Merge(IReadOnlyList<RecordingSegment> raw)
     {
         var merged = new List<RecordingSegment>();
