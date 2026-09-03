@@ -1,4 +1,4 @@
-# CLR TrueCentral VMS
+﻿# CLR TrueCentral VMS
 
 Sistema de gestión de video (VMS) cliente-servidor multimarca de CLRobotics:
 administración web, monitoreo en vivo multicámara con control PTZ y un plano
@@ -167,6 +167,10 @@ solo acepta conexiones desde la propia máquina del servidor.
   estándar no lo permite y el cliente avisa.
 - Aplicaciones → **Reconocimiento de patentes**: lecturas ANPR en vivo con
   ficha completa del vehículo e historial buscable (ver más abajo).
+- **Paneles de alarma**: estado de áreas y zonas de las centrales de
+  intrusión, armado/desarmado/anulación y eventos en vivo (ver más abajo);
+  una alarma avisa con un aviso flotante y enciende el icono del riel aunque
+  la viñeta esté cerrada.
 - Credenciales recordadas cifradas con DPAPI, inicio de sesión automático
   opcional, lista de usuarios recientes.
 
@@ -219,6 +223,185 @@ la familia video wall cada sub-ventana es una **ventana del muro** y el
 equipo tiene un presupuesto total de ventanas simultáneas; si se excede, el
 sistema lo avisa y hay que reducir la división de otros monitores.
 
+## Paneles de alarma
+
+Centrales de intrusión (hoy **Hikvision por ISAPI**, sin SDK: AX PRO / AX
+Hybrid PRO y los paneles híbridos cableados de la línea clásica como el
+DS-PHA64-W4M, ambos validados con hardware real): el servidor mantiene con
+cada panel habilitado el canal de eventos (`alertStream`) y relee su estado
+cada 30 s y apenas llega un evento, así que lo que ve el operador es siempre
+el estado real del equipo. Hay dos drivers Hikvision:
+
+- **Directo** (`hikvision-isapi`): el VMS habla con el panel por su IP.
+- **A través del Hik IP Receiver Pro** (`hikvision-iprp`): los paneles se
+  registran en la pasarela de Hikvision (ISUP 5.0, OTAP o Hik-Partner Pro) y
+  el VMS consume su API con la cuenta de la pasarela. En el mantenedor se
+  indica la dirección del IP Receiver Pro y el **equipo dentro de ella**
+  (uuid, serie, cuenta o ID ISUP; con el campo vacío, "Probar conexión"
+  lista los equipos disponibles). Requisito en la pasarela: *Automation
+  Output → Protocol* habilitado con tipo **Private**; sin eso su API
+  contesta "Invalid operation". Estado, armado, desarmado y bypass van por
+  la pasarela, y los eventos llegan por su suscripción (CIDAlarm con el
+  usuario que armó/desarmó, y la conexión/desconexión del panel respecto de
+  la pasarela). Además el VMS actúa como **centro receptor de
+alarmas (SIA DC-09, protocolos ADM-CID y SIA-DCS por TCP, puerto 5091,
+`Alarms:Receiver`)**: en el panel se configura como *Alarm Receiving Center*
+con la IP del servidor y ese puerto, y el equipo reporta con confirmación
+todo lo que ocurre (alarmas, armados con el usuario que los hizo,
+anulaciones, fallas y pruebas periódicas). Solo se aceptan reportes desde la
+dirección de un panel habilitado; el resto se rechaza y queda en la bitácora.
+
+- **Mantenedor** en `#/alarm-panels` (Dispositivos → Paneles de alarma, rol
+  Admin): dirección, puerto, HTTPS opcional (certificado autofirmado
+  aceptado) y usuario **local** del panel (el de la activación, normalmente
+  `admin`; la cuenta Hik-Connect no sirve). **Probar conexión** muestra
+  modelo, serie, firmware, áreas y zonas antes de guardar. Tras varios
+  intentos fallidos el panel bloquea el acceso 30 min: el servidor no insiste
+  (reintenta recién a los 10 min) y lo dice en el estado del panel.
+- **Cliente**: módulo *Paneles de alarma* con la lista de paneles (armado
+  resumido, conexión, canal de eventos), las áreas con **Armar total /
+  Parcial / Desarmar / Silenciar alarma**, las zonas con su estado (normal,
+  activada, falla, sin comunicación, tamper, batería baja) y **Anular /
+  Restituir**, y el flujo de eventos en vivo filtrable por panel y tipo. El
+  panel web ofrece las mismas órdenes en el detalle de cada panel.
+- **Eventos**: los que empuja el panel (Contact-ID traducido al español:
+  intrusión, pánico, incendio, tamper, armado/desarmado por usuario,
+  anulaciones, fallas de batería/AC/comunicación, restauraciones) más los
+  que el sondeo detecta por diferencia y los que salen del propio VMS (con el
+  operador). Historial en `AlarmEvents` (`Alarms:RetentionDays`, 365 por
+  omisión) y consulta por `/api/alarms/events`.
+- **Auditoría** (categoría *Paneles de alarma*): altas/ediciones, pruebas de
+  conexión, cada armado/desarmado/anulación con su operador, los rechazos del
+  equipo (`success=false`), las alarmas recibidas del panel y la caída o
+  recuperación de la conexión.
+- Otra marca = implementar `IAlarmPanelDriverFactory` (Core) y registrarla en
+  `Program.cs`.
+
+## Automatizaciones (workflows)
+
+"Cuando pase ESTO, hacer ESTO OTRO", sin programar nada: el servidor escucha
+lo que ocurre y ejecuta acciones solo. Hoy dispara con los **paneles de
+alarma** (cualquier evento: alarma, armado, anulación, falla…) y con la
+**conexión** del servidor con un panel; el motor es genérico, así que sumar un
+disparador nuevo (patentes, cámara fuera de línea) es publicar un
+`WorkflowTrigger` más.
+
+Acciones disponibles (`IWorkflowActionExecutor`, una clase cada una):
+
+| Acción | Qué hace |
+|---|---|
+| **Capturar foto** | Snapshot JPEG de las cámaras elegidas (1–5 por cámara). Queda en disco y disponible para las acciones siguientes. |
+| **Enviar correo** | SMTP con MailKit (STARTTLS, TLS implícito o sin cifrar), adjuntando las fotos capturadas. |
+| **Subir a FTP** | FTP/FTPS (explícito o implícito) con las fotos y un informe de texto opcional; la carpeta remota admite marcas y se crea sola. |
+| **Llamar a un servicio (HTTP)** | GET/POST/PUT/… a otro sistema, con cabeceras, cuerpo y autenticación básica o digest. |
+| **Sonar parlante IP** | Hikvision (audio bidireccional ISAPI: el servidor le envía el sonido ya convertido a G.711 al ritmo real), Axis (`playclip.cgi`) o cualquier marca por URL. |
+| **Avisar a los operadores** | Notificación en vivo por el hub a todos los conectados, **con la foto capturada** y **alarma sonora en el equipo del operador** (el sonido lo elige la automatización entre los cargados en el servidor, o el pitido del sistema). |
+
+Los textos (asunto, cuerpo, URL, carpeta remota…) admiten **marcas** que el
+servidor reemplaza con los datos del evento: `{panel}`, `{evento}`, `{tipo}`,
+`{severidad}`, `{codigo}`, `{area}`, `{zona}`, `{operador}`, `{fechahora}`,
+`{workflow}`, `{servidor}`… En las URL los valores se escapan.
+
+Condiciones del disparador: paneles, tipo de evento, severidad, **áreas y
+zonas elegidas por nombre** (para que cada sensor pueda disparar acciones
+distintas: una automatización por zona), códigos Contact-ID, origen (panel /
+sondeo / VMS), texto contenido y **ventana horaria** (días de la semana y
+rango, que puede cruzar la medianoche: 22:00 a 06:00). Cada automatización
+tiene además un **tiempo mínimo entre ejecuciones** (60 s por omisión): un
+detector que rebota veinte veces no manda veinte correos.
+
+**Condición sostenida**: la automatización se ejecuta solo si la interrupción
+se mantiene N segundos — el servidor vigila la zona cada segundo durante ese
+tiempo y descarta la ejecución en cuanto el sensor queda libre. Es lo que
+distingue "alguien pasó frente al detector" de "la puerta quedó abierta".
+Tolera las pausas cortas del detector (`Workflows:SustainedGapSeconds`, 3 s):
+los sensores de movimiento informan por pulsos, no de corrido. El tiempo
+mínimo entre ejecuciones se cuenta desde la última ejecución **real**, así una
+verificación descartada no bloquea la interrupción larga que venga después.
+Para no perderse una interrupción breve, los paneles vigilados así se sondean
+cada 2 s (`Alarms:FastPollSeconds`) mientras exista una automatización que lo
+pida; ese sondeo no escribe en la base ni empuja por el hub si nada cambió.
+
+Como las centrales no reportan por Contact-ID lo que ocurre con el área
+desarmada, el servidor genera por diferencia de estado el evento **«Sensor
+interrumpido»** (y su restauración) cuando un detector se activa sin alarma:
+es lo que permite automatizar puertas y portones fuera de horario.
+
+**Ventana de alarma** (cliente de escritorio): las alertas que exigen
+confirmación abren una ventana propia — a la izquierda el hecho (automatización,
+qué la disparó, severidad, hora, descripción y estado del acuse) y a la derecha
+tres pestañas: **video en vivo** de las cámaras vinculadas **en grilla** (1, 2,
+2×2, 3×3 según cuántas sean, cada cuadro rotulado; se sueltan las concesiones al
+cambiar de pestaña o cerrar), **fotos** capturadas con tira de miniaturas y
+contador, y **qué hizo el sistema** (los pasos de la ejecución). Abajo, el botón
+*Enterado*, *Silenciar* y un paginador para recorrer las alertas pendientes. La
+alarma sonora admite **repeticiones = 0 = sonar hasta que alguien confirme**,
+silencie o cierre la ventana.
+
+**Centro de eventos** (sección del cliente, con su viñeta en la barra y su
+botón en el riel): el historial de todas las alertas —
+qué avisó el sistema, cuándo, qué lo disparó y **quién se dio por enterado, a
+qué hora y en cuántos segundos** (o si quedó sin confirmar). Filtro *Solo sin
+confirmar*, botón *Enterado* en la propia lista y *Ver* para abrir la ventana
+de alarma completa (video, fotos y pasos). Se mantiene al día solo: cada
+alerta nueva y cada confirmación llegan por el hub.
+
+**Alertas con acuse de recibo**: cada aviso a los operadores queda registrado
+como una alerta que nace **pendiente**. La ventana **no se cierra sola** y se
+mantiene hasta que alguien la confirme (si el puesto estaba cerrado cuando se emitió,
+al abrirlo aparecen las pendientes). La primera confirmación es la que queda —
+usuario, hora, origen (cliente o panel) e IP— y baja el aviso en todos los
+demás puestos. En `#/workflows` la sección **Alertas** muestra las pendientes
+destacadas y el registro de quién confirmó cada una y **en cuánto tiempo**;
+también se puede confirmar desde ahí. El botón **Ventana aparte** lo saca a
+una ventana independiente (para dejarlo en otro monitor) con la misma vista y
+el mismo ViewModel; al cerrarla, el módulo vuelve solo a su viñeta. Cada
+confirmación va además a la
+bitácora (`alert-acknowledged`), y una alerta pendiente **nunca** se purga
+sola: es la evidencia de que nadie se dio por enterado.
+
+Cada ejecución queda en el **historial** con qué la disparó, qué hizo cada
+acción, cuánto demoró y las fotos que capturó, y en la **bitácora de
+auditoría** (categoría `workflows`). El botón **Probar** ejecuta las acciones
+de verdad con un evento de ejemplo, sin esperar a que el panel se alarme.
+
+Panel web `#/workflows`: mantenedor, historial, configuración del **servidor
+de correo** y carga de **sonidos** para los parlantes (se convierten a G.711
+µ-law y A-law con el FFmpeg que ya viene con el sistema). Las contraseñas de
+cada acción (FTP, servicio HTTP, parlante) y la del correo se guardan cifradas
+con AES-256-GCM y nunca salen por la API. Configuración en `appsettings.json`
+→ `Workflows` (habilitación, ejecuciones simultáneas, tope por acción,
+carpeta de las fotos y retención del historial).
+
+## Parlantes IP
+
+Altavoces de red (validado con Hikvision DS-QAZ1325G1T por ISAPI). Se
+administran en **Dispositivos → Parlantes IP** (rol Admin): dirección, puerto,
+usuario local del equipo (normalmente `admin`), grupo opcional y **Probar
+conexión**, que muestra modelo, firmware y qué sabe hacer el equipo (voz en
+vivo, biblioteca de audios, texto a voz). Cada parlante tiene su **Biblioteca**:
+los audios guardados en el propio equipo (los de fábrica y los que suba desde el
+panel en mp3/wav/aac), más **Crear desde texto**, que hace que el parlante
+genere la voz (español incluido).
+
+Desde el cliente de escritorio, en la Vista en Vivo, el panel **PARLANTES** (al
+pie del árbol, junto al PTZ) permite marcar uno o varios parlantes y:
+
+- **Mantener para hablar**: la voz del operador sale por los parlantes marcados
+  mientras el botón esté presionado (micrófono del equipo del operador; el
+  servidor la convierte a G.711 y la escribe en todos a la vez).
+- **Sonido del servidor**: los mismos sonidos de Automatizaciones → Sonidos,
+  transmitidos **sincronizados** a todos los marcados.
+- **Biblioteca** y **Texto a voz**: el audio lo reproduce el propio parlante; con
+  varios marcados se busca por nombre en cada uno.
+- **Detener**: corta lo que esté sonando.
+
+En Automatizaciones, la acción **Sonar parlante IP** ahora elige parlantes del
+inventario (o todo un grupo) y puede reproducir un sonido del servidor, un
+audio de la biblioteca del equipo o un texto leído en voz alta con las marcas
+`{zona}`, `{panel}`, etc. Todo queda en la bitácora (categoría *Parlantes IP*):
+quién habló, cuánto tiempo, qué se reprodujo y en qué equipos.
+
 ## Aplicaciones → Reconocimiento de patentes
 
 Lecturas de patentes (ANPR/LPR) de las cámaras ITS, en vivo y con historial.
@@ -258,7 +441,9 @@ mantiene abierto su canal de eventos, guarda lo que llega y lo reparte.
 `#/` dashboard (salud, dispositivos, sesiones activas) · `#/devices`
 mantenedor con wizard "Probar conexión", canales, revalidación, snapshots y
 descubrimiento SADP · `#/decoders` decodificadores de muro · `#/walls` muros
-de video (estructura y operación) · `#/sessions` sesiones de video en vivo con **Expulsar**
+de video (estructura y operación) · `#/workflows` automatizaciones (disparadores, acciones,
+historial de ejecuciones, correo saliente y sonidos) ·
+`#/sessions` sesiones de video en vivo con **Expulsar**
 (corta la sesión RTSP en MediaMTX; el espectador puede reconectarse — no
 bloquea la cuenta) · `#/users` mantenedor de usuarios.
 
@@ -308,6 +493,16 @@ real: los canales 3–10 del NVR CIAPCO.
   cámara. **Pendiente ver una patente leída de punta a punta**: durante las
   pruebas (de noche y con lluvia) la cámara informó `noPlate` en todas las
   pasadas.
+
+- **M9** paneles de alarma (driver Hikvision ISAPI con digest y login de
+  sesión, servicio de sondeo + canal de eventos, API auditada, módulo del
+  cliente y mantenedor web): ✅ — verificado de punta a punta contra un
+  **panel AX PRO simulado** (alta, armado/desarmado, alarma empujada por el
+  panel, bypass, rechazos y cambios externos) y contra dos paneles reales:
+  **DS-PHA64-LP (AX Hybrid PRO)** —probe, estado y sesión— y **DS-PHA64-W4M
+  (línea clásica, firmware V1.3.3)** —probe, estado, bypass/restitución y
+  alertStream—. Pendiente con hardware: armar/desarmar en vivo y una alarma
+  real de intrusión de punta a punta.
 
 Pendientes conocidos: transporte por SDK para equipos sin RTSP; mapas y
 eventos (la arquitectura no los bloquea); foco/iris por ONVIF (servicio de
