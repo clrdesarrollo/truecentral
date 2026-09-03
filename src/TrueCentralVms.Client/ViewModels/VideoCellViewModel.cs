@@ -9,7 +9,8 @@ using TrueCentralVms.Core.Drivers;
 namespace TrueCentralVms.Client.ViewModels;
 
 /// <summary>
-/// Una celda de la grilla de video: dueña de su propio Player de FlyleafLib.
+/// Una celda de la grilla de video: dueña de su propio Player de FlyleafLib
+/// (creado al abrir el primer canal; un cuadro libre no tiene player).
 /// Cada apertura (incluidos los reintentos) pide una concesión NUEVA al
 /// servidor: los tokens expiran y nunca se reutiliza una URL antigua. Si el
 /// stream se corta (red, equipo reiniciado, expulsión), la celda reintenta
@@ -37,11 +38,19 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     private static VideoCellViewModel? OwnerOf(object? sender) =>
         sender is Player player && PlayerOwners.TryGetValue(player, out var owner) ? owner : null;
 
-    /// <summary>Player visible del cuadro. Observable porque el cambio suave de
-    /// stream lo REEMPLAZA: el nuevo se abre en un player de reserva mientras
-    /// este sigue reproduciendo, y recién con imagen lista se intercambian
-    /// (FlyleafHost reengancha su superficie al vuelo).</summary>
-    [ObservableProperty] private Player _player = null!;
+    /// <summary>
+    /// Player visible del cuadro; null mientras el cuadro está libre. Se crea
+    /// al abrir el primer canal y NO en el constructor: cada player levanta su
+    /// propio dispositivo Direct3D, y crear los de una grilla entera de golpe
+    /// (una división de 15 son 15 dispositivos) es trabajo pesado en el hilo de
+    /// UI — justo el que dejaba la aplicación sin responder al abrir todos los
+    /// canales de un equipo. Un cuadro libre no gasta GPU.
+    /// Observable porque el cambio suave de stream lo REEMPLAZA: el nuevo se
+    /// abre en un player de reserva mientras este sigue reproduciendo, y recién
+    /// con imagen lista se intercambian (FlyleafHost reengancha su superficie
+    /// al vuelo).
+    /// </summary>
+    [ObservableProperty] private Player? _player;
 
     /// <summary>Se encendió el audio de este cuadro (el dueño silencia el resto).</summary>
     public event Action<VideoCellViewModel>? AudioActivated;
@@ -84,7 +93,16 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     {
         _api = api;
         _settings = settings;
-        _player = CreatePlayer();
+    }
+
+    /// <summary>Player del cuadro, creado en su primer uso (ver Player).</summary>
+    private Player EnsurePlayer()
+    {
+        if (Player is { } existing) return existing;
+        var player = CreatePlayer();
+        player.Config.Audio.Enabled = IsAudioOn;
+        Player = player;
+        return player;
     }
 
     /// <summary>
@@ -106,6 +124,18 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         // análisis corto basta; la imagen aparece con el primer keyframe.
         config.Demuxer.FormatOpt["analyzeduration"] = "500000"; // 0,5 s (µs)
         config.Demuxer.FormatOpt["probesize"] = "524288";       // 512 KB
+        // Latencia en régimen: por omisión Flyleaf acumula 500 ms antes de
+        // mostrar, nunca vuelve al borde vivo (MaxLatency 0) y encola 4
+        // cuadros decodificados; el retraso frente a iVMS-4200 crecía con la
+        // sesión. Con MaxLatency el player acelera (x1+) hasta quedar a
+        // ~400 ms del último cuadro recibido y activa LowDelay en el
+        // decodificador; MinLatency evita bajar tanto que tartamudee con
+        // jitter de WAN. Los valores están en ticks (1 ms = 10 000).
+        const long Ms = 10_000;
+        config.Player.MinBufferDuration = 200 * Ms;
+        config.Player.MaxLatency = 400 * Ms;
+        config.Player.MinLatency = 150 * Ms;
+        config.Decoder.MaxVideoFrames = 2;
         var player = new Player(config);
         PlayerOwners.AddOrUpdate(player, this);
         player.Audio.Volume = Math.Clamp(_settings.DefaultVolume, 0, 100);
@@ -129,7 +159,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
             if (OwnerOf(sender) is not { } cell || !ReferenceEquals(sender, cell.Player)) return;
             // Flyleaf corta la grabación junto con el stream: reflejar y avisar
             // (la cápsula quedó guardada hasta el momento del corte).
-            if (cell.IsRecordingClip && !cell.Player.IsRecording)
+            if (cell.IsRecordingClip && cell.Player is { IsRecording: false })
             {
                 cell.IsRecordingClip = false;
                 cell.NotifyClipSaved(notify: true);
@@ -147,6 +177,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         int sequence = ++_openSequence;
         StopClipRecording(notify: true);
         ResetDigitalZoom();
+        EnsurePlayer(); // el cuadro deja de estar libre: recién aquí necesita player
         _assigned = node;
         Profile = profile;
         AssignedChannel = node;
@@ -254,7 +285,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
                     fresh.Config.Audio.Enabled = IsAudioOn;
                     Player = fresh; // FlyleafHost reengancha la superficie: corte mínimo
                     Status = "";
-                    retired.Dispose();
+                    retired?.Dispose();
                     return;
                 }
                 fresh.Dispose(); // sin imagen: reintentar o rendirse
@@ -293,7 +324,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         {
             var grant = await _api.RequestStreamAsync(node.Device.Id, node.Channel.RtspChannel, Profile);
             if (sequence != _openSequence) return; // la celda ya se reasignó
-            Player.OpenAsync(grant.RtspUrl);
+            EnsurePlayer().OpenAsync(grant.RtspUrl);
         }
         catch (ApiException ex)
         {
@@ -316,9 +347,9 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         finally { _retryPending = false; }
 
         if (sequence != _openSequence || _assigned is null) return;
-        if (Player.Status is FlyleafLib.MediaPlayer.Status.Playing
+        if (Player is { Status: FlyleafLib.MediaPlayer.Status.Playing
             or FlyleafLib.MediaPlayer.Status.Opening
-            or FlyleafLib.MediaPlayer.Status.Paused) return;
+            or FlyleafLib.MediaPlayer.Status.Paused }) return;
         Status = "Reconectando…";
         await ConnectAsync(sequence);
     }
@@ -338,14 +369,15 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     [RelayCommand]
     private void Snapshot()
     {
-        if (_assigned is null) return;
+        if (_assigned is null || Player is not { } player) return;
         try
         {
             string extension = _settings.SnapshotFormat.Equals("png", StringComparison.OrdinalIgnoreCase) ? ".png" : ".jpg";
             string file = MediaFileBase(_settings.EffectiveSnapshotFolder, extension);
-            Player.TakeSnapshotToFile(file);
+            player.TakeSnapshotToFile(file);
             FlashStatus("Captura guardada");
             MediaSaved?.Invoke("Captura guardada", "\uE722", file);
+            ReportAudit("live-snapshot", file);
         }
         catch (Exception ex)
         {
@@ -360,7 +392,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     [RelayCommand]
     private void ToggleRecording()
     {
-        if (_assigned is null) return;
+        if (_assigned is null || Player is not { } player) return;
         if (IsRecordingClip)
         {
             StopClipRecording(notify: true);
@@ -371,11 +403,12 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
             // Sin extensión: Flyleaf agrega la recomendada según el contenedor
             // (y actualiza la ruta por el parámetro ref).
             string file = MediaFileBase(_settings.EffectiveRecordingFolder, "");
-            Player.StartRecording(ref file, useRecommendedExtension: true);
+            player.StartRecording(ref file, useRecommendedExtension: true);
             _recordingFile = file;
             _recordingStarted = DateTime.UtcNow;
             IsRecordingClip = true;
             RunRecordingTicker();
+            ReportAudit("live-clip-start", file);
         }
         catch (Exception ex)
         {
@@ -386,7 +419,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     private void StopClipRecording(bool notify)
     {
         if (!IsRecordingClip) return;
-        try { Player.StopRecording(); } catch { }
+        try { Player?.StopRecording(); } catch { }
         IsRecordingClip = false;
         NotifyClipSaved(notify);
     }
@@ -425,7 +458,11 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     {
         string? file = _recordingFile;
         _recordingFile = null;
-        if (!notify || file is null) return;
+        if (file is null) return;
+        // El archivo queda en disco igual en los cierres silenciosos
+        // (Clear/reasignación): a la bitácora van todos.
+        ReportAudit("live-clip-saved", file);
+        if (!notify) return;
         FlashStatus("Grabación guardada");
         MediaSaved?.Invoke("Grabación guardada", "\uE714", file);
     }
@@ -439,26 +476,42 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         if (Status == message) Status = "";
     }
 
+    /// <summary>Deja el evento en la bitácora de auditoría del servidor, sin
+    /// bloquear ni molestar al operador si el reporte falla.</summary>
+    private void ReportAudit(string action, string file)
+    {
+        var channel = _assigned;
+        _ = _api.ReportAuditEventAsync(new Core.Contracts.ClientAuditEventDto(
+            action,
+            channel?.Device.Id, channel?.Device.Name,
+            channel?.Channel.ChannelNumber, channel?.Channel.Name,
+            file, channel is null ? Title : null));
+    }
+
     // ------------------------------------------------------------------
     // Zoom digital (rueda del mouse sobre el video)
     // ------------------------------------------------------------------
 
     /// <summary>Ajuste de imagen: estirar al cuadro (sin barras negras) o
     /// mantener la proporción original. Aplica en caliente.</summary>
-    public void ApplyStretch(bool stretch) =>
-        Player.Config.Video.AspectRatio = stretch ? AspectRatio.Fill : AspectRatio.Keep;
+    public void ApplyStretch(bool stretch)
+    {
+        if (Player is { } player)
+            player.Config.Video.AspectRatio = stretch ? AspectRatio.Fill : AspectRatio.Keep;
+    }
 
     /// <summary>Zoom en % (100 = sin zoom). Flyleaf recorta el viewport en GPU.</summary>
-    public double DigitalZoom => Player.Config.Video.Zoom;
+    public double DigitalZoom => Player?.Config.Video.Zoom ?? ViewModels.DigitalZoom.NoZoom;
 
     /// <summary>Acerca o aleja centrado en el punto del cursor (normalizado 0..1).</summary>
     public void DigitalZoomStep(bool zoomIn, System.Windows.Point center)
     {
-        double target = Math.Clamp(Player.Config.Video.Zoom + (zoomIn ? 20 : -20), 100, 600);
+        if (Player is not { } player) return;
+        double target = Math.Clamp(player.Config.Video.Zoom + (zoomIn ? 20 : -20), 100, 600);
         if (target <= ViewModels.DigitalZoom.NoZoom)
             ResetDigitalZoom();
         else
-            Player.Config.Video.SetZoomAndCenter(target, center);
+            player.Config.Video.SetZoomAndCenter(target, center);
         FlashStatus(ViewModels.DigitalZoom.Describe(target));
     }
 
@@ -466,16 +519,25 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     public bool CanDigitalZoom => !IsEmpty;
 
     /// <summary>Acerca el área marcada con el mouse (píxeles físicos de la ventana de video).</summary>
-    public void DigitalZoomToArea(System.Windows.Rect areaPx) =>
-        FlashStatus(ViewModels.DigitalZoom.Describe(ViewModels.DigitalZoom.ApplyArea(Player, areaPx)));
+    public void DigitalZoomToArea(System.Windows.Rect areaPx)
+    {
+        if (Player is { } player)
+            FlashStatus(ViewModels.DigitalZoom.Describe(ViewModels.DigitalZoom.ApplyArea(player, areaPx)));
+    }
 
     /// <summary>Rueda del mouse: un paso de zoom que deja quieto el punto bajo el cursor.</summary>
-    public void DigitalZoomStepAt(System.Windows.Point pointPx, bool zoomIn) =>
-        FlashStatus(ViewModels.DigitalZoom.Describe(
-            ViewModels.DigitalZoom.StepAtPoint(Player, zoomIn, pointPx)));
+    public void DigitalZoomStepAt(System.Windows.Point pointPx, bool zoomIn)
+    {
+        if (Player is { } player)
+            FlashStatus(ViewModels.DigitalZoom.Describe(
+                ViewModels.DigitalZoom.StepAtPoint(player, zoomIn, pointPx)));
+    }
 
     /// <summary>Vuelve a 1× (se hace también al abrir otro canal en el cuadro).</summary>
-    public void ResetDigitalZoom() => ViewModels.DigitalZoom.Reset(Player);
+    public void ResetDigitalZoom()
+    {
+        if (Player is { } player) ViewModels.DigitalZoom.Reset(player);
+    }
 
     // ------------------------------------------------------------------
     // Intercambio de cuadros (arrastrar un cuadro sobre otro en la grilla)
@@ -510,12 +572,13 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         // al otro escribiendo directo en su propiedad Player, y esa escritura
         // borra el enlace del host con su cuadro: quedaría negro para siempre.
         (var playerA, var playerB) = (a.Player, b.Player);
-        a.Player = null!;
-        b.Player = null!;
+        a.Player = null;
+        b.Player = null;
         a.Player = playerB;
         b.Player = playerA;
-        PlayerOwners.AddOrUpdate(playerB, a);
-        PlayerOwners.AddOrUpdate(playerA, b);
+        // Un cuadro libre puede no tener player todavía (se crea al primer uso).
+        if (playerB is not null) PlayerOwners.AddOrUpdate(playerB, a);
+        if (playerA is not null) PlayerOwners.AddOrUpdate(playerA, b);
 
         (a._assigned, b._assigned) = (b._assigned, a._assigned);
         (a.AssignedChannel, b.AssignedChannel) = (b.AssignedChannel, a.AssignedChannel);
@@ -547,9 +610,9 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     private void RestartConnect()
     {
         if (_assigned is null) return;
-        if (Player.Status is FlyleafLib.MediaPlayer.Status.Opening
+        if (Player is { Status: FlyleafLib.MediaPlayer.Status.Opening
             or FlyleafLib.MediaPlayer.Status.Playing
-            or FlyleafLib.MediaPlayer.Status.Paused) return;
+            or FlyleafLib.MediaPlayer.Status.Paused }) return;
         Status = "Reconectando…";
         IsConnecting = true;
         _ = ConnectAsync(_openSequence);
@@ -562,7 +625,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     {
         // Flyleaf abre/cierra el stream de audio en caliente con este flag:
         // apagado no se decodifica (ahorra CPU en grillas grandes).
-        Player.Config.Audio.Enabled = value;
+        if (Player is { } player) player.Config.Audio.Enabled = value;
         if (value) AudioActivated?.Invoke(this);
     }
 
@@ -575,7 +638,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         _assigned = null;
         AssignedChannel = null;
         IsAudioOn = false;
-        Player.Stop();
+        Player?.Stop();
         Title = null;
         Status = "";
         IsConnecting = false;
@@ -589,6 +652,6 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         // la cápsula igual queda guardada, pero sin ventana que lo anuncie.
         StopClipRecording(notify: false);
         _assigned = null;
-        Player.Dispose();
+        Player?.Dispose();
     }
 }

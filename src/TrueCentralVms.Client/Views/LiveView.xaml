@@ -1,4 +1,4 @@
-<UserControl x:Class="TrueCentralVms.Client.Views.LiveView"
+﻿<UserControl x:Class="TrueCentralVms.Client.Views.LiveView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:fl="clr-namespace:FlyleafLib.Controls.WPF;assembly=FlyleafLib"
@@ -255,6 +255,198 @@
                         </StackPanel>
                     </StackPanel>
                 </Border>
+                <!-- Panel Parlantes IP: hablar (mantener presionado), sonidos
+                     del servidor, biblioteca del equipo y texto a voz. Con
+                     varios parlantes marcados los sonidos del servidor suenan
+                     sincronizados. Solo aparece si hay parlantes configurados. -->
+                <Border DockPanel.Dock="Bottom" Background="{StaticResource Panel2Brush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,10"
+                        DataContext="{Binding Speakers}"
+                        Visibility="{Binding HasSpeakers, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                    <StackPanel>
+                        <DockPanel>
+                            <ToggleButton DockPanel.Dock="Right" Style="{StaticResource PtzCollapseToggle}"
+                                          IsChecked="{Binding IsExpanded}"
+                                          ToolTip="Minimizar / restaurar el panel de parlantes"/>
+                            <!-- Marcar / desmarcar todos los parlantes -->
+                            <Button DockPanel.Dock="Right" Padding="0" Width="26" Height="22"
+                                    Margin="6,0,2,0" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                    Command="{Binding ToggleSelectAllCommand}"
+                                    Visibility="{Binding IsExpanded, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
+                                        <Setter Property="Content" Value="&#xE8B3;"/>
+                                        <Setter Property="ToolTip" Value="Marcar todos los parlantes"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding AllSelected}" Value="True">
+                                                <Setter Property="Content" Value="&#xE8E6;"/>
+                                                <Setter Property="ToolTip" Value="Desmarcar todos los parlantes"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                            <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                PARLANTES — <Run Text="{Binding SelectionSummary, Mode=OneWay}" Foreground="{StaticResource AccentBrush}"/>
+                            </TextBlock>
+                        </DockPanel>
+                        <StackPanel Margin="0,8,0,0"
+                                    Visibility="{Binding IsExpanded, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                            <ScrollViewer MaxHeight="110" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Speakers}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <CheckBox IsChecked="{Binding IsSelected}" Style="{StaticResource DarkCheckBox}"
+                                                      Margin="0,1" ToolTip="{Binding Tooltip}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Ellipse Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center">
+                                                        <Ellipse.Style>
+                                                            <Style TargetType="Ellipse">
+                                                                <Setter Property="Fill" Value="{StaticResource DangerBrush}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsOnline}" Value="True">
+                                                                        <Setter Property="Fill" Value="{StaticResource OkBrush}"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Ellipse.Style>
+                                                    </Ellipse>
+                                                    <TextBlock Text="{Binding Name}" FontSize="12"/>
+                                                    <TextBlock Text="{Binding BusyWith}" FontSize="10" Margin="6,0,0,0"
+                                                               Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                            <!-- Volumen de salida de los parlantes marcados (se aplica al soltar) -->
+                            <DockPanel Margin="0,8,0,0" ToolTip="Volumen de salida del parlante (0-100); con varios marcados se aplica a todos">
+                                <TextBlock DockPanel.Dock="Left" Text="Volumen" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding Volume}" FontSize="11" Width="26" TextAlignment="Right"
+                                           Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                                <Slider Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                        Value="{Binding Volume}" IsEnabled="{Binding HasSelection}" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <!-- Micrófono: cuál usar y su nivel (modo prueba = captura sin transmitir) -->
+                            <DockPanel Margin="0,8,0,0"
+                                       Visibility="{Binding HasMicrophones, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                <ToggleButton DockPanel.Dock="Right" Width="58" Height="28" Margin="4,0,0,0" FontSize="11"
+                                              Style="{StaticResource GhostToggle}" IsChecked="{Binding IsMicTest}"
+                                              Content="Probar"
+                                              ToolTip="Captura el micrófono elegido sin transmitir: el nivel de abajo debe moverse al hablar"/>
+                                <ComboBox Height="28" FontSize="11" ItemsSource="{Binding Microphones}"
+                                          SelectedItem="{Binding SelectedMicrophone}"
+                                          ToolTip="Micrófono con el que se habla por los parlantes (se recuerda)"/>
+                            </DockPanel>
+                            <Grid Margin="0,4,0,0" Height="8"
+                                  Visibility="{Binding HasMicrophones, Converter={x:Static vm:BoolToVisibility.Instance}}"
+                                  ToolTip="Nivel del micrófono">
+                                <Border Background="{StaticResource BgBrush}" CornerRadius="3"/>
+                                <Border HorizontalAlignment="Left" CornerRadius="3"
+                                        Width="{Binding MicLevel, Converter={x:Static vm:PercentToWidth.Instance}, ConverterParameter=226}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{StaticResource OkBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MicLevel, Converter={x:Static vm:GreaterThan.Instance}, ConverterParameter=85}" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                </Border>
+                            </Grid>
+                            <!-- Hablar: mantener presionado (press-and-hold, como el PTZ) -->
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0" Style="{StaticResource PrimaryButton}" IsEnabled="{Binding HasSelection}"
+                                        PreviewMouseLeftButtonDown="OnTalkPress" PreviewMouseLeftButtonUp="OnTalkRelease"
+                                        MouseLeave="OnTalkLeave"
+                                        ToolTip="Mantenga presionado para hablar por los parlantes marcados (micrófono del equipo)">
+                                    <TextBlock>
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="Mantener para hablar"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsTalking}" Value="True">
+                                                        <Setter Property="Text" Value="● Hablando… (suelte para terminar)"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Button>
+                                <Button Grid.Column="1" Content="Detener" Margin="6,0,0,0" Style="{StaticResource GhostButton}"
+                                        Command="{Binding StopCommand}" IsEnabled="{Binding HasSelection}"
+                                        ToolTip="Detener lo que esté sonando en los parlantes marcados"/>
+                            </Grid>
+                            <CheckBox Margin="0,6,0,0" Style="{StaticResource DarkCheckBox}" IsChecked="{Binding TalkPreTone}"
+                                      Content="Tono al abrir el canal (dos pitidos antes de la voz)" FontSize="11"
+                                      ToolTip="Como el aviso de canal listo de una radio: confirma que los parlantes ya están escuchando"/>
+                            <!-- Sonido del servidor (sincronizado entre los marcados) -->
+                            <DockPanel Margin="0,6,0,0"
+                                       Visibility="{Binding HasSounds, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                <Button DockPanel.Dock="Right" Content="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="12" Padding="0" Width="30" Height="28" Margin="4,0,0,0" Style="{StaticResource GhostButton}"
+                                        Command="{Binding PlaySoundCommand}" IsEnabled="{Binding HasSelection}"
+                                        ToolTip="Reproducir el sonido del servidor en los PARLANTES marcados (sincronizado)"/>
+                                <Button DockPanel.Dock="Right" Content="&#xE995;" FontFamily="Segoe MDL2 Assets" FontSize="13" Padding="0" Width="30" Height="28" Margin="4,0,0,0"
+                                        Style="{StaticResource GhostButton}" Command="{Binding PreviewSoundCommand}"
+                                        ToolTip="Escuchar en ESTE equipo (no suena en los parlantes); otro clic detiene"/>
+                                <ComboBox Height="28" FontSize="11" ItemsSource="{Binding ServerSounds}" DisplayMemberPath="DisplayName"
+                                          SelectedItem="{Binding SelectedSound}" ToolTip="Sonidos subidos al servidor (Automatizaciones → Sonidos)"/>
+                            </DockPanel>
+                            <!-- Biblioteca del propio parlante -->
+                            <DockPanel Margin="0,6,0,0"
+                                       Visibility="{Binding HasLibrary, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                <Button DockPanel.Dock="Right" Content="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="12" Padding="0" Width="30" Height="28" Margin="4,0,0,0" Style="{StaticResource GhostButton}"
+                                        Command="{Binding PlayLibraryCommand}" IsEnabled="{Binding HasSelection}"
+                                        ToolTip="Reproducir el audio guardado en el PARLANTE (se busca por nombre en cada uno)"/>
+                                <Button DockPanel.Dock="Right" Content="&#xE995;" FontFamily="Segoe MDL2 Assets" FontSize="13" Padding="0" Width="30" Height="28" Margin="4,0,0,0"
+                                        Style="{StaticResource GhostButton}" Command="{Binding PreviewLibraryCommand}"
+                                        ToolTip="Escuchar en ESTE equipo (se descarga del parlante, no suena afuera); otro clic detiene"/>
+                                <Button DockPanel.Dock="Right" Content="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="13" Padding="0" Width="30" Height="28"
+                                        Margin="4,0,0,0" Style="{StaticResource GhostButton}" Command="{Binding DownloadLibraryCommand}"
+                                        ToolTip="Descargar el archivo desde el parlante a este equipo"/>
+                                <ComboBox Height="28" FontSize="11" ItemsSource="{Binding Library}" DisplayMemberPath="Name"
+                                          SelectedItem="{Binding SelectedLibraryItem}" ToolTip="{Binding LibraryOwner}"/>
+                            </DockPanel>
+                            <!-- Texto a voz generado por el parlante -->
+                            <DockPanel Margin="0,6,0,0"
+                                       Visibility="{Binding HasTts, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                <Button DockPanel.Dock="Right" Content="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="12" Padding="0" Width="30" Height="28" Margin="4,0,0,0" Style="{StaticResource GhostButton}"
+                                        Command="{Binding PlayTtsCommand}" IsEnabled="{Binding HasSelection}"
+                                        ToolTip="El parlante lee el texto en voz alta"/>
+                                <Grid>
+                                    <TextBox x:Name="TtsBox" Style="{StaticResource DarkTextBox}" Padding="8,4" FontSize="11" MaxLength="100"
+                                             Text="{Binding TtsText, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Texto a leer (máximo 100 caracteres)"/>
+                                    <TextBlock Text="Texto a leer en voz alta…" IsHitTestVisible="False" Margin="10,0,0,0"
+                                               VerticalAlignment="Center" FontSize="11">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Text, ElementName=TtsBox}" Value="">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </DockPanel>
+                            <TextBlock Text="{Binding StatusMessage}" FontSize="10.5" Foreground="{StaticResource MutedBrush}"
+                                       TextWrapping="Wrap" Margin="0,6,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
                 <TreeView x:Name="DeviceTree" ItemsSource="{Binding Devices}"
                           Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
                           MouseDoubleClick="OnTreeDoubleClick"
@@ -328,6 +520,17 @@
                     <TextBlock Text="&#xE740;" FontFamily="Segoe MDL2 Assets" FontSize="12"
                                VerticalAlignment="Center" Margin="0,0,7,0"/>
                     <TextBlock Text="Pantalla completa" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <!-- Pantalla auxiliar (estilo iVMS-4200): otra ventana de vista en
+                 vivo, con grilla propia, para llevar a otro monitor (hasta 3) -->
+            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="10,5" Margin="0,0,6,0"
+                    Command="{Binding OpenAuxScreenCommand}"
+                    ToolTip="Abrir una pantalla auxiliar (hasta 3): otra ventana de vista en vivo para ver cámaras en otro monitor">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE8A7;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                               VerticalAlignment="Center" Margin="0,0,7,0"/>
+                    <TextBlock Text="Pantalla auxiliar" VerticalAlignment="Center"/>
                 </StackPanel>
             </Button>
             <StackPanel Orientation="Horizontal">

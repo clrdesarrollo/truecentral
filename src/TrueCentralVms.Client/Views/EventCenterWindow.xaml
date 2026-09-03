@@ -1,0 +1,53 @@
+﻿<Window x:Class="TrueCentralVms.Client.Views.EventCenterWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:TrueCentralVms.Client.Views"
+        Title="Centro de eventos" Height="700" Width="1120" MinHeight="480" MinWidth="860"
+        WindowStartupLocation="CenterOwner" WindowStyle="None" ShowInTaskbar="True"
+        Icon="/TrueCentralVms.Client;component/Assets/logo.png"
+        Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}">
+    <!-- Ventana independiente del Centro de eventos: mismo marco sin cromo de
+         Windows que el resto del cliente. El contenido es la MISMA vista que
+         vive en el shell, con el mismo ViewModel. -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="38" ResizeBorderThickness="6"
+                      GlassFrameThickness="0,0,0,1" CornerRadius="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Height="38" Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="10,0,14,0">
+                        <Image Source="/TrueCentralVms.Client;component/Assets/logo.png" Width="22" Height="22"
+                               VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <TextBlock Margin="9,0,0,0" VerticalAlignment="Center" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}">
+                            TrueCentral <Run Foreground="{StaticResource AccentBrush}">VMS</Run>
+                            <Run Foreground="{StaticResource MutedBrush}" Text="— Centro de eventos"/>
+                        </TextBlock>
+                    </StackPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button Style="{StaticResource TitleBarButton}" Click="OnMinimizeClick"
+                                Content="&#xE921;" ToolTip="Minimizar"/>
+                        <Button x:Name="MaxButton" Style="{StaticResource TitleBarButton}" Click="OnMaxRestoreClick"
+                                ToolTip="Maximizar">
+                            <TextBlock x:Name="MaxGlyph" Text="&#xE922;"/>
+                        </Button>
+                        <Button Style="{StaticResource TitleBarCloseButton}" Click="OnCloseClick"
+                                Content="&#xE8BB;" ToolTip="Cerrar y devolver el Centro de eventos al panel principal"/>
+                    </StackPanel>
+                    <Border/>
+                </DockPanel>
+            </Border>
+
+            <views:EventCenterView Grid.Row="1"/>
+        </Grid>
+    </Border>
+</Window>

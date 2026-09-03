@@ -4,8 +4,37 @@
              xmlns:fl="clr-namespace:FlyleafLib.Controls.WPF;assembly=FlyleafLib"
              xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
              xmlns:views="clr-namespace:TrueCentralVms.Client.Views"
+             xmlns:sys="clr-namespace:System;assembly=System.Runtime"
              Background="{StaticResource BgBrush}">
     <UserControl.Resources>
+        <!-- Miniatura de una posición dentro del selector de división -->
+        <DataTemplate x:Key="LayoutPreview">
+            <Border BorderBrush="{StaticResource MutedBrush}" BorderThickness="0.8" Margin="0.8"/>
+        </DataTemplate>
+
+        <!-- Botones de división (1 canal / 4 posiciones): el activo queda
+             marcado con el color de acento. -->
+        <Style x:Key="GridSizeOneButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Margin" Value="4,0,0,0"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Playback.GridSize}" Value="1">
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="GridSizeFourButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Margin" Value="4,0,0,0"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Playback.GridSize}" Value="4">
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- Casilla de día del calendario: número, marca de grabación y estados
              (fuera del mes, futuro, hoy, seleccionado). El orden de los
              disparadores importa: el seleccionado va último para que gane
@@ -81,9 +110,26 @@
             <DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="GRABACIONES" Margin="14,12,14,8" FontSize="11"
                            FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"/>
-                <TextBlock DockPanel.Dock="Top" Margin="14,0,14,8" FontSize="10.5" TextWrapping="Wrap"
-                           Foreground="{StaticResource MutedBrush}"
-                           Text="Doble clic en un canal para sumarlo a la reproducción sincronizada (hasta 4; con la grilla llena reemplaza el cuadro seleccionado). Ctrl + doble clic deja solo ese canal."/>
+                <!-- Buscador del árbol (filtra canales y equipos, sin tildes).
+                     Comparte el filtro con la Vista en Vivo: el árbol es el mismo. -->
+                <Grid DockPanel.Dock="Top" Margin="10,0,10,8">
+                    <TextBox x:Name="PlaybackSearchBox" Style="{StaticResource DarkTextBox}" Padding="9,6" FontSize="12"
+                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
+                    <TextBlock Text="Buscar canal…" IsHitTestVisible="False"
+                               Margin="11,0,0,0" VerticalAlignment="Center" FontSize="12">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=PlaybackSearchBox}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
                 <TreeView x:Name="PlaybackTree" ItemsSource="{Binding Devices}"
                           Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
                           MouseDoubleClick="OnTreeDoubleClick"
@@ -93,6 +139,9 @@
                         <Style TargetType="TreeViewItem">
                             <Setter Property="IsExpanded" Value="True"/>
                             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            <!-- Buscador: los nodos filtrados se ocultan -->
+                            <Setter Property="Visibility"
+                                    Value="{Binding IsVisible, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         </Style>
                     </TreeView.ItemContainerStyle>
                     <TreeView.Resources>
@@ -100,7 +149,8 @@
                             <TextBlock Text="{Binding Header}" FontWeight="SemiBold" Margin="0,2"/>
                         </HierarchicalDataTemplate>
                         <DataTemplate DataType="{x:Type vm:ChannelNode}">
-                            <StackPanel Orientation="Horizontal" Margin="0,1" ToolTip="Doble clic para ver sus grabaciones">
+                            <StackPanel Orientation="Horizontal" Margin="0,1"
+                                        ToolTip="Doble clic: suma el canal a la reproducción sincronizada (hasta 4; con la grilla llena reemplaza el cuadro seleccionado). Ctrl + doble clic deja solo ese canal.">
                                 <TextBlock Text="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="9"
                                            Foreground="{StaticResource MutedBrush}" Margin="0,0,6,0" VerticalAlignment="Center"/>
                                 <TextBlock Text="{Binding Header}"/>
@@ -219,9 +269,53 @@
                             Command="{Binding Playback.NextDayCommand}" ToolTip="Día siguiente"/>
                     <Button Content="Hoy" Style="{StaticResource GhostButton}" Padding="10,5" Margin="8,0,0,0"
                             Command="{Binding Playback.GoTodayCommand}"/>
-                    <TextBlock Text="{Binding Playback.Cells.Count, StringFormat='{}{0} de 4 canales'}"
-                               VerticalAlignment="Center" Margin="16,0,0,0" FontSize="11.5"
-                               Foreground="{StaticResource MutedBrush}"/>
+
+                    <!-- División de la grilla: 1 canal o 4 posiciones -->
+                    <Border Width="1" Background="{StaticResource BorderBrush}" Margin="12,4,4,4"/>
+                    <Button Style="{StaticResource GridSizeOneButton}"
+                            Command="{Binding Playback.SetGridSizeCommand}"
+                            ToolTip="Un solo canal a pantalla completa (cierra los demás)">
+                        <!-- El parámetro va tipado: el comando recibe un entero,
+                             y un literal de XAML llegaría como texto. -->
+                        <Button.CommandParameter>
+                            <sys:Int32>1</sys:Int32>
+                        </Button.CommandParameter>
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="14" Height="11" BorderThickness="1.2" VerticalAlignment="Center"
+                                    BorderBrush="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                            <TextBlock Text="1 canal" Margin="7,0,0,0" VerticalAlignment="Center" FontSize="11.5"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource GridSizeFourButton}"
+                            Command="{Binding Playback.SetGridSizeCommand}"
+                            ToolTip="Mosaico de 4 posiciones: hasta cuatro cámaras sincronizadas a la misma hora">
+                        <Button.CommandParameter>
+                            <sys:Int32>4</sys:Int32>
+                        </Button.CommandParameter>
+                        <StackPanel Orientation="Horizontal">
+                            <UniformGrid Columns="2" Rows="2" Width="14" Height="11" VerticalAlignment="Center">
+                                <Border BorderThickness="1.2" Margin="0,0,0.8,0.8"
+                                        BorderBrush="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                <Border BorderThickness="1.2" Margin="0.8,0,0,0.8"
+                                        BorderBrush="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                <Border BorderThickness="1.2" Margin="0,0.8,0.8,0"
+                                        BorderBrush="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                <Border BorderThickness="1.2" Margin="0.8,0.8,0,0"
+                                        BorderBrush="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                            </UniformGrid>
+                            <TextBlock Text="4 posiciones" Margin="7,0,0,0" VerticalAlignment="Center" FontSize="11.5"/>
+                        </StackPanel>
+                    </Button>
+
+                    <TextBlock VerticalAlignment="Center" Margin="16,0,0,0" FontSize="11.5"
+                               Foreground="{StaticResource MutedBrush}">
+                        <TextBlock.Text>
+                            <MultiBinding StringFormat="{}{0} de {1} canales">
+                                <Binding Path="Playback.Cells.Count"/>
+                                <Binding Path="Playback.GridSize"/>
+                            </MultiBinding>
+                        </TextBlock.Text>
+                    </TextBlock>
                     <!-- Consulta de grabaciones en curso -->
                     <ProgressBar IsIndeterminate="True" Width="70" Height="4" VerticalAlignment="Center" Margin="14,0,0,0"
                                  Foreground="{StaticResource AccentBrush}" Background="{StaticResource Panel2Brush}"
@@ -321,23 +415,17 @@
                 <!-- Tramo marcado, exportación y estado -->
                 <DockPanel Margin="10,0,10,4">
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-                        <TextBlock Text="{Binding Playback.DownloadStatus}" VerticalAlignment="Center"
-                                   Foreground="{StaticResource AccentBrush}" FontSize="11.5" Margin="0,0,10,0"/>
-                        <Button Content="Cancelar" Style="{StaticResource GhostButton}" Padding="10,5"
-                                Command="{Binding Playback.CancelDownloadCommand}"
-                                Visibility="{Binding Playback.IsDownloading, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         <Button Style="{StaticResource GhostButton}" Padding="10,5" Margin="6,0,0,0"
                                 Command="{Binding Playback.PlaySelectionCommand}"
                                 IsEnabled="{Binding Playback.HasSelection}"
                                 Content="Reproducir tramo"/>
                         <Button Style="{StaticResource GhostButton}" Padding="10,5" Margin="6,0,0,0"
                                 Command="{Binding Playback.DownloadCommand}"
-                                IsEnabled="{Binding Playback.HasSelection}"
-                                ToolTip="Guarda el tramo marcado del cuadro seleccionado como MP4 en la carpeta de grabaciones">
+                                ToolTip="Exportar grabaciones: cámara, rango exacto de fecha/hora, carpeta, formato y división en archivos. El tramo marcado en la línea de tiempo prellena el rango.">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="11"
                                            VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <TextBlock Text="Exportar MP4"/>
+                                <TextBlock Text="Exportar…"/>
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -382,22 +470,59 @@
             </StackPanel>
         </Border>
 
-        <!-- Grilla de reproducción (un cuadro por canal, todos a la misma hora) -->
+        <!-- Grilla de reproducción: una entrada por POSICIÓN (cuadro con canal
+             o posición libre), todas a la misma hora. La plantilla se elige por
+             el tipo del elemento, así que ambas conviven en el mismo panel. -->
         <Grid Background="#06090D">
-            <ItemsControl ItemsSource="{Binding Playback.Cells}" Margin="4">
+            <ItemsControl ItemsSource="{Binding Playback.Slots}" Margin="4">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
                         <views:VideoLayoutPanel Layout="{Binding Playback.Layout}"/>
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
+                <ItemsControl.Resources>
+                    <!-- Posición libre: acepta que se le suelte un canal del árbol -->
+                    <DataTemplate DataType="{x:Type vm:PlaybackSlot}">
+                        <Border Margin="3" Background="#080B10" CornerRadius="4" BorderThickness="2"
+                                AllowDrop="True" Drop="OnSlotDrop" DragOver="OnSlotDragOver" DragLeave="OnSlotDragLeave">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+                                    <Style.Triggers>
+                                        <!-- El arrastre encima ilumina la posición -->
+                                        <DataTrigger Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{x:Static vm:SelectedCellComparer.Instance}">
+                                                    <Binding/>
+                                                    <Binding Path="DataContext.Playback.DropTarget"
+                                                             RelativeSource="{RelativeSource AncestorType=Window}"/>
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            <Setter Property="Background" Value="#101A24"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.4">
+                                <TextBlock Text="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="20"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{StaticResource MutedBrush}"/>
+                                <TextBlock Text="Posición libre" Margin="0,6,0,0" FontSize="10.5"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{StaticResource MutedBrush}"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+
                     <DataTemplate DataType="{x:Type vm:PlaybackCellViewModel}">
                         <!-- El video de FlyleafLib vive en una ventana nativa superpuesta:
                              los clics sobre él NO llegan a WPF, así que la barra del
                              cuadro selecciona/silencia/cierra y los dobles clics sobre
                              el video se enganchan en OnFlyleafHostLoaded (code-behind). -->
                         <Border Margin="3" Background="#0A0E13" CornerRadius="4" BorderThickness="2"
-                                MouseLeftButtonDown="OnCellClick">
+                                MouseLeftButtonDown="OnCellClick"
+                                AllowDrop="True" Drop="OnSlotDrop" DragOver="OnSlotDragOver" DragLeave="OnSlotDragLeave">
                             <Border.Style>
                                 <Style TargetType="Border">
                                     <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
@@ -411,6 +536,18 @@
                                                 </MultiBinding>
                                             </DataTrigger.Binding>
                                             <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                        </DataTrigger>
+                                        <!-- El arrastre encima manda sobre el foco: marca dónde va a caer -->
+                                        <DataTrigger Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{x:Static vm:SelectedCellComparer.Instance}">
+                                                    <Binding/>
+                                                    <Binding Path="DataContext.Playback.DropTarget"
+                                                             RelativeSource="{RelativeSource AncestorType=Window}"/>
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            <Setter Property="Background" Value="#101A24"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -498,10 +635,13 @@
                             </Grid>
                         </Border>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
+                </ItemsControl.Resources>
             </ItemsControl>
-            <TextBlock Text="Elija un canal (doble clic en el árbol) y luego haga clic en la línea de tiempo para reproducir."
-                       HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
+            <!-- Ayuda inicial: sobre las posiciones vacías, sin taparlas para
+                 el arrastre (los clics y los sueltos pasan de largo). -->
+            <TextBlock Text="Doble clic en un canal del árbol, o arrástrelo hasta la posición donde quiera verlo."
+                       HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,18"
+                       TextWrapping="Wrap" IsHitTestVisible="False"
                        TextAlignment="Center" MaxWidth="420" Foreground="#3A4654" FontSize="12.5"
                        Visibility="{Binding Playback.Cells.Count, Converter={x:Static vm:ZeroToVisibility.Instance}}"/>
         </Grid>

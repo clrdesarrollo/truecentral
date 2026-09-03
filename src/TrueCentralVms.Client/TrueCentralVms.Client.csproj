@@ -27,6 +27,8 @@
     <PackageReference Include="Flyleaf.FFmpeg" Version="9.0.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.11" />
+    <!-- Captura del micrófono para hablar por los parlantes IP (WaveIn 8 kHz mono). -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
 </Project>

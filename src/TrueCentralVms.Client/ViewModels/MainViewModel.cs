@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Threading;
@@ -18,6 +18,8 @@ public partial class MainViewModel : ObservableObject
 {
     private readonly ApiClient _api;
     private readonly VmsHubClient _hub;
+    /// <summary>Alarma sonora de las automatizaciones en este equipo.</summary>
+    private readonly AlertSoundPlayer _alertSound;
     /// <summary>Preferencias locales (última división, etc.). Copia propia:
     /// el login ya terminó de escribir las suyas cuando esta ventana nace.</summary>
     private readonly ClientSettings _settings = ClientSettings.Load();
@@ -29,6 +31,10 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     public ApiClient Api => _api;
     public VmsHubClient Hub => _hub;
+
+    /// <summary>Ajustes locales compartidos con las pantallas auxiliares (sus
+    /// cuadros usan las mismas carpetas, formato y stream por defecto).</summary>
+    internal ClientSettings Settings => _settings;
 
     public ObservableCollection<DeviceNode> Devices { get; } = [];
     public ObservableCollection<VideoCellViewModel> Cells { get; } = [];
@@ -78,6 +84,184 @@ public partial class MainViewModel : ObservableObject
         StatusMessage = ReadyMessage;
     }
 
+    /// <summary>La viñeta "Paneles de alarma" existe en el navbar.</summary>
+    [ObservableProperty] private bool _isAlarmsOpen;
+
+    /// <summary>
+    /// Módulo Paneles de alarma. Se carga al arrancar (no al abrir la viñeta)
+    /// para que el icono del riel avise de una alarma aunque el operador
+    /// nunca haya entrado al módulo.
+    /// </summary>
+    public AlarmsViewModel Alarms { get; }
+
+    /// <summary>Parlantes IP (panel de la Vista en Vivo: hablar, sonidos, biblioteca, texto a voz).</summary>
+    public SpeakersViewModel Speakers { get; }
+
+    [RelayCommand]
+    private void OpenAlarms()
+    {
+        IsAlarmsOpen = true;
+        ActiveSection = "Alarms";
+        StatusMessage = AlarmsHintMessage;
+        _ = Alarms.InitializeAsync();
+    }
+
+    /// <summary>Cerrar la viñeta solo saca el módulo de la vista: el servidor
+    /// sigue conectado a los paneles y las alarmas siguen avisando.</summary>
+    [RelayCommand]
+    private void CloseAlarms()
+    {
+        IsAlarmsOpen = false;
+        ActiveSection = "Home";
+        StatusMessage = ReadyMessage;
+    }
+
+    /// <summary>Alarma crítica de un panel: aviso flotante + barra de estado,
+    /// se esté donde se esté (la viñeta puede estar cerrada).</summary>
+    private void OnAlarmRaised(Core.Contracts.AlarmEventDto dto)
+    {
+        string where = string.Join(" · ", new[] { dto.PanelName, dto.AreaName, dto.ZoneName }
+            .Where(s => !string.IsNullOrWhiteSpace(s))!);
+        StatusMessage = $"ALARMA: {dto.Description} ({where})";
+        Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            if (Application.Current.MainWindow is { IsLoaded: true } owner)
+                Views.ToastWindow.ShowAlert(owner, $"Alarma · {dto.PanelName}",
+                    dto.Description + (where.Length > 0 ? $"\n{where}" : "") +
+                    $"\n{dto.Timestamp.ToLocalTime():HH:mm:ss}");
+        });
+    }
+
+    /// <summary>
+    /// Alertas de automatizaciones pendientes de confirmar en este puesto. Se
+    /// muestra la más reciente; al confirmarla aparece la siguiente, así una
+    /// tanda de alertas no deja ninguna sin acuse de recibo.
+    /// </summary>
+    private readonly List<Core.Contracts.WorkflowAlertDto> _pendingAlerts = [];
+
+    /// <summary>
+    /// Aviso pedido por una automatización del servidor: sonido, barra de
+    /// estado y notificación flotante con la foto que capturó (la imagen se
+    /// descarga aparte porque por el hub solo viaja su ruta). Si el aviso
+    /// exige acuse de recibo, se encola y NO se cierra solo.
+    /// </summary>
+    private void OnWorkflowNotification(Core.Contracts.WorkflowNotificationDto dto)
+    {
+        StatusMessage = $"{dto.Title}: {dto.Message}";
+        // El sonido arranca de inmediato, sin esperar a que baje la foto: es
+        // lo que hace que el operador levante la vista.
+        _ = _alertSound.PlayAsync(dto.Sound, dto.SoundRepeat);
+
+        if (dto.RequiresAck && dto.AlertId > 0)
+        {
+            // El aviso del hub es liviano: el detalle completo (todas las fotos
+            // y la ejecución que la generó) se lee de la API para la ventana.
+            _ = Task.Run(async () =>
+            {
+                var alert = await _api.GetAlertAsync(dto.AlertId);
+                // Respaldo si la API no contesta: con lo que trae el aviso del
+                // hub alcanza para mostrar la alerta y confirmarla.
+                QueueAlert(alert ?? new Core.Contracts.WorkflowAlertDto(dto.AlertId, null, dto.WorkflowId,
+                    dto.WorkflowName, dto.At, dto.Title, dto.Message, dto.Severity, dto.ImagePath,
+                    dto.ImagePath is { Length: > 0 } one ? [one] : [], [], dto.Sound, dto.SoundRepeat,
+                    "", true, null, null, null, null));
+            });
+            return;
+        }
+
+        _ = Application.Current.Dispatcher.InvokeAsync(async () =>
+        {
+            byte[]? image = dto.ImagePath is { Length: > 0 }
+                ? await _api.GetWorkflowImageAsync(dto.ImagePath)
+                : null;
+            if (Application.Current.MainWindow is { IsLoaded: true } owner)
+                Views.ToastWindow.ShowAlert(owner, dto.Title, dto.Message, GlyphOf(dto.Severity), image);
+        });
+    }
+
+    private static string GlyphOf(Core.Contracts.AlarmSeverity severity) =>
+        severity == Core.Contracts.AlarmSeverity.Info ? "\uE783" : "\uE814";
+
+    /// <summary>Suma una alerta a la cola (sin repetir) y muestra la más reciente.</summary>
+    private void QueueAlert(Core.Contracts.WorkflowAlertDto alert) =>
+        Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            if (_pendingAlerts.Any(a => a.Id == alert.Id)) return;
+            _pendingAlerts.Add(alert);
+            ShowPendingCount();
+            _ = ShowTopAlertAsync();
+        });
+
+    /// <summary>
+    /// Abre (o actualiza) la ventana de alarma con todas las pendientes,
+    /// dejando arriba la más reciente.
+    /// </summary>
+    private Task ShowTopAlertAsync()
+    {
+        var pending = _pendingAlerts.Where(a => a.Pending).ToList();
+        if (pending.Count == 0)
+        {
+            Views.AlertWindow.CloseIfDone();
+            return Task.CompletedTask;
+        }
+        if (Application.Current.MainWindow is not { IsLoaded: true } owner)
+        {
+            // Arranque del cliente: la ventana principal todavía no existe. Las
+            // alertas pendientes no se pueden perder por eso: se reintenta.
+            _ = Task.Delay(TimeSpan.FromSeconds(3)).ContinueWith(_ =>
+                Application.Current?.Dispatcher.InvokeAsync(() => _ = ShowTopAlertAsync()));
+            return Task.CompletedTask;
+        }
+        // La ventana necesita resolver la cámara vinculada contra el árbol de
+        // dispositivos que este cliente ya tiene cargado.
+        Views.AlertWindow.Show(owner, _api, _settings, _alertSound,
+            id => Devices.SelectMany(d => d.Channels).FirstOrDefault(c => c.Channel.Id == id),
+            pending, pending[^1].Id);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Alguien confirmó la alerta (este puesto u otro): se refleja en la
+    /// ventana de alarma y se saca de las pendientes.
+    /// </summary>
+    private void OnAlertAcknowledged(Core.Contracts.WorkflowAlertDto alert) =>
+        Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            int position = _pendingAlerts.FindIndex(a => a.Id == alert.Id);
+            if (position >= 0) _pendingAlerts[position] = alert;
+            // Confirmada (aquí o en otro puesto): la alarma sonora se calla.
+            _alertSound.Stop();
+            Views.AlertWindow.Update(alert);
+            _pendingAlerts.RemoveAll(a => a.Id == alert.Id);
+            ShowPendingCount();
+            StatusMessage = $"Alerta «{alert.Title}» confirmada por {alert.AcknowledgedBy}.";
+        });
+
+    private void ShowPendingCount()
+    {
+        if (_pendingAlerts.Count > 0)
+            StatusMessage = $"{_pendingAlerts.Count} alerta(s) sin confirmar.";
+    }
+
+    /// <summary>
+    /// Trae las alertas que quedaron sin confirmar (al abrir el cliente o al
+    /// recuperar la conexión): si el puesto estaba cerrado cuando se emitió la
+    /// alerta, igual hay que darse por enterado.
+    /// </summary>
+    public async Task LoadPendingAlertsAsync()
+    {
+        try
+        {
+            if (await _api.GetAlertsAsync(pendingOnly: true, take: 20) is not { } list) return;
+            foreach (var alert in list.Items.OrderBy(a => a.RaisedAt))
+                QueueAlert(alert);
+        }
+        catch (Exception)
+        {
+            // Sin conexión ahora; al reconectar se vuelve a intentar.
+        }
+    }
+
     /// <summary>La viñeta "Reconocimiento de patentes" existe en el navbar.</summary>
     [ObservableProperty] private bool _isLprOpen;
 
@@ -87,6 +271,9 @@ public partial class MainViewModel : ObservableObject
     /// así que volver a abrir la viñeta no vuelve a golpear la API.
     /// </summary>
     public LprViewModel Lpr { get; }
+
+    /// <summary>Centro de eventos (historial de alertas de automatizaciones).</summary>
+    public EventCenterViewModel Events { get; }
 
     private bool _lprLoaded;
 
@@ -161,6 +348,90 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ShowComingSoon(string module) =>
         StatusMessage = $"El módulo \"{module}\" estará disponible próximamente.";
+
+    // ---------- Centro de descargas ----------
+
+    /// <summary>Cola de exportaciones de grabaciones. Vive en el shell (no en
+    /// la ventana): las descargas siguen aunque el centro esté cerrado.</summary>
+    public DownloadCenterViewModel Downloads { get; }
+
+    private Views.DownloadCenterWindow? _downloadWindow;
+    private Views.EventCenterWindow? _eventWindow;
+
+    /// <summary>La viñeta "Centro de eventos" existe en el navbar.</summary>
+    [ObservableProperty] private bool _isEventsOpen;
+
+    /// <summary>
+    /// Centro de eventos: historial de las alertas con su acuse de recibo.
+    /// Vive DENTRO del sistema como una sección más; el botón "Ventana aparte"
+    /// lo saca a su propia ventana (misma vista y mismo ViewModel).
+    /// </summary>
+    [RelayCommand]
+    private void OpenEventCenter()
+    {
+        if (_eventWindow is not null)
+        {
+            // Ya está afuera: se trae al frente en vez de duplicarlo.
+            if (_eventWindow.WindowState == WindowState.Minimized)
+                _eventWindow.WindowState = WindowState.Normal;
+            _eventWindow.Activate();
+            return;
+        }
+        IsEventsOpen = true;
+        ActiveSection = "Events";
+        StatusMessage = "Centro de eventos: historial de alertas y su acuse de recibo.";
+        _ = Events.LoadAsync();
+    }
+
+    /// <summary>Cerrar la viñeta solo saca el módulo de la vista; el historial sigue en el servidor.</summary>
+    [RelayCommand]
+    private void CloseEvents()
+    {
+        IsEventsOpen = false;
+        ActiveSection = "Home";
+        StatusMessage = ReadyMessage;
+    }
+
+    /// <summary>
+    /// Saca el Centro de eventos a una ventana independiente (para dejarlo en
+    /// otro monitor). Al cerrarla, el módulo vuelve al panel principal.
+    /// </summary>
+    private void PopOutEventCenter()
+    {
+        if (_eventWindow is not null) { _eventWindow.Activate(); return; }
+
+        Events.IsPoppedOut = true;
+        IsEventsOpen = false;
+        if (ActiveSection == "Events") ActiveSection = "Home";
+
+        _eventWindow = new Views.EventCenterWindow(Events) { Owner = Application.Current.MainWindow };
+        _eventWindow.Closed += (_, _) =>
+        {
+            _eventWindow = null;
+            Events.IsPoppedOut = false;
+            // Al cerrar la ventana, el módulo vuelve a su viñeta.
+            IsEventsOpen = true;
+            ActiveSection = "Events";
+        };
+        _eventWindow.Show();
+    }
+
+    /// <summary>Abre (o trae al frente) la ventana NO modal del Centro de
+    /// descargas. Instancia única: la lista es la misma se abra cuando se abra.</summary>
+    [RelayCommand]
+    private void OpenDownloadCenter()
+    {
+        if (_downloadWindow is null)
+        {
+            _downloadWindow = new Views.DownloadCenterWindow(Downloads) { Owner = Application.Current.MainWindow };
+            _downloadWindow.Closed += (_, _) => _downloadWindow = null;
+            _downloadWindow.Show();
+            return;
+        }
+        if (_downloadWindow.WindowState == WindowState.Minimized)
+            _downloadWindow.WindowState = WindowState.Normal;
+        _downloadWindow.Activate();
+    }
 
     /// <summary>Ventana de Configuración. Edita la MISMA instancia de ajustes
     /// que usan las celdas (carpetas, formato, stream por defecto): al guardar,
@@ -350,6 +621,9 @@ public partial class MainViewModel : ObservableObject
     private const string LprHintMessage =
         "Reconocimiento de patentes: las lecturas llegan solas; elija una de la lista para ver su ficha completa.";
 
+    private const string AlarmsHintMessage =
+        "Paneles de alarma: seleccione un panel para ver sus áreas y zonas; armar, desarmar y anular zonas queda auditado.";
+
     private const string WallHintMessage =
         "Muro de video: arrastre un canal a una ventana; doble clic para pantalla completa.";
 
@@ -361,6 +635,7 @@ public partial class MainViewModel : ObservableObject
     {
         _api = api;
         _hub = hub;
+        _alertSound = new AlertSoundPlayer(api);
 
         _hub.ConfigChanged += entity =>
         {
@@ -376,14 +651,45 @@ public partial class MainViewModel : ObservableObject
         {
             IsConnected = ok;
             ConnectionStatus = ok ? "Conectado" : "Reconectando…";
+            // Al recuperar la conexión pueden haber quedado alertas sin confirmar.
+            if (ok) _ = LoadPendingAlertsAsync();
         });
+        // Automatizaciones del servidor: el aviso llega ya resuelto (título,
+        // mensaje y, si la automatización capturó una, la foto del hecho).
+        _hub.WorkflowNotification += OnWorkflowNotification;
+        _hub.WorkflowAlertAcknowledged += OnAlertAcknowledged;
 
-        Playback = new PlaybackViewModel(api, _settings);
+        // El Centro de descargas atiende la cola aunque su ventana esté cerrada;
+        // al encolar desde Reproducción, la ventana se muestra sola (no modal).
+        Downloads = new DownloadCenterViewModel(api);
+        Downloads.MediaSaved += OnCellMediaSaved;
+        Downloads.JobEnqueued += () => Application.Current.Dispatcher.InvokeAsync(OpenDownloadCenter);
+
+        Playback = new PlaybackViewModel(api, _settings, Downloads,
+            () => Devices.SelectMany(d => d.Channels));
         // Los tramos exportados avisan igual que las capturas y cápsulas del vivo.
         Playback.MediaSaved += OnCellMediaSaved;
 
         Lpr = new LprViewModel(api, hub, _settings);
         Lpr.MediaSaved += OnCellMediaSaved;
+
+        Events = new EventCenterViewModel(api, hub);
+        Events.PopOutRequested += () => Application.Current.Dispatcher.InvokeAsync(PopOutEventCenter);
+        // "Ver" en el centro de eventos abre la misma ventana de alarma.
+        Events.OpenRequested += alert => Application.Current.Dispatcher.InvokeAsync(() =>
+            Views.AlertWindow.Show(Application.Current.MainWindow, _api, _settings, _alertSound,
+                id => Devices.SelectMany(d => d.Channels).FirstOrDefault(c => c.Channel.Id == id),
+                [alert], alert.Id));
+
+        Alarms = new AlarmsViewModel(api, hub);
+        Alarms.AlarmRaised += OnAlarmRaised;
+
+        Speakers = new SpeakersViewModel(api, hub, _settings);
+        _ = Speakers.InitializeAsync();
+        _ = Alarms.InitializeAsync();
+
+        // Alertas que quedaron pendientes mientras este puesto estaba cerrado.
+        _ = LoadPendingAlertsAsync();
 
         // Preferencia local: se abre con la última división que usó el usuario
         // (asíncrono: las celdas se crean por tandas sin congelar el arranque).
@@ -526,7 +832,7 @@ public partial class MainViewModel : ObservableObject
             cell.AudioActivated -= OnCellAudioActivated;
             cell.MediaSaved -= OnCellMediaSaved;
             cell.Dispose();
-            await Dispatcher.Yield(DispatcherPriority.Background);
+            await BreatheAsync();
         }
         while (Cells.Count < count)
         {
@@ -534,12 +840,32 @@ public partial class MainViewModel : ObservableObject
             cell.AudioActivated += OnCellAudioActivated;
             cell.MediaSaved += OnCellMediaSaved;
             Cells.Add(cell);
-            await Dispatcher.Yield(DispatcherPriority.Background);
+            await BreatheAsync();
         }
         for (int i = 0; i < Cells.Count; i++)
             Cells[i].Index = i + 1;
         if (SelectedCell is not null && !Cells.Contains(SelectedCell))
             SelectedCell = null;
+    }
+
+    /// <summary>Tope de la pausa entre celda y celda (ver BreatheAsync).</summary>
+    private static readonly TimeSpan BreathTimeout = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// Cede el turno al dispatcher para que la interfaz alcance a pintar entre
+    /// celda y celda, pero CON TOPE. Background es de las prioridades más bajas
+    /// de la cola: cualquier trabajo continuo por encima (el render de una
+    /// animación, por ejemplo la barra indeterminada del aviso de apertura
+    /// masiva) puede dejarla sin turno indefinidamente. Una espera Background
+    /// pura se quedaba entonces sin despertar, el bucle de celdas no avanzaba
+    /// más y la aplicación quedaba congelada con el aviso puesto — que además
+    /// bloquea la entrada. El respaldo por tiempo despierta en prioridad Normal
+    /// (por encima del render), así que el bucle SIEMPRE avanza.
+    /// </summary>
+    internal static async Task BreatheAsync()
+    {
+        var pumped = Dispatcher.CurrentDispatcher.InvokeAsync(() => { }, DispatcherPriority.Background).Task;
+        await Task.WhenAny(pumped, Task.Delay(BreathTimeout));
     }
 
     /// <summary>
@@ -580,7 +906,10 @@ public partial class MainViewModel : ObservableObject
     public void SwapCells(VideoCellViewModel source, VideoCellViewModel target)
     {
         if (ReferenceEquals(source, target)) return;
-        if (!Cells.Contains(source) || !Cells.Contains(target)) return;
+        // El destino es de esta grilla (aquí se soltó); el origen puede venir
+        // de una pantalla auxiliar: el player viaja entre ventanas con el
+        // video andando, igual que dentro de la misma grilla.
+        if (!Cells.Contains(target)) return;
         if (source.IsEmpty && target.IsEmpty) return;
 
         bool exchange = !target.IsEmpty;
@@ -603,10 +932,13 @@ public partial class MainViewModel : ObservableObject
     /// cuadros sobrantes de la división elegida quedan libres.
     /// </summary>
     /// <summary>Apertura masiva en curso (indicador en la barra de herramientas:
-    /// crear decenas de players congela la UI unos segundos y sin aviso parece
-    /// que la aplicación se colgó).</summary>
+    /// preparar los cuadros y enganchar los streams toma unos segundos y sin
+    /// aviso parece que la aplicación se colgó).</summary>
     [ObservableProperty] private bool _isBulkOpening;
     [ObservableProperty] private string _bulkOpeningText = "";
+
+    /// <summary>Canales que se abren juntos en la apertura masiva.</summary>
+    private const int OpenBatchSize = 4;
 
     public async Task OpenDeviceAsync(DeviceNode device)
     {
@@ -656,16 +988,37 @@ public partial class MainViewModel : ObservableObject
 
             SelectedCell = null;
             var profile = DefaultProfileForOpen();
-            var openings = new List<Task>();
-            for (int i = 0; i < Cells.Count; i++)
+            // Si ninguna división estándar da abasto (más canales que cuadros),
+            // entran los que quepan: el resto de la grilla queda libre.
+            int openCount = Math.Min(channels.Count, Cells.Count);
+            for (int i = openCount; i < Cells.Count; i++)
+                Cells[i].Clear();
+
+            // Por tandas y no los N de golpe: cada apertura crea el player del
+            // cuadro (un dispositivo Direct3D) y lanza un pull RTSP hacia el
+            // equipo. Repartido, la interfaz respira entre tanda y tanda, el
+            // aviso muestra el avance y el grabador no recibe quince conexiones
+            // en el mismo instante (los equipos limitan sesiones simultáneas).
+            for (int i = 0; i < openCount; i += OpenBatchSize)
             {
-                if (i < channels.Count)
-                    openings.Add(Cells[i].OpenAsync(channels[i], profile));
-                else
-                    Cells[i].Clear();
+                int upTo = Math.Min(i + OpenBatchSize, openCount);
+                var wave = new List<Task>();
+                for (int j = i; j < upTo; j++)
+                    wave.Add(Cells[j].OpenAsync(channels[j], profile));
+                await Task.WhenAll(wave);
+                BulkOpeningText = $"Abriendo canales de \"{device.Device.Name}\"… {upTo}/{openCount}";
+                StatusMessage = BulkOpeningText;
+                loading?.Update(BulkOpeningText);
+                await BreatheAsync();
             }
-            await Task.WhenAll(openings);
-            StatusMessage = $"{channels.Count} canal(es) de \"{device.Device.Name}\" en pantalla.";
+            StatusMessage = $"{openCount} canal(es) de \"{device.Device.Name}\" en pantalla.";
+        }
+        catch (Exception ex)
+        {
+            // Abrir video toca driver, GPU y red: una falla ahí NO puede
+            // llevarse la aplicación. El doble clic del árbol es async void y
+            // la excepción no tendría dónde caer — se cierra el proceso.
+            StatusMessage = $"No se pudieron abrir todos los canales de \"{device.Device.Name}\": {ex.Message}";
         }
         finally
         {
@@ -693,12 +1046,44 @@ public partial class MainViewModel : ObservableObject
                 Views.ToastWindow.ShowSaved(owner, title, glyph, path);
         });
 
-    /// <summary>Audio exclusivo: encender el audio de un cuadro apaga el resto.</summary>
-    private void OnCellAudioActivated(VideoCellViewModel active)
+    /// <summary>Audio exclusivo en TODA la aplicación: encender el audio de un
+    /// cuadro apaga el resto, incluidos los de las pantallas auxiliares (por
+    /// eso lo comparten sus grillas: una sola cámara suena a la vez).</summary>
+    internal void OnCellAudioActivated(VideoCellViewModel active)
     {
-        foreach (var cell in Cells)
+        foreach (var cell in Cells.Concat(_auxWindows.SelectMany(w => w.Vm.Cells)))
             if (cell != active && cell.IsAudioOn)
                 cell.IsAudioOn = false;
+    }
+
+    // ---------- Pantallas auxiliares (estilo iVMS-4200, máximo 3) ----------
+
+    /// <summary>Pantallas auxiliares abiertas: ventanas independientes con su
+    /// propia grilla, para ver cámaras en más de un monitor.</summary>
+    private readonly List<Views.AuxLiveWindow> _auxWindows = [];
+
+    private const int MaxAuxScreens = 3;
+
+    [RelayCommand]
+    private void OpenAuxScreen()
+    {
+        if (_auxWindows.Count >= MaxAuxScreens)
+        {
+            StatusMessage = $"Ya hay {MaxAuxScreens} pantallas auxiliares abiertas (el máximo).";
+            return;
+        }
+        // El número más bajo libre: cerrar la 2 y abrir otra vuelve a dar la 2.
+        int slot = Enumerable.Range(1, MaxAuxScreens).First(n => _auxWindows.All(w => w.Vm.SlotNumber != n));
+        var window = new Views.AuxLiveWindow(new AuxScreenViewModel(this, slot));
+        window.Closed += (_, _) => _auxWindows.Remove(window);
+        _auxWindows.Add(window);
+
+        // Parte en el primer monitor sin ventanas de la aplicación (si lo hay).
+        var occupied = new List<Window>();
+        if (Application.Current.MainWindow is { } main) occupied.Add(main);
+        occupied.AddRange(_auxWindows.Where(w => w != window && w.IsLoaded));
+        window.ShowOnFreeMonitor(occupied);
+        StatusMessage = $"Pantalla auxiliar {slot} abierta: arrástrela al monitor que quiera si no partió ahí.";
     }
 
     [RelayCommand]
@@ -711,6 +1096,10 @@ public partial class MainViewModel : ObservableObject
     public void Shutdown()
     {
         _metricsTimer.Stop();
+        // Las pantallas auxiliares mueren con la principal (cada una libera
+        // sus players en su propio Closed).
+        foreach (var window in _auxWindows.ToList())
+            window.Close();
         foreach (var cell in Cells)
             cell.Dispose();
         Playback.Dispose();

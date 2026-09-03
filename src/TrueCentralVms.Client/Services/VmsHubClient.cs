@@ -18,7 +18,7 @@ public sealed class VmsHubClient : IAsyncDisposable
     private readonly HubConnection _connection;
     private volatile bool _disposed;
 
-    /// <summary>Cambió una entidad de configuración ("devices" | "channels" | "users" | "decoders" | "walls" | "anpr-sources"): recargar.</summary>
+    /// <summary>Cambió una entidad de configuración ("devices" | "channels" | "users" | "decoders" | "walls" | "anpr-sources" | "alarm-panels"): recargar.</summary>
     public event Action<string>? ConfigChanged;
 
     /// <summary>Cambió el estado en línea de un dispositivo.</summary>
@@ -29,6 +29,21 @@ public sealed class VmsHubClient : IAsyncDisposable
 
     /// <summary>Llegó un reconocimiento de patente (módulo Aplicaciones).</summary>
     public event Action<PlateEventDto>? PlateRecognized;
+
+    /// <summary>Cambió el estado de un panel de alarma (conexión, áreas o zonas).</summary>
+    public event Action<AlarmPanelDto>? AlarmPanelStateChanged;
+
+    /// <summary>Llegó un evento de un panel de alarma (alarma, armado, falla...).</summary>
+    public event Action<AlarmEventDto>? AlarmEventReceived;
+
+    /// <summary>Una automatización pide avisar al operador (puede traer una foto).</summary>
+    public event Action<WorkflowNotificationDto>? WorkflowNotification;
+
+    /// <summary>Alguien se dio por enterado de una alerta (se puede bajar de pantalla).</summary>
+    public event Action<WorkflowAlertDto>? WorkflowAlertAcknowledged;
+
+    /// <summary>Un parlante IP cambió de estado de conexión.</summary>
+    public event Action<SpeakerDto>? SpeakerStatusChanged;
 
     /// <summary>true = conectado al hub; false = reconectando/caído.</summary>
     public event Action<bool>? ConnectionStateChanged;
@@ -49,6 +64,11 @@ public sealed class VmsHubClient : IAsyncDisposable
         _connection.On<DeviceDto>(VmsHubContract.DeviceStatusChanged, dto => DeviceStatusChanged?.Invoke(dto));
         _connection.On<WallDto>(VmsHubContract.WallStateChanged, dto => WallStateChanged?.Invoke(dto));
         _connection.On<PlateEventDto>(VmsHubContract.PlateRecognized, dto => PlateRecognized?.Invoke(dto));
+        _connection.On<AlarmPanelDto>(VmsHubContract.AlarmPanelStateChanged, dto => AlarmPanelStateChanged?.Invoke(dto));
+        _connection.On<AlarmEventDto>(VmsHubContract.AlarmEventReceived, dto => AlarmEventReceived?.Invoke(dto));
+        _connection.On<WorkflowNotificationDto>(VmsHubContract.WorkflowNotification, dto => WorkflowNotification?.Invoke(dto));
+        _connection.On<WorkflowAlertDto>(VmsHubContract.WorkflowAlertAcknowledged, dto => WorkflowAlertAcknowledged?.Invoke(dto));
+        _connection.On<SpeakerDto>(VmsHubContract.SpeakerStatusChanged, dto => SpeakerStatusChanged?.Invoke(dto));
 
         _connection.Reconnecting += _ => { ConnectionStateChanged?.Invoke(false); return Task.CompletedTask; };
         _connection.Reconnected += _ => { ConnectionStateChanged?.Invoke(true); return Task.CompletedTask; };

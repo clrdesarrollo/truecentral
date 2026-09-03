@@ -145,7 +145,45 @@ public partial class PlaybackView : UserControl
         if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _dragCandidate = null;
-        DragDrop.DoDragDrop(PlaybackTree, new DataObject(typeof(ChannelNode), node), DragDropEffects.Copy);
+        try { DragDrop.DoDragDrop(PlaybackTree, new DataObject(typeof(ChannelNode), node), DragDropEffects.Copy); }
+        finally { Vm.Playback.DropTarget = null; }
+    }
+
+    // ------------------------------------------------------------------
+    // Soltar un canal sobre una posición de la grilla: va EXACTAMENTE ahí
+    // (libre u ocupada), que es todo el sentido de arrastrarlo. Las dos
+    // plantillas —cuadro con canal y posición libre— comparten manejadores:
+    // el elemento soltado sale del DataContext.
+    // ------------------------------------------------------------------
+    private void OnSlotDragOver(object sender, DragEventArgs e)
+    {
+        bool accepts = e.Data.GetDataPresent(typeof(ChannelNode));
+        e.Effects = accepts ? DragDropEffects.Copy : DragDropEffects.None;
+        Vm.Playback.DropTarget = accepts ? (sender as FrameworkElement)?.DataContext : null;
+        e.Handled = true;
+    }
+
+    private void OnSlotDragLeave(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement element && ReferenceEquals(Vm.Playback.DropTarget, element.DataContext))
+            Vm.Playback.DropTarget = null;
+    }
+
+    private async void OnSlotDrop(object sender, DragEventArgs e)
+    {
+        Vm.Playback.DropTarget = null;
+        if (sender is not FrameworkElement element) return;
+        if (e.Data.GetData(typeof(ChannelNode)) is not ChannelNode node) return;
+        e.Handled = true;
+        await DropOnSlotAsync(node, element.DataContext);
+    }
+
+    /// <summary>Abre el canal en la posición donde se soltó (por su índice en
+    /// la grilla); si la posición ya no existe, entra donde haya lugar.</summary>
+    private async Task DropOnSlotAsync(ChannelNode node, object? slot)
+    {
+        int index = slot is null ? -1 : Vm.Playback.Slots.IndexOf(slot);
+        await Vm.Playback.SelectChannelAsync(node, slotIndex: index >= 0 ? index : null);
     }
 
     /// <summary>El botón de la barra enciende el modo zoom en todas las ventanas de video.</summary>
@@ -167,14 +205,27 @@ public partial class PlaybackView : UserControl
         // Un clic en el video deja el foco del teclado en la ventana de
         // Flyleaf: Esc también debe salir de la pantalla completa desde ahí.
         window.AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler(OnKeyDown), handledEventsToo: true);
-        // El video tapa el cuadro WPF: el canal arrastrado se suelta
-        // directamente sobre la ventana de Flyleaf, que reemplaza ESE cuadro.
+        // El video tapa el cuadro WPF: el arrastre se atiende también en la
+        // ventana de Flyleaf, para que soltar SOBRE la imagen valga igual que
+        // soltar en el borde del cuadro.
         window.AllowDrop = true;
+        window.AddHandler(DragDrop.DragOverEvent, new DragEventHandler((_, e) =>
+        {
+            bool accepts = e.Data.GetDataPresent(typeof(ChannelNode));
+            e.Effects = accepts ? DragDropEffects.Copy : DragDropEffects.None;
+            Vm.Playback.DropTarget = accepts ? host.DataContext : null;
+            e.Handled = true;
+        }), handledEventsToo: true);
+        window.AddHandler(DragDrop.DragLeaveEvent, new DragEventHandler((_, _) =>
+        {
+            if (ReferenceEquals(Vm.Playback.DropTarget, host.DataContext))
+                Vm.Playback.DropTarget = null;
+        }), handledEventsToo: true);
         window.AddHandler(DragDrop.DropEvent, new DragEventHandler(async (_, e) =>
         {
-            if (host.DataContext is PlaybackCellViewModel cell &&
-                e.Data.GetData(typeof(ChannelNode)) is ChannelNode node)
-                await Vm.Playback.SelectChannelAsync(node, target: cell);
+            Vm.Playback.DropTarget = null;
+            if (e.Data.GetData(typeof(ChannelNode)) is ChannelNode node)
+                await DropOnSlotAsync(node, host.DataContext);
         }), handledEventsToo: true);
     }
 }

@@ -57,6 +57,19 @@ public sealed class ClientSettings
     public bool FitGridToDevice { get; set; } = true;
     /// <summary>Tiempo de espera de la API en segundos (se aplica al iniciar la aplicación).</summary>
     public int ApiTimeoutSeconds { get; set; } = 20;
+    /// <summary>Micrófono para hablar por los parlantes IP (nombre del dispositivo); null = el predeterminado.</summary>
+    public string? MicrophoneDevice { get; set; }
+    /// <summary>Tono de apertura (dos pitidos cortos) antes de la voz al hablar por los parlantes IP.</summary>
+    public bool TalkPreTone { get; set; } = true;
+
+    // ---------- Exportación de grabaciones (diálogo Exportar) ----------
+
+    /// <summary>Última carpeta de exportación elegida; null/vacío = carpeta de grabaciones.</summary>
+    public string? ExportFolder { get; set; }
+    /// <summary>Último formato de exportación: "mp4" o "mkv".</summary>
+    public string ExportFormat { get; set; } = "mp4";
+    /// <summary>Última división elegida en minutos por archivo; 0 = un solo archivo.</summary>
+    public int ExportSplitMinutes { get; set; }
 
     // ---------- Muro de video ----------
 
@@ -84,6 +97,10 @@ public sealed class ClientSettings
     [JsonIgnore]
     public string EffectiveRecordingFolder =>
         string.IsNullOrWhiteSpace(RecordingFolder) ? DefaultRecordingFolder : RecordingFolder;
+
+    [JsonIgnore]
+    public string EffectiveExportFolder =>
+        string.IsNullOrWhiteSpace(ExportFolder) ? EffectiveRecordingFolder : ExportFolder;
 
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

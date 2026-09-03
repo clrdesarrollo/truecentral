@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -10,6 +10,13 @@ namespace TrueCentralVms.Client.ViewModels;
 
 /// <summary>Pista de la línea de tiempo: los tramos grabados de un canal.</summary>
 public sealed record TimelineTrack(string Name, IReadOnlyList<RecordingSegmentDto> Segments);
+
+/// <summary>
+/// Posición libre de la grilla de reproducción. No tiene estado: existe para
+/// ocupar su lugar en <see cref="PlaybackViewModel.Slots"/> y así poder
+/// dibujarla vacía y aceptar que le suelten un canal encima.
+/// </summary>
+public sealed class PlaybackSlot;
 
 /// <summary>
 /// Módulo Reproducción: las grabaciones viven en el disco del DVR/NVR (o en
@@ -30,15 +37,102 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     private readonly ApiClient _api;
     private readonly ClientSettings _settings;
     private readonly DispatcherTimer _clock;
-    private CancellationTokenSource? _downloadCancel;
+    /// <summary>Centro de descargas del shell: las exportaciones se encolan ahí.</summary>
+    private readonly DownloadCenterViewModel _downloads;
+    /// <summary>Canales del inventario (árbol compartido del shell), para que
+    /// el diálogo de exportación ofrezca cualquier cámara, no solo las abiertas.</summary>
+    private readonly Func<IEnumerable<ChannelNode>> _channelSource;
 
+    /// <summary>
+    /// Posiciones de la grilla EN ORDEN: cada una es un cuadro con canal
+    /// (<see cref="PlaybackCellViewModel"/>) o una posición libre
+    /// (<see cref="PlaybackSlot"/>). Es lo que dibuja la grilla, y lo que
+    /// permite soltar una cámara exactamente donde el operador quiera.
+    /// </summary>
+    public ObservableCollection<object> Slots { get; } = [];
+
+    /// <summary>Cuadros con canal, en el orden de la grilla. Lo mantiene
+    /// <see cref="SyncCells"/>: la sincronización, las pistas de la línea de
+    /// tiempo y el audio exclusivo trabajan sobre esta lista.</summary>
     public ObservableCollection<PlaybackCellViewModel> Cells { get; } = [];
 
     /// <summary>Cuadro con el foco: manda en el audio y en la exportación.</summary>
     [ObservableProperty] private PlaybackCellViewModel? _selectedCell;
 
-    /// <summary>División de la grilla según cuántos canales haya abiertos.</summary>
+    /// <summary>Posición bajo el puntero durante un arrastre (se ilumina para
+    /// mostrar dónde va a caer la cámara). null = no hay arrastre encima.</summary>
+    [ObservableProperty] private object? _dropTarget;
+
+    /// <summary>División de la grilla; la fija <see cref="GridSize"/>.</summary>
     [ObservableProperty] private VideoLayout _layout = VideoLayout.Standard[0];
+
+    /// <summary>
+    /// Posiciones de la grilla: 1 (un canal a pantalla completa) o 4 (mosaico
+    /// 2×2 con las posiciones libres a la vista, para comparar cámaras a la
+    /// misma hora). Los botones de la barra la cambian; sumar un segundo canal
+    /// la lleva sola a 4.
+    /// </summary>
+    [ObservableProperty] private int _gridSize = 1;
+
+    partial void OnGridSizeChanged(int value)
+    {
+        Layout = value <= 1 ? VideoLayout.Standard[0] : VideoLayout.Standard[1];
+        ResizeSlots();
+    }
+
+    /// <summary>
+    /// Botones «1 canal» y «4 posiciones» de la barra. Bajar a un canal cierra
+    /// los demás: cada cuadro abierto ocupa una sesión de reproducción del
+    /// grabador, y dejarlos corriendo fuera de la vista las gastaría sin que
+    /// nadie los mire.
+    /// </summary>
+    [RelayCommand]
+    private void SetGridSize(int size)
+    {
+        size = size <= 1 ? 1 : MaxChannels;
+        if (GridSize == size) return;
+
+        if (size == 1)
+        {
+            var keep = SelectedCell ?? Cells.FirstOrDefault();
+            foreach (var cell in Cells.Where(c => !ReferenceEquals(c, keep)).ToList())
+                RemoveCell(cell);
+            // Al achicar solo sobreviven las posiciones de adelante: el cuadro
+            // que queda se muda a la primera (Move conserva su ventana de
+            // video; recrear el elemento reiniciaría la reproducción).
+            if (keep is not null && Slots.IndexOf(keep) is int from and > 0)
+                Slots.Move(from, 0);
+        }
+        GridSize = size; // ajusta la división y las posiciones
+    }
+
+    /// <summary>Ajusta la cantidad de posiciones a <see cref="GridSize"/>,
+    /// agregando o quitando de a una para no tocar los cuadros que ya están
+    /// reproduciendo.</summary>
+    private void ResizeSlots()
+    {
+        while (Slots.Count > GridSize)
+        {
+            int last = Slots.Count - 1;
+            // Quien achica la grilla cierra antes los cuadros sobrantes; esto
+            // es una red de seguridad para no dejar un player huérfano.
+            if (Slots[last] is PlaybackCellViewModel orphan) Detach(orphan);
+            Slots.RemoveAt(last);
+        }
+        while (Slots.Count < GridSize)
+            Slots.Add(new PlaybackSlot());
+        SyncCells();
+    }
+
+    /// <summary>Refleja en <see cref="Cells"/> los cuadros con canal, en el
+    /// orden en que están puestos en la grilla.</summary>
+    private void SyncCells()
+    {
+        var live = Slots.OfType<PlaybackCellViewModel>().ToList();
+        if (Cells.SequenceEqual(live)) return;
+        Cells.Clear();
+        foreach (var cell in live) Cells.Add(cell);
+    }
 
     /// <summary>Día visible en la línea de tiempo (hora local del equipo).</summary>
     [ObservableProperty]
@@ -101,8 +195,6 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(HasSelection))]
     private DateTime? _selectionEnd;
 
-    [ObservableProperty] private bool _isDownloading;
-    [ObservableProperty] private string _downloadStatus = "";
 
     private const string EmptyMessage = "Elija un canal del árbol (doble clic) para ver sus grabaciones.";
 
@@ -194,10 +286,16 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
         return currentMonth && DateTime.UtcNow - loadedAt > CurrentMonthCacheLife;
     }
 
-    public PlaybackViewModel(ApiClient api, ClientSettings settings)
+    public PlaybackViewModel(ApiClient api, ClientSettings settings, DownloadCenterViewModel downloads,
+        Func<IEnumerable<ChannelNode>> channelSource)
     {
         _api = api;
         _settings = settings;
+        _downloads = downloads;
+        _channelSource = channelSource;
+
+        // La grilla arranca con sus posiciones vacías a la vista.
+        ResizeSlots();
 
         Calendar.Selected = Date;
         Calendar.DayPicked += day => Date = day;
@@ -219,39 +317,44 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Doble clic en un canal del árbol: se SUMA a la reproducción
-    /// sincronizada (hasta <see cref="MaxChannels"/>, como la vista en vivo va
-    /// llenando cuadros). Con la grilla llena reemplaza el cuadro con foco.
-    /// Con <paramref name="replaceAll"/> (Ctrl + doble clic) deja solo ese
-    /// canal.
+    /// Pone el canal en la grilla de reproducción. Sin más datos entra en la
+    /// primera posición libre (y sumar el segundo canal abre solo el mosaico de
+    /// 4). <paramref name="slotIndex"/> lo manda a una posición EXACTA: es lo
+    /// que usa el arrastrar y soltar, donde el operador eligió el lugar.
+    /// <paramref name="replaceAll"/> (Ctrl + doble clic) deja solo ese canal.
     /// </summary>
-    /// <summary>
-    /// Suma el canal a la reproducción. <paramref name="target"/> (arrastrar y
-    /// soltar sobre un cuadro) reemplaza ESE cuadro en vez del que tiene el
-    /// foco: el operador soltó ahí a propósito.
-    /// </summary>
-    public async Task SelectChannelAsync(ChannelNode node, bool replaceAll = false,
-        PlaybackCellViewModel? target = null)
+    public async Task SelectChannelAsync(ChannelNode node, bool replaceAll = false, int? slotIndex = null)
     {
-        if (target is not null && Cells.Contains(target))
-            SelectedCell = target;
         if (Cells.FirstOrDefault(c => c.Channel.Device.Id == node.Device.Id &&
-                                      c.Channel.Channel.ChannelNumber == node.Channel.ChannelNumber) is { } existing)
+                                      c.Channel.Channel.ChannelNumber == node.Channel.ChannelNumber) is { } existing
+            && !replaceAll)
         {
+            // Ya está en la grilla: no se abre dos veces (sería una segunda
+            // sesión de reproducción del mismo canal en el equipo).
             SelectedCell = existing;
+            Status = $"\"{node.Channel.Name}\" ya está en la grilla.";
             return;
         }
 
         if (replaceAll)
         {
-            // Primero salen de la colección (la grilla suelta sus superficies)
-            // y recién ahí se liberan los players, como en la vista en vivo.
-            var previous = Cells.ToList();
-            Cells.Clear();
-            foreach (var cell in previous) Detach(cell);
+            foreach (var cell in Cells.ToList()) RemoveCell(cell);
+            GridSize = 1;
             Playhead = null;
             IsPaused = false;
         }
+        else if (slotIndex is null && GridSize == 1 && Cells.Count == 1)
+        {
+            // Sumar un segundo canal abre el mosaico de 4 posiciones: en la
+            // grilla de uno solo el nuevo reemplazaría al que se está viendo.
+            GridSize = MaxChannels;
+        }
+
+        // Posición destino: la elegida al soltar, la primera libre, o —con la
+        // grilla llena— la del cuadro con foco.
+        int index = slotIndex ?? Slots.IndexOf(Slots.FirstOrDefault(s => s is PlaybackSlot)!);
+        if (index < 0) index = SelectedCell is { } focused ? Slots.IndexOf(focused) : 0;
+        index = Math.Clamp(index, 0, Slots.Count - 1);
 
         var created = new PlaybackCellViewModel(_api, _settings, node);
         created.AudioActivated += OnCellAudioActivated;
@@ -259,22 +362,12 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
         // Las capturas y cápsulas avisan igual que en la Vista en Vivo.
         created.MediaSaved += OnCellMediaSaved;
 
-        // Grilla llena: el canal nuevo entra en el cuadro con foco (mismo
-        // criterio que la vista en vivo al abrir sobre un cuadro ocupado).
-        if (Cells.Count >= MaxChannels || target is not null)
-        {
-            int index = SelectedCell is { } focused ? Cells.IndexOf(focused) : 0;
-            if (index < 0) index = 0;
-            var replaced = Cells[index];
-            Cells[index] = created;
-            Detach(replaced);
-        }
-        else
-        {
-            Cells.Add(created);
-        }
+        // La posición elegida cambia de contenido: si tenía un canal, se cierra
+        // (su sesión en el equipo se libera).
+        if (Slots[index] is PlaybackCellViewModel replaced) Detach(replaced);
+        Slots[index] = created;
+        SyncCells();
         SelectedCell = created;
-        Layout = LayoutFor(Cells.Count);
 
         IsLoadingSegments = true;
         Status = $"Consultando grabaciones de \"{node.Channel.Name}\" del {Date:dd-MM-yyyy}…";
@@ -317,10 +410,13 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     /// <summary>Quita un canal de la reproducción (su ✕).</summary>
     public void RemoveCell(PlaybackCellViewModel cell)
     {
-        if (!Cells.Remove(cell)) return;
+        if (Slots.IndexOf(cell) is not (int index and >= 0)) return;
+        // La posición queda LIBRE en su lugar (no se recompone la grilla): es
+        // la que eligió el operador con los botones de la barra.
+        Slots[index] = new PlaybackSlot();
+        SyncCells();
         Detach(cell);
         if (ReferenceEquals(SelectedCell, cell)) SelectedCell = Cells.FirstOrDefault();
-        Layout = LayoutFor(Math.Max(Cells.Count, 1));
         RefreshTracks();
         if (Cells.Count == 0)
         {
@@ -347,13 +443,6 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
         foreach (var cell in Cells)
             if (!ReferenceEquals(cell, owner)) cell.MuteQuietly();
     }
-
-    private static VideoLayout LayoutFor(int count) => count switch
-    {
-        <= 1 => VideoLayout.Standard[0], // 1
-        2 => VideoLayout.FitFor(2),      // 2×1
-        _ => VideoLayout.Standard[1],    // 2×2
-    };
 
     private void RefreshTracks() =>
         Tracks = Cells.Select(c => new TimelineTrack(c.Channel.Channel.Name, c.Segments)).ToList();
@@ -599,96 +688,43 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Exporta el tramo marcado del cuadro con foco a un MP4 en la carpeta de
-    /// grabaciones. El servidor tira del equipo con FFmpeg y va enviando el
-    /// archivo: avanza al ritmo al que el grabador entrega el video.
+    /// Abre el diálogo de exportación (cámara, rango exacto de fecha/hora,
+    /// carpeta de destino, formato y división en archivos). El recorte de la
+    /// línea de tiempo solo PRE-LLENA el rango: el diálogo es la fuente de
+    /// verdad. Cada archivo aceptado entra como descarga al Centro de descargas.
     /// </summary>
     [RelayCommand]
-    private async Task DownloadAsync()
+    private void Download()
     {
-        if (IsDownloading) return;
-        if (SelectedCell is not { } cell)
+        var channels = _channelSource().ToList();
+        if (channels.Count == 0)
         {
-            Status = "Elija primero un canal.";
-            return;
-        }
-        if (SelectionStart is not { } from || SelectionEnd is not { } to)
-        {
-            Status = "Arrastre sobre la línea de tiempo para marcar el tramo a exportar.";
-            return;
-        }
-        if (to - from > TimeSpan.FromHours(2))
-        {
-            Status = "El tramo a exportar no puede superar 2 horas.";
+            Status = "No hay canales disponibles para exportar.";
             return;
         }
 
-        string folder = _settings.EffectiveRecordingFolder;
-        string file = Path.Combine(folder,
-            $"{SafeName(cell.Channel.Device.Name)}_{SafeName(cell.Channel.Channel.Name)}_{from:yyyyMMdd_HHmmss}.mp4");
+        // Prellenado: el tramo marcado; sin marca, desde la aguja (o el
+        // mediodía del día visible) con una hora de duración.
+        DateTime from = SelectionStart ?? Playhead ?? Date.AddHours(12);
+        DateTime to = SelectionEnd is { } end && end > from ? end : from.AddHours(1);
 
-        _downloadCancel = new CancellationTokenSource();
-        IsDownloading = true;
-        DownloadStatus = "Preparando la exportación…";
-        try
+        var dialog = new Views.ExportDialog(channels, SelectedCell?.Channel, from, to, _settings, _downloads)
         {
-            Directory.CreateDirectory(folder);
-            var progress = new Progress<long>(bytes =>
-                DownloadStatus = $"Exportando… {bytes / 1024d / 1024d:0.0} MB");
-            await _api.DownloadPlaybackAsync(cell.Channel.Device.Id, cell.Channel.Channel.RtspChannel,
-                from, to, file, progress, _downloadCancel.Token);
-            Status = $"Tramo exportado ({(to - from).TotalMinutes:0.#} min).";
-            MediaSaved?.Invoke("Grabación exportada", "\uE896", file);
-        }
-        catch (OperationCanceledException)
-        {
-            TryDelete(file);
-            Status = "Exportación cancelada.";
-        }
-        catch (Exception ex)
-        {
-            TryDelete(file);
-            Status = ex is ApiException ? ex.Message : $"No se pudo exportar el tramo: {ex.Message}";
-        }
-        finally
-        {
-            IsDownloading = false;
-            DownloadStatus = "";
-            _downloadCancel?.Dispose();
-            _downloadCancel = null;
-        }
-    }
-
-    [RelayCommand]
-    private void CancelDownload() => _downloadCancel?.Cancel();
-
-    private static void TryDelete(string file)
-    {
-        try
-        {
-            if (File.Exists(file)) File.Delete(file);
-        }
-        catch
-        {
-            // Archivo parcial tomado por otro programa: queda en la carpeta.
-        }
-    }
-
-    /// <summary>Nombre de equipo/canal apto para un archivo de Windows.</summary>
-    private static string SafeName(string name)
-    {
-        var clean = name.Trim();
-        foreach (char invalid in Path.GetInvalidFileNameChars())
-            clean = clean.Replace(invalid, '_');
-        clean = clean.Replace(' ', '_');
-        return clean.Length > 0 ? clean : "canal";
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        if (dialog.ShowDialog() != true) return;
+        Status = dialog.EnqueuedCount == 1
+            ? "Exportación agregada al Centro de descargas."
+            : $"{dialog.EnqueuedCount} exportaciones agregadas al Centro de descargas.";
     }
 
     public void Dispose()
     {
         _clock.Stop();
-        _downloadCancel?.Cancel();
         var open = Cells.ToList();
+        // Primero salen de la grilla (suelta sus superficies de video) y recién
+        // ahí se liberan los players, como en la vista en vivo.
+        Slots.Clear();
         Cells.Clear();
         foreach (var cell in open) Detach(cell);
     }

@@ -117,6 +117,10 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
 
             if (IsPlaying) Status = "No se pudo abrir la grabación: " + (e.Error ?? "error desconocido");
             IsPlaying = false;
+            // El media server solo informa un error genérico al lector; el
+            // motivo del EQUIPO (p. ej. 453: sin ancho de banda para otra
+            // reproducción) lo tiene el servidor y es lo accionable.
+            ExplainFailureAsync();
         };
         Player.PlaybackStopped += (_, _) =>
         {
@@ -127,6 +131,24 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
             IsPlaying = false;
             Status = "Fin del tramo.";
         };
+    }
+
+    /// <summary>Ruta del media server de la última concesión: con ella se le
+    /// pregunta al servidor por qué el equipo rechazó la reproducción.</summary>
+    private string? _lastPath;
+
+    /// <summary>
+    /// Reemplaza el error técnico por el motivo real del equipo, si el
+    /// servidor lo registró. Sin esperar a nadie: es un detalle del mensaje.
+    /// </summary>
+    private async void ExplainFailureAsync()
+    {
+        if (_lastPath is not { Length: > 0 } path) return;
+        int sequence = _openSequence;
+        if (await _api.GetPlaybackFailureAsync(path) is not { Length: > 0 } message) return;
+        // El operador ya se movió a otra hora: su mensaje manda.
+        if (sequence != _openSequence || IsPlaying) return;
+        Status = message;
     }
 
     /// <summary>
@@ -161,6 +183,11 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
     {
         int sequence = ++_openSequence;
         IsOpening = true;
+        // La ventana protegida cubre TAMBIÉN la concesión: al pedirla, el
+        // servidor cierra la ruta anterior de este canal (así el grabador
+        // libera la sesión en el acto) y ese corte llegaría como "fin del
+        // tramo" sobre un cuadro que en realidad está saltando de hora.
+        Interlocked.Increment(ref _pendingOpens);
         try
         {
             // La velocidad viaja en la concesión: a más de 1× el servidor toma
@@ -170,7 +197,13 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
             _speed = speed;
             var grant = await _api.RequestPlaybackAsync(Channel.Device.Id, Channel.Channel.RtspChannel,
                 localTime, localEnd, speed);
-            if (sequence != _openSequence) return false; // el usuario ya se movió a otra hora
+            if (sequence != _openSequence)
+            {
+                // El usuario ya se movió a otra hora: como no se llega a abrir,
+                // nadie va a descontar esta apertura al completarse.
+                Interlocked.Decrement(ref _pendingOpens);
+                return false;
+            }
             RangeStart = localTime;
             IsSeekExact = grant.ExactSeek;
             IsPlaying = true;
@@ -178,14 +211,15 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
                 ? ""
                 : "El equipo reproduce desde el inicio de su grabación (ONVIF no permite posicionar).";
             Player.Config.Audio.Enabled = IsAudioOn;
-            // Se cuenta ANTES de abrir: el cierre del tramo anterior ocurre
-            // dentro de OpenAsync y debe caer dentro de la ventana protegida.
-            Interlocked.Increment(ref _pendingOpens);
-            Player.OpenAsync(grant.RtspUrl);
+            // La ruta identifica esta reproducción en el servidor: si el equipo
+            // la rechaza, con ella se recupera el motivo.
+            _lastPath = new Uri(grant.RtspUrl).AbsolutePath.Trim('/');
+            Player.OpenAsync(grant.RtspUrl); // el descuento lo hace OpenCompleted
             return true;
         }
         catch (ApiException ex)
         {
+            Interlocked.Decrement(ref _pendingOpens);
             if (sequence != _openSequence) return false;
             IsOpening = false;
             IsPlaying = false;
@@ -221,6 +255,7 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
             string extension = _settings.SnapshotFormat.Equals("png", StringComparison.OrdinalIgnoreCase) ? ".png" : ".jpg";
             string file = MediaFileBase(_settings.EffectiveSnapshotFolder, extension);
             Player.TakeSnapshotToFile(file);
+            ReportAudit("playback-snapshot", file);
             Status = "Captura guardada";
             MediaSaved?.Invoke("Captura guardada", "\uE722", file);
         }
@@ -270,9 +305,23 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
 
         string? file = _recordingFile;
         _recordingFile = null;
-        if (!notify || file is null) return;
+        if (file is null) return;
+        ReportAudit("playback-clip-saved", file);
+        if (!notify) return;
         Status = "Grabación guardada";
         MediaSaved?.Invoke("Grabación guardada", "\uE714", file);
+    }
+
+    /// <summary>Deja el evento en la bitácora de auditoría del servidor, con la
+    /// hora de la grabación que se estaba viendo; nunca molesta si falla.</summary>
+    private void ReportAudit(string action, string file)
+    {
+        var moment = Playhead ?? RangeStart;
+        _ = _api.ReportAuditEventAsync(new ClientAuditEventDto(
+            action,
+            Channel.Device.Id, Channel.Device.Name,
+            Channel.Channel.ChannelNumber, Channel.Channel.Name,
+            file, $"instante grabado: {moment:dd-MM-yyyy HH:mm:ss}"));
     }
 
     /// <summary>Contador de la cápsula en la barra del cuadro (mm:ss).</summary>

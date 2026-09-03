@@ -1,0 +1,642 @@
+<UserControl x:Class="TrueCentralVms.Client.Views.AlarmsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
+             Background="{StaticResource BgBrush}">
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="WarnBrush" Color="#FCD34D"/>
+        <SolidColorBrush x:Key="AlarmBgBrush" Color="#33EF4444"/>
+        <SolidColorBrush x:Key="ArmedBgBrush" Color="#2622C55E"/>
+        <SolidColorBrush x:Key="DisarmedBgBrush" Color="#268B98A5"/>
+        <SolidColorBrush x:Key="PartialBgBrush" Color="#263B82F6"/>
+
+        <!-- Distintivo de estado (píldora): el color sale de Tag = nivel -->
+        <Style x:Key="LevelBadge" TargetType="Border">
+            <Setter Property="CornerRadius" Value="999"/>
+            <Setter Property="Padding" Value="8,2"/>
+            <Setter Property="Background" Value="{StaticResource DisarmedBgBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Armed">
+                    <Setter Property="Background" Value="{StaticResource ArmedBgBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Normal">
+                    <Setter Property="Background" Value="{StaticResource ArmedBgBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Partial">
+                    <Setter Property="Background" Value="{StaticResource PartialBgBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Alarm">
+                    <Setter Property="Background" Value="{StaticResource AlarmBgBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Triggered">
+                    <Setter Property="Background" Value="#33FCD34D"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Fault">
+                    <Setter Property="Background" Value="#33FCD34D"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Bypassed">
+                    <Setter Property="Background" Value="#33A78BFA"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="LevelBadgeText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Armed">
+                    <Setter Property="Foreground" Value="{StaticResource OkBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Normal">
+                    <Setter Property="Foreground" Value="{StaticResource OkBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Partial">
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Alarm">
+                    <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Triggered">
+                    <Setter Property="Foreground" Value="{StaticResource WarnBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Fault">
+                    <Setter Property="Foreground" Value="{StaticResource WarnBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Bypassed">
+                    <Setter Property="Foreground" Value="#A78BFA"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Botón compacto de acción (armar/desarmar/anular) -->
+        <Style x:Key="SmallGhost" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+        </Style>
+        <Style x:Key="SmallPrimary" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+        </Style>
+        <Style x:Key="SmallDanger" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
+        </Style>
+
+        <!-- Fila de la lista de paneles -->
+        <Style x:Key="PanelListItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Root" Background="Transparent" BorderThickness="3,0,0,1"
+                                BorderBrush="Transparent" Padding="10,9">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Fila del flujo de eventos -->
+        <Style x:Key="EventListItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Root" Background="Transparent" BorderThickness="0,0,0,1"
+                                BorderBrush="{StaticResource BorderBrush}" Padding="10,7">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Barra de severidad del evento -->
+        <Style x:Key="SeverityBar" TargetType="Border">
+            <Setter Property="Width" Value="4"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="Margin" Value="0,0,10,0"/>
+            <Setter Property="Background" Value="{StaticResource MutedBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Severity}" Value="Critical">
+                    <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Warning">
+                    <Setter Property="Background" Value="{StaticResource WarnBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="EventGlyph" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Margin" Value="0,1,10,0"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Severity}" Value="Critical">
+                    <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Warning">
+                    <Setter Property="Foreground" Value="{StaticResource WarnBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="Arm">
+                    <Setter Property="Foreground" Value="{StaticResource OkBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Tarjeta de área -->
+        <Style x:Key="AreaCard" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="Margin" Value="0,0,12,12"/>
+            <Setter Property="Width" Value="330"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Level}" Value="Alarm">
+                    <Setter Property="BorderBrush" Value="{StaticResource DangerBrush}"/>
+                    <Setter Property="Background" Value="#1AEF4444"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="Armed">
+                    <Setter Property="BorderBrush" Value="#5522C55E"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="AreaGlyph" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,12,0"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Level}" Value="Armed">
+                    <Setter Property="Foreground" Value="{StaticResource OkBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="Alarm">
+                    <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Baldosa de zona -->
+        <Style x:Key="ZoneTile" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Margin" Value="0,0,8,8"/>
+            <Setter Property="Width" Value="215"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Level}" Value="Alarm">
+                    <Setter Property="BorderBrush" Value="{StaticResource DangerBrush}"/>
+                    <Setter Property="Background" Value="#1AEF4444"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="Triggered">
+                    <Setter Property="BorderBrush" Value="#66FCD34D"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="Fault">
+                    <Setter Property="BorderBrush" Value="#66FCD34D"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="Bypassed">
+                    <Setter Property="Opacity" Value="0.7"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- ===== Barra de herramientas ===== -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,8">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE730;" FontSize="16"
+                               Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                    <StackPanel Margin="10,0,20,0" VerticalAlignment="Center">
+                        <TextBlock Text="Paneles de alarma" FontSize="13.5" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                            <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{StaticResource OkBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasActiveAlarms}" Value="True">
+                                                <Setter Property="Fill" Value="{StaticResource DangerBrush}"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding HasPanels}" Value="False">
+                                                <Setter Property="Fill" Value="{StaticResource MutedBrush}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center">
+                                <Run Text="{Binding Panels.Count, Mode=OneWay}"/><Run Text=" panel(es)  ·  "/><Run Text="{Binding ActiveAlarmCount, Mode=OneWay}"/><Run Text=" en alarma"/>
+                            </TextBlock>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <CheckBox Content="Solo el panel seleccionado" IsChecked="{Binding OnlySelectedPanel}"
+                              VerticalAlignment="Center" Foreground="{StaticResource TextBrush}" FontSize="12"
+                              Margin="0,0,12,0" ToolTip="Filtrar el flujo de eventos por el panel seleccionado"/>
+                    <ComboBox Width="170" Height="30" VerticalAlignment="Center" FontSize="12"
+                              ItemsSource="{Binding KindOptions}" DisplayMemberPath="Key" SelectedValuePath="Value"
+                              SelectedValue="{Binding KindFilter}"
+                              ToolTip="Filtrar el flujo de eventos por tipo"/>
+                </StackPanel>
+                <TextBlock/>
+            </DockPanel>
+        </Border>
+
+        <!-- ===== Aviso / estado del módulo ===== -->
+        <Border Grid.Row="1" Background="#1A3B82F6" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1" Padding="12,7"
+                Visibility="{Binding StatusMessage, Converter={x:Static vm:NonEmptyToVisibility.Instance}}">
+            <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource TextBrush}" FontSize="12"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- ===== Paneles | detalle | eventos ===== -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="270" MinWidth="220"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*" MinWidth="380"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="370" MinWidth="280"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Lista de paneles -->
+            <Border Grid.Column="0" Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Padding="12,9"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+                        <TextBlock Text="Paneles" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"/>
+                    </Border>
+                    <TextBlock DockPanel.Dock="Top" Margin="14,20,14,0" TextWrapping="Wrap" FontSize="12"
+                               Foreground="{StaticResource MutedBrush}"
+                               Text="Sin paneles registrados."
+                               Visibility="{Binding Panels.Count, Converter={x:Static vm:ZeroToVisibility.Instance}}"/>
+                    <ListBox ItemsSource="{Binding Panels}" SelectedItem="{Binding SelectedPanel}"
+                             Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
+                             ItemContainerStyle="{StaticResource PanelListItem}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel>
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource LevelBadge}" Tag="{Binding ArmLevel}">
+                                            <TextBlock Text="{Binding ArmSummary}" Style="{StaticResource LevelBadgeText}"
+                                                       Tag="{Binding ArmLevel}"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding Name}" FontSize="12.5" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="{StaticResource DangerBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsOnline}" Value="True">
+                                                            <Setter Property="Fill" Value="{StaticResource OkBrush}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                        <TextBlock Text="{Binding StatusText}" FontSize="10.5"
+                                                   Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding Counts}" FontSize="10.5"
+                                               Foreground="{StaticResource MutedBrush}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+                          Background="{StaticResource BorderBrush}"/>
+
+            <!-- Detalle del panel seleccionado -->
+            <Grid Grid.Column="2">
+                <TextBlock Text="Seleccione un panel para ver sus áreas y zonas."
+                           HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12.5"
+                           Foreground="{StaticResource MutedBrush}"
+                           Visibility="{Binding SelectedPanel, Converter={x:Static vm:NullToVisibility.Instance}}"/>
+
+                <Grid DataContext="{Binding SelectedPanel}"
+                      Visibility="{Binding DataContext.SelectedPanel,
+                                   RelativeSource={RelativeSource AncestorType=UserControl},
+                                   Converter={x:Static vm:NotNullToVisibility.Instance}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Cabecera del panel -->
+                    <Border Grid.Row="0" Padding="16,12" Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+                        <StackPanel>
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource SmallGhost}" Content="Actualizar"
+                                            ToolTip="Releer el estado del panel ahora"
+                                            Command="{Binding DataContext.RefreshCommand,
+                                                      RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="Bold"
+                                                   Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                                        <Border Style="{StaticResource LevelBadge}" Tag="{Binding ArmLevel}" Margin="12,0,0,0">
+                                            <TextBlock Text="{Binding ArmSummary}" Style="{StaticResource LevelBadgeText}"
+                                                       Tag="{Binding ArmLevel}"/>
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0">
+                                        <Run Text="{Binding Detail, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding Host, Mode=OneWay}"/>
+                                    </TextBlock>
+                                    <TextBlock FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0">
+                                        <Run Text="{Binding StatusText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding LastStateText, Mode=OneWay}"/>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding LastError}" FontSize="11.5" TextWrapping="Wrap" Margin="0,3,0,0"
+                                               Foreground="{StaticResource DangerBrush}"
+                                               Visibility="{Binding LastError, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+                                    <Border Margin="0,6,0,0" Padding="8,6" CornerRadius="6"
+                                            Background="#26EF4444" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1"
+                                            Visibility="{Binding HasWarning, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE814;" FontSize="13"
+                                                       Foreground="{StaticResource DangerBrush}" VerticalAlignment="Top" Margin="0,1,8,0"/>
+                                            <TextBlock Text="{Binding WarningText}" TextWrapping="Wrap" FontSize="11.5"
+                                                       Foreground="{StaticResource DangerBrush}"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Órdenes globales -->
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0"
+                                        IsEnabled="{Binding IsOnline}">
+                                <Button Style="{StaticResource SmallPrimary}"
+                                        IsEnabled="{Binding CanArmAllAway}"
+                                        ToolTip="Armado total de todas las áreas"
+                                        Command="{Binding DataContext.ArmAllAwayCommand,
+                                                  RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72E;" FontSize="11"
+                                                   VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <TextBlock Text="Armar todo" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource SmallGhost}" Content="Armar parcial (todo)"
+                                        IsEnabled="{Binding CanArmAllStay}"
+                                        ToolTip="Armado parcial / en casa de todas las áreas"
+                                        Command="{Binding DataContext.ArmAllStayCommand,
+                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                                <Button IsEnabled="{Binding CanDisarmAll}"
+                                        Command="{Binding DataContext.DisarmAllCommand,
+                                                  RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource SmallGhost}">
+                                            <Setter Property="ToolTip" Value="Desarmar todas las áreas"/>
+                                        </Style>
+                                    </Button.Style>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE785;" FontSize="11"
+                                                   VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <TextBlock VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="Desarmar todo"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasArming}" Value="True">
+                                                            <Setter Property="Text" Value="Cancelar armado"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource SmallDanger}" Content="Silenciar alarmas"
+                                        Visibility="{Binding InAlarm, Converter={x:Static vm:BoolToVisibility.Instance}}"
+                                        ToolTip="Borra la alarma activa de todas las áreas sin cambiar el armado"
+                                        Command="{Binding DataContext.ClearAllAlarmsCommand,
+                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                                <ProgressBar Width="90" Height="4" IsIndeterminate="True" VerticalAlignment="Center"
+                                             Margin="6,0,0,0" Background="Transparent" BorderThickness="0"
+                                             Foreground="{StaticResource AccentBrush}"
+                                             Visibility="{Binding IsBusy, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Áreas y zonas -->
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16,12,10,12">
+                        <StackPanel IsEnabled="{Binding IsOnline}">
+                            <TextBlock Text="ÁREAS" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8"/>
+                            <TextBlock Text="El panel no reportó áreas todavía." FontSize="12"
+                                       Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12"
+                                       Visibility="{Binding Areas.Count, Converter={x:Static vm:ZeroToVisibility.Instance}}"/>
+                            <ItemsControl ItemsSource="{Binding Areas}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource AreaCard}">
+                                            <StackPanel>
+                                                <DockPanel>
+                                                    <TextBlock Text="{Binding Glyph}" Style="{StaticResource AreaGlyph}"/>
+                                                    <Border DockPanel.Dock="Right" Style="{StaticResource LevelBadge}" Tag="{Binding Level}">
+                                                        <TextBlock Text="{Binding ArmLabel}" Style="{StaticResource LevelBadgeText}"
+                                                                   Tag="{Binding Level}"/>
+                                                    </Border>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
+                                                                   Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock FontSize="10.5" Foreground="{StaticResource MutedBrush}">
+                                                            <Run Text="Área "/><Run Text="{Binding Number, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding ZoneCountText, Mode=OneWay}"/>
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                                <TextBlock Text="¡ALARMA ACTIVA!" FontSize="11.5" FontWeight="Bold" Margin="0,8,0,0"
+                                                           Foreground="{StaticResource DangerBrush}"
+                                                           Visibility="{Binding InAlarm, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                                    <Button Style="{StaticResource SmallPrimary}" Content="Armar total"
+                                                            IsEnabled="{Binding CanArmAway}"
+                                                            Command="{Binding DataContext.ArmAreaAwayCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}"/>
+                                                    <Button Style="{StaticResource SmallGhost}" Content="Parcial"
+                                                            IsEnabled="{Binding CanArmStay}"
+                                                            ToolTip="Armado parcial / en casa"
+                                                            Command="{Binding DataContext.ArmAreaStayCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}"/>
+                                                    <Button IsEnabled="{Binding CanDisarm}"
+                                                            Command="{Binding DataContext.DisarmAreaCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}">
+                                                        <Button.Style>
+                                                            <Style TargetType="Button" BasedOn="{StaticResource SmallGhost}">
+                                                                <Setter Property="Content" Value="Desarmar"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsArming}" Value="True">
+                                                                        <Setter Property="Content" Value="Cancelar"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Button.Style>
+                                                    </Button>
+                                                    <Button Style="{StaticResource SmallDanger}" Content="Silenciar"
+                                                            Visibility="{Binding InAlarm, Converter={x:Static vm:BoolToVisibility.Instance}}"
+                                                            Command="{Binding DataContext.ClearAreaAlarmCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="ZONAS" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{StaticResource MutedBrush}" Margin="0,10,0,8"/>
+                            <TextBlock Text="El panel no reportó zonas todavía." FontSize="12"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       Visibility="{Binding Zones.Count, Converter={x:Static vm:ZeroToVisibility.Instance}}"/>
+                            <ItemsControl ItemsSource="{Binding Zones}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource ZoneTile}" ToolTip="{Binding Tooltip}">
+                                            <StackPanel>
+                                                <DockPanel>
+                                                    <Border DockPanel.Dock="Right" Style="{StaticResource LevelBadge}" Tag="{Binding Level}">
+                                                        <TextBlock Text="{Binding StatusLabel}" Style="{StaticResource LevelBadgeText}"
+                                                                   Tag="{Binding Level}"/>
+                                                    </Border>
+                                                    <TextBlock Text="{Binding Name}" FontSize="12.5" FontWeight="SemiBold"
+                                                               Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"
+                                                               VerticalAlignment="Center"/>
+                                                </DockPanel>
+                                                <TextBlock Text="{Binding AreaText}" FontSize="10.5" Margin="0,3,0,0"
+                                                           Foreground="{StaticResource MutedBrush}"/>
+                                                <TextBlock Text="{Binding Flags}" FontSize="10.5"
+                                                           Foreground="{StaticResource WarnBrush}"
+                                                           Visibility="{Binding Flags, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+                                                <TextBlock Text="{Binding Detail}" FontSize="10" TextTrimming="CharacterEllipsis"
+                                                           Foreground="{StaticResource MutedBrush}"
+                                                           Visibility="{Binding Detail, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+                                                <Button Style="{StaticResource SmallGhost}" Content="{Binding BypassLabel}"
+                                                        HorizontalAlignment="Left" Margin="0,7,0,0"
+                                                        ToolTip="Anular (bypass) deja la zona fuera del armado; restituir la vuelve a incluir"
+                                                        Command="{Binding DataContext.ToggleZoneBypassCommand,
+                                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+
+            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Stretch"
+                          Background="{StaticResource BorderBrush}"/>
+
+            <!-- Flujo de eventos -->
+            <Border Grid.Column="4" Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Padding="12,9"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" FontSize="11"
+                                       Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"
+                                       Text="{Binding Events.Count, StringFormat={}{0} en pantalla}"/>
+                            <TextBlock Text="Eventos" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
+                    <TextBlock DockPanel.Dock="Top" Margin="14,20,14,0" TextWrapping="Wrap" FontSize="12"
+                               Foreground="{StaticResource MutedBrush}"
+                               Text="Aún no hay eventos. Las alarmas, armados y fallas de los paneles aparecerán aquí al instante."
+                               Visibility="{Binding Events.Count, Converter={x:Static vm:ZeroToVisibility.Instance}}"/>
+                    <ListBox ItemsSource="{Binding Events}" Background="Transparent" BorderThickness="0"
+                             Foreground="{StaticResource TextBrush}"
+                             ItemContainerStyle="{StaticResource EventListItem}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Left" Style="{StaticResource SeverityBar}"/>
+                                    <TextBlock DockPanel.Dock="Left" Text="{Binding Glyph}" Style="{StaticResource EventGlyph}"/>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Description}" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding Where}" FontSize="11"
+                                                   Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                        <TextBlock FontSize="10.5" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap">
+                                            <Run Text="{Binding TimeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding Origin, Mode=OneWay}"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -60,6 +60,52 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <!-- Paneles de alarma: activo por sección y, con una alarma en curso,
+             en rojo y pulsando aunque la viñeta esté cerrada. -->
+        <Style x:Key="RailAlarmsButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveSection}" Value="Alarms">
+                    <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Alarms.HasActiveAlarms}" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                    <Setter Property="ToolTip" Value="Paneles de alarma: hay una alarma activa"/>
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard x:Name="AlarmPulse">
+                            <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 From="1" To="0.35" Duration="0:0:0.6"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                        <StopStoryboard BeginStoryboardName="AlarmPulse"/>
+                    </DataTrigger.ExitActions>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Centro de descargas: el icono se enciende (y pulsa suave) mientras
+             haya una descarga en curso o en cola, aunque la ventana esté cerrada. -->
+        <Style x:Key="RailDownloadButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Downloads.HasActiveJobs}" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="ToolTip" Value="Centro de descargas — hay descargas en curso"/>
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard x:Name="DownloadPulse">
+                            <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 From="1" To="0.45" Duration="0:0:0.9"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                        <StopStoryboard BeginStoryboardName="DownloadPulse"/>
+                    </DataTrigger.ExitActions>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
 
         <!-- Indicadores de recursos del servidor: gris normal, amarillo ≥70 %,
              rojo ≥90 % (el nivel llega en Tag; el detalle, en el ToolTip). -->
@@ -211,6 +257,42 @@
                                 Command="{Binding CloseWallCommand}"
                                 ToolTip="Cerrar Muro de video"/>
                     </Grid>
+                    <!-- Paneles de alarma: cerrar la viñeta no desconecta nada,
+                         el servidor sigue recibiendo los eventos de los paneles. -->
+                    <Grid Visibility="{Binding IsAlarmsOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
+                                     Padding="14,0,34,0"
+                                     IsChecked="{Binding ActiveSection, Mode=TwoWay,
+                                                 Converter={x:Static vm:SectionEquals.Instance}, ConverterParameter=Alarms}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE730;" FontSize="12"
+                                           VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="Paneles de alarma" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+                        <Button Style="{StaticResource TabCloseButton}" Content="&#xE8BB;"
+                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
+                                Command="{Binding CloseAlarmsCommand}"
+                                ToolTip="Cerrar Paneles de alarma"/>
+                    </Grid>
+                    <!-- Centro de eventos: historial de alertas y acuse de
+                         recibo. Puede sacarse a su propia ventana. -->
+                    <Grid Visibility="{Binding IsEventsOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
+                                     Padding="14,0,34,0"
+                                     IsChecked="{Binding ActiveSection, Mode=TwoWay,
+                                                 Converter={x:Static vm:SectionEquals.Instance}, ConverterParameter=Events}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7BA;" FontSize="12"
+                                           VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="Centro de eventos" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+                        <Button Style="{StaticResource TabCloseButton}" Content="&#xE8BB;"
+                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
+                                Command="{Binding CloseEventsCommand}"
+                                ToolTip="Cerrar Centro de eventos"/>
+                    </Grid>
                     <!-- Aplicaciones → Reconocimiento de patentes. Cerrar la
                          viñeta no detiene nada: el servidor sigue recibiendo
                          y guardando las lecturas de las cámaras. -->
@@ -247,6 +329,9 @@
                     Visibility="{Binding IsGridFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,6">
+                        <Button Style="{StaticResource RailDownloadButton}" Content="&#xE896;"
+                                ToolTip="Centro de descargas"
+                                Command="{Binding OpenDownloadCenterCommand}"/>
                         <Button Style="{StaticResource RailButton}" Content="&#xE713;"
                                 ToolTip="Configuración"
                                 Command="{Binding OpenSettingsCommand}"/>
@@ -262,9 +347,12 @@
                         <Button Style="{StaticResource RailWallButton}" Content="&#xE7F4;"
                                 ToolTip="Muro de video"
                                 Command="{Binding OpenWallCommand}"/>
+                        <Button Style="{StaticResource RailAlarmsButton}" Content="&#xE730;"
+                                ToolTip="Paneles de alarma"
+                                Command="{Binding OpenAlarmsCommand}"/>
                         <Button Style="{StaticResource RailButton}" Content="&#xE7BA;"
-                                ToolTip="Centro de eventos (próximamente)"
-                                Command="{Binding ShowComingSoonCommand}" CommandParameter="Centro de eventos"/>
+                                ToolTip="Centro de eventos — alertas y acuse de recibo"
+                                Command="{Binding OpenEventCenterCommand}"/>
                         <!-- Aplicaciones: módulos verticales sobre el inventario -->
                         <Separator Background="{StaticResource BorderBrush}" Margin="12,7" Height="1"/>
                         <Button Style="{StaticResource RailLprButton}" Content="&#xE804;"
@@ -285,6 +373,14 @@
                                     Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Playback}"/>
                 <views:WallView Visibility="{Binding ActiveSection,
                                 Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Wall}"/>
+                <views:AlarmsView DataContext="{Binding Alarms}"
+                                  Visibility="{Binding DataContext.ActiveSection,
+                                               RelativeSource={RelativeSource AncestorType=Window},
+                                               Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Alarms}"/>
+                <views:EventCenterView DataContext="{Binding Events}"
+                                       Visibility="{Binding DataContext.ActiveSection,
+                                                    RelativeSource={RelativeSource AncestorType=Window},
+                                                    Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Events}"/>
                 <!-- Este módulo tiene ViewModel propio, así que su DataContext
                      NO es el de la ventana: la visibilidad se ata al shell. -->
                 <views:LprView DataContext="{Binding Lpr}"

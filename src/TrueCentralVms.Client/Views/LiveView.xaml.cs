@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using TrueCentralVms.Client.ViewModels;
@@ -266,6 +266,8 @@ public partial class LiveView : UserControl
     // marcarlos como manejados.
     // ------------------------------------------------------------------
     private readonly HashSet<FlyleafLib.Controls.WPF.FlyleafHost> _hookedHosts = [];
+    /// <summary>Ventanas de video ya enganchadas (el enganche se reintenta).</summary>
+    private readonly HashSet<Window> _hookedWindows = [];
 
     /// <summary>Modo zoom digital (lupa + recuadro sobre el video).</summary>
     private readonly ZoomDragController _zoom = new();
@@ -274,14 +276,26 @@ public partial class LiveView : UserControl
     {
         if (sender is not FlyleafLib.Controls.WPF.FlyleafHost host || !_hookedHosts.Add(host))
             return;
-        // Diferido a prioridad Loaded: garantiza que Flyleaf ya creó sus
-        // ventanas en su propio manejador de Loaded, sea cual sea el orden.
+        // El player del cuadro se crea recién al abrir su primer canal, así que
+        // las ventanas de Flyleaf pueden no existir todavía cuando el host
+        // carga: el enganche se reintenta cada vez que el cuadro estrena
+        // player (y cada ventana se engancha una sola vez).
+        if (host.DataContext is VideoCellViewModel cell)
+            cell.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(VideoCellViewModel.Player)) HookVideoWindows(host);
+            };
+        HookVideoWindows(host);
+    }
+
+    /// <summary>Diferido a prioridad Loaded: garantiza que Flyleaf ya creó sus
+    /// ventanas en su propio manejador de Loaded, sea cual sea el orden.</summary>
+    private void HookVideoWindows(FlyleafLib.Controls.WPF.FlyleafHost host) =>
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
         {
             HookVideoWindow(host, host.Surface);
             HookVideoWindow(host, host.Overlay);
         }));
-    }
 
     /// <summary>El botón de la barra enciende el modo zoom en todas las ventanas de video.</summary>
     private void OnDigitalZoomToggled(object sender, RoutedEventArgs e) =>
@@ -289,7 +303,7 @@ public partial class LiveView : UserControl
 
     private void HookVideoWindow(FlyleafLib.Controls.WPF.FlyleafHost host, Window? window)
     {
-        if (window is null) return;
+        if (window is null || !_hookedWindows.Add(window)) return;
         // El modo zoom se engancha PRIMERO: mientras está activo, el arrastre
         // sobre el video marca el área y no debe seleccionar ni maximizar.
         _zoom.Attach(window, () => host.DataContext as VideoCellViewModel);
@@ -358,6 +372,18 @@ public partial class LiveView : UserControl
     // botón con el mouse presionado) detiene.
     // ------------------------------------------------------------------
     private string? _activePtzCommand;
+
+    // --- Parlantes IP: la voz sale mientras el botón se mantiene presionado ---
+
+    private void OnTalkPress(object sender, MouseButtonEventArgs e) => _ = Vm.Speakers.StartTalkAsync();
+
+    private void OnTalkRelease(object sender, MouseButtonEventArgs e) => _ = Vm.Speakers.StopTalkAsync();
+
+    private void OnTalkLeave(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Pressed)
+            _ = Vm.Speakers.StopTalkAsync();
+    }
 
     private void OnPtzPress(object sender, MouseButtonEventArgs e)
     {

@@ -1,0 +1,183 @@
+<Window x:Class="TrueCentralVms.Client.Views.DownloadCenterWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
+        Title="Centro de descargas — CLR TrueCentral VMS"
+        Width="880" Height="480" MinWidth="720" MinHeight="320"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None" ShowInTaskbar="False"
+        Icon="/TrueCentralVms.Client;component/Assets/logo.png"
+        Background="{StaticResource BgBrush}">
+    <!-- Misma receta del shell: sin marco de Windows, franja superior
+         arrastrable y ✕ propio. NO es modal: el operador sigue trabajando
+         mientras las exportaciones avanzan. -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="44" ResizeBorderThickness="6"
+                      GlassFrameThickness="0,0,0,1" CornerRadius="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    <DockPanel>
+        <!-- Barra de título -->
+        <Border DockPanel.Dock="Top" Height="44" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource TitleBarCloseButton}" Content="&#xE8BB;"
+                        Width="44" Click="OnCloseClick"
+                        ToolTip="Cerrar (las descargas siguen en segundo plano)"
+                        WindowChrome.IsHitTestVisibleInChrome="True"/>
+                <StackPanel Orientation="Horizontal" Margin="14,0">
+                    <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                               Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Text="Centro de descargas" Foreground="{StaticResource TextBrush}"
+                               FontSize="13" FontWeight="SemiBold" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Encabezado: resumen + limpiar terminadas -->
+        <Border DockPanel.Dock="Top" Padding="16,10" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="10,5"
+                        Content="Limpiar terminadas"
+                        ToolTip="Quita de la lista las descargas terminadas, fallidas y canceladas (no borra los archivos)"
+                        Command="{Binding ClearFinishedCommand}"/>
+                <TextBlock Text="{Binding Summary}" Foreground="{StaticResource MutedBrush}"
+                           FontSize="12" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
+        <Grid>
+            <!-- Estado vacío -->
+            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
+                       Foreground="{StaticResource MutedBrush}" FontSize="12.5" LineHeight="20"
+                       Text="No hay descargas en esta sesión.&#x0a;Marque un tramo en Reproducción y use «Exportar MP4»: la exportación aparecerá aquí.">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Jobs.Count}" Value="0">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+
+            <!-- Lista (la más nueva arriba) -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="10,8">
+                <ItemsControl ItemsSource="{Binding Jobs}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:DownloadJobViewModel}">
+                            <Border Background="{StaticResource PanelBrush}" CornerRadius="8"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                    Padding="12,9" Margin="4,3">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="170"/>
+                                        <ColumnDefinition Width="100"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Cámara, archivo y tramo -->
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextBrush}"
+                                                   FontSize="12.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding RangeText}" Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="11" Margin="0,2,0,0"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                            <TextBlock Text="{Binding EnqueuedText}" Foreground="{StaticResource MutedBrush}"
+                                                       FontSize="10.5" Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding FileName}" Foreground="{StaticResource MutedBrush}"
+                                                       FontSize="10.5" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding FilePath}"/>
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <!-- Avance -->
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0">
+                                        <ProgressBar Height="4" IsIndeterminate="True" BorderThickness="0"
+                                                     Foreground="{StaticResource AccentBrush}"
+                                                     Background="{StaticResource Panel2Brush}"
+                                                     Visibility="{Binding IsDownloading, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                        <TextBlock Text="{Binding ProgressText}" Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="11" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding ProgressText}"/>
+                                    </StackPanel>
+
+                                    <!-- Estado -->
+                                    <Border Grid.Column="2" CornerRadius="999" Padding="9,3"
+                                            HorizontalAlignment="Left" VerticalAlignment="Center">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="#22303C"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding State}" Value="Completed">
+                                                        <Setter Property="Background" Value="#153A26"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding State}" Value="Failed">
+                                                        <Setter Property="Background" Value="#42201F"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding State}" Value="Cancelled">
+                                                        <Setter Property="Background" Value="#3A3324"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding StateText}" FontSize="10.5" FontWeight="SemiBold">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding State}" Value="Downloading">
+                                                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding State}" Value="Completed">
+                                                            <Setter Property="Foreground" Value="{StaticResource OkBrush}"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding State}" Value="Failed">
+                                                            <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Border>
+
+                                    <!-- Acciones -->
+                                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Style="{StaticResource GhostButton}" Padding="8,5" Margin="4,0,0,0"
+                                                Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                                ToolTip="Cancelar esta descarga"
+                                                Command="{Binding DataContext.CancelCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding CanCancel, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                        <Button Style="{StaticResource GhostButton}" Padding="8,5" Margin="4,0,0,0"
+                                                Content="&#xE72C;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                                ToolTip="Reintentar la exportación"
+                                                Command="{Binding DataContext.RetryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding CanRetry, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                        <Button Style="{StaticResource GhostButton}" Padding="8,5" Margin="4,0,0,0"
+                                                Content="&#xE838;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                                ToolTip="Abrir la carpeta del archivo"
+                                                Command="{Binding DataContext.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding IsCompleted, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                        <Button Style="{StaticResource GhostButton}" Padding="8,5" Margin="4,0,0,0"
+                                                Content="&#xE74D;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                                ToolTip="Quitar de la lista (no borra el archivo)"
+                                                Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding CanRemove, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+    </DockPanel>
+</Window>

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -11,11 +11,12 @@ namespace TrueCentralVms.Client.Views;
 /// sus tramos grabados (coloreados por tipo), regla horaria, aguja de
 /// reproducción y tramo marcado para exportar.
 ///
-/// La ventana visible es un ZOOM sobre el día (24 h a 1 min): los botones
-/// − / + y la rueda del mouse cambian la densidad, y mientras se reproduce la
-/// vista sigue a la aguja. Arrastrar mueve la aguja (al soltar se reproduce
-/// desde ahí) y, si el cursor se sale por un costado, la vista acompaña. En
-/// modo recorte el arrastre marca un tramo en vez de navegar.
+/// La aguja va SIEMPRE al centro y lo que se mueve es la tira, como en un
+/// grabador: al reproducir, los tramos corren bajo ella, y arrastrar empuja la
+/// tira (al soltar se reproduce desde la hora que quedó bajo la aguja). La
+/// ventana visible es un ZOOM sobre el día (24 h a 1 min) que cambian los
+/// botones − / + y la rueda, siempre alrededor de la aguja. En modo recorte el
+/// arrastre marca un tramo en vez de navegar.
 ///
 /// Es dibujo directo (OnRender): cientos de segmentos sin costo de layout.
 /// </summary>
@@ -118,6 +119,8 @@ public sealed class TimelineBar : FrameworkElement
     private static readonly Brush SelectionBrush = new SolidColorBrush(Color.FromArgb(0x46, 0x4C, 0xA0, 0xFF));
     private static readonly Pen SelectionPen = new(new SolidColorBrush(Color.FromRgb(0x4C, 0xA0, 0xFF)), 1);
     private static readonly Brush TimeChipBrush = new SolidColorBrush(Color.FromRgb(0x1A, 0x22, 0x2C));
+    /// <summary>Velo sobre el tiempo que ya no pertenece al día visible.</summary>
+    private static readonly Brush OutsideDayBrush = new SolidColorBrush(Color.FromArgb(0xB4, 0x06, 0x09, 0x0D));
 
     private static readonly Dictionary<string, Brush> KindBrushes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -133,7 +136,7 @@ public sealed class TimelineBar : FrameworkElement
         foreach (var brush in KindBrushes.Values) brush.Freeze();
         Background.Freeze(); TrackBrush.Freeze(); TickPen.Freeze(); LabelTickPen.Freeze();
         LabelBrush.Freeze(); TrackNameBrush.Freeze(); PlayheadPen.Freeze(); PlayheadBrush.Freeze();
-        SelectionBrush.Freeze(); SelectionPen.Freeze(); TimeChipBrush.Freeze();
+        SelectionBrush.Freeze(); SelectionPen.Freeze(); TimeChipBrush.Freeze(); OutsideDayBrush.Freeze();
     }
 
     public TimelineBar()
@@ -147,50 +150,44 @@ public sealed class TimelineBar : FrameworkElement
     private int _zoom;                 // índice en ZoomMinutes (0 = día completo)
     private DateTime? _center;         // centro de la ventana; null = seguir a la aguja
 
-    /// <summary>
-    /// La ventana visible acompaña a la aguja. Se apaga en cuanto el usuario
-    /// mueve la vista a mano (rueda, o arrastre que empuja la tira): si no, el
-    /// tick de la aguja —dos por segundo— le devolvería la vista a la hora que
-    /// se está reproduciendo y sería imposible mirar otro momento del día
-    /// mientras el video corre. Vuelve a encenderse con un clic para
-    /// reproducir, con los botones − / + y al cambiar de día.
-    /// </summary>
-    private bool _followPlayhead = true;
     private static readonly Typeface Font = new("Segoe UI");
 
     private TimeSpan Span => TimeSpan.FromMinutes(ZoomMinutes[_zoom]);
 
-    private DateTime ViewStart
+    /// <summary>
+    /// Hora bajo la aguja. Es el centro de la ventana: la aguja NO se mueve,
+    /// corre la tira por debajo, como en un grabador.
+    /// </summary>
+    private DateTime Center
     {
         get
         {
             var day = Day.Date;
-            var span = Span;
-            if (span >= TimeSpan.FromHours(24)) return day;
             var center = _center ?? Playhead ?? day.AddHours(12);
-            var start = center - TimeSpan.FromTicks(span.Ticks / 2);
-            var last = day.AddDays(1) - span;
-            return start < day ? day : start > last ? last : start;
+            // La aguja siempre apunta a un instante del día visible.
+            return center < day ? day : center > day.AddDays(1) ? day.AddDays(1) : center;
         }
     }
 
+    /// <summary>
+    /// Hora del borde izquierdo. Como la ventana va centrada en la aguja,
+    /// cerca de la medianoche se asoma fuera del día: esos costados se pintan
+    /// aparte para que se lean como "otro día" y no como "sin grabación".
+    /// </summary>
+    private DateTime ViewStart => Center - TimeSpan.FromTicks(Span.Ticks / 2);
+
     /// <summary>Acerca la línea de tiempo (más detalle) alrededor de la aguja.</summary>
-    public void ZoomIn() => SetZoom(_zoom + 1, follow: true);
+    public void ZoomIn() => SetZoom(_zoom + 1);
 
     /// <summary>Aleja la línea de tiempo (menos detalle).</summary>
-    public void ZoomOut() => SetZoom(_zoom - 1, follow: true);
+    public void ZoomOut() => SetZoom(_zoom - 1);
 
-    /// <param name="follow">true: los botones − / + recentran en la aguja y
-    /// retoman el seguimiento; false (rueda): el usuario manda hasta que
-    /// vuelva a hacer clic para reproducir.</param>
-    private void SetZoom(int level, DateTime? anchor = null, bool follow = false)
+    /// <summary>Cambia el detalle. El centro —la aguja— no se mueve: solo
+    /// cambia cuánto tiempo cabe a cada lado.</summary>
+    private void SetZoom(int level)
     {
         level = Math.Clamp(level, 0, ZoomMinutes.Length - 1);
         if (level == _zoom) return;
-        _followPlayhead = follow;
-        _center = follow
-            ? Playhead ?? _center ?? ViewStart + TimeSpan.FromTicks(Span.Ticks / 2)
-            : anchor ?? _center ?? Playhead ?? ViewStart + TimeSpan.FromTicks(Span.Ticks / 2);
         _zoom = level;
         SpanLabel = ZoomMinutes[_zoom] >= 60 ? $"{ZoomMinutes[_zoom] / 60} h" : $"{ZoomMinutes[_zoom]} min";
         InvalidateVisual();
@@ -199,15 +196,14 @@ public sealed class TimelineBar : FrameworkElement
     private static void OnDayChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         // Otro día: la ventana vuelve a arrancar centrada en la aguja (o al medio).
-        if (d is TimelineBar bar) { bar._center = null; bar._followPlayhead = true; }
+        if (d is TimelineBar bar) bar._center = null;
     }
 
     private static void OnPlayheadChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        // Mientras se reproduce, la vista acompaña a la aguja (la tira corre
-        // bajo ella); durante un arrastre —o si el usuario se fue a mirar otra
-        // hora— manda el usuario.
-        if (d is TimelineBar { _dragStartX: < 0, _followPlayhead: true } bar && e.NewValue is DateTime playhead)
+        // Mientras se reproduce, la tira corre bajo la aguja; durante un
+        // arrastre manda el usuario.
+        if (d is TimelineBar { _dragStartX: < 0 } bar && e.NewValue is DateTime playhead)
             bar._center = playhead;
     }
 
@@ -274,6 +270,16 @@ public sealed class TimelineBar : FrameworkElement
                 dc.DrawText(name, new Point(4, top + (bodyHeight - name.Height) / 2));
             }
         }
+
+        // Lo que queda fuera del día visible se atenúa: ahí no falta
+        // grabación, es tiempo de otro día (la ventana va centrada en la aguja
+        // y en los extremos del día se asoma hacia afuera).
+        double dayStartX = PixelsAt(Day.Date), dayEndX = PixelsAt(Day.Date.AddDays(1));
+        if (dayStartX > 0)
+            dc.DrawRectangle(OutsideDayBrush, null, new Rect(0, 0, Math.Min(dayStartX, width), barHeight));
+        if (dayEndX < width)
+            dc.DrawRectangle(OutsideDayBrush, null,
+                new Rect(Math.Max(0, dayEndX), 0, width - Math.Max(0, dayEndX), barHeight));
 
         DrawRuler(dc, width, barHeight, viewStart, span, dpi);
 
@@ -357,6 +363,9 @@ public sealed class TimelineBar : FrameworkElement
     // ---------- Interacción ----------
 
     private double _dragStartX = -1;
+    /// <summary>Hora bajo la aguja al empezar a arrastrar: el desplazamiento
+    /// del cursor se descuenta de ella para correr la tira.</summary>
+    private DateTime _dragStartCenter;
     private bool _dragging;
     private DateTime? _dragFrom, _dragTo; // marca en curso (modo recorte)
     private DateTime? _scrubTime;         // aguja arrastrada (modo navegación)
@@ -369,32 +378,12 @@ public sealed class TimelineBar : FrameworkElement
         return time < day ? day : time >= day.AddDays(1) ? day.AddDays(1).AddSeconds(-1) : time;
     }
 
-    /// <summary>
-    /// Arrastre fuera del control: la ventana acompaña al cursor. El centro se
-    /// mantiene DENTRO del día — sin ese tope, arrastrar unos segundos contra
-    /// el borde lo deja horas fuera de rango y después hay que "desandar" todo
-    /// ese recorrido para que la vista vuelva a moverse.
-    /// </summary>
-    private void PanIfOutside(double x)
-    {
-        double overflow = x < 0 ? x : x > ActualWidth ? x - ActualWidth : 0;
-        if (overflow == 0 || ActualWidth <= 0) return;
-        _followPlayhead = false; // el usuario está eligiendo qué mirar
-        var span = Span;
-        var moved = (_center ?? ViewStart + TimeSpan.FromTicks(span.Ticks / 2))
-            + TimeSpan.FromSeconds(overflow / ActualWidth * span.TotalSeconds);
-        var day = Day.Date;
-        var half = TimeSpan.FromTicks(span.Ticks / 2);
-        var first = day + half;
-        var last = day.AddDays(1) - half;
-        _center = moved < first ? first : moved > last ? last : moved;
-    }
-
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
         if (ActualWidth <= 0) return;
         _dragStartX = e.GetPosition(this).X;
+        _dragStartCenter = Center;
         _dragging = false;
         _dragFrom = _dragTo = null;
         _scrubTime = null;
@@ -416,8 +405,11 @@ public sealed class TimelineBar : FrameworkElement
         }
         else
         {
-            PanIfOutside(x);
-            _scrubTime = TimeAt(x);
+            // La aguja no se mueve: corre la TIRA bajo ella. Arrastrar hacia
+            // la derecha trae el pasado, como empujar la cinta de un grabador.
+            double seconds = (x - _dragStartX) / Math.Max(ActualWidth, 1) * Span.TotalSeconds;
+            _center = _dragStartCenter - TimeSpan.FromSeconds(seconds);
+            _scrubTime = Center;
             Scrubbing?.Invoke(_scrubTime);
         }
         InvalidateVisual();
@@ -439,11 +431,11 @@ public sealed class TimelineBar : FrameworkElement
             return;
         }
 
+        // Al arrastrar, el destino es la hora que quedó bajo la aguja; con un
+        // clic simple, la del punto que se tocó.
         var target = _scrubTime ?? TimeAt(startX);
         _scrubTime = null;
         _dragging = false;
-        // Pedir reproducción desde una hora vuelve a atar la vista a la aguja.
-        _followPlayhead = true;
         _center = target;
         Scrubbing?.Invoke(null);
         InvalidateVisual();
@@ -459,11 +451,14 @@ public sealed class TimelineBar : FrameworkElement
         InvalidateVisual();
     }
 
-    /// <summary>Rueda: acercar/alejar la línea de tiempo alrededor del cursor.</summary>
+    /// <summary>Rueda: acercar/alejar la línea de tiempo alrededor de la aguja.</summary>
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
         base.OnMouseWheel(e);
-        SetZoom(_zoom + (e.Delta > 0 ? 1 : -1), anchor: TimeAt(e.GetPosition(this).X), follow: false);
+        // El zoom siempre abre y cierra alrededor de la aguja, que vive en el
+        // centro: el cursor no manda (si mandara, un zoom cerrado la sacaría
+        // de la ventana).
+        SetZoom(_zoom + (e.Delta > 0 ? 1 : -1));
         e.Handled = true;
     }
 }

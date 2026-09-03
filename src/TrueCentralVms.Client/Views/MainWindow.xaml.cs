@@ -16,6 +16,7 @@ public partial class MainWindow : Window
         DataContext = vm;
         InitializeComponent();
         Loaded += async (_, _) => await _vm.LoadTreeAsync();
+        Closing += OnShellClosing;
         Closed += (_, _) => _vm.Shutdown();
         StateChanged += OnWindowStateChanged;
         _vm.PropertyChanged += (_, e) =>
@@ -23,6 +24,42 @@ public partial class MainWindow : Window
             if (e.PropertyName == nameof(MainViewModel.IsGridFullscreen))
                 ApplyGridFullscreen(_vm.IsGridFullscreen);
         };
+    }
+
+    // ------------------------------------------------------------------
+    // Confirmación de salida. Con descargas de grabaciones activas el aviso
+    // cambia: salir corta la cola y los MP4 a medias se pierden.
+    // ------------------------------------------------------------------
+    private void OnShellClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        bool downloading = _vm.Downloads.HasActiveJobs;
+        string message;
+        if (downloading)
+        {
+            int active = _vm.Downloads.Jobs.Count(j => j.State == DownloadState.Downloading);
+            int queued = _vm.Downloads.Jobs.Count(j => j.State == DownloadState.Pending);
+            message = $"Hay {active} descarga(s) de grabaciones en curso" +
+                      (queued > 0 ? $" y {queued} en cola" : "") +
+                      ".\nSi sale ahora se cancelarán y los archivos a medias quedarán incompletos.\n\n" +
+                      "¿Salir de todos modos?";
+        }
+        else
+        {
+            message = "¿Cerrar CLR TrueCentral VMS?";
+        }
+
+        var result = MessageBox.Show(this, message, "Salir de CLR TrueCentral VMS",
+            MessageBoxButton.YesNo,
+            downloading ? MessageBoxImage.Warning : MessageBoxImage.Question,
+            MessageBoxResult.No);
+        if (result != MessageBoxResult.Yes)
+        {
+            e.Cancel = true;
+            return;
+        }
+        // Mejor esfuerzo: cancelar la cola da la oportunidad de borrar los
+        // parciales antes de que el proceso muera.
+        if (downloading) _vm.Downloads.CancelAll();
     }
 
     // ------------------------------------------------------------------

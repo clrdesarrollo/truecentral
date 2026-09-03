@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 
@@ -88,4 +88,34 @@ public sealed class SelectedCellComparer : IMultiValueConverter
     public object Convert(object[] values, Type t, object p, CultureInfo c) =>
         values.Length == 2 && values[0] is not null && ReferenceEquals(values[0], values[1]);
     public object[] ConvertBack(object value, Type[] t, object p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>Porcentaje (0..100) → ancho en píxeles sobre un ancho total dado por ConverterParameter (vúmetro).</summary>
+public sealed class PercentToWidth : IValueConverter
+{
+    public static readonly PercentToWidth Instance = new();
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        double total = parameter is string s && double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out double t) ? t : 100;
+        double percent = value is int i ? i : value is double d ? d : 0;
+        return Math.Clamp(percent, 0, 100) / 100.0 * total;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
+}
+
+/// <summary>true si el número supera el umbral de ConverterParameter (vúmetro en rojo al saturar).</summary>
+public sealed class GreaterThan : IValueConverter
+{
+    public static readonly GreaterThan Instance = new();
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        double threshold = parameter is string s && double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out double t) ? t : 0;
+        double number = value is int i ? i : value is double d ? d : 0;
+        return number > threshold;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }

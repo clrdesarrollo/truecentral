@@ -1,0 +1,236 @@
+﻿<Window x:Class="TrueCentralVms.Client.Views.AlertWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:fl="clr-namespace:FlyleafLib.Controls.WPF;assembly=FlyleafLib"
+        Title="Información de la alarma" Height="700" Width="1060"
+        MinHeight="520" MinWidth="860"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ShowInTaskbar="True"
+        Icon="/TrueCentralVms.Client;component/Assets/logo.png"
+        Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="38" ResizeBorderThickness="6"
+                      GlassFrameThickness="0,0,0,1" CornerRadius="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    <!-- Ventana de alarma: el detalle del hecho a la izquierda, las fotos a la
+         derecha y el acuse de recibo abajo. No se cierra sola: mientras la
+         alerta siga pendiente, alguien tiene que darse por enterado. -->
+    <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Barra de título del producto (sin el cromo de Windows) -->
+        <Border Grid.Row="0" Height="38" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="10,0,14,0">
+                    <Image Source="/TrueCentralVms.Client;component/Assets/logo.png" Width="22" Height="22"
+                           VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <TextBlock Margin="9,0,0,0" VerticalAlignment="Center" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}">
+                        TrueCentral <Run Foreground="{StaticResource AccentBrush}">VMS</Run>
+                        <Run Foreground="{StaticResource MutedBrush}" Text="— Información de la alarma"/>
+                    </TextBlock>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource TitleBarButton}" Click="OnMinimizeClick"
+                            Content="&#xE921;" ToolTip="Minimizar"/>
+                    <Button x:Name="MaxButton" Style="{StaticResource TitleBarButton}" Click="OnMaxRestoreClick"
+                            ToolTip="Maximizar">
+                        <TextBlock x:Name="MaxGlyph" Text="&#xE922;"/>
+                    </Button>
+                    <Button Style="{StaticResource TitleBarCloseButton}" Click="OnClose"
+                            Content="&#xE8BB;" ToolTip="Cerrar (la alerta sigue pendiente si no la confirma)"/>
+                </StackPanel>
+                <Border/>
+            </DockPanel>
+        </Border>
+
+        <!-- Encabezado -->
+        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1" Padding="18,12">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="SeverityGlyph" FontFamily="Segoe MDL2 Assets" FontSize="20"
+                           Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <StackPanel>
+                    <TextBlock x:Name="TitleText" FontSize="16" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="SubtitleText" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="360" MinWidth="300"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Detalle del hecho -->
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Padding="18,14">
+                <StackPanel>
+                    <TextBlock Text="ORIGEN" Style="{StaticResource FieldLabel}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <Grid x:Name="TriggerGrid" Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Automatización" Style="{StaticResource FieldLabel}"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" x:Name="WorkflowText" TextWrapping="Wrap" FontSize="12.5" Margin="0,0,0,6"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Qué la disparó" Style="{StaticResource FieldLabel}"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="TriggerText" TextWrapping="Wrap" FontSize="12.5" Margin="0,0,0,6"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Severidad" Style="{StaticResource FieldLabel}"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="SeverityText" FontSize="12.5" Margin="0,0,0,6"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Hora del evento" Style="{StaticResource FieldLabel}"/>
+                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="RaisedText" FontSize="12.5" Margin="0,0,0,6"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Ejecución" Style="{StaticResource FieldLabel}"/>
+                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="RunText" FontSize="12.5" Margin="0,0,0,6"/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Alarma sonora" Style="{StaticResource FieldLabel}"/>
+                        <TextBlock Grid.Row="5" Grid.Column="1" x:Name="SoundText" FontSize="12.5" TextWrapping="Wrap"/>
+                    </Grid>
+
+                    <TextBlock Text="DESCRIPCIÓN" Style="{StaticResource FieldLabel}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <Border Background="{StaticResource Panel2Brush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,0,14">
+                        <TextBlock x:Name="MessageText" TextWrapping="Wrap" FontSize="12.5"/>
+                    </Border>
+
+                    <TextBlock Text="ACUSE DE RECIBO" Style="{StaticResource FieldLabel}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <Border x:Name="AckBox" Background="{StaticResource Panel2Brush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="10,8">
+                        <StackPanel>
+                            <TextBlock x:Name="AckStateText" FontSize="12.5" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="AckDetailText" FontSize="11.5" Foreground="{StaticResource MutedBrush}"
+                                       TextWrapping="Wrap" Margin="0,3,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Fotos y registro de la automatización -->
+            <Border Grid.Column="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1,0,0,0">
+                <TabControl x:Name="Tabs" Style="{StaticResource DarkTabControl}" Margin="8"
+                            SelectionChanged="OnTabChanged">
+                    <TabItem Header="Video en vivo">
+                        <Grid Margin="10">
+                            <!-- Con más de una cámara vinculada se muestran todas en
+                                 grilla: en una alarma interesa el sector completo, no
+                                 ir cambiando de cámara con un selector. -->
+                            <Border Background="Black" CornerRadius="6">
+                                <Grid>
+                                    <ItemsControl x:Name="VideoGrid" Margin="2">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <UniformGrid Columns="{Binding VideoColumns,
+                                                             RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Margin="2" Background="Black"
+                                                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                                        CornerRadius="4">
+                                                    <Grid>
+                                                        <fl:FlyleafHost Player="{Binding Player}"
+                                                                        AttachedDragMove="None" KeyBindings="None"
+                                                                        OpenOnDrop="None" SwapOnDrop="None"
+                                                                        ToggleFullScreenOnDoubleClick="None"/>
+                                                        <Border VerticalAlignment="Top" HorizontalAlignment="Left"
+                                                                Background="#99000000" CornerRadius="4,0,4,0" Padding="7,2">
+                                                            <TextBlock Text="{Binding Title}" FontSize="11" Foreground="White"/>
+                                                        </Border>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock x:Name="NoVideoText" Foreground="{StaticResource MutedBrush}"
+                                               FontSize="12.5" TextWrapping="Wrap" TextAlignment="Center"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20"
+                                               Text="Esta alerta no tiene cámara vinculada."/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Fotos">
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Background="Black" CornerRadius="6">
+                                <Grid>
+                                    <Image x:Name="MainImage" Stretch="Uniform"/>
+                                    <TextBlock x:Name="NoImageText" Text="Esta alerta no tiene fotos."
+                                               Foreground="{StaticResource MutedBrush}" FontSize="12.5"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                                    <Border Background="#99000000" CornerRadius="4" Padding="7,2"
+                                            HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8">
+                                        <TextBlock x:Name="ImageCounter" FontSize="11" Foreground="White"/>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                            <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                          Margin="0,10,0,0">
+                                <ItemsControl x:Name="Thumbnails">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Qué hizo el sistema">
+                        <ScrollViewer Margin="10" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="StepsPanel"/>
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
+            </Border>
+        </Grid>
+
+        <!-- Acciones -->
+        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,1,0,0" Padding="18,12">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <TextBlock x:Name="PagerText" VerticalAlignment="Center" Margin="0,0,12,0"
+                               FontSize="12" Foreground="{StaticResource MutedBrush}"/>
+                    <Button x:Name="PrevButton" Content="&#xE76B;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                            Style="{StaticResource GhostButton}" Click="OnPrevious" ToolTip="Alerta anterior" Margin="0,0,6,0"/>
+                    <Button x:Name="NextButton" Content="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                            Style="{StaticResource GhostButton}" Click="OnNext" ToolTip="Alerta siguiente" Margin="0,0,14,0"/>
+                    <Button x:Name="CloseButton" Content="Cerrar" Style="{StaticResource GhostButton}" Click="OnClose"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="AckButton" Content="Enterado" Click="OnAcknowledge"
+                            Background="{StaticResource DangerBrush}" Foreground="White" FontWeight="SemiBold"
+                            Padding="18,8" BorderThickness="0" Cursor="Hand"/>
+                    <Button x:Name="MuteButton" Content="Silenciar" Click="OnMute" Margin="8,0,0,0"
+                            Style="{StaticResource GhostButton}"
+                            ToolTip="Calla la alarma sonora sin confirmar la alerta"/>
+                    <TextBlock x:Name="AckHint" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11.5"
+                               Foreground="{StaticResource MutedBrush}"
+                               Text="Queda registrado quién confirma, a qué hora y desde dónde."/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+    </Border>
+</Window>

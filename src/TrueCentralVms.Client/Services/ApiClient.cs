@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -31,6 +31,12 @@ public sealed class ApiClient
         Timeout = TimeSpan.FromSeconds(Math.Clamp(ClientSettings.Load().ApiTimeoutSeconds, 5, 120)),
     };
 
+    /// <summary>Identificación para la bitácora de auditoría del servidor: con
+    /// esta cabecera el origen queda como "cliente de escritorio" (y no panel
+    /// web) junto con la máquina desde la que se operó.</summary>
+    private static readonly string ClientIdentity =
+        $"wpf/{typeof(ApiClient).Assembly.GetName().Version?.ToString(3) ?? "0.0.0"} ({Environment.MachineName})";
+
     /// <summary>Cliente aparte para las exportaciones: una descarga dura lo
     /// que el equipo tarde en entregar el tramo, muy por encima del tiempo
     /// límite razonable para una llamada de API.</summary>
@@ -44,6 +50,12 @@ public sealed class ApiClient
     public string? Token { get; private set; }
     public string? Username { get; private set; }
     public string? Role { get; private set; }
+
+    public ApiClient()
+    {
+        _http.DefaultRequestHeaders.Add("X-TCVMS-Client", ClientIdentity);
+        _downloads.DefaultRequestHeaders.Add("X-TCVMS-Client", ClientIdentity);
+    }
 
     public async Task LoginAsync(string serverUrl, string username, string password, CancellationToken ct = default)
     {
@@ -94,6 +106,76 @@ public sealed class ApiClient
 
     public Task<List<ChannelDto>> GetChannelsAsync(int deviceId, CancellationToken ct = default) =>
         SendAsync<List<ChannelDto>>(HttpMethod.Get, $"/api/devices/{deviceId}/channels", null, ct);
+
+    /// <summary>Alertas de automatizaciones (pendientes de confirmar o todas).</summary>
+    public Task<WorkflowAlertListDto?> GetAlertsAsync(bool pendingOnly = true, int take = 20, CancellationToken ct = default) =>
+        SendAsync<WorkflowAlertListDto>(HttpMethod.Get,
+            $"/api/workflows/alerts?pending={(pendingOnly ? "true" : "false")}&take={take}", null, ct);
+
+    /// <summary>Detalle completo de una alerta (todas sus fotos y su ejecución).</summary>
+    public Task<WorkflowAlertDto?> GetAlertAsync(long alertId, CancellationToken ct = default) =>
+        SendAsync<WorkflowAlertDto>(HttpMethod.Get, $"/api/workflows/alerts/{alertId}", null, ct);
+
+    /// <summary>Ejecución de una automatización (los pasos que corrió y su resultado).</summary>
+    public Task<WorkflowRunDto?> GetWorkflowRunAsync(long runId, CancellationToken ct = default) =>
+        SendAsync<WorkflowRunDto>(HttpMethod.Get, $"/api/workflows/runs/{runId}", null, ct);
+
+    /// <summary>
+    /// Se da por enterado de una alerta: el servidor registra quién y cuándo.
+    /// Devuelve la alerta ya confirmada (si otro operador se adelantó, con SU
+    /// nombre: la primera confirmación es la que vale).
+    /// </summary>
+    public Task<WorkflowAlertDto?> AcknowledgeAlertAsync(long alertId, CancellationToken ct = default) =>
+        SendAsync<WorkflowAlertDto>(HttpMethod.Post, $"/api/workflows/alerts/{alertId}/ack", null, ct);
+
+    /// <summary>
+    /// Sonido de alarma cargado en el servidor (los mismos de los parlantes
+    /// IP). Devuelve el contenido y su nombre de archivo —la extensión importa
+    /// para reproducirlo—, o null si ya no existe.
+    /// </summary>
+    public async Task<(byte[] Content, string FileName)?> GetWorkflowSoundAsync(string name, CancellationToken ct = default)
+    {
+        if (BaseUrl is null || string.IsNullOrWhiteSpace(name)) return null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                $"{BaseUrl}/api/workflows/audio/{Uri.EscapeDataString(name)}/file");
+            if (Token is not null)
+                request.Headers.Authorization = new("Bearer", Token);
+            using var response = await _http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode) return null;
+            string fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+                              ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+                              ?? name + ".wav";
+            return (await response.Content.ReadAsByteArrayAsync(ct), fileName);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Foto capturada por una automatización (la ruta viene en el aviso del
+    /// hub). null si ya no está en el servidor.
+    /// </summary>
+    public async Task<byte[]?> GetWorkflowImageAsync(string relativePath, CancellationToken ct = default)
+    {
+        if (BaseUrl is null || string.IsNullOrWhiteSpace(relativePath)) return null;
+        try
+        {
+            string path = string.Join('/', relativePath.Split('/').Select(Uri.EscapeDataString));
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/api/workflows/files/{path}");
+            if (Token is not null)
+                request.Headers.Authorization = new("Bearer", Token);
+            using var response = await _http.SendAsync(request, ct);
+            return response.IsSuccessStatusCode ? await response.Content.ReadAsByteArrayAsync(ct) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     // -----------------------------------------------------------------
     // Muro de video
@@ -290,6 +372,81 @@ public sealed class ApiClient
         }
     }
 
+    // -----------------------------------------------------------------
+    // Parlantes IP
+    // -----------------------------------------------------------------
+
+    public Task<List<SpeakerDto>> GetSpeakersAsync(CancellationToken ct = default) =>
+        SendAsync<List<SpeakerDto>>(HttpMethod.Get, "/api/speakers", null, ct);
+
+    /// <summary>Biblioteca de audios guardada en el propio parlante.</summary>
+    public Task<List<SpeakerAudioItemDto>> GetSpeakerLibraryAsync(int speakerId, CancellationToken ct = default) =>
+        SendAsync<List<SpeakerAudioItemDto>>(HttpMethod.Get, $"/api/speakers/{speakerId}/library", null, ct);
+
+    /// <summary>Sonidos subidos al servidor (los mismos de Automatizaciones → Sonidos).</summary>
+    public Task<List<WorkflowAudioDto>> GetSpeakerSoundsAsync(CancellationToken ct = default) =>
+        SendAsync<List<WorkflowAudioDto>>(HttpMethod.Get, "/api/speakers/sounds", null, ct);
+
+    /// <summary>Reproduce en uno o más parlantes (sonido del servidor, audio de la biblioteca o texto a voz).</summary>
+    public Task<SpeakerOperationResultDto> PlaySpeakersAsync(SpeakerPlayRequestDto request, CancellationToken ct = default) =>
+        SendAsync<SpeakerOperationResultDto>(HttpMethod.Post, "/api/speakers/play", request, ct);
+
+    public Task<SpeakerOperationResultDto> StopSpeakersAsync(IReadOnlyList<int> speakerIds, CancellationToken ct = default) =>
+        SendAsync<SpeakerOperationResultDto>(HttpMethod.Post, "/api/speakers/stop", new SpeakerStopRequestDto(speakerIds), ct);
+
+    /// <summary>Archivo de un audio de la biblioteca del parlante, para escucharlo en este equipo sin hacerlo sonar afuera.</summary>
+    public async Task<(byte[] Content, string FileName)?> GetSpeakerAudioFileAsync(int speakerId, long audioId, CancellationToken ct = default)
+    {
+        using var response = await SendDownloadAsync($"/api/speakers/{speakerId}/library/{audioId}/file", ct, allowRelogin: true);
+        if (!response.IsSuccessStatusCode) return null;
+        string name = response.Content.Headers.ContentDisposition?.FileNameStar ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"') ?? $"audio-{audioId}";
+        return (await response.Content.ReadAsByteArrayAsync(ct), name);
+    }
+
+    public Task<SpeakerDto> SetSpeakerVolumeAsync(int speakerId, int volume, CancellationToken ct = default) =>
+        SendAsync<SpeakerDto>(HttpMethod.Put, $"/api/speakers/{speakerId}/volume", new SpeakerVolumeRequestDto(volume), ct);
+
+    // -----------------------------------------------------------------
+    // Paneles de alarma
+    // -----------------------------------------------------------------
+
+    /// <summary>Paneles de alarma con el estado de sus áreas y zonas.</summary>
+    public Task<List<AlarmPanelDto>> GetAlarmPanelsAsync(CancellationToken ct = default) =>
+        SendAsync<List<AlarmPanelDto>>(HttpMethod.Get, "/api/alarms/panels", null, ct);
+
+    /// <summary>Pide al servidor releer el estado del panel ahora mismo.</summary>
+    public Task<AlarmPanelDto> RefreshAlarmPanelAsync(int panelId, CancellationToken ct = default) =>
+        SendAsync<AlarmPanelDto>(HttpMethod.Post, $"/api/alarms/panels/{panelId}/refresh", null, ct);
+
+    /// <summary>Arma un área (0 = todas). La respuesta trae el estado resultante.</summary>
+    public Task<AlarmPanelDto> ArmAlarmAreaAsync(int panelId, int area, AlarmArmMode mode, CancellationToken ct = default) =>
+        SendAsync<AlarmPanelDto>(HttpMethod.Post, $"/api/alarms/panels/{panelId}/areas/{area}/arm", new AlarmArmRequestDto(mode), ct);
+
+    public Task<AlarmPanelDto> DisarmAlarmAreaAsync(int panelId, int area, CancellationToken ct = default) =>
+        SendAsync<AlarmPanelDto>(HttpMethod.Post, $"/api/alarms/panels/{panelId}/areas/{area}/disarm", null, ct);
+
+    /// <summary>Silencia/borra la alarma activa de un área (0 = todas).</summary>
+    public Task<AlarmPanelDto> ClearAlarmAsync(int panelId, int area, CancellationToken ct = default) =>
+        SendAsync<AlarmPanelDto>(HttpMethod.Post, $"/api/alarms/panels/{panelId}/areas/{area}/clear-alarm", null, ct);
+
+    /// <summary>Anula (bypass) o restituye una zona.</summary>
+    public Task<AlarmPanelDto> SetAlarmZoneBypassAsync(int panelId, int zone, bool bypassed, CancellationToken ct = default) =>
+        SendAsync<AlarmPanelDto>(HttpMethod.Post, $"/api/alarms/panels/{panelId}/zones/{zone}/bypass",
+            new AlarmZoneBypassRequestDto(bypassed), ct);
+
+    /// <summary>Historial de eventos de alarma, del más reciente al más antiguo.</summary>
+    public Task<List<AlarmEventDto>> GetAlarmEventsAsync(int? panelId = null, string? kind = null,
+        DateTime? from = null, DateTime? to = null, string? text = null, int take = 200, CancellationToken ct = default)
+    {
+        var query = new List<string> { $"take={take}" };
+        if (panelId is > 0) query.Add($"panelId={panelId}");
+        if (!string.IsNullOrWhiteSpace(kind)) query.Add($"kind={Uri.EscapeDataString(kind)}");
+        if (from is { } f) query.Add($"from={Uri.EscapeDataString(f.ToUniversalTime().ToString("o"))}");
+        if (to is { } t) query.Add($"to={Uri.EscapeDataString(t.ToUniversalTime().ToString("o"))}");
+        if (!string.IsNullOrWhiteSpace(text)) query.Add($"text={Uri.EscapeDataString(text)}");
+        return SendAsync<List<AlarmEventDto>>(HttpMethod.Get, $"/api/alarms/events?{string.Join('&', query)}", null, ct);
+    }
+
     /// <summary>Uso de CPU/RAM/disco de la máquina del servidor (indicadores del navbar).</summary>
     public Task<SystemMetricsDto> GetSystemMetricsAsync(CancellationToken ct = default) =>
         SendAsync<SystemMetricsDto>(HttpMethod.Get, "/api/system/metrics", null, ct);
@@ -324,6 +481,27 @@ public sealed class ApiClient
         SendAsync<StreamGrantDto>(HttpMethod.Post, "/api/playback/request",
             new PlaybackRequestDto(deviceId, rtspChannel, startLocal, endLocal, speed), ct);
 
+    /// <summary>
+    /// Motivo por el que el EQUIPO rechazó una reproducción (el media server
+    /// solo devuelve un error genérico al lector). null si no hay motivo
+    /// registrado o el servidor no lo soporta.
+    /// </summary>
+    public async Task<string?> GetPlaybackFailureAsync(string path, CancellationToken ct = default)
+    {
+        try
+        {
+            var failure = await SendAsync<PlaybackFailureDto>(HttpMethod.Get,
+                $"/api/playback/failure/{Uri.EscapeDataString(path)}", null, ct);
+            return failure.Message;
+        }
+        catch
+        {
+            return null; // sin conexión o servidor antiguo: se muestra el error original
+        }
+    }
+
+    private sealed record PlaybackFailureDto(int Code, string? Reason, string? Message);
+
     /// <summary>Orden PTZ continua (stop=false inicia, stop=true detiene).</summary>
     public Task PtzAsync(int deviceId, int channelNumber, PtzCommand command, int speed, bool stop, CancellationToken ct = default) =>
         SendAsync<object?>(HttpMethod.Post, $"/api/devices/{deviceId}/channels/{channelNumber}/ptz",
@@ -335,6 +513,23 @@ public sealed class ApiClient
             new PtzPresetRequestDto(action, index), ct);
 
     /// <summary>
+    /// Reporta a la bitácora de auditoría del servidor un evento que ocurrió
+    /// en esta máquina (captura, grabación local, exportación guardada). Nunca
+    /// lanza: la auditoría no debe romper la operación que el usuario ya hizo.
+    /// </summary>
+    public async Task ReportAuditEventAsync(ClientAuditEventDto request)
+    {
+        try
+        {
+            await SendAsync<object?>(HttpMethod.Post, "/api/audit/client-event", request, CancellationToken.None);
+        }
+        catch
+        {
+            // Sin conexión o servidor antiguo: el archivo local ya existe igual.
+        }
+    }
+
+    /// <summary>
     /// Exporta un tramo grabado a un archivo MP4 local. El servidor lo arma
     /// con FFmpeg mientras el equipo va entregando el video, así que la
     /// descarga avanza al ritmo del grabador y puede cancelarse. Usa su
@@ -342,14 +537,15 @@ public sealed class ApiClient
     /// transferencia a los pocos segundos.
     /// </summary>
     public async Task DownloadPlaybackAsync(int deviceId, int rtspChannel, DateTime startLocal, DateTime endLocal,
-        string destinationPath, IProgress<long>? progress, CancellationToken ct = default)
+        string destinationPath, IProgress<long>? progress, string format = "mp4", CancellationToken ct = default)
     {
         if (BaseUrl is null)
             throw new ApiException("Sin conexión con el servidor.");
 
         string path = $"/api/playback/{deviceId}/{rtspChannel}/download" +
                       $"?start={Uri.EscapeDataString(startLocal.ToString("s"))}" +
-                      $"&end={Uri.EscapeDataString(endLocal.ToString("s"))}";
+                      $"&end={Uri.EscapeDataString(endLocal.ToString("s"))}" +
+                      $"&format={Uri.EscapeDataString(format)}";
 
         using var response = await SendDownloadAsync(path, ct, allowRelogin: true);
 

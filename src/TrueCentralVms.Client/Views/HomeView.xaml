@@ -140,6 +140,19 @@
                     </Grid>
                 </Button>
 
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenAlarmsCommand}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33FB7185">
+                            <TextBlock Text="&#xE730;" Foreground="#FB7185" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Paneles de alarma" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Estado de áreas y zonas de las centrales de intrusión, armado, desarmado y eventos en vivo."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Button>
+
                 <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
                         CommandParameter="Centro de descargas">
                     <Grid>
