@@ -62,7 +62,7 @@ public static class VmsHubContract
     /// <summary>Cambió el estado de un dispositivo (payload: DeviceDto).</summary>
     public const string DeviceStatusChanged = nameof(DeviceStatusChanged);
 
-    /// <summary>Cambió la configuración de una entidad; recargar (payload: string "devices" | "channels" | "users" | "decoders" | "walls" | "anpr-sources").</summary>
+    /// <summary>Cambió la configuración de una entidad; recargar (payload: string "devices" | "channels" | "users" | "decoders" | "walls" | "anpr-sources" | "alarm-panels").</summary>
     public const string ConfigChanged = nameof(ConfigChanged);
 
     /// <summary>Cambió el estado de un muro de video (payload: WallDto).</summary>
@@ -73,4 +73,22 @@ public static class VmsHubContract
 
     /// <summary>Llegó un reconocimiento de patente nuevo (payload: PlateEventDto).</summary>
     public const string PlateRecognized = nameof(PlateRecognized);
+
+    /// <summary>Cambió el estado de un panel de alarma: áreas, zonas o conexión (payload: AlarmPanelDto).</summary>
+    public const string AlarmPanelStateChanged = nameof(AlarmPanelStateChanged);
+
+    /// <summary>Llegó un evento de un panel de alarma (payload: AlarmEventDto).</summary>
+    public const string AlarmEventReceived = nameof(AlarmEventReceived);
+
+    /// <summary>Terminó la ejecución de una automatización (payload: WorkflowRunDto).</summary>
+    public const string WorkflowRunCompleted = nameof(WorkflowRunCompleted);
+
+    /// <summary>Una automatización avisa a los operadores (payload: WorkflowNotificationDto).</summary>
+    public const string WorkflowNotification = nameof(WorkflowNotification);
+
+    /// <summary>Alguien se dio por enterado de una alerta; el resto puede bajarla (payload: WorkflowAlertDto).</summary>
+    public const string WorkflowAlertAcknowledged = nameof(WorkflowAlertAcknowledged);
+
+    /// <summary>Un parlante IP cambió de estado de conexión (payload: SpeakerDto).</summary>
+    public const string SpeakerStatusChanged = nameof(SpeakerStatusChanged);
 }
