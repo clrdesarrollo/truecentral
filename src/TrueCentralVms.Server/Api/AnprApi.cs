@@ -30,10 +30,24 @@ public static class AnprApi
         // ------------------------------------------------------------------
         // Historial de reconocimientos
         // ------------------------------------------------------------------
-        app.MapGet("/api/anpr/events", async (HttpContext ctx, VmsDbContext db,
+        app.MapGet("/api/anpr/events", async (HttpContext ctx, VmsDbContext db, AuditService audit,
             int? deviceId, string? plate, DateTime? from, DateTime? to, int? take) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+
+            // Las patentes son datos personales: toda búsqueda con filtros se
+            // audita; la carga inicial de la pantalla, una vez cada 5 min.
+            bool filtered = deviceId is > 0 || !string.IsNullOrWhiteSpace(plate) || from is not null || to is not null;
+            if (filtered || audit.ShouldLog($"anpr:{session.UserId}", TimeSpan.FromMinutes(5)))
+                await audit.LogAsync(ctx, "anpr", "search",
+                    detail: filtered
+                        ? "Buscó en el historial de patentes" +
+                          (string.IsNullOrWhiteSpace(plate) ? "" : $" (patente contiene '{plate.Trim()}')") +
+                          (deviceId is > 0 ? $" (equipo {deviceId})" : "") +
+                          (from is { } f1 ? $" desde {f1:dd-MM-yyyy HH:mm}" : "") +
+                          (to is { } t1 ? $" hasta {t1:dd-MM-yyyy HH:mm}" : "") + "."
+                        : "Consultó el historial de patentes.",
+                    data: new { deviceId, plate, from, to, take });
 
             var query = db.PlateEvents.AsNoTracking().Include(p => p.Device).AsQueryable();
             if (deviceId is > 0)
@@ -123,7 +137,7 @@ public static class AnprApi
         });
 
         app.MapPut("/api/anpr/sources/{deviceId:int}", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers,
-            AnprService anpr, IHubContext<VmsHub> hub, int deviceId, AnprSourceWriteDto request) =>
+            AnprService anpr, IHubContext<VmsHub> hub, AuditService audit, int deviceId, AnprSourceWriteDto request) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
 
@@ -142,6 +156,9 @@ public static class AnprApi
                 // resultado de su clic de inmediato.
                 if (!request.Enabled) await anpr.DetachAsync(device.Id);
                 anpr.RequestReconcile();
+                await audit.LogAsync(ctx, "anpr", request.Enabled ? "source-enabled" : "source-disabled",
+                    targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
+                    detail: $"{(request.Enabled ? "Activó" : "Desactivó")} '{device.Name}' como fuente de patentes.");
                 await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "anpr-sources");
             }
             return Results.Ok(new { ok = true, enabled = device.AnprEnabled });
@@ -150,7 +167,8 @@ public static class AnprApi
         // ------------------------------------------------------------------
         // Borrado del historial (administrador)
         // ------------------------------------------------------------------
-        app.MapDelete("/api/anpr/events/{id:long}", async (HttpContext ctx, VmsDbContext db, AnprStore store, long id) =>
+        app.MapDelete("/api/anpr/events/{id:long}", async (HttpContext ctx, VmsDbContext db, AnprStore store,
+            AuditService audit, long id) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var record = await db.PlateEvents.FirstOrDefaultAsync(p => p.Id == id);
@@ -159,6 +177,10 @@ public static class AnprApi
             store.Delete([record.SceneImagePath, record.PlateImagePath]);
             db.PlateEvents.Remove(record);
             await db.SaveChangesAsync();
+            await audit.LogAsync(ctx, "anpr", "event-deleted",
+                targetType: "plate-event", targetId: id.ToString(), targetName: record.PlateNumber,
+                detail: $"Eliminó el reconocimiento {id} (patente {record.PlateNumber}, " +
+                        $"capturada el {record.CapturedAt:dd-MM-yyyy HH:mm:ss}).");
             return Results.Ok(new { ok = true });
         });
     }

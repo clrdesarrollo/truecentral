@@ -6,6 +6,7 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -27,7 +28,7 @@ public static class UsersApi
         });
 
         app.MapPost("/api/users", async (HttpContext ctx, UserWriteDto request, VmsDbContext db,
-            PasswordGovernance passwords, IHubContext<VmsHub> hub) =>
+            PasswordGovernance passwords, IHubContext<VmsHub> hub, AuditService audit) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
 
@@ -48,12 +49,15 @@ public static class UsersApi
             db.Users.Add(user);
             await db.SaveChangesAsync();
 
+            await audit.LogAsync(ctx, "users", "user-created",
+                targetType: "user", targetId: user.Id.ToString(), targetName: user.Username,
+                detail: $"Creó el usuario '{user.Username}' (rol {user.Role}, {(user.Enabled ? "habilitado" : "deshabilitado")}).");
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "users");
             return Results.Ok(ToDto(user));
         });
 
         app.MapPut("/api/users/{id:int}", async (HttpContext ctx, int id, UserWriteDto request, VmsDbContext db,
-            PasswordGovernance passwords, TokenService tokens, IHubContext<VmsHub> hub) =>
+            PasswordGovernance passwords, TokenService tokens, IHubContext<VmsHub> hub, AuditService audit) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
 
@@ -82,6 +86,13 @@ public static class UsersApi
                 tokens.RevokeUser(id);
             }
 
+            // Cambios efectivos, para que el detalle auditado diga QUÉ cambió.
+            var changes = new List<string>();
+            if (user.Username != username) changes.Add($"nombre '{user.Username}' → '{username}'");
+            if (user.Role != request.Role) changes.Add($"rol {user.Role} → {request.Role}");
+            if (user.Enabled != request.Enabled) changes.Add(request.Enabled ? "habilitado" : "deshabilitado");
+            if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña restablecida");
+
             user.Username = username;
             user.Role = request.Role;
             user.Enabled = request.Enabled;
@@ -89,12 +100,16 @@ public static class UsersApi
                 tokens.RevokeUser(id);
             await db.SaveChangesAsync();
 
+            await audit.LogAsync(ctx, "users", "user-updated",
+                targetType: "user", targetId: user.Id.ToString(), targetName: user.Username,
+                detail: $"Modificó el usuario '{user.Username}': " +
+                        (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "users");
             return Results.Ok(ToDto(user));
         });
 
         app.MapDelete("/api/users/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
-            TokenService tokens, IHubContext<VmsHub> hub) =>
+            TokenService tokens, IHubContext<VmsHub> hub, AuditService audit) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
 
@@ -110,6 +125,9 @@ public static class UsersApi
             await db.SaveChangesAsync();
             tokens.RevokeUser(id);
 
+            await audit.LogAsync(ctx, "users", "user-deleted",
+                targetType: "user", targetId: id.ToString(), targetName: user.Username,
+                detail: $"Eliminó el usuario '{user.Username}' (rol {user.Role}).");
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "users");
             return Results.Ok();
         });

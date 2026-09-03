@@ -21,7 +21,7 @@ namespace TrueCentralVms.Server.Services;
 /// queda en 127.0.0.1; RTMP/HLS/WebRTC/SRT/MoQ deshabilitados. Las
 /// credenciales de los equipos SOLO existen dentro del yml generado.
 /// </summary>
-public sealed class MediaMtxManager(
+public sealed partial class MediaMtxManager(
     IServiceScopeFactory scopeFactory,
     DriverRegistry drivers,
     CredentialProtector protector,
@@ -303,17 +303,29 @@ public sealed class MediaMtxManager(
     // ------------------------------------------------------------------
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _playbackPaths = new();
 
-    /// <summary>Crea una ruta de reproducción bajo demanda; false si MediaMTX no está o la rechazó.</summary>
+    /// <summary>
+    /// Crea una ruta de reproducción bajo demanda; false si MediaMTX no está o
+    /// la rechazó. Antes cierra las rutas HERMANAS (mismo espectador, equipo y
+    /// canal): cada salto en la línea de tiempo pide una ruta nueva, y si la
+    /// anterior sigue viva el grabador queda con DOS sesiones de reproducción
+    /// abiertas del mismo canal. Los equipos admiten unas pocas, así que la
+    /// nueva se quedaba esperando hasta agotar el tiempo de arranque —medido
+    /// contra un DVR real: 15 s con la anterior viva, 1 s sin ella—.
+    /// </summary>
     public async Task<bool> AddPlaybackPathAsync(string name, string sourceUrl, CancellationToken ct = default)
     {
         if (!IsRunning) return false;
         await SweepPlaybackPathsAsync(TimeSpan.FromHours(2), ct);
+        await ReleaseSiblingPathsAsync(name, ct);
         var payload = new
         {
             source = sourceUrl,
             sourceOnDemand = true,
             sourceOnDemandStartTimeout = "15s",
-            sourceOnDemandCloseAfter = "10s",
+            // De un solo uso: cada salto crea otra ruta y nadie vuelve a esta,
+            // así que en cuanto el espectador se va sobra la sesión contra el
+            // equipo (en el vivo, en cambio, conviene dejarla tibia 30 s).
+            sourceOnDemandCloseAfter = "1s",
         };
         try
         {
@@ -344,6 +356,9 @@ public sealed class MediaMtxManager(
     {
         if (!IsRunning) return false;
         await SweepPlaybackPathsAsync(TimeSpan.FromHours(2), ct);
+        // Igual que en las rutas con fuente: la anterior del mismo espectador y
+        // canal sobra (su relé se cierra aparte, en PlaybackRelayManager).
+        await ReleaseSiblingPathsAsync(name, ct);
         try
         {
             using var response = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(
@@ -375,16 +390,66 @@ public sealed class MediaMtxManager(
     private async Task SweepPlaybackPathsAsync(TimeSpan maxAge, CancellationToken ct)
     {
         foreach (var (name, created) in _playbackPaths)
+            if (DateTime.UtcNow - created >= maxAge)
+                await DeletePlaybackPathAsync(name, ct);
+    }
+
+    /// <summary>
+    /// Cierra las rutas de reproducción hermanas de <paramref name="name"/>:
+    /// las que comparten todo el nombre menos el sufijo aleatorio, es decir el
+    /// mismo espectador sobre el mismo equipo y canal. Borrar la ruta corta su
+    /// pull, y con eso el grabador libera la sesión en el acto.
+    /// </summary>
+    private async Task ReleaseSiblingPathsAsync(string name, CancellationToken ct)
+    {
+        int lastDash = name.LastIndexOf('-');
+        if (lastDash <= 0) return;
+        string prefix = name[..(lastDash + 1)];
+        foreach (string other in _playbackPaths.Keys)
+            if (other != name && other.StartsWith(prefix, StringComparison.Ordinal))
+                await DeletePlaybackPathAsync(other, ct);
+    }
+
+    // ------------------------------------------------------------------
+    // Por qué falló el pull de una ruta. MediaMTX lo dice en su salida y el
+    // lector solo recibe un error genérico ("400 Bad Request"), así que el
+    // motivo del EQUIPO —típicamente 453, sin ancho de banda para otra
+    // reproducción— se guarda aquí para que el cliente pueda explicarlo.
+    // ------------------------------------------------------------------
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, int Code, string Reason)>
+        _sourceErrors = new();
+
+    /// <summary>Último rechazo del equipo para una ruta (dentro de los últimos 2 minutos).</summary>
+    public (int Code, string Reason)? LastSourceError(string path) =>
+        _sourceErrors.TryGetValue(path, out var error) && DateTime.UtcNow - error.At < TimeSpan.FromMinutes(2)
+            ? (error.Code, error.Reason)
+            : null;
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\[path ([^\]]+)\].*bad status code: (\d+) \(([^)]*)\)")]
+    private static partial System.Text.RegularExpressions.Regex SourceErrorPattern();
+
+    private void RecordSourceError(string line)
+    {
+        if (SourceErrorPattern().Match(line) is not { Success: true } match) return;
+        _sourceErrors[match.Groups[1].Value] =
+            (DateTime.UtcNow, int.Parse(match.Groups[2].Value), match.Groups[3].Value);
+
+        // La tabla no crece sin límite: cada ruta es de un solo uso.
+        if (_sourceErrors.Count > 200)
+            foreach (var (path, error) in _sourceErrors)
+                if (DateTime.UtcNow - error.At > TimeSpan.FromMinutes(5))
+                    _sourceErrors.TryRemove(path, out _);
+    }
+
+    private async Task DeletePlaybackPathAsync(string name, CancellationToken ct)
+    {
+        try
         {
-            if (DateTime.UtcNow - created < maxAge) continue;
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Delete, $"{ApiBaseUrl}/v3/config/paths/delete/{name}");
-                using var _ = await ApiHttp.SendAsync(request, ct);
-            }
-            catch { /* si MediaMTX se reinició, la ruta ya no existe */ }
-            _playbackPaths.TryRemove(name, out _);
+            using var request = new HttpRequestMessage(HttpMethod.Delete, $"{ApiBaseUrl}/v3/config/paths/delete/{name}");
+            using var _ = await ApiHttp.SendAsync(request, ct);
         }
+        catch { /* si MediaMTX se reinició, la ruta ya no existe */ }
+        _playbackPaths.TryRemove(name, out _);
     }
 
     /// <summary>
@@ -442,8 +507,18 @@ public sealed class MediaMtxManager(
 
         // El log de MediaMTX pasa al log del servidor (prefijado) y sirve para
         // ver la apertura de listeners y los pulls on-demand.
-        process.OutputDataReceived += (_, e) => { if (e.Data is { Length: > 0 }) logger.LogInformation("[mediamtx] {Line}", e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is { Length: > 0 }) logger.LogWarning("[mediamtx] {Line}", e.Data); };
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is not { Length: > 0 }) return;
+            logger.LogInformation("[mediamtx] {Line}", e.Data);
+            RecordSourceError(e.Data);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is not { Length: > 0 }) return;
+            logger.LogWarning("[mediamtx] {Line}", e.Data);
+            RecordSourceError(e.Data);
+        };
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 

@@ -23,7 +23,8 @@ public static class StreamingAuthApi
     public static void MapStreamingAuthApi(this WebApplication app)
     {
         app.MapPost("/api/streaming/auth", async (HttpContext ctx, StreamTokenService streamTokens,
-            VmsDbContext db, IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, ILogger<Program> logger) =>
+            VmsDbContext db, IHubContext<VmsHub> hub, Services.MediaMtxManager mtx,
+            AuditService audit, ILogger<Program> logger) =>
         {
             if (!ApiSecurity.IsLoopback(ctx))
                 return Results.NotFound(); // ni siquiera revelar que existe
@@ -98,6 +99,16 @@ public static class StreamingAuthApi
             await db.SaveChangesAsync();
             logger.LogInformation("Streaming: {User} comenzó a ver {Device} canal {Channel} ({Profile}) desde {Ip}.",
                 grant.Username, grant.DeviceName, grant.RtspChannel, grant.Profile, ip);
+
+            // El inicio de reproducción de grabaciones se audita en su propio
+            // endpoint (con el rango pedido); aquí solo el vivo.
+            if (grant.Profile is "main" or "sub")
+                await audit.LogSystemAsync("live", "view-started",
+                    targetType: "channel", targetId: $"{grant.DeviceId}/{grant.RtspChannel}",
+                    targetName: $"{grant.DeviceName} · canal {grant.RtspChannel}",
+                    detail: $"Comenzó a ver '{grant.DeviceName}' canal {grant.RtspChannel} " +
+                            $"({(grant.Profile == "main" ? "stream principal" : "stream secundario")}).",
+                    userId: grant.UserId, username: grant.Username, clientIp: ip, origin: "client");
 
             await SessionAccounting.BroadcastActiveSessionsAsync(db, hub);
             return Results.Ok();

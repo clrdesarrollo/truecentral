@@ -28,9 +28,9 @@ public static class PlaybackApi
         // ------------------------------------------------------------------
         app.MapGet("/api/playback/{deviceId:int}/{channelNumber:int}/segments",
             async (HttpContext ctx, int deviceId, int channelNumber, DateTime? date, VmsDbContext db,
-                DriverRegistry drivers, CredentialProtector protector, CancellationToken ct) =>
+                DriverRegistry drivers, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
 
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.ChannelNumber == channelNumber, ct);
@@ -42,6 +42,14 @@ public static class PlaybackApi
                     statusCode: StatusCodes.Status422UnprocessableEntity);
 
             var day = (date ?? DateTime.Now).Date;
+
+            // Cambiar de día varias veces sobre el mismo canal es una sola
+            // búsqueda a efectos de auditoría (una por usuario/canal/día).
+            if (audit.ShouldLog($"pbsearch:{session.UserId}:{deviceId}:{channelNumber}:{day:yyyyMMdd}", TimeSpan.FromMinutes(5)))
+                await audit.LogAsync(ctx, "playback", "search",
+                    targetType: "channel", targetId: $"{deviceId}/{channelNumber}",
+                    targetName: $"{device.Name} · {channel.Name}",
+                    detail: $"Buscó grabaciones de '{device.Name}' canal {channelNumber} para el {day:dd-MM-yyyy}.");
             var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
                 protector.Unprotect(device.PasswordCiphertext));
             try
@@ -134,7 +142,7 @@ public static class PlaybackApi
         app.MapPost("/api/playback/request", async (HttpContext ctx, PlaybackRequestDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, StreamTokenService streamTokens,
             MediaMtxManager mtx, Services.Rtsp.PlaybackRelayManager relays, IConfiguration config,
-            CancellationToken ct) =>
+            AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
 
@@ -168,7 +176,10 @@ public static class PlaybackApi
                     statusCode: StatusCodes.Status422UnprocessableEntity);
 
             // Nombre plano y único: cada espectador/rango tiene su propia ruta.
-            string path = $"pb-{device.Id}-{request.RtspChannel}-" +
+            // Lleva el id del espectador porque al montar la ruta se cierran
+            // las hermanas —mismo prefijo— para que el equipo libere la sesión
+            // anterior de ESE canal sin tocar la de otro operador.
+            string path = $"pb-{device.Id}-{request.RtspChannel}-{session.UserId}-" +
                           Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
 
             // A 1× manda MediaMTX, que pulsa el equipo (camino de siempre).
@@ -199,7 +210,40 @@ public static class PlaybackApi
                 ? configured
                 : ctx.Request.Host.Host;
             string url = $"rtsp://{host}:{mtx.RtspPort}/{path}?token={token}";
+
+            // Cada salto de la línea de tiempo pide una concesión nueva: se
+            // audita una reproducción por usuario/canal cada 2 min, con el
+            // instante pedido en esa primera concesión.
+            if (audit.ShouldLog($"pbplay:{session.UserId}:{device.Id}:{request.RtspChannel}", TimeSpan.FromMinutes(2)))
+                await audit.LogAsync(ctx, "playback", "play",
+                    targetType: "channel", targetId: $"{device.Id}/{request.RtspChannel}",
+                    targetName: $"{device.Name} · {channel.Name}",
+                    detail: $"Reprodujo grabaciones de '{device.Name}' canal {request.RtspChannel} " +
+                            $"desde el {request.StartLocal:dd-MM-yyyy HH:mm:ss}" +
+                            (accelerated ? $" a {speed:0.##}×." : "."),
+                    data: new { request.StartLocal, request.EndLocal, request.Speed });
             return Results.Ok(new StreamGrantDto(url, token, grant.ExpiresAt, driver.SupportsExactPlaybackSeek));
+        });
+
+        // ------------------------------------------------------------------
+        // Por qué falló una reproducción. El cliente solo ve el error genérico
+        // del media server ("400 Bad Request"): acá se le devuelve el motivo
+        // que dio el EQUIPO, que es lo único accionable para el operador.
+        // ------------------------------------------------------------------
+        app.MapGet("/api/playback/failure/{path}", (HttpContext ctx, string path, MediaMtxManager mtx) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (mtx.LastSourceError(path) is not { } error)
+                return Results.Ok(new { code = 0, reason = (string?)null, message = (string?)null });
+
+            // 453 es el rechazo típico de los grabadores cuando ya no pueden
+            // entregar otra reproducción simultánea (límite de sesiones o de
+            // ancho de banda de salida configurado en el equipo).
+            string message = error.Code == 453
+                ? "El grabador no puede entregar otra reproducción simultánea " +
+                  "(sin ancho de banda disponible). Cierre algún canal e intente de nuevo."
+                : $"El equipo rechazó la reproducción: {error.Code} {error.Reason}.";
+            return Results.Ok(new { code = error.Code, reason = error.Reason, message });
         });
 
         // ------------------------------------------------------------------
@@ -210,14 +254,19 @@ public static class PlaybackApi
         // ------------------------------------------------------------------
         app.MapGet("/api/playback/{deviceId:int}/{rtspChannel:int}/download",
             async (HttpContext ctx, int deviceId, int rtspChannel, DateTime start, DateTime end,
-                VmsDbContext db, DriverRegistry drivers, CredentialProtector protector,
-                ILoggerFactory loggers, CancellationToken ct) =>
+                string? format, VmsDbContext db, DriverRegistry drivers, CredentialProtector protector,
+                AuditService audit, ILoggerFactory loggers, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var logger = loggers.CreateLogger("Playback");
 
             if (end <= start || end - start > TimeSpan.FromHours(2))
                 return Results.Json(new { error = "El tramo a descargar es inválido (máximo 2 horas)." },
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+
+            string fmt = (format ?? "mp4").Trim().ToLowerInvariant();
+            if (fmt is not ("mp4" or "mkv"))
+                return Results.Json(new { error = "Formato de exportación desconocido: use mp4 o mkv." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
 
             var channel = await db.Channels.Include(c => c.Device)
@@ -246,32 +295,37 @@ public static class PlaybackApi
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
-            // Video copiado (sin costo de CPU ni pérdida) y audio a AAC, que es
-            // el único que aceptan todos los reproductores dentro de un MP4
-            // (los equipos suelen entregar G.711). Se descartan los flujos de
-            // datos privados del fabricante, que el contenedor MP4 rechaza.
-            foreach (string argument in new[]
-                     {
-                         // -nostdin: el hijo hereda la consola del servidor y
-                         // FFmpeg leería de ahí las teclas de control.
-                         "-hide_banner", "-loglevel", "error", "-nostdin",
-                         "-rtsp_transport", "tcp",
-                         "-i", source,
-                         "-t", ((int)(end - start).TotalSeconds).ToString(),
-                         "-map", "0:v:0", "-map", "0:a:0?",
-                         "-c:v", "copy", "-c:a", "aac",
-                         // Sin esto el MP4 hereda los rótulos del RTSP del
-                         // equipo (Hikvision anuncia su sesión como "HIK Media
-                         // Server Vx.y") y los reproductores los muestran como
-                         // título del archivo. Se reemplazan por el origen real
-                         // del tramo, que es lo que sirve como evidencia.
-                         "-map_metadata", "-1",
-                         "-metadata", $"title={device.Name} · {channel.Name} — {start:dd-MM-yyyy HH:mm:ss}",
-                         "-metadata", $"comment=Exportado por CLR TrueCentral VMS · {device.Name} ({device.Host}) " +
-                                      $"canal {channel.ChannelNumber} · {start:dd-MM-yyyy HH:mm:ss} a {end:HH:mm:ss}",
-                         "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-                         "-f", "mp4", "pipe:1",
-                     })
+            // Video copiado siempre (sin costo de CPU ni pérdida). El audio
+            // depende del contenedor: MP4 solo acepta AAC entre los formatos
+            // universales (los equipos suelen entregar G.711, se recodifica);
+            // MKV admite el audio original tal cual (copia exacta).
+            var arguments = new List<string>
+            {
+                // -nostdin: el hijo hereda la consola del servidor y
+                // FFmpeg leería de ahí las teclas de control.
+                "-hide_banner", "-loglevel", "error", "-nostdin",
+                "-rtsp_transport", "tcp",
+                "-i", source,
+                "-t", ((int)(end - start).TotalSeconds).ToString(),
+                "-map", "0:v:0", "-map", "0:a:0?",
+                "-c:v", "copy",
+                "-c:a", fmt == "mp4" ? "aac" : "copy",
+                // Sin esto el archivo hereda los rótulos del RTSP del
+                // equipo (Hikvision anuncia su sesión como "HIK Media
+                // Server Vx.y") y los reproductores los muestran como
+                // título del archivo. Se reemplazan por el origen real
+                // del tramo, que es lo que sirve como evidencia.
+                "-map_metadata", "-1",
+                "-metadata", $"title={device.Name} · {channel.Name} — {start:dd-MM-yyyy HH:mm:ss}",
+                "-metadata", $"comment=Exportado por CLR TrueCentral VMS · {device.Name} ({device.Host}) " +
+                             $"canal {channel.ChannelNumber} · {start:dd-MM-yyyy HH:mm:ss} a {end:HH:mm:ss}",
+            };
+            if (fmt == "mp4")
+                arguments.AddRange(["-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4"]);
+            else
+                arguments.AddRange(["-f", "matroska"]);
+            arguments.Add("pipe:1");
+            foreach (string argument in arguments)
                 psi.ArgumentList.Add(argument);
 
             using var process = Process.Start(psi);
@@ -320,8 +374,16 @@ public static class PlaybackApi
                         statusCode: StatusCodes.Status422UnprocessableEntity);
                 }
 
-                string fileName = $"{Sanitize(device.Name)}_{Sanitize(channel.Name)}_{start:yyyyMMdd_HHmmss}.mp4";
-                ctx.Response.ContentType = "video/mp4";
+                string fileName = $"{Sanitize(device.Name)}_{Sanitize(channel.Name)}_{start:yyyyMMdd_HHmmss}.{fmt}";
+                // Se audita al confirmar que el equipo entregó video (recién
+                // aquí la exportación existe de verdad).
+                await audit.LogAsync(ctx, "playback", "export",
+                    targetType: "channel", targetId: $"{deviceId}/{rtspChannel}",
+                    targetName: $"{device.Name} · {channel.Name}",
+                    detail: $"Exportó '{device.Name}' canal {rtspChannel} del {start:dd-MM-yyyy HH:mm:ss} " +
+                            $"al {end:HH:mm:ss} ({(int)(end - start).TotalMinutes} min) como {fileName}.",
+                    data: new { start, end, fileName, format = fmt });
+                ctx.Response.ContentType = fmt == "mp4" ? "video/mp4" : "video/x-matroska";
                 ctx.Response.Headers.ContentDisposition = $"attachment; filename=\"{fileName}\"";
                 await ctx.Response.Body.WriteAsync(buffer.AsMemory(0, read), ct);
                 await output.CopyToAsync(ctx.Response.Body, ct);

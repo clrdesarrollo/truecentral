@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using TrueCentralVms.Core.Contracts;
@@ -9,6 +9,8 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Server.Services.Workflows;
+using TrueCentralVms.Server.Services.Workflows.Actions;
 
 // El servidor corre igual como consola (desarrollo) o como servicio de Windows
 // (instalado). Como servicio, el directorio de trabajo inicial es System32, así
@@ -36,12 +38,21 @@ builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, relo
 // recién después de StartAsync (más abajo), antes del primer uso del contexto.
 var postgres = new EmbeddedPostgres(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddSingleton(postgres);
-builder.Services.AddDbContext<VmsDbContext>(o => o.UseNpgsql(postgres.ConnectionString));
+// En tiempo de diseño (dotnet ef migrations add) el host se construye sin
+// PostgreSQL iniciado: la cadena es un marcador, solo se necesita el modelo.
+builder.Services.AddDbContext<VmsDbContext>(o => o.UseNpgsql(EF.IsDesignTime
+    ? "Host=127.0.0.1;Database=design-time;Username=postgres;Password=design-time"
+    : postgres.ConnectionString));
 
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<PasswordGovernance>();
 builder.Services.AddSingleton<CredentialProtector>();
 builder.Services.AddSingleton<SystemMetrics>();
+
+// Bitácora de auditoría (ISO 27001): registro solo-agregar de todas las
+// acciones, con purga opcional por retención (Audit:RetentionDays).
+builder.Services.AddSingleton<AuditService>();
+builder.Services.AddHostedService<AuditRetentionService>();
 
 // Registro de drivers de dispositivos. Para soportar una marca nueva (Dahua,
 // ONVIF, ...) basta con implementar IDeviceDriverFactory en su propio
@@ -67,6 +78,41 @@ builder.Services.AddScoped<WallService>();
 builder.Services.AddSingleton<AnprStore>();
 builder.Services.AddSingleton<AnprService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprService>());
+
+// Paneles de alarma (centrales de intrusión): el servicio mantiene el sondeo
+// de estado y el canal de eventos de cada panel habilitado. Para otra marca
+// basta con implementar IAlarmPanelDriverFactory y agregarla aquí.
+builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionAlarmPanelDriverFactory>();
+builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionIpReceiverDriverFactory>();
+builder.Services.AddSingleton<AlarmDriverRegistry>();
+builder.Services.AddSingleton<AlarmPanelService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmPanelService>());
+
+// Parlantes IP: drivers, registro y servicio (sondeo de estado, reproducción sincronizada, voz en vivo).
+builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
+builder.Services.AddSingleton<SpeakerDriverRegistry>();
+builder.Services.AddSingleton<SpeakerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>());
+// Centro receptor de alarmas (SIA DC-09: ADM-CID / SIA-DCS por TCP) al que
+// los paneles reportan como "Alarm Receiving Center".
+builder.Services.AddSingleton<AlarmReceiverService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmReceiverService>());
+
+// Automatizaciones (workflows): "cuando pase ESTO, hacer ESTO OTRO". El motor
+// escucha lo que publican los módulos (hoy, los paneles de alarma) y ejecuta
+// las acciones configuradas. Para soportar una acción nueva basta con
+// implementar IWorkflowActionExecutor y agregarla aquí: aparece sola en el
+// editor del panel.
+builder.Services.AddSingleton<WorkflowStore>();
+builder.Services.AddSingleton<SmtpSender>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, SnapshotAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, EmailAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, FtpAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, HttpAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, SpeakerAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, NotifyAction>();
+builder.Services.AddSingleton<WorkflowEngine>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkflowEngine>());
 
 // Plano de media: MediaMTX embebido + tokens de streaming + contabilidad.
 builder.Services.AddSingleton<StreamTokenService>();
@@ -111,6 +157,8 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors();
+// WebSocket propio (fuera de SignalR) para la voz del operador hacia los parlantes.
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(15) });
 app.UseDefaultFiles();
 // El panel es una SPA servida como archivos estáticos: se exige revalidación
 // (ETag/304) para que los navegadores no se queden con app.js viejo tras una
@@ -160,6 +208,10 @@ app.MapSystemApi();
 app.MapDecodersApi();
 app.MapWallsApi();
 app.MapAnprApi();
+app.MapAuditApi();
+app.MapAlarmsApi();
+app.MapSpeakersApi();
+app.MapWorkflowsApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);
 
@@ -168,6 +220,10 @@ app.MapFallbackToFile("index.html");
 
 app.Logger.LogInformation("CLR TrueCentral VMS v{Version} escuchando en {Urls}.",
     serverVersion, builder.Configuration["Urls"]);
+
+// Evidencia de disponibilidad: cada arranque del servidor queda en la bitácora.
+await app.Services.GetRequiredService<AuditService>().LogSystemAsync("system", "server-started",
+    detail: $"Servidor CLR TrueCentral VMS v{serverVersion} iniciado.");
 
 // Precalentamiento del muro en segundo plano: sincroniza cada muro al arrancar
 // para que el primer comando del operador (p. ej. la pantalla completa por

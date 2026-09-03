@@ -29,7 +29,7 @@ public static class SetupApi
                 ServerVersion: serverVersion)));
 
         app.MapPost("/api/setup/admin", async (HttpContext ctx, SetupAdminRequest request, VmsDbContext db,
-            PasswordGovernance passwords, TokenService tokens, ILogger<Program> logger) =>
+            PasswordGovernance passwords, TokenService tokens, Services.AuditService audit, ILogger<Program> logger) =>
         {
             if (!ApiSecurity.IsLoopback(ctx))
                 return Results.Json(
@@ -57,6 +57,9 @@ public static class SetupApi
 
                 logger.LogInformation("Configuración inicial completada: administrador '{Username}' creado desde {Ip}.",
                     username, ctx.Connection.RemoteIpAddress);
+                await audit.LogAsAsync(ctx, user.Id, user.Username, user.Role, "auth", "setup-admin",
+                    targetType: "user", targetId: user.Id.ToString(), targetName: user.Username,
+                    detail: "Configuración inicial: primer administrador creado desde la máquina del servidor.");
 
                 // Sesión inmediata: el asistente queda logueado sin pedir login.
                 var (token, session) = tokens.Issue(user.Id, user.Username, user.Role);

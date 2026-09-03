@@ -22,6 +22,11 @@
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.11" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <!-- Automatizaciones: correo saliente (MailKit soporta STARTTLS y TLS
+         implícito; SmtpClient de .NET no habla el 465 de la mayoría de los
+         proveedores) y subida a FTP/FTPS. -->
+    <PackageReference Include="MailKit" Version="4.17.0" />
+    <PackageReference Include="FluentFTP" Version="54.2.0" />
   </ItemGroup>
 
   <PropertyGroup>

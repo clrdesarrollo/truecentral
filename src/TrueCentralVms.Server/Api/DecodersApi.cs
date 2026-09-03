@@ -83,7 +83,7 @@ public static class DecodersApi
 
         app.MapPost("/api/decoders", async (HttpContext ctx, DecoderWriteDto request, VmsDbContext db,
             DecoderDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            CancellationToken ct) =>
+            AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -111,13 +111,16 @@ public static class DecodersApi
             db.Decoders.Add(decoder);
             await db.SaveChangesAsync(ct);
 
+            await audit.LogAsync(ctx, "wall", "decoder-created",
+                targetType: "decoder", targetId: decoder.Id.ToString(), targetName: decoder.Name,
+                detail: $"Agregó el decodificador '{decoder.Name}' ({decoder.Host}:{decoder.Port}, modelo {decoder.Model ?? "—"}).");
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "decoders", cancellationToken: ct);
             return Results.Ok(new { decoder = ToDto(decoder), capabilities = ToDto(caps) });
         });
 
         app.MapPut("/api/decoders/{id:int}", async (HttpContext ctx, int id, DecoderWriteDto request, VmsDbContext db,
             DecoderDriverRegistry drivers, CredentialProtector protector, DecoderSessionManager sessions,
-            IHubContext<VmsHub> hub, CancellationToken ct) =>
+            IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -159,13 +162,17 @@ public static class DecodersApi
             decoder.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
 
+            await audit.LogAsync(ctx, "wall", "decoder-updated",
+                targetType: "decoder", targetId: decoder.Id.ToString(), targetName: decoder.Name,
+                detail: $"Modificó el decodificador '{decoder.Name}' ({decoder.Host}:{decoder.Port}" +
+                        (connectionChanged ? ", con cambios de conexión)." : ")."));
             await sessions.InvalidateAsync(id);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "decoders", cancellationToken: ct);
             return Results.Ok(ToDto(decoder));
         });
 
         app.MapDelete("/api/decoders/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
-            DecoderSessionManager sessions, IHubContext<VmsHub> hub, CancellationToken ct) =>
+            DecoderSessionManager sessions, IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var decoder = await db.Decoders.FindAsync([id], ct);
@@ -175,6 +182,9 @@ public static class DecodersApi
 
             db.Decoders.Remove(decoder);
             await db.SaveChangesAsync(ct);
+            await audit.LogAsync(ctx, "wall", "decoder-deleted",
+                targetType: "decoder", targetId: id.ToString(), targetName: decoder.Name,
+                detail: $"Eliminó el decodificador '{decoder.Name}' ({decoder.Host}:{decoder.Port}).");
             await sessions.InvalidateAsync(id);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "decoders", cancellationToken: ct);
             return Results.Ok();
@@ -183,7 +193,7 @@ public static class DecodersApi
         // Prueba de conexión: devuelve las salidas y canales reales del equipo
         // (el asistente de muros los usa para armar la grilla).
         app.MapPost("/api/decoders/{id:int}/test", async (HttpContext ctx, int id, VmsDbContext db,
-            DecoderSessionManager sessions, CancellationToken ct) =>
+            DecoderSessionManager sessions, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             var decoder = await db.Decoders.FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -198,10 +208,16 @@ public static class DecodersApi
                     decoder.Model = model;
                     await db.SaveChangesAsync(ct);
                 }
+                await audit.LogAsync(ctx, "wall", "decoder-tested",
+                    targetType: "decoder", targetId: id.ToString(), targetName: decoder.Name,
+                    detail: $"Probó el decodificador '{decoder.Name}': conexión correcta.");
                 return Results.Ok(new DecoderProbeResultDto(true, null, ToDto(caps)));
             }
             catch (Exception ex)
             {
+                await audit.LogAsync(ctx, "wall", "decoder-tested",
+                    targetType: "decoder", targetId: id.ToString(), targetName: decoder.Name,
+                    detail: $"Probó el decodificador '{decoder.Name}': {ex.Message}", success: false);
                 return Results.Ok(new DecoderProbeResultDto(false, ex.Message, null));
             }
         });

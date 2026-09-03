@@ -38,6 +38,46 @@ public static class WallsApi
         }
     }
 
+    /// <summary>
+    /// Igual que <see cref="RunAsync"/>, pero dejando la operación en la
+    /// bitácora de auditoría (también cuando el equipo la rechaza: el intento
+    /// es tan relevante como el éxito). El marcador {channel} del detalle se
+    /// reemplaza por "Equipo · Canal" resuelto desde el inventario.
+    /// </summary>
+    private static async Task<IResult> RunAuditedAsync<T>(HttpContext ctx, AuditService audit, VmsDbContext db,
+        int wallId, string action, string detailTemplate, Func<Task<T>> operation, int? channelId = null)
+    {
+        string wallName = await db.Walls.Where(w => w.Id == wallId).Select(w => w.Name).FirstOrDefaultAsync()
+            ?? $"muro {wallId}";
+        string detail = detailTemplate;
+        if (channelId is int cid)
+        {
+            string? channelName = await db.Channels.Where(c => c.Id == cid)
+                .Select(c => c.Device.Name + " · " + c.Name).FirstOrDefaultAsync();
+            detail = detail.Replace("{channel}", channelName ?? $"canal id {cid}");
+        }
+        detail = $"{detail} en el muro '{wallName}'";
+
+        try
+        {
+            var result = await operation();
+            await audit.LogAsync(ctx, "wall", action,
+                targetType: "wall", targetId: wallId.ToString(), targetName: wallName, detail: detail + ".");
+            return Results.Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status404NotFound);
+        }
+        catch (InvalidOperationException ex)
+        {
+            await audit.LogAsync(ctx, "wall", action,
+                targetType: "wall", targetId: wallId.ToString(), targetName: wallName,
+                detail: $"{detail}: {ex.Message}", success: false);
+            return Error(ex.Message);
+        }
+    }
+
     private static LayoutPresetDto ToDto(WallLayoutPreset l) => new(
         l.Id, l.Name, l.CreatedAt,
         l.Screens.Select(s => new LayoutScreenDto(s.Row, s.Col, s.WindowMode)).ToList(),
@@ -114,7 +154,7 @@ public static class WallsApi
         });
 
         app.MapPost("/api/walls", async (HttpContext ctx, WallWriteDto request, VmsDbContext db,
-            WallService walls, DecoderSessionManager sessions, CancellationToken ct) =>
+            WallService walls, DecoderSessionManager sessions, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name))
@@ -139,13 +179,16 @@ public static class WallsApi
             db.Walls.Add(wall);
             await db.SaveChangesAsync(ct);
 
+            await audit.LogAsync(ctx, "wall", "wall-created",
+                targetType: "wall", targetId: wall.Id.ToString(), targetName: wall.Name,
+                detail: $"Creó el muro '{wall.Name}' ({wall.Rows}×{wall.Columns}, decodificador '{decoder.Name}').");
             var sync = await walls.SyncToDecoderAsync(wall.Id);
             await walls.BroadcastConfigChangedAsync();
             return Results.Ok(new { wall = await walls.GetWallDtoAsync(wall.Id), warning, sync });
         });
 
         app.MapPut("/api/walls/{id:int}", async (HttpContext ctx, int id, WallWriteDto request, VmsDbContext db,
-            WallService walls, DecoderSessionManager sessions, CancellationToken ct) =>
+            WallService walls, DecoderSessionManager sessions, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var wall = await db.Walls.Include(w => w.Screens).ThenInclude(s => s.Windows)
@@ -181,156 +224,221 @@ public static class WallsApi
             if (oldDecoder is not null)
                 await walls.ReleaseChannelsAsync(oldDecoder, oldChannels.Except(newChannels));
 
+            await audit.LogAsync(ctx, "wall", "wall-updated",
+                targetType: "wall", targetId: wall.Id.ToString(), targetName: wall.Name,
+                detail: $"Modificó la estructura del muro '{wall.Name}' ({wall.Rows}×{wall.Columns}, " +
+                        $"decodificador '{decoder.Name}'): las asignaciones anteriores se reemplazaron.");
             var sync = await walls.SyncToDecoderAsync(wall.Id);
             await walls.BroadcastConfigChangedAsync();
             return Results.Ok(new { wall = await walls.GetWallDtoAsync(wall.Id), warning, sync });
         });
 
         app.MapDelete("/api/walls/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
-            WallService walls, CancellationToken ct) =>
+            WallService walls, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var wall = await db.Walls.FindAsync([id], ct);
             if (wall is null) return Results.NotFound();
             db.Walls.Remove(wall);
             await db.SaveChangesAsync(ct);
+            await audit.LogAsync(ctx, "wall", "wall-deleted",
+                targetType: "wall", targetId: id.ToString(), targetName: wall.Name,
+                detail: $"Eliminó el muro '{wall.Name}'.");
             await walls.BroadcastConfigChangedAsync();
             return Results.Ok();
         });
 
         // Re-empuja al decoder la división configurada (por si el equipo estaba
         // apagado al guardar o alguien lo cambió con otra herramienta).
-        app.MapPost("/api/walls/{id:int}/sync", (HttpContext ctx, int id, WallService walls) =>
+        app.MapPost("/api/walls/{id:int}/sync", (HttpContext ctx, int id, WallService walls,
+            VmsDbContext db, AuditService audit) =>
             ApiSecurity.RequireUser(ctx, out _) is { } failure
                 ? Task.FromResult(failure)
-                : RunAsync(() => walls.SyncToDecoderAsync(id)));
+                : RunAuditedAsync(ctx, audit, db, id, "wall-synced",
+                    "Re-sincronizó la configuración contra el decodificador",
+                    () => walls.SyncToDecoderAsync(id)));
 
         // ------------------------------------------------------------------
         // Operación (cualquier sesión)
         // ------------------------------------------------------------------
-        app.MapPost("/api/walls/{id:int}/assign", (HttpContext ctx, int id, AssignRequest request, WallService walls) =>
+        app.MapPost("/api/walls/{id:int}/assign", (HttpContext ctx, int id, AssignRequest request, WallService walls,
+            VmsDbContext db, AuditService audit) =>
             ApiSecurity.RequireUser(ctx, out _) is { } failure
                 ? Task.FromResult(failure)
-                : RunAsync(() => walls.AssignAsync(id, request)));
+                : RunAuditedAsync(ctx, audit, db, id, "window-assigned",
+                    $"Puso {{channel}} en la ventana {request.WindowId}",
+                    () => walls.AssignAsync(id, request), channelId: request.ChannelId));
 
         // Proyección: una ventana muestra una URL externa (el PC del operador
         // publica su pantalla por RTSP y el decodificador la consume).
         app.MapPost("/api/walls/{id:int}/assign-external",
-            (HttpContext ctx, int id, ExternalAssignRequest request, WallService walls) =>
+            (HttpContext ctx, int id, ExternalAssignRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.AssignExternalAsync(id, request)));
+                    : RunAuditedAsync(ctx, audit, db, id, "external-assigned",
+                        $"Proyectó la fuente externa '{request.Label}' en la ventana {request.WindowId}",
+                        () => walls.AssignExternalAsync(id, request)));
 
-        app.MapPost("/api/walls/{id:int}/clear", (HttpContext ctx, int id, ClearRequest request, WallService walls) =>
+        app.MapPost("/api/walls/{id:int}/clear", (HttpContext ctx, int id, ClearRequest request, WallService walls,
+            VmsDbContext db, AuditService audit) =>
             ApiSecurity.RequireUser(ctx, out _) is { } failure
                 ? Task.FromResult(failure)
-                : RunAsync(() => walls.ClearAsync(id, request.WindowId)));
+                : RunAuditedAsync(ctx, audit, db, id, "window-cleared",
+                    $"Limpió la ventana {request.WindowId}",
+                    () => walls.ClearAsync(id, request.WindowId)));
 
-        app.MapPost("/api/walls/{id:int}/clear-all", (HttpContext ctx, int id, WallService walls) =>
+        app.MapPost("/api/walls/{id:int}/clear-all", (HttpContext ctx, int id, WallService walls,
+            VmsDbContext db, AuditService audit) =>
             ApiSecurity.RequireUser(ctx, out _) is { } failure
                 ? Task.FromResult(failure)
-                : RunAsync(() => walls.ClearAllAsync(id)));
+                : RunAuditedAsync(ctx, audit, db, id, "wall-cleared",
+                    "Limpió todas las ventanas",
+                    () => walls.ClearAllAsync(id)));
 
-        app.MapPost("/api/walls/{id:int}/swap", (HttpContext ctx, int id, SwapRequest request, WallService walls) =>
+        app.MapPost("/api/walls/{id:int}/swap", (HttpContext ctx, int id, SwapRequest request, WallService walls,
+            VmsDbContext db, AuditService audit) =>
             ApiSecurity.RequireUser(ctx, out _) is { } failure
                 ? Task.FromResult(failure)
-                : RunAsync(() => walls.SwapWindowsAsync(id, request.WindowAId, request.WindowBId)));
+                : RunAuditedAsync(ctx, audit, db, id, "windows-swapped",
+                    $"Intercambió las ventanas {request.WindowAId} y {request.WindowBId}",
+                    () => walls.SwapWindowsAsync(id, request.WindowAId, request.WindowBId)));
 
         // Cambia la división de un monitor. La estructura del muro (filas ×
         // columnas) sigue siendo exclusiva del administrador.
         app.MapPut("/api/walls/{id:int}/screens/{screenId:int}/window-mode",
-            (HttpContext ctx, int id, int screenId, ScreenWindowModeRequest request, WallService walls) =>
+            (HttpContext ctx, int id, int screenId, ScreenWindowModeRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.ChangeScreenWindowModeAsync(id, screenId, request.WindowMode)));
+                    : RunAuditedAsync(ctx, audit, db, id, "window-mode-changed",
+                        $"Cambió la división del monitor {screenId} a {request.WindowMode} ventana(s)",
+                        () => walls.ChangeScreenWindowModeAsync(id, screenId, request.WindowMode)));
 
         app.MapPost("/api/walls/{id:int}/screens/{screenId:int}/group",
-            (HttpContext ctx, int id, int screenId, GroupRequest request, WallService walls) =>
+            (HttpContext ctx, int id, int screenId, GroupRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.GroupWindowsAsync(id, screenId, request.WindowIds)));
+                    : RunAuditedAsync(ctx, audit, db, id, "windows-grouped",
+                        $"Agrupó {request.WindowIds.Count} ventanas del monitor {screenId}",
+                        () => walls.GroupWindowsAsync(id, screenId, request.WindowIds)));
 
         app.MapPost("/api/walls/{id:int}/windows/{windowId:int}/ungroup",
-            (HttpContext ctx, int id, int windowId, WallService walls) =>
+            (HttpContext ctx, int id, int windowId, WallService walls, VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.UngroupWindowAsync(id, windowId)));
+                    : RunAuditedAsync(ctx, audit, db, id, "window-ungrouped",
+                        $"Desagrupó la ventana {windowId}",
+                        () => walls.UngroupWindowAsync(id, windowId)));
 
         app.MapPost("/api/walls/{id:int}/windows/{windowId:int}/subdivide",
-            (HttpContext ctx, int id, int windowId, SubdivideRequest request, WallService walls) =>
+            (HttpContext ctx, int id, int windowId, SubdivideRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.SubdivideWindowAsync(id, windowId, request.Parts)));
+                    : RunAuditedAsync(ctx, audit, db, id, "window-subdivided",
+                        $"Subdividió la ventana {windowId} en {request.Parts} partes",
+                        () => walls.SubdivideWindowAsync(id, windowId, request.Parts)));
 
         // Pantalla completa (doble clic sobre una ventana) y muro completo.
         app.MapPost("/api/walls/{id:int}/fullscreen",
-            (HttpContext ctx, int id, FullscreenRequest request, WallService walls) =>
+            (HttpContext ctx, int id, FullscreenRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.EnterFullscreenAsync(id, request.WindowId)));
+                    : RunAuditedAsync(ctx, audit, db, id, "fullscreen-entered",
+                        $"Puso la ventana {request.WindowId} a pantalla completa de su monitor",
+                        () => walls.EnterFullscreenAsync(id, request.WindowId)));
 
         app.MapPost("/api/walls/{id:int}/screens/{screenId:int}/exit-fullscreen",
-            (HttpContext ctx, int id, int screenId, WallService walls) =>
+            (HttpContext ctx, int id, int screenId, WallService walls, VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.ExitFullscreenAsync(id, screenId)));
+                    : RunAuditedAsync(ctx, audit, db, id, "fullscreen-exited",
+                        $"Sacó el monitor {screenId} de pantalla completa",
+                        () => walls.ExitFullscreenAsync(id, screenId)));
 
         app.MapPost("/api/walls/{id:int}/wall-fullscreen",
-            (HttpContext ctx, int id, FullscreenRequest request, WallService walls) =>
+            (HttpContext ctx, int id, FullscreenRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.EnterWallFullscreenAsync(id, request.WindowId)));
+                    : RunAuditedAsync(ctx, audit, db, id, "wall-fullscreen-entered",
+                        $"Puso la ventana {request.WindowId} a pantalla completa del muro",
+                        () => walls.EnterWallFullscreenAsync(id, request.WindowId)));
 
         app.MapPost("/api/walls/{id:int}/exit-wall-fullscreen",
-            (HttpContext ctx, int id, WallService walls) =>
+            (HttpContext ctx, int id, WallService walls, VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.ExitWallFullscreenAsync(id)));
+                    : RunAuditedAsync(ctx, audit, db, id, "wall-fullscreen-exited",
+                        "Sacó el muro de pantalla completa",
+                        () => walls.ExitWallFullscreenAsync(id)));
 
         // ------------------------------------------------------------------
         // Ventanas flotantes (rect libre dibujado encima del mosaico)
         // ------------------------------------------------------------------
         app.MapPost("/api/walls/{id:int}/floating",
-            (HttpContext ctx, int id, FloatingCreateRequest request, WallService walls) =>
+            (HttpContext ctx, int id, FloatingCreateRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.CreateFloatingAsync(id, request)));
+                    : RunAuditedAsync(ctx, audit, db, id, "floating-created",
+                        "Creó una ventana flotante con {channel}",
+                        () => walls.CreateFloatingAsync(id, request), channelId: request.ChannelId));
 
         app.MapPost("/api/walls/{id:int}/floating-external",
-            (HttpContext ctx, int id, FloatingExternalCreateRequest request, WallService walls) =>
+            (HttpContext ctx, int id, FloatingExternalCreateRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.CreateFloatingExternalAsync(id, request)));
+                    : RunAuditedAsync(ctx, audit, db, id, "floating-created",
+                        $"Creó una ventana flotante con la fuente externa '{request.Label}'",
+                        () => walls.CreateFloatingExternalAsync(id, request)));
 
         app.MapPost("/api/walls/{id:int}/floating/{floatingId:int}/assign-external",
-            (HttpContext ctx, int id, int floatingId, FloatingExternalAssignRequest request, WallService walls) =>
+            (HttpContext ctx, int id, int floatingId, FloatingExternalAssignRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.AssignFloatingExternalAsync(id, floatingId, request)));
+                    : RunAuditedAsync(ctx, audit, db, id, "floating-assigned",
+                        $"Proyectó la fuente externa '{request.Label}' en la flotante {floatingId}",
+                        () => walls.AssignFloatingExternalAsync(id, floatingId, request)));
 
         app.MapPut("/api/walls/{id:int}/floating/{floatingId:int}",
-            (HttpContext ctx, int id, int floatingId, FloatingMoveRequest request, WallService walls) =>
+            (HttpContext ctx, int id, int floatingId, FloatingMoveRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.MoveFloatingAsync(id, floatingId, request)));
+                    : RunAuditedAsync(ctx, audit, db, id, "floating-moved",
+                        $"Movió o redimensionó la ventana flotante {floatingId}",
+                        () => walls.MoveFloatingAsync(id, floatingId, request)));
 
         app.MapPost("/api/walls/{id:int}/floating/{floatingId:int}/fullscreen",
-            (HttpContext ctx, int id, int floatingId, WallService walls) =>
+            (HttpContext ctx, int id, int floatingId, WallService walls, VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.ToggleFloatingFullscreenAsync(id, floatingId)));
+                    : RunAuditedAsync(ctx, audit, db, id, "floating-fullscreen",
+                        $"Alternó la pantalla completa de la flotante {floatingId}",
+                        () => walls.ToggleFloatingFullscreenAsync(id, floatingId)));
 
         app.MapPost("/api/walls/{id:int}/floating/{floatingId:int}/assign",
-            (HttpContext ctx, int id, int floatingId, FloatingAssignRequest request, WallService walls) =>
+            (HttpContext ctx, int id, int floatingId, FloatingAssignRequest request, WallService walls,
+                VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.AssignFloatingAsync(id, floatingId, request)));
+                    : RunAuditedAsync(ctx, audit, db, id, "floating-assigned",
+                        $"Puso {{channel}} en la ventana flotante {floatingId}",
+                        () => walls.AssignFloatingAsync(id, floatingId, request), channelId: request.ChannelId));
 
         app.MapDelete("/api/walls/{id:int}/floating/{floatingId:int}",
-            (HttpContext ctx, int id, int floatingId, WallService walls) =>
+            (HttpContext ctx, int id, int floatingId, WallService walls, VmsDbContext db, AuditService audit) =>
                 ApiSecurity.RequireUser(ctx, out _) is { } failure
                     ? Task.FromResult(failure)
-                    : RunAsync(() => walls.DeleteFloatingAsync(id, floatingId)));
+                    : RunAuditedAsync(ctx, audit, db, id, "floating-deleted",
+                        $"Eliminó la ventana flotante {floatingId}",
+                        () => walls.DeleteFloatingAsync(id, floatingId)));
 
         // ------------------------------------------------------------------
         // Layouts guardados
@@ -351,7 +459,7 @@ public static class WallsApi
         // Guarda un layout como foto del estado actual del muro (división de
         // cada monitor + cámaras asignadas por posición estable).
         app.MapPost("/api/walls/{id:int}/layouts", async (HttpContext ctx, int id, LayoutSaveRequest request,
-            VmsDbContext db, CancellationToken ct) =>
+            VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name))
@@ -386,24 +494,35 @@ public static class WallsApi
             };
             db.WallLayouts.Add(layout);
             await db.SaveChangesAsync(ct);
+            await audit.LogAsync(ctx, "wall", "layout-saved",
+                targetType: "wall", targetId: id.ToString(), targetName: wall.Name,
+                detail: $"Guardó el layout '{layout.Name}' del muro '{wall.Name}' ({layout.Items.Count} cámaras).");
             return Results.Ok(ToDto(layout));
         });
 
         app.MapDelete("/api/walls/{id:int}/layouts/{layoutId:int}",
-            async (HttpContext ctx, int id, int layoutId, VmsDbContext db, CancellationToken ct) =>
+            async (HttpContext ctx, int id, int layoutId, VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             var layout = await db.WallLayouts.FirstOrDefaultAsync(l => l.Id == layoutId && l.VideoWallId == id, ct);
             if (layout is null) return Results.NotFound();
             db.WallLayouts.Remove(layout);
             await db.SaveChangesAsync(ct);
+            await audit.LogAsync(ctx, "wall", "layout-deleted",
+                targetType: "wall", targetId: id.ToString(),
+                detail: $"Eliminó el layout '{layout.Name}' del muro {id}.");
             return Results.Ok();
         });
 
         app.MapPost("/api/walls/{id:int}/layouts/{layoutId:int}/apply",
-            (HttpContext ctx, int id, int layoutId, WallService walls) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
-                    ? Task.FromResult(failure)
-                    : RunAsync(() => walls.ApplyLayoutAsync(id, layoutId)));
+            async (HttpContext ctx, int id, int layoutId, WallService walls, VmsDbContext db, AuditService audit) =>
+            {
+                if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+                string layoutName = await db.WallLayouts.Where(l => l.Id == layoutId && l.VideoWallId == id)
+                    .Select(l => l.Name).FirstOrDefaultAsync() ?? $"layout {layoutId}";
+                return await RunAuditedAsync(ctx, audit, db, id, "layout-applied",
+                    $"Aplicó el layout '{layoutName}'",
+                    () => walls.ApplyLayoutAsync(id, layoutId));
+            });
     }
 }

@@ -50,7 +50,7 @@ public static class StreamsApi
         // ------------------------------------------------------------------
         app.MapPost("/api/streams/{id:int}/kick", async (HttpContext ctx, int id, VmsDbContext db,
             MediaMtxManager mtx, Microsoft.AspNetCore.SignalR.IHubContext<Hubs.VmsHub> hub,
-            ILogger<Program> logger) =>
+            AuditService audit, ILogger<Program> logger) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out var admin) is { } failure) return failure;
 
@@ -63,6 +63,13 @@ public static class StreamsApi
             await SessionAccounting.BroadcastActiveSessionsAsync(db, hub);
             logger.LogInformation("Streaming: {Admin} expulsó la sesión de {User} ({Device} canal {Channel}).",
                 admin.Username, session.Username, session.DeviceName, session.RtspChannel);
+            await audit.LogAsync(ctx, "live", "session-kicked",
+                targetType: "channel", targetId: $"{session.DeviceId}/{session.RtspChannel}",
+                targetName: $"{session.DeviceName} · canal {session.RtspChannel}",
+                detail: $"Expulsó la sesión de video de '{session.Username}' sobre '{session.DeviceName}' " +
+                        $"canal {session.RtspChannel} ({session.Profile}).",
+                success: kicked,
+                data: new { kickedUser = session.Username, session.ClientIp, session.StartedAt });
             return Results.Ok(new { kicked });
         });
 

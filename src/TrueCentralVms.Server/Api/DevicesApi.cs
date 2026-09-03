@@ -7,6 +7,7 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -159,7 +160,7 @@ public static class DevicesApi
 
         app.MapPost("/api/devices", async (HttpContext ctx, DeviceWriteDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -172,7 +173,13 @@ public static class DevicesApi
             var conn = new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, request.Password);
             var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             if (info is null)
+            {
+                await audit.LogAsync(ctx, "devices", "device-created",
+                    targetType: "device", targetName: request.Name?.Trim(),
+                    detail: $"Alta de dispositivo rechazada por el equipo {request.Host}:{request.SdkPort}: {probeError}",
+                    success: false);
                 return Error(probeError!);
+            }
 
             var device = new Device
             {
@@ -188,6 +195,11 @@ public static class DevicesApi
             db.Devices.Add(device);
             await db.SaveChangesAsync(ct);
 
+            await audit.LogAsync(ctx, "devices", "device-created",
+                targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
+                detail: $"Agregó el dispositivo '{device.Name}' ({device.DriverKey}, {device.Host}:{device.SdkPort}, " +
+                        $"{device.Channels.Count} canales).",
+                data: new { device.Host, device.SdkPort, device.RtspPort, device.DriverKey, device.Model, device.SerialNumber });
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
             return Results.Ok(ToDto(device, device.Channels.Count));
@@ -195,7 +207,7 @@ public static class DevicesApi
 
         app.MapPut("/api/devices/{id:int}", async (HttpContext ctx, int id, DeviceWriteDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, Services.AnprService anpr, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, Services.AnprService anpr, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -225,6 +237,15 @@ public static class DevicesApi
                 ApplyProbe(device, info);
             }
 
+            var changes = new List<string>();
+            if (device.Name != request.Name.Trim()) changes.Add($"nombre '{device.Name}' → '{request.Name.Trim()}'");
+            if (device.Host != request.Host.Trim() || device.SdkPort != request.SdkPort)
+                changes.Add($"dirección {device.Host}:{device.SdkPort} → {request.Host.Trim()}:{request.SdkPort}");
+            if (device.RtspPort != request.RtspPort) changes.Add($"puerto RTSP {device.RtspPort} → {request.RtspPort}");
+            if (device.Username != request.Username) changes.Add($"usuario del equipo '{device.Username}' → '{request.Username}'");
+            if (device.DriverKey != request.DriverKey) changes.Add($"driver {device.DriverKey} → {request.DriverKey}");
+            if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña del equipo cambiada");
+
             device.Name = request.Name.Trim();
             device.DriverKey = request.DriverKey;
             device.Host = request.Host.Trim();
@@ -234,6 +255,11 @@ public static class DevicesApi
             device.PasswordCiphertext = protector.Protect(password);
             device.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
+
+            await audit.LogAsync(ctx, "devices", "device-updated",
+                targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
+                detail: $"Modificó el dispositivo '{device.Name}': " +
+                        (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios de conexión."));
 
             // El canal de eventos de patentes cuelga de estas credenciales: si
             // la conexión cambió hay que rehacerlo con las nuevas.
@@ -250,7 +276,7 @@ public static class DevicesApi
 
         app.MapDelete("/api/devices/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, Services.WallService walls,
-            Services.AnprService anpr, CancellationToken ct) =>
+            Services.AnprService anpr, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var device = await db.Devices.FindAsync([id], ct);
@@ -268,6 +294,9 @@ public static class DevicesApi
 
             db.Devices.Remove(device); // canales caen por cascada
             await db.SaveChangesAsync(ct);
+            await audit.LogAsync(ctx, "devices", "device-deleted",
+                targetType: "device", targetId: id.ToString(), targetName: device.Name,
+                detail: $"Eliminó el dispositivo '{device.Name}' ({device.Host}:{device.SdkPort}) y todos sus canales.");
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
             return Results.Ok();
@@ -279,7 +308,7 @@ public static class DevicesApi
         // ------------------------------------------------------------------
         app.MapPost("/api/devices/{id:int}/revalidate", async (HttpContext ctx, int id, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -289,10 +318,18 @@ public static class DevicesApi
                 protector.Unprotect(device.PasswordCiphertext));
             var (info, probeError) = await ProbeAsync(drivers, device.DriverKey, conn, ct);
             if (info is null)
+            {
+                await audit.LogAsync(ctx, "devices", "device-revalidated",
+                    targetType: "device", targetId: id.ToString(), targetName: device.Name,
+                    detail: $"Revalidación de '{device.Name}' fallida: {probeError}", success: false);
                 return Error(probeError!);
+            }
 
             ApplyProbe(device, info);
             await db.SaveChangesAsync(ct);
+            await audit.LogAsync(ctx, "devices", "device-revalidated",
+                targetType: "device", targetId: id.ToString(), targetName: device.Name,
+                detail: $"Revalidó '{device.Name}': {device.Channels.Count} canales, firmware {device.FirmwareVersion ?? "—"}.");
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
             return Results.Ok(ToDto(device, device.Channels.Count));
@@ -303,7 +340,8 @@ public static class DevicesApi
         // ?deviceId= reutiliza la contraseña guardada cuando no se escribe una.
         // ------------------------------------------------------------------
         app.MapPost("/api/devices/probe", async (HttpContext ctx, DeviceWriteDto request, VmsDbContext db,
-            DriverRegistry drivers, CredentialProtector protector, int? deviceId, CancellationToken ct) =>
+            DriverRegistry drivers, CredentialProtector protector, AuditService audit, int? deviceId,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -317,6 +355,12 @@ public static class DevicesApi
 
             var conn = new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, password);
             var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+            await audit.LogAsync(ctx, "devices", "device-probed",
+                targetType: "device", targetName: request.Name?.Trim(),
+                detail: info is null
+                    ? $"Probó la conexión con {request.Host.Trim()}:{request.SdkPort} ({request.DriverKey}): {probeError}"
+                    : $"Probó la conexión con {request.Host.Trim()}:{request.SdkPort} ({request.DriverKey}): correcta.",
+                success: info is not null);
             if (info is null)
                 return Results.Ok(new DeviceProbeResultDto(false, probeError, null, null, null, null, 0, 0, []));
 
@@ -345,7 +389,7 @@ public static class DevicesApi
 
         app.MapPut("/api/devices/{id:int}/channels/{channelId:int}", async (HttpContext ctx, int id, int channelId,
             ChannelWriteDto request, VmsDbContext db, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var channel = await db.Channels.Include(c => c.Device)
@@ -354,6 +398,12 @@ public static class DevicesApi
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre del canal es obligatorio (máximo 128 caracteres).");
 
+            var changes = new List<string>();
+            if (channel.Name != request.Name.Trim()) changes.Add($"nombre '{channel.Name}' → '{request.Name.Trim()}'");
+            if (channel.Enabled != request.Enabled) changes.Add(request.Enabled ? "habilitado" : "deshabilitado");
+            if (channel.SupportsPtz != request.SupportsPtz) changes.Add(request.SupportsPtz ? "PTZ activado" : "PTZ desactivado");
+            if (channel.UseFfmpegProxy != request.UseFfmpegProxy) changes.Add(request.UseFfmpegProxy ? "proxy FFmpeg activado" : "proxy FFmpeg desactivado");
+
             bool pathsChanged = channel.Enabled != request.Enabled
                 || channel.UseFfmpegProxy != request.UseFfmpegProxy;
             channel.Name = request.Name.Trim();
@@ -361,6 +411,12 @@ public static class DevicesApi
             channel.SupportsPtz = request.SupportsPtz;
             channel.UseFfmpegProxy = request.UseFfmpegProxy;
             await db.SaveChangesAsync(ct);
+
+            await audit.LogAsync(ctx, "devices", "channel-updated",
+                targetType: "channel", targetId: $"{id}/{channel.ChannelNumber}",
+                targetName: $"{channel.Device.Name} · {channel.Name}",
+                detail: $"Modificó el canal {channel.ChannelNumber} de '{channel.Device.Name}': " +
+                        (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
             if (pathsChanged)
                 await mtx.RefreshPathsAsync(ct); // habilitar/deshabilitar o proxy cambian la ruta
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "channels", cancellationToken: ct);
@@ -374,9 +430,9 @@ public static class DevicesApi
         // ------------------------------------------------------------------
         app.MapPost("/api/devices/{id:int}/channels/{channelNumber:int}/ptz", async (HttpContext ctx, int id,
             int channelNumber, PtzRequestDto request, VmsDbContext db, DriverRegistry drivers,
-            CredentialProtector protector, CancellationToken ct) =>
+            CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
 
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == id && c.ChannelNumber == channelNumber, ct);
@@ -398,6 +454,16 @@ public static class DevicesApi
             {
                 return Error(ex.Message, StatusCodes.Status502BadGateway);
             }
+
+            // Las órdenes continuas llegan de a pares (partir/detener) y a
+            // ráfagas: se audita UNA operación por usuario/canal cada 2 min,
+            // no cada gesto (quedaría constancia sin ruido).
+            if (!request.Stop && audit.ShouldLog($"ptz:{session.UserId}:{id}:{channelNumber}", TimeSpan.FromMinutes(2)))
+                await audit.LogAsync(ctx, "ptz", "ptz-moved",
+                    targetType: "channel", targetId: $"{id}/{channelNumber}",
+                    targetName: $"{channel.Device.Name} · {channel.Name}",
+                    detail: $"Operó el PTZ de '{channel.Device.Name}' canal {channelNumber}.",
+                    success: ok);
             return ok
                 ? Results.Ok()
                 : Error("El equipo rechazó la orden PTZ.", StatusCodes.Status502BadGateway);
@@ -408,7 +474,7 @@ public static class DevicesApi
         // ------------------------------------------------------------------
         app.MapPost("/api/devices/{id:int}/channels/{channelNumber:int}/ptz-preset", async (HttpContext ctx, int id,
             int channelNumber, PtzPresetRequestDto request, VmsDbContext db, DriverRegistry drivers,
-            CredentialProtector protector, CancellationToken ct) =>
+            CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             if (request.Index is < 1 or > 300)
@@ -434,6 +500,18 @@ public static class DevicesApi
             {
                 return Error(ex.Message, StatusCodes.Status502BadGateway);
             }
+
+            var (presetAction, presetVerb) = request.Action switch
+            {
+                Core.Drivers.PtzPresetAction.Set => ("ptz-preset-saved", "Guardó"),
+                Core.Drivers.PtzPresetAction.Clear => ("ptz-preset-deleted", "Borró"),
+                _ => ("ptz-preset-goto", "Fue al"),
+            };
+            await audit.LogAsync(ctx, "ptz", presetAction,
+                targetType: "channel", targetId: $"{id}/{channelNumber}",
+                targetName: $"{channel.Device.Name} · {channel.Name}",
+                detail: $"{presetVerb} preset {request.Index} de '{channel.Device.Name}' canal {channelNumber}.",
+                success: ok);
             return ok
                 ? Results.Ok()
                 : Error("El equipo rechazó la operación de preset.", StatusCodes.Status502BadGateway);
@@ -443,9 +521,17 @@ public static class DevicesApi
         // Snapshot JPEG de un canal (cache 25 s, máximo 4 capturas simultáneas)
         // ------------------------------------------------------------------
         app.MapGet("/api/devices/{id:int}/snapshot/{channelNumber:int}", async (HttpContext ctx, int id, int channelNumber,
-            VmsDbContext db, DriverRegistry drivers, CredentialProtector protector, IMemoryCache cache, CancellationToken ct) =>
+            VmsDbContext db, DriverRegistry drivers, CredentialProtector protector, IMemoryCache cache,
+            AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+
+            // Las miniaturas se piden solas por tandas (mantenedor de canales,
+            // muro): se audita una vez por usuario/equipo cada 5 min.
+            if (audit.ShouldLog($"snap:{session.UserId}:{id}", TimeSpan.FromMinutes(5)))
+                await audit.LogAsync(ctx, "live", "snapshot-web",
+                    targetType: "device", targetId: id.ToString(),
+                    detail: $"Solicitó miniaturas del dispositivo {id} (canal {channelNumber} y siguientes).");
 
             string cacheKey = $"snapshot:{id}:{channelNumber}";
             if (cache.TryGetValue(cacheKey, out byte[]? cached) && cached is not null)

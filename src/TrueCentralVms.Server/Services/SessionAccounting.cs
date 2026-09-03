@@ -17,6 +17,7 @@ public sealed class SessionAccounting(
     IServiceScopeFactory scopeFactory,
     MediaMtxManager mtx,
     IHubContext<VmsHub> hub,
+    AuditService audit,
     ILogger<SessionAccounting> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(5);
@@ -56,6 +57,9 @@ public sealed class SessionAccounting(
             // Sin media server no puede haber lectores: cerrar todo lo abierto.
             foreach (var s in open) s.EndedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
+            await audit.LogSystemAsync("live", "view-stopped",
+                detail: $"El servicio de streaming se detuvo: se cerraron {open.Count} sesiones de video abiertas.",
+                data: new { sessions = open.Select(s => new { s.Username, s.DeviceName, s.RtspChannel }) });
             await BroadcastActiveSessionsAsync(db, hub, ct);
             return;
         }
@@ -75,6 +79,17 @@ public sealed class SessionAccounting(
             changed = true;
             logger.LogInformation("Streaming: {User} dejó de ver {Device} canal {Channel} ({Profile}).",
                 session.Username, session.DeviceName, session.RtspChannel, session.Profile);
+            if (session.Profile is "main" or "sub")
+            {
+                var duration = session.EndedAt.Value - session.StartedAt;
+                await audit.LogSystemAsync("live", "view-stopped",
+                    targetType: "channel", targetId: $"{session.DeviceId}/{session.RtspChannel}",
+                    targetName: $"{session.DeviceName} · canal {session.RtspChannel}",
+                    detail: $"Dejó de ver '{session.DeviceName}' canal {session.RtspChannel} " +
+                            $"(duración {(int)duration.TotalMinutes} min {duration.Seconds} s).",
+                    userId: session.UserId, username: session.Username, clientIp: session.ClientIp,
+                    origin: "client", data: new { session.StartedAt, session.EndedAt, session.Profile });
+            }
         }
         if (changed)
         {

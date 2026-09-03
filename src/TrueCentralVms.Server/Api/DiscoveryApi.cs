@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.RegularExpressions;
 using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Services;
@@ -22,9 +22,21 @@ public static partial class DiscoveryApi
 {
     public static void MapDiscoveryApi(this WebApplication app)
     {
-        app.MapGet("/api/discovery/scan", async (HttpContext ctx, ILogger<Program> logger, string? host, CancellationToken ct) =>
+        app.MapGet("/api/discovery/scan", async (HttpContext ctx, ILogger<Program> logger,
+            Services.AuditService audit, string? host, string? kind, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            // kind=decoders: solo decodificadores de muro (Hikvision DS-64/69/C10, Dahua NVD);
+            // el resto de los equipos de video se omite (lo usa la página Decodificadores).
+            bool decodersOnly = string.Equals(kind, "decoders", StringComparison.OrdinalIgnoreCase);
+
+            // El panel repite el sondeo solo cada 30 s mientras la página está
+            // abierta: se audita una vez por usuario cada 10 min.
+            if (audit.ShouldLog($"scan:{session.UserId}", TimeSpan.FromMinutes(10)))
+                await audit.LogAsync(ctx, "devices", "discovery-scan",
+                    detail: decodersOnly
+                        ? "Sondeó la red en busca de decodificadores de muro (SADP, DHDiscover)."
+                        : "Sondeó la red en busca de equipos de video (SADP, DHDiscover, WS-Discovery).");
 
             IPAddress? directed = null;
             if (!string.IsNullOrWhiteSpace(host) && !IPAddress.TryParse(host.Trim(), out directed))
@@ -42,6 +54,7 @@ public static partial class DiscoveryApi
             foreach (var d in sadpTask.Result)
             {
                 if (CategorizeHikvision(d.Model) is not { } category) continue;
+                if (decodersOnly && category != "Decodificador") continue;
                 rows[d.Ip] = new
                 {
                     d.Ip, Brand = "Hikvision", DriverKey = "hikvision-netsdk",
@@ -52,6 +65,7 @@ public static partial class DiscoveryApi
             foreach (var d in dahuaTask.Result)
             {
                 if (CategorizeDahua(d.DeviceClass, d.Model) is not { } category) continue;
+                if (decodersOnly && category != "Decodificador") continue;
                 rows[d.Ip] = new
                 {
                     d.Ip, Brand = "Dahua", DriverKey = "dahua-netsdk",
@@ -62,6 +76,7 @@ public static partial class DiscoveryApi
 
             foreach (var d in onvifTask.Result)
             {
+                if (decodersOnly) break;               // WS-Discovery no distingue decodificadores
                 if (rows.ContainsKey(d.Ip)) continue; // ya visto por su protocolo de fábrica
                 rows[d.Ip] = new
                 {
@@ -80,7 +95,7 @@ public static partial class DiscoveryApi
     /// Clasifica por el modelo Hikvision; null = no es un equipo de video (se
     /// oculta en este administrador). Prefijos: DS-K* control de acceso e
     /// intercomunicación, DS-P*/AX alarmas, DS-3* switches, DS-2* cámaras,
-    /// *NI-* NVR, H(Q|U|G|T)HI DVR Turbo, DS-64/69 decodificadores.
+    /// *NI-* NVR, H(Q|U|G|T)HI DVR Turbo, DS-64/69 y DS-C10 decodificadores/controladores de muro.
     /// </summary>
     private static string? CategorizeHikvision(string model)
     {
@@ -135,6 +150,6 @@ public static partial class DiscoveryApi
     [GeneratedRegex(@"^I?DS-7[123]\d")]
     private static partial Regex DvrSeries();
 
-    [GeneratedRegex(@"^DS-6[49]\d")]
+    [GeneratedRegex(@"^DS-(6[49]\d|C1\d)")]
     private static partial Regex Decoder();
 }

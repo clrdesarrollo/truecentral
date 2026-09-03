@@ -18,6 +18,27 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     /// <summary>Reconocimientos de patentes (módulo Aplicaciones → ANPR).</summary>
     public DbSet<PlateEvent> PlateEvents => Set<PlateEvent>();
 
+    /// <summary>Bitácora de auditoría (solo-agregar; ver Services\AuditService).</summary>
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+
+    // Paneles de alarma (centrales de intrusión)
+    public DbSet<AlarmPanel> AlarmPanels => Set<AlarmPanel>();
+    public DbSet<AlarmArea> AlarmAreas => Set<AlarmArea>();
+    public DbSet<AlarmZone> AlarmZones => Set<AlarmZone>();
+    public DbSet<AlarmEvent> AlarmEvents => Set<AlarmEvent>();
+
+    // Parlantes IP
+    public DbSet<Speaker> Speakers => Set<Speaker>();
+
+    // Automatizaciones (workflows): disparador + acciones, y su historial
+    public DbSet<Workflow> Workflows => Set<Workflow>();
+    public DbSet<WorkflowAction> WorkflowActions => Set<WorkflowAction>();
+    public DbSet<WorkflowRun> WorkflowRuns => Set<WorkflowRun>();
+    /// <summary>Alertas mostradas a los operadores y su acuse de recibo.</summary>
+    public DbSet<WorkflowAlert> WorkflowAlerts => Set<WorkflowAlert>();
+    /// <summary>Servidor de correo saliente: fila única (Id = 1).</summary>
+    public DbSet<SmtpSettings> SmtpSettings => Set<SmtpSettings>();
+
     // Muro de video
     public DbSet<Decoder> Decoders => Set<Decoder>();
     public DbSet<VideoWall> Walls => Set<VideoWall>();
@@ -111,6 +132,166 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.HasIndex(p => p.ReceivedAt);
             e.HasIndex(p => p.PlateNumber);
             e.HasIndex(p => new { p.DeviceId, p.ReceivedAt });
+        });
+
+        modelBuilder.Entity<AuditEvent>(e =>
+        {
+            e.Property(a => a.Username).HasMaxLength(64);
+            e.Property(a => a.Role).HasMaxLength(16);
+            e.Property(a => a.Origin).HasMaxLength(16);
+            e.Property(a => a.ClientIp).HasMaxLength(64);
+            e.Property(a => a.Category).HasMaxLength(32);
+            e.Property(a => a.Action).HasMaxLength(48);
+            e.Property(a => a.TargetType).HasMaxLength(32);
+            e.Property(a => a.TargetId).HasMaxLength(64);
+            e.Property(a => a.TargetName).HasMaxLength(128);
+            e.Property(a => a.Detail).HasMaxLength(512);
+            // El panel consulta siempre por fecha descendente, y filtra por
+            // categoría/acción y por usuario.
+            e.HasIndex(a => a.Timestamp);
+            e.HasIndex(a => new { a.Category, a.Action, a.Timestamp });
+            e.HasIndex(a => new { a.Username, a.Timestamp });
+        });
+
+        // -------------------------------------------------------------------
+        // Paneles de alarma
+        // -------------------------------------------------------------------
+        modelBuilder.Entity<Speaker>(e =>
+        {
+            e.Property(s => s.Name).HasMaxLength(128);
+            e.Property(s => s.DriverKey).HasMaxLength(32);
+            e.Property(s => s.Host).HasMaxLength(255);
+            e.Property(s => s.Username).HasMaxLength(64);
+            e.Property(s => s.GroupName).HasMaxLength(64);
+            e.Property(s => s.Model).HasMaxLength(64);
+            e.Property(s => s.SerialNumber).HasMaxLength(64);
+            e.Property(s => s.FirmwareVersion).HasMaxLength(64);
+            e.Property(s => s.LastError).HasMaxLength(512);
+            e.Property(s => s.Status).HasConversion<string>().HasMaxLength(16);
+            e.HasIndex(s => new { s.Host, s.Port }).IsUnique();
+        });
+
+        modelBuilder.Entity<AlarmPanel>(e =>
+        {
+            e.Property(p => p.Name).HasMaxLength(128);
+            e.Property(p => p.DriverKey).HasMaxLength(32);
+            e.Property(p => p.Host).HasMaxLength(255);
+            e.Property(p => p.Username).HasMaxLength(64);
+            e.Property(p => p.GatewayDeviceId).HasMaxLength(128);
+            e.Property(p => p.Model).HasMaxLength(64);
+            e.Property(p => p.SerialNumber).HasMaxLength(64);
+            e.Property(p => p.FirmwareVersion).HasMaxLength(64);
+            e.Property(p => p.LastError).HasMaxLength(512);
+            e.Property(p => p.Status).HasConversion<string>().HasMaxLength(16);
+            e.HasIndex(p => new { p.Host, p.Port }).IsUnique();
+        });
+
+        modelBuilder.Entity<AlarmArea>(e =>
+        {
+            e.Property(a => a.Name).HasMaxLength(128);
+            e.Property(a => a.ArmState).HasConversion<string>().HasMaxLength(16);
+            e.HasOne(a => a.AlarmPanel)
+                .WithMany(p => p.Areas)
+                .HasForeignKey(a => a.AlarmPanelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(a => new { a.AlarmPanelId, a.Number }).IsUnique();
+        });
+
+        modelBuilder.Entity<AlarmZone>(e =>
+        {
+            e.Property(z => z.Name).HasMaxLength(128);
+            e.Property(z => z.ZoneType).HasMaxLength(48);
+            e.Property(z => z.DetectorType).HasMaxLength(48);
+            e.Property(z => z.Model).HasMaxLength(64);
+            e.Property(z => z.Status).HasConversion<string>().HasMaxLength(16);
+            e.HasOne(z => z.AlarmPanel)
+                .WithMany(p => p.Zones)
+                .HasForeignKey(z => z.AlarmPanelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(z => new { z.AlarmPanelId, z.Number }).IsUnique();
+        });
+
+        modelBuilder.Entity<AlarmEvent>(e =>
+        {
+            e.Property(a => a.PanelName).HasMaxLength(128);
+            e.Property(a => a.Kind).HasConversion<string>().HasMaxLength(16);
+            e.Property(a => a.Severity).HasConversion<string>().HasMaxLength(16);
+            e.Property(a => a.Code).HasMaxLength(16);
+            e.Property(a => a.Description).HasMaxLength(256);
+            e.Property(a => a.AreaName).HasMaxLength(128);
+            e.Property(a => a.ZoneName).HasMaxLength(128);
+            e.Property(a => a.Operator).HasMaxLength(64);
+            e.Property(a => a.Source).HasMaxLength(8);
+            e.Property(a => a.RawJson).HasMaxLength(4096);
+            // La pantalla lee por recepción descendente y filtra por panel,
+            // por naturaleza y por fecha del evento.
+            e.HasIndex(a => a.ReceivedAt);
+            e.HasIndex(a => new { a.AlarmPanelId, a.ReceivedAt });
+            e.HasIndex(a => new { a.Kind, a.ReceivedAt });
+        });
+
+        // -------------------------------------------------------------------
+        // Automatizaciones (workflows)
+        // -------------------------------------------------------------------
+        modelBuilder.Entity<Workflow>(e =>
+        {
+            e.Property(w => w.Name).HasMaxLength(128);
+            e.Property(w => w.Description).HasMaxLength(512);
+            e.Property(w => w.TriggerType).HasMaxLength(32);
+            e.Property(w => w.CreatedBy).HasMaxLength(64);
+            e.HasIndex(w => w.Name).IsUnique();
+            // El motor consulta las habilitadas de un disparador en cada evento.
+            e.HasIndex(w => new { w.TriggerType, w.Enabled });
+        });
+
+        modelBuilder.Entity<WorkflowAction>(e =>
+        {
+            e.Property(a => a.Type).HasMaxLength(32);
+            e.HasOne(a => a.Workflow)
+                .WithMany(w => w.Actions)
+                .HasForeignKey(a => a.WorkflowId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(a => new { a.WorkflowId, a.Order });
+        });
+
+        modelBuilder.Entity<WorkflowRun>(e =>
+        {
+            e.Property(r => r.WorkflowName).HasMaxLength(128);
+            e.Property(r => r.TriggerSummary).HasMaxLength(256);
+            e.Property(r => r.Error).HasMaxLength(512);
+            e.Property(r => r.StartedBy).HasMaxLength(64);
+            // El historial se lee por fecha descendente y se filtra por workflow.
+            e.HasIndex(r => r.StartedAt);
+            e.HasIndex(r => new { r.WorkflowId, r.StartedAt });
+        });
+
+        modelBuilder.Entity<WorkflowAlert>(e =>
+        {
+            e.Property(a => a.WorkflowName).HasMaxLength(128);
+            e.Property(a => a.Title).HasMaxLength(160);
+            e.Property(a => a.Message).HasMaxLength(512);
+            e.Property(a => a.TriggerSummary).HasMaxLength(256);
+            e.Property(a => a.ImagePath).HasMaxLength(256);
+            e.Property(a => a.ImagePathsJson).HasMaxLength(2048);
+            e.Property(a => a.ChannelIdsJson).HasMaxLength(256);
+            e.Property(a => a.Sound).HasMaxLength(64);
+            e.Property(a => a.Severity).HasConversion<string>().HasMaxLength(16);
+            e.Property(a => a.AcknowledgedBy).HasMaxLength(64);
+            e.Property(a => a.AcknowledgedFrom).HasMaxLength(16);
+            e.Property(a => a.AcknowledgedIp).HasMaxLength(64);
+            // Las pendientes se consultan en cada arranque de cliente; el
+            // registro se lee por fecha descendente.
+            e.HasIndex(a => a.RaisedAt);
+            e.HasIndex(a => new { a.AcknowledgedAt, a.RaisedAt });
+        });
+
+        modelBuilder.Entity<SmtpSettings>(e =>
+        {
+            e.Property(s => s.Host).HasMaxLength(255);
+            e.Property(s => s.Username).HasMaxLength(128);
+            e.Property(s => s.FromAddress).HasMaxLength(255);
+            e.Property(s => s.FromName).HasMaxLength(128);
+            e.Property(s => s.Security).HasConversion<string>().HasMaxLength(16);
         });
 
         // -------------------------------------------------------------------
