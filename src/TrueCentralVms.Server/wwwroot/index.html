@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -41,6 +41,8 @@
           </button>
           <div class="nav-children">
             <a href="#/devices" data-route="devices">Fuentes de video</a>
+            <a href="#/alarm-panels" data-route="alarm-panels">Paneles de alarma</a>
+            <a href="#/speakers" data-route="speakers">Parlantes IP</a>
             <div class="nav-group" data-group="videowall">
               <button type="button" class="nav-toggle">
                 <span class="caret" aria-hidden="true"></span><span>Videowall</span>
@@ -53,12 +55,15 @@
           </div>
         </div>
 
+        <a href="#/workflows" data-route="workflows">Automatizaciones</a>
+
         <div class="nav-group" data-group="security">
           <button type="button" class="nav-toggle">
             <span class="caret" aria-hidden="true"></span><span>Seguridad</span>
           </button>
           <div class="nav-children">
             <a href="#/users" data-route="users">Usuarios</a>
+            <a href="#/audit" data-route="audit">Auditoría</a>
           </div>
         </div>
 
@@ -97,7 +102,10 @@
 
   <script src="api.js?v=1"></script>
   <!-- walls.js va ANTES: app.js referencia sus funciones al armar las rutas. -->
-  <script src="walls.js?v=1"></script>
-  <script src="app.js?v=7"></script>
+  <script src="walls.js?v=2"></script>
+  <script src="alarms.js?v=4"></script>
+  <script src="speakers.js?v=7"></script>
+  <script src="workflows.js?v=9"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

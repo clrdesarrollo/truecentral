@@ -1,4 +1,4 @@
-// CLR TrueCentral VMS — panel de administración (SPA sin framework).
+﻿// CLR TrueCentral VMS — panel de administración (SPA sin framework).
 "use strict";
 
 const $ = (sel, root) => (root || document).querySelector(sel);
@@ -51,9 +51,10 @@ function toast(message, isError) {
   toastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
 }
 
-function openModal(html, wide) {
-  // `wide` lo usan los formularios con grilla (editor de muros).
-  $("#modal").className = "modal" + (wide ? " wide" : "");
+function openModal(html, size) {
+  // `size`: true = "wide" (formularios con grilla, editor de muros) o el
+  // nombre de una clase de ancho ("wider" para tablas dentro del modal).
+  $("#modal").className = "modal" + (size === true ? " wide" : size ? " " + size : "");
   $("#modal").innerHTML = html;
   $("#modal-backdrop").classList.remove("hidden");
 }
@@ -522,57 +523,78 @@ let lastScanAt = 0;
  * al abrir la página y se refresca sola cada 30 s (el sondeo dura ~4 s: es la
  * ventana que espera el servidor por SADP, DHDiscover y WS-Discovery).
  */
-function startDiscoveryPolling(devices) {
+// Opciones por defecto: la página Fuentes de video. Decodificadores reutiliza
+// el mismo sondeo con kind=decoders y su propio contenedor/modal.
+const DEVICE_DISCOVERY = {
+  container: "#online-devices",
+  button: "#btn-device-scan",
+  kind: "",
+  emptyText: "No se encontraron equipos de video en este segmento de red.",
+  onUse: (d) => deviceModal(null, {
+    name: d.model || d.ip,
+    host: d.ip,
+    sdkPort: d.commandPort || 8000,
+    driverKey: d.driverKey || "hikvision-netsdk",
+  }),
+};
+let discoveryOptions = DEVICE_DISCOVERY;
+
+function startDiscoveryPolling(devices, options = DEVICE_DISCOVERY) {
   clearInterval(discoveryTimer);
+  // Cambiar de página (o de tipo de sondeo) invalida el resultado anterior.
+  if (discoveryOptions !== options) { lastScan = null; lastScanAt = 0; }
+  discoveryOptions = options;
   // renderDevices() se repite al agregar, editar o revalidar un equipo: ahí no
   // se vuelve a sondear si el último resultado todavía está fresco.
   if (!lastScan || Date.now() - lastScanAt >= 30000) {
     runDiscovery(devices, !lastScan); // con resultados en pantalla, el refresco es silencioso
   }
   discoveryTimer = setInterval(() => {
-    if (!$("#online-devices")) { clearInterval(discoveryTimer); return; }
+    if (!$(discoveryOptions.container)) { clearInterval(discoveryTimer); return; }
     runDiscovery(devices, false);
   }, 30000);
 }
 
 /** @param showProgress muestra el aviso de "sondeando" y los errores; falso en los refrescos automáticos. */
 async function runDiscovery(devices, showProgress = true) {
+  const opt = discoveryOptions;
   if (discoveryBusy) return; // no encimar el sondeo automático con el del botón
-  if (!$("#online-devices")) return;
+  if (!$(opt.container)) return;
   discoveryBusy = true;
-  const scanButton = $("#btn-device-scan");
+  const scanButton = $(opt.button);
   if (scanButton) { scanButton.disabled = true; scanButton.textContent = "Buscando…"; }
   if (showProgress) {
-    const box = $("#online-devices");
+    const box = $(opt.container);
     box.innerHTML = `<div class="info-box">Sondeando la red… (unos segundos)</div>`;
     box.dataset.signature = ""; // se reemplazó la tabla: hay que volver a pintarla aunque el resultado repita
   }
   try {
-    lastScan = await Api.get("/api/discovery/scan");
+    lastScan = await Api.get(`/api/discovery/scan${opt.kind ? `?kind=${encodeURIComponent(opt.kind)}` : ""}`);
     lastScanAt = Date.now();
     renderOnlineDevices(devices);
   } catch (err) {
     // En el refresco automático se conserva la última lista buena: un aviso
     // cada 30 s por un sondeo fallido sería solo ruido.
-    const box = showProgress ? $("#online-devices") : null;
+    const box = showProgress ? $(opt.container) : null;
     if (box) { box.innerHTML = `<div class="error-box">${esc(err.error)}</div>`; box.dataset.signature = ""; }
   } finally {
     discoveryBusy = false;
-    const btn = $("#btn-device-scan");
+    const btn = $(opt.button);
     if (btn) { btn.disabled = false; btn.textContent = "Buscar"; }
   }
 }
 
 /// Tabla de equipos descubiertos, al estilo "Online Device" de HikCentral.
 function renderOnlineDevices(devices) {
-  const box = $("#online-devices");
+  const opt = discoveryOptions;
+  const box = $(opt.container);
   if (!box) return; // la página cambió mientras corría el sondeo
   // El refresco automático no debe repintar la tabla si nada cambió.
   const signature = JSON.stringify(lastScan) + "|" + devices.map((d) => d.host).join(",");
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
   if (!lastScan || !lastScan.length) {
-    box.innerHTML = `<div class="warn-box">No se encontraron equipos de video en este segmento de red.</div>`;
+    box.innerHTML = `<div class="warn-box">${esc(opt.emptyText)}</div>`;
     return;
   }
   const knownHosts = new Set(devices.map((d) => d.host));
@@ -603,15 +625,7 @@ function renderOnlineDevices(devices) {
       }).join("")}
       </tbody>
     </table></div>`;
-  $$(".scan-use").forEach((b) => b.addEventListener("click", () => {
-    const d = lastScan[Number(b.dataset.i)];
-    deviceModal(null, {
-      name: d.model || d.ip,
-      host: d.ip,
-      sdkPort: d.commandPort || 8000,
-      driverKey: d.driverKey || "hikvision-netsdk",
-    });
-  }));
+  $$(".scan-use").forEach((b) => b.addEventListener("click", () => opt.onUse(lastScan[Number(b.dataset.i)])));
 }
 
 async function deviceModal(device, prefill) {
@@ -911,16 +925,229 @@ function userModal(user) {
 }
 
 // ---------------------------------------------------------------------------
+// Auditoría (bitácora ISO 27001, solo administradores)
+// ---------------------------------------------------------------------------
+let auditCatalog = null;           // catálogo de categorías/acciones (se pide una vez)
+const auditState = { page: 1 };    // filtros vigentes entre búsquedas
+
+const AUDIT_ORIGINS = { web: "Panel web", client: "Cliente", server: "Servidor" };
+
+function formatDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleDateString("es-CL") + " " +
+    d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function auditLabels(ev) {
+  const cat = (auditCatalog?.categories || []).find((c) => c.key === ev.category);
+  const act = cat?.actions.find((a) => a.key === ev.action);
+  return { category: cat?.label ?? ev.category, action: act?.label ?? ev.action };
+}
+
+/** Query string con los filtros vigentes (sin paginación). */
+function auditFilterQuery() {
+  const q = [];
+  const add = (k, v) => { if (v) q.push(`${k}=${encodeURIComponent(v)}`); };
+  add("from", auditState.from);
+  add("to", auditState.to);
+  add("category", auditState.category);
+  add("action", auditState.action);
+  add("username", auditState.username);
+  add("text", auditState.text);
+  if (auditState.success === "1") q.push("success=true");
+  if (auditState.success === "0") q.push("success=false");
+  return q.join("&");
+}
+
+async function renderAudit() {
+  $("#page-title").textContent = "Auditoría";
+  if (Api.role !== "Admin") {
+    $("#view").innerHTML = `<div class="warn-box">Requiere rol administrador.</div>`;
+    return;
+  }
+
+  try { auditCatalog ??= await Api.get("/api/audit/catalog"); }
+  catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
+
+  const categoryOptions = auditCatalog.categories
+    .map((c) => `<option value="${esc(c.key)}" ${auditState.category === c.key ? "selected" : ""}>${esc(c.label)}</option>`)
+    .join("");
+  const userOptions = (auditCatalog.usernames || [])
+    .map((u) => `<option value="${esc(u)}" ${auditState.username === u ? "selected" : ""}>${esc(u)}</option>`)
+    .join("");
+
+  $("#view").innerHTML = `
+    <div class="toolbar">
+      <h3>Bitácora de auditoría</h3>
+      <button class="btn ghost" id="audit-export" title="Descarga los eventos que coinciden con los filtros (máximo 100.000)">Exportar CSV</button>
+    </div>
+    <div class="filter-bar">
+      <div class="field"><label>Desde</label>
+        <input type="datetime-local" id="af-from" value="${esc(auditState.from ?? "")}"></div>
+      <div class="field"><label>Hasta</label>
+        <input type="datetime-local" id="af-to" value="${esc(auditState.to ?? "")}"></div>
+      <div class="field"><label>Categoría</label>
+        <select id="af-category"><option value="">Todas</option>${categoryOptions}</select></div>
+      <div class="field"><label>Subcategoría</label>
+        <select id="af-action"><option value="">Todas</option></select></div>
+      <div class="field"><label>Usuario</label>
+        <select id="af-username"><option value="">Todos</option>${userOptions}</select></div>
+      <div class="field"><label>Resultado</label>
+        <select id="af-success">
+          <option value="">Todos</option>
+          <option value="1" ${auditState.success === "1" ? "selected" : ""}>Éxito</option>
+          <option value="0" ${auditState.success === "0" ? "selected" : ""}>Fallo</option>
+        </select></div>
+      <div class="field"><label>Buscar texto</label>
+        <input id="af-text" placeholder="detalle, objeto, IP..." value="${esc(auditState.text ?? "")}"></div>
+      <div class="filter-actions">
+        <button class="btn" id="af-search">Buscar</button>
+        <button class="btn ghost" id="af-clear" title="Quita todos los filtros">Limpiar</button>
+      </div>
+    </div>
+    <div id="audit-results"><div class="info-box">Cargando eventos…</div></div>`;
+
+  // La lista de subcategorías depende de la categoría elegida.
+  const fillActions = () => {
+    const category = $("#af-category").value;
+    const cat = auditCatalog.categories.find((c) => c.key === category);
+    $("#af-action").innerHTML = `<option value="">Todas</option>` + (cat
+      ? cat.actions.map((a) =>
+          `<option value="${esc(a.key)}" ${auditState.action === a.key ? "selected" : ""}>${esc(a.label)}</option>`).join("")
+      : "");
+    if (!cat) auditState.action = "";
+  };
+  fillActions();
+  $("#af-category").addEventListener("change", () => { auditState.action = ""; fillActions(); });
+
+  const readFilters = () => {
+    auditState.from = $("#af-from").value || "";
+    auditState.to = $("#af-to").value || "";
+    auditState.category = $("#af-category").value;
+    auditState.action = $("#af-action").value;
+    auditState.username = $("#af-username").value;
+    auditState.success = $("#af-success").value;
+    auditState.text = $("#af-text").value.trim();
+  };
+
+  $("#af-search").addEventListener("click", () => { readFilters(); auditState.page = 1; loadAuditPage(); });
+  $("#af-text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { readFilters(); auditState.page = 1; loadAuditPage(); }
+  });
+  $("#af-clear").addEventListener("click", () => {
+    Object.keys(auditState).forEach((k) => delete auditState[k]);
+    auditState.page = 1;
+    renderAudit();
+  });
+  $("#audit-export").addEventListener("click", () => {
+    readFilters();
+    const query = auditFilterQuery();
+    window.open(`/api/audit/export?${query}${query ? "&" : ""}access_token=${encodeURIComponent(Api.token)}`);
+  });
+
+  await loadAuditPage();
+}
+
+async function loadAuditPage() {
+  const box = $("#audit-results");
+  if (!box) return;
+  let data;
+  try {
+    const query = auditFilterQuery();
+    data = await Api.get(`/api/audit?${query}${query ? "&" : ""}page=${auditState.page}&pageSize=50`);
+  } catch (err) {
+    box.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    return;
+  }
+
+  if (!data.items.length) {
+    box.innerHTML = `<div class="info-box">No hay eventos que coincidan con los filtros.</div>`;
+    return;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
+  box.innerHTML = `
+    <div class="table-scroll"><table class="grid">
+      <thead><tr>
+        <th>Fecha</th><th>Usuario</th><th>Origen</th><th>IP</th>
+        <th>Categoría</th><th>Acción</th><th>Objeto</th><th>Detalle</th><th>Resultado</th>
+      </tr></thead>
+      <tbody>
+        ${data.items.map((ev, i) => {
+          const labels = auditLabels(ev);
+          return `
+          <tr class="audit-row" data-i="${i}" title="Clic para ver el detalle completo">
+            <td class="muted" style="white-space:nowrap">${formatDateTime(ev.timestamp)}</td>
+            <td>${esc(ev.username || "—")}</td>
+            <td class="muted">${esc(AUDIT_ORIGINS[ev.origin] ?? ev.origin)}</td>
+            <td class="muted">${esc(ev.clientIp || "—")}</td>
+            <td><span class="tag operator">${esc(labels.category)}</span></td>
+            <td>${esc(labels.action)}</td>
+            <td>${esc(ev.targetName ?? "—")}</td>
+            <td class="muted" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ev.detail ?? "")}</td>
+            <td>${ev.success ? `<span class="tag on">Éxito</span>` : `<span class="tag off">Fallo</span>`}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table></div>
+    <div class="audit-pager">
+      <span class="muted">${data.total} evento${data.total === 1 ? "" : "s"} · página ${data.page} de ${totalPages}</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" id="audit-prev" ${data.page <= 1 ? "disabled" : ""}>« Anterior</button>
+        <button class="btn ghost" id="audit-next" ${data.page >= totalPages ? "disabled" : ""}>Siguiente »</button>
+      </div>
+    </div>`;
+
+  $("#audit-prev")?.addEventListener("click", () => { auditState.page--; loadAuditPage(); });
+  $("#audit-next")?.addEventListener("click", () => { auditState.page++; loadAuditPage(); });
+  $$("#audit-results .audit-row").forEach((row) => row.addEventListener("click", () => {
+    auditDetailModal(data.items[Number(row.dataset.i)]);
+  }));
+}
+
+function auditDetailModal(ev) {
+  const labels = auditLabels(ev);
+  let dataPretty = "";
+  if (ev.dataJson) {
+    try { dataPretty = JSON.stringify(JSON.parse(ev.dataJson), null, 2); }
+    catch { dataPretty = ev.dataJson; }
+  }
+  openModal(`
+    <h3>Evento #${ev.id}</h3>
+    <div class="audit-detail-grid">
+      <span>Fecha</span><b>${formatDateTime(ev.timestamp)}</b>
+      <span>Usuario</span><b>${esc(ev.username || "—")}${ev.role ? ` (${esc(ev.role)})` : ""}</b>
+      <span>Origen</span><b>${esc(AUDIT_ORIGINS[ev.origin] ?? ev.origin)}</b>
+      <span>Dirección IP</span><b>${esc(ev.clientIp || "—")}</b>
+      <span>Categoría</span><b>${esc(labels.category)}</b>
+      <span>Subcategoría</span><b>${esc(labels.action)}</b>
+      <span>Objeto</span><b>${esc(ev.targetName ?? "—")}${ev.targetId ? ` <span class="muted">(${esc(ev.targetType ?? "")} ${esc(ev.targetId)})</span>` : ""}</b>
+      <span>Resultado</span><b>${ev.success ? "Éxito" : "Fallo"}</b>
+    </div>
+    ${ev.detail ? `<div class="info-box">${esc(ev.detail)}</div>` : ""}
+    ${dataPretty ? `<div class="field"><label>Datos adicionales</label><pre class="audit-json">${esc(dataPretty)}</pre></div>` : ""}
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" id="audit-detail-close">Cerrar</button>
+    </div>`);
+  $("#audit-detail-close").addEventListener("click", closeModal);
+}
+
+// ---------------------------------------------------------------------------
 // Router y arranque
 // ---------------------------------------------------------------------------
 const routes = {
   "": renderDashboard,
   "#/": renderDashboard,
   "#/devices": renderDevices,
+  "#/alarm-panels": renderAlarmPanels,
+  "#/speakers": renderSpeakers,
+  "#/workflows": renderWorkflows,
   "#/decoders": renderDecoders,
   "#/walls": renderWalls,
   "#/sessions": renderSessions,
   "#/users": renderUsers,
+  "#/audit": renderAudit,
 };
 
 // --- Menú lateral: nodos desplegables -------------------------------------
@@ -976,6 +1203,9 @@ function navigate() {
   clearInterval(sessionsTimer);  // el sondeo de sesiones vive solo en su página
   clearInterval(wallsTimer);     // ídem el del estado de los muros
   clearInterval(discoveryTimer); // ídem el de equipos en línea
+  clearInterval(alarmsTimer);    // ídem el de paneles de alarma
+  clearInterval(speakersTimer);  // ídem el de parlantes IP
+  clearInterval(workflowsTimer); // ídem el del historial de automatizaciones
   const hash = location.hash || "#/";
   const render = routes[hash] || renderDashboard;
   let active = null;

@@ -240,6 +240,9 @@ table.grid tr:hover td { background: rgba(255,255,255,.02); }
 .channel-row .btn { padding: 5px 10px; font-size: 12.5px; flex: none; }
 
 .modal.wide { width: 560px; }
+/* Modales con tabla adentro (sonidos, detalle de una ejecución, editor de
+   automatizaciones): a 560 px las columnas quedan con barra horizontal. */
+.modal.wider { width: 820px; }
 
 /* ---------- Muro de video ---------- */
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -283,4 +286,47 @@ pre.diag { white-space: pre-wrap; font-size: 12px; margin: 0; color: var(--muted
   position: absolute; inset: 0; border-radius: 8px;
   background: rgba(15,20,26,.78); color: var(--muted);
   display: flex; align-items: center; justify-content: center; font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Auditoría: barra de filtros y detalle de evento
+--------------------------------------------------------------------------- */
+.filter-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px 12px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+.filter-bar .field { margin-bottom: 0; }
+.filter-bar .filter-actions { display: flex; gap: 8px; }
+.audit-pager {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 12px; gap: 12px;
+}
+.grid tbody tr.audit-row { cursor: pointer; }
+.audit-detail-grid {
+  display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px;
+  font-size: 13px; margin: 10px 0;
+}
+.audit-detail-grid span { color: var(--muted); }
+.audit-json {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px; font-size: 12px; overflow-x: auto; white-space: pre; max-height: 260px;
+}
+
+/* --- Automatizaciones (workflows) ------------------------------------- */
+.wf-action {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel-2); padding: 12px; margin-bottom: 12px;
+}
+.wf-action-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.wf-check-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 2px 12px; max-height: 190px; overflow-y: auto;
+}
+.wf-check-grid .checkbox-row { margin: 0; }
+.wf-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+.wf-thumbs img {
+  width: 190px; border: 1px solid var(--border); border-radius: 8px; display: block;
 }

@@ -1,4 +1,4 @@
-// CLR TrueCentral VMS — panel: decodificadores y muros de video.
+﻿// CLR TrueCentral VMS — panel: decodificadores y muros de video.
 //
 // Se carga ANTES que app.js: este archivo solo declara funciones (sin efectos
 // al cargar) y app.js las referencia desde su tabla de rutas.
@@ -52,7 +52,16 @@ async function renderDecoders() {
             </tr>
             <tr class="hidden" data-detail="${d.id}"><td colspan="6"></td></tr>`).join("")}
         </tbody>
-      </table></div>`}`;
+      </table></div>`}
+    ${isAdmin ? `
+    <div class="toolbar" style="margin-top:28px">
+      <h3>Decodificadores en línea <span class="muted" style="font-weight:normal;font-size:12px">(SADP · Dahua en la red local · se actualiza cada 30 s)</span></h3>
+      <button class="btn ghost" id="btn-decoder-scan">Buscar</button>
+    </div>
+    <div id="online-decoders">
+      <div class="info-box">Sondeando el segmento de red del servidor… Solo se listan decodificadores y controladores de muro
+        (Hikvision DS-64xx/69xx/C10, Dahua NVD); cámaras, grabadores y otros equipos se omiten.</div>
+    </div>` : ""}`;
 
   const detailCell = (id) => $(`#view tr[data-detail="${id}"] td`);
   const showDetail = (id, html) => {
@@ -61,6 +70,10 @@ async function renderDecoders() {
   };
 
   $("#btn-decoder-new")?.addEventListener("click", () => decoderModal(null));
+  // Decodificadores en línea (mismo sondeo que Fuentes de video, filtrado a decodificadores).
+  const knownDecoders = decoders.map((d) => ({ host: d.host }));
+  $("#btn-decoder-scan")?.addEventListener("click", () => runDiscovery(knownDecoders));
+  if (isAdmin) startDiscoveryPolling(knownDecoders, DECODER_DISCOVERY);
 
   $$("#view .btn-test").forEach((b) => b.addEventListener("click", async (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
@@ -114,13 +127,28 @@ async function renderDecoders() {
   }));
 }
 
-async function decoderModal(decoder) {
+/** Sondeo de red de la página Decodificadores: solo decodificadores, alta con el modal de decodificador. */
+const DECODER_DISCOVERY = {
+  container: "#online-decoders",
+  button: "#btn-decoder-scan",
+  kind: "decoders",
+  emptyText: "No se encontraron decodificadores de muro en este segmento de red.",
+  onUse: (d) => decoderModal(null, {
+    name: d.model || d.ip,
+    host: d.ip,
+    port: d.commandPort || 8000,
+    driverKey: d.driverKey || "hikvision-netsdk",
+  }),
+};
+
+async function decoderModal(decoder, prefill) {
   let drivers;
   try { drivers = await getDecoderDrivers(); }
   catch (err) { toast(err.error, true); return; }
 
-  const d = decoder || { name: "", driverKey: drivers[0]?.driverKey ?? "hikvision-netsdk",
-    host: "", port: 8000, username: "admin", enabled: true, notes: "" };
+  const seed = decoder ? {} : (prefill || {});
+  const d = decoder || { name: seed.name ?? "", driverKey: seed.driverKey ?? drivers[0]?.driverKey ?? "hikvision-netsdk",
+    host: seed.host ?? "", port: seed.port ?? 8000, username: "admin", enabled: true, notes: "" };
 
   openModal(`
     <h3>${decoder ? "Editar decodificador" : "Nuevo decodificador"}</h3>
