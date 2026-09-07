@@ -33,6 +33,9 @@ public sealed partial class MediaMtxManager(
     private Process? _process;
     private volatile bool _stopping;
     private int _consecutiveFailures;
+    private volatile bool _restartPending;
+    private int? _lastExitCode;
+    private DateTime? _startedAtUtc;
 
     public int RtspPort => config.GetValue("Streaming:RtspPort", 8654);
     public int ApiPort => config.GetValue("Streaming:ApiPort", 9911);
@@ -51,10 +54,23 @@ public sealed partial class MediaMtxManager(
 
     public bool IsRunning => _process is { HasExited: false };
 
+    /// <summary>true entre una caída del proceso y su relanzamiento automático (lo consulta el supervisor).</summary>
+    public bool RestartPending => _restartPending;
+    public int? ProcessId => _process is { HasExited: false } p ? p.Id : null;
+    public DateTime? StartedAtUtc => _startedAtUtc;
+    public int? LastExitCode => _lastExitCode;
+    public bool ExecutableFound => FindExecutable() is not null;
+
     private string ConfigPath => Path.Combine(env.ContentRootPath, "mediamtx.runtime.yml");
 
     public async Task StartAsync(CancellationToken ct)
     {
+        // Reutilizable tras un StopAsync (el supervisor detiene e inicia a pedido).
+        if (IsRunning) return;
+        _stopping = false;
+        _restartPending = false;
+        _consecutiveFailures = 0;
+
         string? exe = FindExecutable();
         if (exe is null)
         {
@@ -100,9 +116,12 @@ public sealed partial class MediaMtxManager(
             if (_process is { HasExited: false } p)
             {
                 p.Kill(entireProcessTree: true);
-                p.WaitForExit(5000);
+                // La espera sin tope tras la acotada vacía los eventos pendientes (Exited).
+                if (p.WaitForExit(5000)) p.WaitForExit();
                 logger.LogInformation("MediaMTX detenido.");
             }
+            _process = null;
+            _restartPending = false;
         }
         catch (Exception ex)
         {
@@ -501,6 +520,8 @@ public sealed partial class MediaMtxManager(
             return;
         }
         _process = process;
+        _startedAtUtc = DateTime.UtcNow;
+        _restartPending = false;
         process.EnableRaisingEvents = true;
         // El hijo muere con el servidor aunque el apagado sea abrupto.
         ChildProcessJob.Attach(process);
@@ -526,7 +547,10 @@ public sealed partial class MediaMtxManager(
         long startedAtTicks = Environment.TickCount64;
         process.Exited += (_, _) =>
         {
-            if (_stopping) return;
+            try { _lastExitCode = process.ExitCode; } catch { /* handle cerrado */ }
+            // Un proceso reemplazado (detención + inicio a pedido) no relanza nada.
+            if (_stopping || !ReferenceEquals(process, _process)) return;
+            _restartPending = true;
             if (Environment.TickCount64 - startedAtTicks > 30_000)
                 _consecutiveFailures = 0;
             int delay = Math.Min(3 << Math.Min(_consecutiveFailures, 4), 30); // 3,6,12,24,30...
@@ -536,8 +560,10 @@ public sealed partial class MediaMtxManager(
             _ = Task.Run(async () =>
             {
                 await Task.Delay(TimeSpan.FromSeconds(delay));
-                if (!_stopping)
+                if (!_stopping && ReferenceEquals(process, _process))
                     StartProcess(exe);
+                else
+                    _restartPending = false;
             });
         };
 

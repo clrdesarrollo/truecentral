@@ -76,6 +76,9 @@ pipeline {
         booleanParam(
             name: 'PACKAGE', defaultValue: true,
             description: 'Armar y archivar los .zip de servidor y cliente.')
+        booleanParam(
+            name: 'INSTALLERS', defaultValue: true,
+            description: 'Compilar los instaladores de Windows (suite completa y cliente) con Inno Setup 6, si el agente lo tiene.')
     }
 
     environment {
@@ -287,6 +290,14 @@ pipeline {
                         'publish src\\TrueCentralVms.Server\\TrueCentralVms.Server.csproj ' +
                         "${comunes} -o \"${env.DIST}\\server\"")
 
+                    // Watchdog: monitor de escritorio del servidor. Va DENTRO del
+                    // paquete del servidor, en la misma subcarpeta que usa el
+                    // instalador ({app}\watchdog), para que el .zip quede igual
+                    // a una instalacion.
+                    dotnet('Publicar watchdog',
+                        'publish src\\TrueCentralVms.Watchdog\\TrueCentralVms.Watchdog.csproj ' +
+                        "${comunes} -o \"${env.DIST}\\server\\watchdog\"")
+
                     dotnet('Publicar cliente',
                         'publish src\\TrueCentralVms.Client\\TrueCentralVms.Client.csproj ' +
                         "${comunes} -o \"${env.DIST}\\client\"")
@@ -348,6 +359,39 @@ pipeline {
                 }
             }
         }
+
+        // Instaladores de Windows (Inno Setup 6): la suite completa y el
+        // cliente solo. Solo si el agente tiene ISCC.exe y los binarios de
+        // terceros; si no, se avisa y quedan los .zip de la etapa anterior.
+        stage('Instaladores') {
+            when { expression { return params.INSTALLERS } }
+            steps {
+                script {
+                    def iscc = powershell(returnStdout: true, script: '''
+                        $candidatos = @(
+                            (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\\ISCC.exe"),
+                            (Join-Path $env:ProgramFiles "Inno Setup 6\\ISCC.exe"),
+                            (Join-Path $env:LOCALAPPDATA "Programs\\Inno Setup 6\\ISCC.exe"))
+                        ($candidatos | Where-Object { Test-Path $_ } | Select-Object -First 1)
+                    ''').trim()
+
+                    if (!iscc) {
+                        echo 'AVISO: Inno Setup 6 no está en el agente: no se generan instaladores ' +
+                             '(winget install -e --id JRSoftware.InnoSetup).'
+                    } else if (env.BINARIES_OK != 'true') {
+                        echo 'AVISO: sin los binarios de terceros no se generan instaladores.'
+                    } else {
+                        // El script vuelve a publicar en build\publish (self-contained,
+                        // como exigen los .iss) y deja los .exe en dist\.
+                        powershell label: 'installer\\build-installers.ps1', script: '''
+                            powershell -NoProfile -ExecutionPolicy Bypass -File installer\\build-installers.ps1 -Version $env:SEMVER
+                            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                        '''
+                    }
+                }
+            }
+        }
+
     }
 
     post {
@@ -356,10 +400,10 @@ pipeline {
             archiveArtifacts artifacts: 'reports/**/*.trx', allowEmptyArchive: true
         }
         success {
-            archiveArtifacts artifacts: 'dist/*.zip', allowEmptyArchive: true, fingerprint: true
+            archiveArtifacts artifacts: 'dist/*.zip, dist/*.exe', allowEmptyArchive: true, fingerprint: true
         }
         unstable {
-            archiveArtifacts artifacts: 'dist/*.zip', allowEmptyArchive: true, fingerprint: true
+            archiveArtifacts artifacts: 'dist/*.zip, dist/*.exe', allowEmptyArchive: true, fingerprint: true
         }
         cleanup {
             // El workspace NO se limpia a propósito: conservar obj\ y los

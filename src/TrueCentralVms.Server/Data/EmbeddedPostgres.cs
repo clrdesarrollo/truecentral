@@ -61,6 +61,9 @@ public sealed class EmbeddedPostgres
     /// <summary>Directorio de datos del clúster (ahí también viven los secretos del servidor).</summary>
     public string DataDirectory => _dataDir;
 
+    /// <summary>Puerto efectivo del clúster (el del postgresql.conf si ya existía).</summary>
+    public int Port => _port;
+
     private string SecretPath => Path.Combine(_dataDir, "tcvms-pg.secret");
 
     public string ConnectionString => BuildConnectionString(DatabaseName);
@@ -206,7 +209,8 @@ public sealed class EmbeddedPostgres
                  "-A", "scram-sha-256", $"--pwfile={pwFile}", "--data-checksums"],
                 timeoutSeconds: 180);
             if (exitCode != 0)
-                throw new InvalidOperationException($"initdb falló (código {exitCode}): {output.Trim()}");
+                throw new InvalidOperationException(
+                    $"initdb falló (código {exitCode}): {output.Trim()}{DescribeStartupFailure(exitCode)}");
         }
         finally
         {
@@ -263,7 +267,7 @@ public sealed class EmbeddedPostgres
             timeoutSeconds: 90);
         if (exitCode != 0)
             throw new InvalidOperationException(
-                $"No se pudo iniciar PostgreSQL embebido (código {exitCode}): {output.Trim()} — revise {Path.Combine(_dataDir, "startup.log")}.");
+                $"No se pudo iniciar PostgreSQL embebido (código {exitCode}): {output.Trim()} — revise {Path.Combine(_dataDir, "startup.log")}.{DescribeStartupFailure(exitCode)}");
     }
 
     private async Task WaitUntilReadyAsync(CancellationToken ct)
@@ -289,6 +293,23 @@ public sealed class EmbeddedPostgres
             }
         }
     }
+
+    /// <summary>
+    /// Traduce los códigos con que Windows mata un proceso que ni siquiera llegó
+    /// a ejecutarse. El más habitual en un servidor recién instalado es
+    /// 0xC0000135 (falta una DLL): los binarios de PostgreSQL son builds MSVC y
+    /// necesitan el runtime de Visual C++, que se distribuye junto a ellos.
+    /// Sin esta pista, el log solo muestra un número negativo sin salida alguna.
+    /// </summary>
+    private string DescribeStartupFailure(int exitCode) => unchecked((uint)exitCode) switch
+    {
+        0xC0000135 => $" — Windows no encontró una DLL necesaria: faltan VCRUNTIME140.dll/MSVCP140.dll " +
+                      $"junto a los binarios de PostgreSQL ('{_binDir}'). Reinstale el sistema con un " +
+                      "instalador que los incluya, o instale el redistribuible de Visual C++ x64.",
+        0xC0000142 => $" — una DLL de '{_binDir}' no pudo inicializarse.",
+        0xC000007B => $" — los binarios de '{_binDir}' no son de 64 bits (imagen inválida).",
+        _ => "",
+    };
 
     private (int ExitCode, string Output) RunTool(string exe, IEnumerable<string> args, int timeoutSeconds)
     {

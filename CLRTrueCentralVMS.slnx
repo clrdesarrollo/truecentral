@@ -6,5 +6,6 @@
     <Project Path="src/TrueCentralVms.Drivers.Hikvision/TrueCentralVms.Drivers.Hikvision.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.Onvif/TrueCentralVms.Drivers.Onvif.csproj" />
     <Project Path="src/TrueCentralVms.Server/TrueCentralVms.Server.csproj" />
+    <Project Path="src/TrueCentralVms.Watchdog/TrueCentralVms.Watchdog.csproj" />
   </Folder>
 </Solution>

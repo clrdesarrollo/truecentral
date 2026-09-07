@@ -239,9 +239,21 @@ public partial class MainViewModel : ObservableObject
 
     private void ShowPendingCount()
     {
-        if (_pendingAlerts.Count > 0)
-            StatusMessage = $"{_pendingAlerts.Count} alerta(s) sin confirmar.";
+        PendingAlertCount = _pendingAlerts.Count(a => a.Pending);
+        if (PendingAlertCount > 0)
+            StatusMessage = $"{PendingAlertCount} alerta(s) sin confirmar.";
     }
+
+    /// <summary>
+    /// Alertas que siguen sin acuse de recibo en este puesto. El riel lo usa
+    /// para encender el botón del Centro de eventos y mostrar la insignia.
+    /// </summary>
+    [ObservableProperty] private int _pendingAlertCount;
+
+    /// <summary>Hay al menos una alerta sin confirmar.</summary>
+    public bool HasPendingAlerts => PendingAlertCount > 0;
+
+    partial void OnPendingAlertCountChanged(int value) => OnPropertyChanged(nameof(HasPendingAlerts));
 
     /// <summary>
     /// Trae las alertas que quedaron sin confirmar (al abrir el cliente o al

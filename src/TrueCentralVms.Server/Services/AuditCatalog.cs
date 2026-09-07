@@ -111,6 +111,9 @@ public static class AuditCatalog
             new("panel-updated", "Panel modificado"),
             new("panel-deleted", "Panel eliminado"),
             new("panel-probed", "Prueba de conexión con panel"),
+            new("receiver-devices-listed", "Equipos de la receptora consultados"),
+            new("receiver-device-added", "Equipo agregado en la receptora"),
+            new("receiver-device-removed", "Equipo quitado de la receptora"),
             new("panel-refreshed", "Estado del panel actualizado a pedido"),
             new("area-armed", "Área armada"),
             new("area-disarmed", "Área desarmada"),
@@ -162,8 +165,15 @@ public static class AuditCatalog
         new("system", "Sistema",
         [
             new("server-started", "Servidor iniciado"),
+            new("server-stopped", "Servidor detenido"),
             new("audit-purged", "Bitácora purgada por retención"),
             new("audit-exported", "Bitácora exportada a CSV"),
+            new("service-started", "Servicio iniciado"),
+            new("service-stopped", "Servicio detenido"),
+            new("service-restarted", "Servicio reiniciado"),
+            new("service-failed", "Servicio caído (detectado por el supervisor)"),
+            new("service-autorestart-changed", "Auto-reinicio de servicio cambiado"),
+            new("server-restart-requested", "Reinicio completo del servidor solicitado"),
         ]),
     ];
 

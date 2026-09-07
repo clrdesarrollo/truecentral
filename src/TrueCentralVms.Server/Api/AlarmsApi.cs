@@ -8,6 +8,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Drivers.Hikvision;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -67,6 +68,42 @@ public static class AlarmsApi
 
     private static AlarmConnectionInfo ConnectionOf(AlarmPanel panel, CredentialProtector protector) =>
         new(panel.Host, panel.Port, panel.UseHttps, panel.Username, protector.Unprotect(panel.PasswordCiphertext), panel.GatewayDeviceId);
+
+    /// <summary>
+    /// Arma la conexión con la receptora. La contraseña puede venir en el
+    /// cuerpo o tomarse de un panel ya guardado (PanelId), para no obligar a
+    /// reescribirla cada vez que se administra la lista de equipos.
+    /// </summary>
+    private static async Task<(AlarmConnectionInfo? Connection, string? Error)> ReceiverConnectionAsync(
+        AlarmReceiverConnectionDto? request, VmsDbContext db, CredentialProtector protector, CancellationToken ct)
+    {
+        if (request is null)
+            return (null, "Faltan los datos de la receptora.");
+
+        string host = (request.Host ?? "").Trim();
+        string username = (request.Username ?? "").Trim();
+        int port = request.Port;
+        bool useHttps = request.UseHttps;
+        string? password = request.Password;
+
+        if (request.PanelId is int panelId)
+        {
+            var panel = await db.AlarmPanels.AsNoTracking().FirstOrDefaultAsync(p => p.Id == panelId, ct);
+            if (panel is null)
+                return (null, "El panel indicado ya no existe.");
+            if (host.Length == 0) host = panel.Host;
+            if (username.Length == 0) username = panel.Username;
+            if (port is < 1 or > 65535) { port = panel.Port; useHttps = panel.UseHttps; }
+            if (string.IsNullOrEmpty(password)) password = protector.Unprotect(panel.PasswordCiphertext);
+        }
+
+        if (host.Length == 0) return (null, "La dirección de la receptora es obligatoria.");
+        if (port is < 1 or > 65535) return (null, "El puerto debe estar entre 1 y 65535.");
+        if (username.Length == 0) return (null, "El usuario de la receptora es obligatorio.");
+        if (string.IsNullOrEmpty(password)) return (null, "La contraseña de la receptora es obligatoria.");
+
+        return (new AlarmConnectionInfo(host, port, useHttps, username, password), null);
+    }
 
     private static string? DeviceIdOf(AlarmPanelWriteDto request) =>
         string.IsNullOrWhiteSpace(request.DeviceId) ? null : request.DeviceId.Trim();
@@ -280,6 +317,100 @@ public static class AlarmsApi
             var zones = state?.Zones.Select(z => new AlarmZoneDto(z.Number, z.AreaNumber, z.Name, z.ZoneType, z.DetectorType,
                 z.Status, z.Bypassed, z.Armed, z.InAlarm, z.Tamper, z.LowBattery, z.Signal, z.Model)).ToList() ?? [];
             return Results.Ok(new AlarmPanelProbeResultDto(true, null, info.Model, info.SerialNumber, info.FirmwareVersion, areas, zones));
+        });
+
+        // ------------------------------------------------------------------
+        // Equipos DENTRO de la receptora (Hik IP Receiver Pro)
+        //
+        // Alta y baja de paneles en la pasarela desde el VMS: evita tener que
+        // entrar a la interfaz web del fabricante. Las credenciales van en el
+        // cuerpo (nunca en la URL) y pueden tomarse de un panel ya guardado.
+        // ------------------------------------------------------------------
+        app.MapPost("/api/alarms/receiver/devices/list", async (HttpContext ctx, AlarmReceiverConnectionDto request,
+            VmsDbContext db, CredentialProtector protector, AuditService audit, string? search, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            var (conn, error) = await ReceiverConnectionAsync(request, db, protector, ct);
+            if (conn is null) return Error(error!);
+
+            try
+            {
+                var devices = await HikvisionIpReceiverDriver.ListGatewayDevicesAsync(conn, search, ct);
+                return Results.Ok(devices.Select(d => new AlarmReceiverDeviceDto(
+                    d.DevIndex, d.Name, d.Serial, d.AccountId, d.IsupId, d.Model, d.Version, d.Status)).ToList());
+            }
+            catch (DriverException ex)
+            {
+                await audit.LogAsync(ctx, "alarms", "receiver-devices-listed",
+                    targetType: "alarm-receiver", targetName: $"{conn.Host}:{conn.Port}",
+                    detail: $"No pudo listar los equipos de la receptora: {ex.Message}", success: false);
+                return Error(ex.Message);
+            }
+        });
+
+        app.MapPost("/api/alarms/receiver/devices", async (HttpContext ctx, AlarmReceiverAddDeviceDto request,
+            VmsDbContext db, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (string.IsNullOrWhiteSpace(request.DeviceId))
+                return Error("El ID del equipo es obligatorio.");
+            var (conn, error) = await ReceiverConnectionAsync(request.Receiver, db, protector, ct);
+            if (conn is null) return Error(error!);
+
+            string name = string.IsNullOrWhiteSpace(request.Name) ? request.DeviceId.Trim() : request.Name.Trim();
+            string target = $"{conn.Host}:{conn.Port}";
+            try
+            {
+                string devIndex = await HikvisionIpReceiverDriver.AddGatewayDeviceAsync(conn,
+                    new HikvisionIpReceiverDriver.GatewayDeviceSpec(request.Protocol, request.DeviceId, request.DeviceKey,
+                        name, request.DeviceType, request.AccountId, request.Remark), ct);
+                await audit.LogAsync(ctx, "alarms", "receiver-device-added",
+                    targetType: "alarm-receiver", targetName: target,
+                    detail: $"Agregó el equipo «{name}» (ID {request.DeviceId.Trim()}) a la receptora {target}; uuid {devIndex}.");
+                return Results.Ok(new AlarmReceiverDeviceDto(devIndex, name, null, request.AccountId, request.DeviceId.Trim(), null, null, null));
+            }
+            catch (DriverException ex)
+            {
+                await audit.LogAsync(ctx, "alarms", "receiver-device-added",
+                    targetType: "alarm-receiver", targetName: target,
+                    detail: $"No pudo agregar el equipo «{name}» (ID {request.DeviceId.Trim()}) a la receptora {target}: {ex.Message}",
+                    success: false);
+                return Error(ex.Message);
+            }
+        });
+
+        app.MapPost("/api/alarms/receiver/devices/delete", async (HttpContext ctx, AlarmReceiverDeleteDeviceDto request,
+            VmsDbContext db, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (string.IsNullOrWhiteSpace(request.DevIndex))
+                return Error("Indique el equipo a quitar de la receptora.");
+            var (conn, error) = await ReceiverConnectionAsync(request.Receiver, db, protector, ct);
+            if (conn is null) return Error(error!);
+
+            string target = $"{conn.Host}:{conn.Port}";
+            // Un panel del VMS que apunte a ese equipo quedaría sin comunicación.
+            string devIndex = request.DevIndex.Trim();
+            bool inUse = await db.AlarmPanels.AnyAsync(p =>
+                p.Host == conn.Host && p.Port == conn.Port && p.GatewayDeviceId == devIndex, ct);
+            if (inUse)
+                return Error("Ese equipo está en uso por un panel del sistema: elimine primero el panel en el VMS.");
+
+            try
+            {
+                await HikvisionIpReceiverDriver.DeleteGatewayDeviceAsync(conn, devIndex, ct);
+                await audit.LogAsync(ctx, "alarms", "receiver-device-removed",
+                    targetType: "alarm-receiver", targetName: target,
+                    detail: $"Quitó el equipo {devIndex} de la receptora {target}.");
+                return Results.NoContent();
+            }
+            catch (DriverException ex)
+            {
+                await audit.LogAsync(ctx, "alarms", "receiver-device-removed",
+                    targetType: "alarm-receiver", targetName: target,
+                    detail: $"No pudo quitar el equipo {devIndex} de la receptora {target}: {ex.Message}", success: false);
+                return Error(ex.Message);
+            }
         });
 
         // ------------------------------------------------------------------

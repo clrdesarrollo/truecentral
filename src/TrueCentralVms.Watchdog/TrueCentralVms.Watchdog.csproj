@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- Iniciar/detener el servicio de Windows requiere elevación: un solo aviso
+         UAC al abrir la aplicación (ver app.manifest). -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon Condition="Exists('..\..\installer\assets\truecentral.ico')">..\..\installer\assets\truecentral.ico</ApplicationIcon>
+    <AssemblyTitle>CLR TrueCentral VMS — Watchdog</AssemblyTitle>
+    <Product>CLR TrueCentral VMS</Product>
+    <Company>CLRobotics</Company>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.11" />
+  </ItemGroup>
+
+</Project>

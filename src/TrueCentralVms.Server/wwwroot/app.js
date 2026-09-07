@@ -90,9 +90,8 @@ function renderSetup(status) {
   if (!status.isLocalRequest) {
     body.innerHTML = `
       <div class="warn-box">
-        El servidor aún no está inicializado. Por seguridad, la creación del
-        primer administrador solo puede realizarse <b>desde la propia máquina del
-        servidor</b>: abra <code>http://localhost:5090</code> en ese equipo.
+        El servidor no ha sido inicializado aún, por seguridad este proceso
+        solo puede realizarse desde la propia máquina del servidor.
       </div>`;
     return;
   }
@@ -255,6 +254,14 @@ async function renderDashboard() {
     try { usersCount = (await Api.get("/api/users")).length; } catch { /* sin permiso */ }
     try { sessionsCount = (await Api.get("/api/streams/active")).length; } catch { /* sin permiso */ }
   }
+  let servicesRunning = "—", servicesTotal = "—", servicesFailed = 0;
+  try {
+    const overview = await Api.get("/api/system/services");
+    const supervised = overview.services.filter((s) => s.state !== "Disabled");
+    servicesTotal = supervised.length;
+    servicesRunning = supervised.filter((s) => s.state === "Running").length;
+    servicesFailed = supervised.filter((s) => s.state === "Failed").length;
+  } catch { /* sin sesión aún */ }
   const online = devices.filter((d) => d.status === "Online").length;
   $("#view").innerHTML = `
     <div class="cards">
@@ -275,6 +282,11 @@ async function renderDashboard() {
         <div class="card-label">Sesiones de video activas</div>
         <div class="card-value">${esc(sessionsCount)}</div>
       </div>` : ""}
+      <a class="card" href="#/services" style="text-decoration:none;color:inherit">
+        <div class="card-label">Servicios del servidor</div>
+        <div class="card-value" style="color:${servicesFailed ? "var(--danger)" : "inherit"}">${servicesRunning}<span class="muted" style="font-size:13px"> de ${servicesTotal} en ejecución</span></div>
+        ${servicesFailed ? `<div style="font-size:12px;color:var(--danger)">${servicesFailed} caído(s): revisar</div>` : ""}
+      </a>
       <div class="card">
         <div class="card-label">Usuarios</div>
         <div class="card-value">${esc(usersCount)}</div>
@@ -1148,6 +1160,7 @@ const routes = {
   "#/sessions": renderSessions,
   "#/users": renderUsers,
   "#/audit": renderAudit,
+  "#/services": renderServices,
 };
 
 // --- Menú lateral: nodos desplegables -------------------------------------
@@ -1206,6 +1219,7 @@ function navigate() {
   clearInterval(alarmsTimer);    // ídem el de paneles de alarma
   clearInterval(speakersTimer);  // ídem el de parlantes IP
   clearInterval(workflowsTimer); // ídem el del historial de automatizaciones
+  clearInterval(servicesTimer);  // ídem el del supervisor de servicios
   const hash = location.hash || "#/";
   const render = routes[hash] || renderDashboard;
   let active = null;

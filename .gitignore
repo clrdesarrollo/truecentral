@@ -22,6 +22,8 @@ tools/
 # Clúster PostgreSQL embebido: incluye tcvms-pg.secret (clave del superusuario)
 # y tcvms-data.key (llave AES que descifra las contraseñas de los dispositivos)
 pgdata/
+# Estado local del licenciamiento (license.lic + state.json), junto a pgdata
+license/
 *.secret
 *.key
 admin-initial.txt
@@ -37,3 +39,5 @@ anpr/
 workflows/
 # Salida del servidor cuando se lanza redirigiendo la consola
 src/TrueCentralVms.Server/*.log
+# Publicacion intermedia de los instaladores (installer/build-installers.ps1)
+build/publish/

@@ -152,6 +152,161 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
     }
 
+    // ------------------------------------------------------------------
+    // Administración de equipos DENTRO de la pasarela
+    //
+    // Alta y baja de paneles en el IP Receiver Pro sin abrir su interfaz web:
+    // el VMS queda como único punto de operación. La pasarela expone
+    // addDevice/delDevice desde su versión 2.5.0 (guía del API, 7.3 y 7.5).
+    // ------------------------------------------------------------------
+
+    /// <summary>Equipo de la pasarela tal como se muestra en el VMS.</summary>
+    public sealed record GatewayDeviceSummary(string DevIndex, string Name, string? Serial, string? AccountId,
+        string? IsupId, string? Model, string? Version, string? Status);
+
+    /// <summary>Datos para dar de alta un panel en la pasarela.</summary>
+    public sealed record GatewayDeviceSpec(string Protocol, string DeviceId, string? DeviceKey, string Name,
+        string? DeviceType, string? AccountId, string? Remark);
+
+    /// <summary>
+    /// Llamada de administración (alta/baja) contra la pasarela. No comparte
+    /// el camino de <c>RequireAsync</c>, pensado para las lecturas de estado:
+    /// aquí no interviene el protocolo «Private» ni el estado en línea del
+    /// panel, y la respuesta trae su propio resultado por equipo, que es el
+    /// que se traduce después.
+    /// </summary>
+    private static async Task<string> ManageAsync(AlarmConnectionInfo info, string path, string body,
+        CancellationToken ct, string what)
+    {
+        string? text;
+        try
+        {
+            text = await ClientOf(info).RequestAsync(HttpMethod.Post, path, body, ct: ct, allowNotFound: false);
+        }
+        catch (DriverException ex) when (ex.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
+                                         ex.Message.Contains("notSupport", StringComparison.OrdinalIgnoreCase) ||
+                                         ex.Message.Contains("invalidOperation", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new DriverException($"El IP Receiver Pro no admite {what} por API: requiere la versión V2.5.0 o superior " +
+                                      "de la pasarela (en versiones anteriores el alta y la baja de equipos solo se hacen " +
+                                      "desde su interfaz web).", ex);
+        }
+        if (string.IsNullOrWhiteSpace(text))
+            throw new DriverException($"El IP Receiver Pro no respondió {what}.");
+        return text;
+    }
+
+    /// <summary>Lista los equipos agregados en la pasarela (opcionalmente filtrados).</summary>
+    public static async Task<IReadOnlyList<GatewayDeviceSummary>> ListGatewayDevicesAsync(
+        AlarmConnectionInfo info, string? keyword, CancellationToken ct = default)
+    {
+        var devices = await ListDevicesAsync(ClientOf(info), string.IsNullOrWhiteSpace(keyword) ? null : keyword.Trim(), ct);
+        return devices
+            .Select(d => new GatewayDeviceSummary(d.DevIndex, d.Name, d.Serial, d.AccountId, d.IsupId, d.Model, d.Version, d.Status))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Agrega un panel a la pasarela por ISUP 5.0 (EHome) u OTAP y devuelve el
+    /// uuid (devIndex) que la pasarela le asignó, que es el identificador con
+    /// el que después se opera el panel desde el VMS.
+    /// </summary>
+    public static async Task<string> AddGatewayDeviceAsync(AlarmConnectionInfo info, GatewayDeviceSpec spec,
+        CancellationToken ct = default)
+    {
+        string protocol = NormalizeProtocol(spec.Protocol);
+        string deviceId = (spec.DeviceId ?? "").Trim();
+        if (deviceId.Length == 0)
+            throw new DriverException("Falta el ID del equipo (el mismo que está configurado en el panel para reportar a la receptora).");
+        if (deviceId.Length > 31 || !deviceId.All(char.IsLetterOrDigit))
+            throw new DriverException("El ID del equipo admite hasta 31 caracteres, solo letras y números.");
+        string? key = string.IsNullOrWhiteSpace(spec.DeviceKey) ? null : spec.DeviceKey.Trim();
+        if (key is { Length: > 32 })
+            throw new DriverException("La clave del equipo admite hasta 32 caracteres.");
+        string name = string.IsNullOrWhiteSpace(spec.Name) ? deviceId : spec.Name.Trim();
+        // "SecurityCP" (panel de alarma) o "encodingDev" (equipo de video).
+        string devType = string.Equals(spec.DeviceType, "encodingDev", StringComparison.OrdinalIgnoreCase)
+            ? "encodingDev" : "SecurityCP";
+
+        var device = new Dictionary<string, object?>
+        {
+            ["protocolType"] = protocol,
+            ["devName"] = name,
+            ["devType"] = devType,
+        };
+        var parameters = new Dictionary<string, object?> { [protocol == "OTAP" ? "OTAPID" : "EhomeID"] = deviceId };
+        if (key is not null) parameters[protocol == "OTAP" ? "OTAPKey" : "EhomeKey"] = key;
+        device[protocol == "OTAP" ? "OTAPParams" : "EhomeParams"] = parameters;
+        if (!string.IsNullOrWhiteSpace(spec.AccountId)) device["accountID"] = spec.AccountId.Trim();
+        if (!string.IsNullOrWhiteSpace(spec.Remark)) device["remark"] = spec.Remark.Trim();
+
+        string body = JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["DeviceInList"] = new[] { new Dictionary<string, object?> { ["Device"] = device } },
+        });
+
+        string json = await ManageAsync(info, "/ISAPI/ContentMgmt/DeviceMgmt/addDevice?format=json", body, ct,
+            "el alta de equipos");
+
+        using var doc = JsonDocument.Parse(json);
+        foreach (var item in HikvisionAlarmPanelDriver.EnumerateList(doc.RootElement, "DeviceOutList", "Device"))
+        {
+            string? status = HikvisionAlarmPanelDriver.GetString(item, "status");
+            if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
+                return HikvisionAlarmPanelDriver.GetString(item, "devIndex")
+                       ?? throw new DriverException("La pasarela agregó el equipo pero no devolvió su identificador.");
+            throw new DriverException(DescribeAddFailure(HikvisionAlarmPanelDriver.GetString(item, "subStatusCode")));
+        }
+        // Lote entero fallido: la pasarela responde solo con ResponseStatus.
+        HikvisionAlarmPanelDriver.EnsureOk(json, "agregar el equipo");
+        throw new DriverException("La pasarela no informó el resultado del alta del equipo.");
+    }
+
+    /// <summary>Quita un equipo de la pasarela por su uuid (devIndex).</summary>
+    public static async Task DeleteGatewayDeviceAsync(AlarmConnectionInfo info, string devIndex, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(devIndex))
+            throw new DriverException("Falta el identificador del equipo a quitar de la pasarela.");
+
+        string body = JsonSerializer.Serialize(new Dictionary<string, object?> { ["DevIndexList"] = new[] { devIndex.Trim() } });
+        string json = await ManageAsync(info, "/ISAPI/ContentMgmt/DeviceMgmt/delDevice?format=json", body, ct,
+            "la baja de equipos");
+
+        // La caché de resolución quedaría apuntando a un equipo que ya no está.
+        foreach (var cached in Resolved.Keys.Where(k => k.StartsWith($"{info.Host}|{info.Port}|", StringComparison.Ordinal)).ToList())
+            Resolved.TryRemove(cached, out _);
+
+        using var doc = JsonDocument.Parse(json);
+        foreach (var item in HikvisionAlarmPanelDriver.EnumerateList(doc.RootElement, "DelDevList", "Dev"))
+        {
+            string? status = HikvisionAlarmPanelDriver.GetString(item, "status");
+            if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
+                return;
+            throw new DriverException(HikvisionAlarmPanelDriver.GetString(item, "subStatusCode") switch
+            {
+                "theDeviceIdDoesNotExist" => "La pasarela ya no tiene ese equipo.",
+                "badParameters" => "La pasarela rechazó los datos del equipo a quitar.",
+                var other => $"La pasarela no pudo quitar el equipo{(other is null ? "" : $" ({other})")}.",
+            });
+        }
+    }
+
+    private static string NormalizeProtocol(string? protocol) => (protocol ?? "").Trim().ToLowerInvariant() switch
+    {
+        "otap" => "OTAP",
+        "" or "isup" or "isup5" or "isup5.0" or "ehome" or "ehomev5" => "ehomeV5",
+        _ => throw new DriverException($"Protocolo '{protocol}' no admitido por la pasarela: use ISUP 5.0 (ehomeV5) u OTAP."),
+    };
+
+    private static string DescribeAddFailure(string? subStatusCode) => subStatusCode switch
+    {
+        "deviceExist" => "Ese equipo ya está agregado en la pasarela.",
+        "monitorNodeOverLimit" => "La pasarela llegó al límite de equipos de su licencia.",
+        "badParameters" => "La pasarela rechazó los datos del equipo (revise el ID y la clave).",
+        "noMemory" => "La pasarela no tiene memoria disponible para agregar el equipo.",
+        var other => $"La pasarela no pudo agregar el equipo{(other is null ? "" : $" ({other})")}.",
+    };
+
     private static async Task<(HikvisionIsapiClient Client, string DevIndex)> ConnectAsync(AlarmConnectionInfo info, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(info.DeviceId))

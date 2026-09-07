@@ -255,6 +255,10 @@ async function alarmPanelModal(panel) {
       <div class="field" id="al-device-field" ${driver0?.needsDeviceId ? "" : "hidden"}>
         <label>Equipo dentro de la pasarela (uuid, serie, cuenta o ID ISUP)</label>
         <input id="al-device" value="${esc(panel?.deviceId ?? "")}" placeholder="PA02, DS-PHA64-W4M2022…, o el uuid de la pasarela">
+        <div style="margin-top:6px">
+          <button class="btn ghost" type="button" id="al-gw-open">Equipos de la receptora…</button>
+        </div>
+        <div id="al-gw-box" hidden style="margin-top:8px"></div>
       </div>
       <div class="form-grid">
         <div class="field">
@@ -269,7 +273,7 @@ async function alarmPanelModal(panel) {
       <label class="checkbox-row"><input type="checkbox" id="al-https" ${(panel ? panel.useHttps : driver0?.defaultHttps) ? "checked" : ""}> Usar HTTPS (certificado autofirmado aceptado)</label>
       <label class="checkbox-row"><input type="checkbox" id="al-enabled" ${panel ? (panel.enabled ? "checked" : "") : "checked"}> Monitoreo activo (sondeo de estado y recepción de eventos)</label>
       <div class="info-box" style="margin-top:10px" id="al-cred-help">${driver0?.needsDeviceId
-        ? "Estas credenciales son las del <b>IP Receiver Pro</b> (la pasarela), no las del panel. El panel se identifica por su equipo dentro de la pasarela (arriba) y se comunica con ella por su clave EHome/ISUP, configurada en el propio panel. Requiere que en la pasarela esté habilitado <b>Automation Output → Protocol → Private</b>."
+        ? "Estas credenciales son las del <b>IP Receiver Pro</b> (la pasarela), no las del panel. El panel se identifica por su equipo dentro de la pasarela (arriba) y se comunica con ella por su clave EHome/ISUP, configurada en el propio panel. Requiere que en la pasarela esté habilitado <b>Automation Output → Protocol → Private</b>. Si la receptora se instaló con el instalador de TrueCentral, está en <b>127.0.0.1:8091</b> y solo se puede usar desde el servidor."
         : "Use un usuario <b>local</b> del panel (el creado al activarlo, normalmente <b>admin</b>), no la cuenta de la nube Hik-Connect. Tras varios intentos fallidos el panel bloquea el acceso por 30 minutos."}</div>
       <div id="al-probe-result"></div>
       <div class="modal-actions">
@@ -288,7 +292,7 @@ async function alarmPanelModal(panel) {
     $("#al-username-label").textContent = gw ? "Usuario del IP Receiver Pro" : "Usuario del panel";
     $("#al-password-label").textContent = (gw ? "Contraseña del IP Receiver Pro" : "Contraseña del panel") + (isNew ? "" : " (vacío = no cambiar)");
     $("#al-cred-help").innerHTML = gw
-      ? "Estas credenciales son las del <b>IP Receiver Pro</b> (la pasarela), no las del panel. El panel se identifica por su equipo dentro de la pasarela (arriba) y se comunica con ella por su clave EHome/ISUP, configurada en el propio panel. Requiere que en la pasarela esté habilitado <b>Automation Output → Protocol → Private</b>."
+      ? "Estas credenciales son las del <b>IP Receiver Pro</b> (la pasarela), no las del panel. El panel se identifica por su equipo dentro de la pasarela (arriba) y se comunica con ella por su clave EHome/ISUP, configurada en el propio panel. Requiere que en la pasarela esté habilitado <b>Automation Output → Protocol → Private</b>. Si la receptora se instaló con el instalador de TrueCentral, está en <b>127.0.0.1:8091</b> y solo se puede usar desde el servidor."
       : "Use un usuario <b>local</b> del panel (el creado al activarlo, normalmente <b>admin</b>), no la cuenta de la nube Hik-Connect. Tras varios intentos fallidos el panel bloquea el acceso por 30 minutos.";
   });
 
@@ -302,6 +306,141 @@ async function alarmPanelModal(panel) {
     password: $("#al-password").value || null,
     enabled: $("#al-enabled").checked,
     deviceId: $("#al-device").value.trim() || null,
+  });
+
+  // ------------------------------------------------------------------
+  // Equipos DENTRO de la receptora (Hik IP Receiver Pro)
+  //
+  // Alta y baja de paneles en la pasarela desde aquí: no hace falta entrar a
+  // la interfaz web del fabricante. Se reutilizan las credenciales del
+  // formulario (o las guardadas del panel, si no se reescribe la contraseña).
+  // ------------------------------------------------------------------
+  const receiverConn = () => ({
+    host: $("#al-host").value.trim(),
+    port: Number($("#al-port").value),
+    useHttps: $("#al-https").checked,
+    username: $("#al-username").value.trim(),
+    password: $("#al-password").value || null,
+    panelId: isNew ? null : panel.id,
+  });
+
+  const gwBox = () => $("#al-gw-box");
+
+  async function loadGatewayDevices() {
+    const box = gwBox();
+    box.innerHTML = `<div class="info-box">Consultando la receptora…</div>`;
+    let devices;
+    try {
+      devices = await Api.post("/api/alarms/receiver/devices/list", receiverConn());
+    } catch (err) {
+      box.innerHTML = `<div class="error-box">${esc(err.message || String(err))}</div>` + gatewayAddFormHtml();
+      wireGatewayAddForm();
+      return;
+    }
+    const rows = devices.length
+      ? devices.map((d) => `
+          <tr>
+            <td>${esc(d.name)}</td>
+            <td class="muted">${esc(d.isupId ?? d.serial ?? d.accountId ?? "—")}</td>
+            <td class="muted">${esc(d.status ?? "—")}</td>
+            <td style="text-align:right;white-space:nowrap">
+              <button class="btn ghost" type="button" data-gw-use="${esc(d.devIndex)}">Usar</button>
+              <button class="btn ghost" type="button" data-gw-del="${esc(d.devIndex)}" data-gw-name="${esc(d.name)}">Quitar</button>
+            </td>
+          </tr>`).join("")
+      : `<tr><td colspan="4" class="muted">La receptora todavía no tiene equipos agregados.</td></tr>`;
+
+    box.innerHTML = `
+      <div class="probe-box">
+        <div class="probe-title">Equipos en la receptora</div>
+        <table class="table" style="margin-top:6px"><tbody>${rows}</tbody></table>
+      </div>` + gatewayAddFormHtml();
+
+    box.querySelectorAll("[data-gw-use]").forEach((b) => b.addEventListener("click", () => {
+      $("#al-device").value = b.getAttribute("data-gw-use");
+    }));
+    box.querySelectorAll("[data-gw-del]").forEach((b) => b.addEventListener("click", async () => {
+      const devIndex = b.getAttribute("data-gw-del");
+      if (!confirm(`¿Quitar «${b.getAttribute("data-gw-name")}» de la receptora? El panel dejará de reportar.`)) return;
+      b.disabled = true;
+      try {
+        await Api.post("/api/alarms/receiver/devices/delete", { receiver: receiverConn(), devIndex });
+        await loadGatewayDevices();
+      } catch (err) {
+        $("#al-modal-error").innerHTML = `<div class="error-box">${esc(err.message || String(err))}</div>`;
+        b.disabled = false;
+      }
+    }));
+    wireGatewayAddForm();
+  }
+
+  function gatewayAddFormHtml() {
+    return `
+      <div class="probe-box" style="margin-top:8px">
+        <div class="probe-title">Agregar un panel a la receptora</div>
+        <div class="form-grid">
+          <div class="field">
+            <label>ID del equipo (ISUP/OTAP)</label>
+            <input id="al-gw-id" placeholder="PA02" maxlength="31">
+          </div>
+          <div class="field">
+            <label>Clave del equipo</label>
+            <input id="al-gw-key" type="password" autocomplete="new-password" maxlength="32">
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Nombre</label>
+            <input id="al-gw-name" placeholder="Panel bodega" maxlength="128">
+          </div>
+          <div class="field">
+            <label>Protocolo</label>
+            <select id="al-gw-proto">
+              <option value="isup">ISUP 5.0 (EHome)</option>
+              <option value="otap">OTAP</option>
+            </select>
+          </div>
+        </div>
+        <div class="info-box">El ID y la clave son los que están configurados <b>en el panel</b> para reportar a la receptora
+          (en el AX PRO: Comunicación → ISUP). Al agregarlo, la receptora devuelve su uuid y queda cargado arriba.</div>
+        <div style="margin-top:8px">
+          <button class="btn" type="button" id="al-gw-add">Agregar a la receptora</button>
+        </div>
+      </div>`;
+  }
+
+  function wireGatewayAddForm() {
+    const addButton = $("#al-gw-add");
+    if (!addButton) return;
+    addButton.addEventListener("click", async () => {
+      const errorBox = $("#al-modal-error");
+      errorBox.innerHTML = "";
+      addButton.disabled = true;
+      try {
+        const created = await Api.post("/api/alarms/receiver/devices", {
+          receiver: receiverConn(),
+          protocol: $("#al-gw-proto").value,
+          deviceId: $("#al-gw-id").value.trim(),
+          deviceKey: $("#al-gw-key").value || null,
+          name: $("#al-gw-name").value.trim(),
+        });
+        $("#al-device").value = created.devIndex;
+        if (!$("#al-name").value.trim() && $("#al-gw-name").value.trim())
+          $("#al-name").value = $("#al-gw-name").value.trim();
+        await loadGatewayDevices();
+      } catch (err) {
+        errorBox.innerHTML = `<div class="error-box">${esc(err.message || String(err))}</div>`;
+      } finally {
+        addButton.disabled = false;
+      }
+    });
+  }
+
+  $("#al-gw-open").addEventListener("click", async () => {
+    const box = gwBox();
+    if (!box.hidden) { box.hidden = true; return; }
+    box.hidden = false;
+    await loadGatewayDevices();
   });
 
   $("#al-probe").addEventListener("click", async () => {

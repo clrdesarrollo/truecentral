@@ -54,6 +54,7 @@ CLRTrueCentralVMS.slnx
 src\TrueCentralVms.Core\               contratos: DTOs, IDeviceDriver, hub SignalR
 src\TrueCentralVms.Server\             servidor + panel web (wwwroot)
 src\TrueCentralVms.Client\             cliente de escritorio WPF (FlyleafLib)
+src\TrueCentralVms.Watchdog\           monitor de escritorio del servidor
 src\TrueCentralVms.Drivers.Hikvision\  interop HCNetSDK 6.1.9.48
 src\TrueCentralVms.Drivers.Dahua\      interop propio contra dhnetsdk.h (x64)
 src\TrueCentralVms.Drivers.Onvif\      SOAP manual (WS-UsernameToken)
@@ -78,11 +79,76 @@ dotnet run
 # 3. Cliente de escritorio
 cd src\TrueCentralVms.Client
 dotnet run
+
+# 4. Watchdog del servidor (opcional; pide elevación al abrirse)
+cd src\TrueCentralVms.Watchdog
+dotnet run
 ```
 
 Panel web: `http://localhost:5090`. El sistema viene **desactivado de
 fábrica**: el primer administrador se crea desde el asistente del panel, que
 solo acepta conexiones desde la propia máquina del servidor.
+
+## Instaladores
+
+Dos instaladores de Windows (Inno Setup 6, x64, en español) salen de
+`installer\build-installers.ps1`:
+
+| Instalador | Qué instala | Dónde |
+|---|---|---|
+| `CLRTrueCentralVMS-Suite-Setup-<versión>.exe` | **Suite completa**: servidor como servicio de Windows `CLRTrueCentralVMS` (API, panel web, SignalR, drivers), PostgreSQL embebido, MediaMTX y FFmpeg; opcionalmente el cliente de escritorio en el mismo equipo (tarea marcada por defecto). El instalador del cliente queda además en `client-setup\` para llevarlo a los demás puestos. | `%ProgramFiles%\CLR TrueCentral VMS\Server` · datos en `%ProgramData%\CLRTrueCentralVMS` (pgdata, anpr, workflows, logs) |
+| `CLRTrueCentralVMS-Client-Setup-<versión>.exe` | **Solo el cliente** de operación (WPF) con el FFmpeg de FlyleafLib, ffmpeg/ffprobe y MediaMTX para la proyección de pantalla al muro. | `%ProgramFiles%\CLR TrueCentral VMS\Client` · preferencias en `%AppData%\CLRTrueCentralVMS\client.json` |
+
+Ambos son self-contained (.NET 10 incluido: el equipo destino no necesita
+instalar nada más) y sirven tanto para instalar como para **actualizar**
+sobre una instalación existente: la suite detiene el servicio, reemplaza los
+binarios, conserva los datos y `appsettings.Local.json`, y vuelve a arrancar
+el servicio verificando `/api/health`; las migraciones de esquema las aplica
+el propio servidor al iniciar.
+
+Qué hace la suite en el equipo, además de copiar archivos:
+
+- Crea (o reconfigura) el servicio `CLRTrueCentralVMS` (LocalSystem, inicio
+  automático) con acciones de recuperación del SCM (reinicio a los 5, 15 y
+  60 s si el proceso muere; contador reseteado tras un día estable). Las
+  caídas de los servicios internos las cubre el supervisor del servidor.
+- Reglas de firewall: TCP 5090 (panel/API) y 5091 (receptor SIA DC-09), UDP
+  por programa para el descubrimiento de equipos (SADP 37020, WS-Discovery
+  3702, Dahua 37810) y TCP 8654 para el MediaMTX del servidor.
+- ACL de `%ProgramData%\CLRTrueCentralVMS` solo para SYSTEM y
+  Administradores (ahí viven la clave del clúster y la llave AES de las
+  credenciales de los equipos).
+- Si el puerto 25490 de PostgreSQL está ocupado, elige el primer libre hasta
+  25539 y lo anota en `appsettings.Local.json` (una vez creado el clúster,
+  el puerto vive dentro de él y no se cambia).
+- Al terminar ofrece abrir `http://localhost:5090`: el sistema viene
+  desactivado de fábrica y el primer administrador se crea desde el asistente
+  del panel, que solo acepta conexiones desde la propia máquina.
+- Copia el **runtime de Visual C++** (`VCRUNTIME140`, `VCRUNTIME140_1`,
+  `MSVCP140`) junto a los binarios de PostgreSQL. No viene con Windows: sin
+  él `initdb.exe` muere con `0xC0000135` en un servidor recién instalado y la
+  base nunca se crea.
+- Si se marca la tarea correspondiente, instala en silencio el **Hik IP
+  Receiver Pro** (receptora de los paneles que reportan por ISUP/OTAP) y lo
+  deja escuchando en `127.0.0.1:8091` en vez del puerto 80 abierto a la red:
+  su web/API la usa solo el servidor del VMS desde este mismo equipo. Los
+  paneles no usan ese puerto, se registran por TCP 7091, 7660-7667 y 8661,
+  que sí quedan abiertos en el firewall.
+
+Compilar los instaladores (requiere Inno Setup 6, `winget install -e --id
+JRSoftware.InnoSetup`, y los binarios de `build\setup-binaries.ps1`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\build-installers.ps1              # ambos
+powershell -ExecutionPolicy Bypass -File installer\build-installers.ps1 -Solo Client # solo el cliente
+```
+
+El script publica servidor y cliente (`build\publish\`), verifica que estén
+las DLL nativas, PostgreSQL, MediaMTX y FFmpeg, compila `client.iss` y luego
+`suite.iss` (que empaqueta el .exe del cliente) y deja los .exe en `dist\`.
+La versión sale del archivo `VERSION`. Instalación desatendida:
+`Setup.exe /VERYSILENT /NORESTART` (la suite acepta además
+`/TASKS=installclient` o `/TASKS=` para incluir u omitir el cliente).
 
 ## Cliente de escritorio
 
@@ -233,6 +299,12 @@ cada 30 s y apenas llega un evento, así que lo que ve el operador es siempre
 el estado real del equipo. Hay dos drivers Hikvision:
 
 - **Directo** (`hikvision-isapi`): el VMS habla con el panel por su IP.
+> Los paneles se dan de alta **en la receptora desde el propio VMS**: en el
+> formulario del panel, «Equipos de la receptora…» lista los equipos que tiene
+> la pasarela, permite agregar uno nuevo con su ID y clave ISUP/OTAP y quitar
+> los que ya no se usan, sin entrar a la interfaz web del fabricante. Todo
+> queda en la bitácora ISO 27001.
+
 - **A través del Hik IP Receiver Pro** (`hikvision-iprp`): los paneles se
   registran en la pasarela de Hikvision (ISUP 5.0, OTAP o Hik-Partner Pro) y
   el VMS consume su API con la cuenta de la pasarela. En el mantenedor se
@@ -435,6 +507,102 @@ mantiene abierto su canal de eventos, guarda lo que llega y lo reparte.
 > (`Interop\ItsInterop.cs`) calcado de la cabecera 6.1.9.48: las que trae el
 > `CHCNetSDK.cs` heredado son de una versión anterior y dejan todos los campos
 > corridos.
+
+## Supervisor de servicios (watchdog)
+
+El servidor lleva un watchdog interno (`Services\Supervisor\ServiceSupervisor.cs`)
+que vigila la salud de cada servicio y permite controlarlos desde el panel web
+(**Sistema → Servicios**; cualquier usuario ve el estado, solo un
+administrador opera):
+
+| Servicio | Tipo | Cómo se comprueba | Control |
+|---|---|---|---|
+| Base de datos (PostgreSQL embebido) | proceso | `SELECT 1` por Npgsql | **esencial**: solo reiniciar |
+| Media server (MediaMTX) | proceso | proceso vivo **y** su API de control responde | iniciar / detener / reiniciar |
+| Monitor de dispositivos, Contabilidad de sesiones, Paneles de alarma, Receptor SIA DC-09, Parlantes IP, Reconocimiento de patentes, Automatizaciones, Retención de la bitácora | interno | la tarea del `BackgroundService` sigue viva (no terminó ni falló) | iniciar / detener / reiniciar |
+
+Reglas:
+
+- Cada `Supervisor:CheckSeconds` (10 s) se comprueba todo. Un servicio que
+  cae pasa a **Caído** y, con su auto-reinicio activo, se reinicia solo con
+  esperas crecientes (5, 10, 20, 40, 60 s) hasta agotar
+  `Supervisor:MaxRestartAttempts` (5) dentro de
+  `Supervisor:RestartWindowMinutes` (10); tras ese tiempo estable el contador
+  vuelve a cero.
+- Un servicio **detenido a mano queda detenido**: el watchdog no lo toca hasta
+  que un administrador lo inicie. El auto-reinicio se puede apagar por
+  servicio (en memoria: vuelve a "activo" al reiniciar el servidor).
+- MediaMTX conserva su relanzamiento propio ante una caída del proceso; el
+  supervisor lo muestra "Iniciando" mientras esa reposición está pendiente en
+  vez de lanzar un segundo arranque encima.
+- Todo cambio de estado se empuja por el hub (`ServiceStateChanged`) y queda
+  en la bitácora (categoría **Sistema**): `service-failed` y los
+  `service-restarted` automáticos los firma `sistema`; las órdenes manuales
+  (`service-started`, `service-stopped`, `service-restarted`,
+  `service-autorestart-changed`, `server-restart-requested`) llevan el
+  administrador, la IP y el origen.
+- **Reiniciar servidor completo** (solo instalado como servicio de Windows):
+  el servidor audita la orden y lanza un auxiliar `powershell.exe` fuera de su
+  job que ejecuta `Restart-Service CLRTrueCentralVMS`. En modo consola el
+  botón queda deshabilitado.
+
+Para agregar un servicio al supervisor basta con implementar
+`IManagedService` (o envolver un `BackgroundService` con
+`HostedServiceAdapter`) y agregarlo al catálogo de `ServiceSupervisor`;
+los `BackgroundService` supervisados se registran como singleton +
+`AddHostedService(sp => sp.GetRequiredService<T>())` para que el supervisor
+tome la MISMA instancia que arranca el host.
+
+API (`/api/system/...`):
+
+```
+GET  /api/system/services                        estado del servidor y de cada servicio (usuario)
+POST /api/system/services/{id}/start|stop|restart  orden sobre un servicio (administrador)
+PUT  /api/system/services/{id}/auto-restart      { "enabled": bool } (administrador)
+POST /api/system/restart                         reinicio completo del servicio de Windows (administrador)
+```
+
+El watchdog vive dentro del proceso del servidor, así que no puede
+recuperarlo si el proceso entero muere. Para eso se configuran las acciones
+de recuperación del SCM al instalar el servicio de Windows (una sola vez,
+como administrador):
+
+```powershell
+sc.exe failure CLRTrueCentralVMS reset= 86400 actions= restart/5000/restart/15000/restart/60000
+sc.exe failureflag CLRTrueCentralVMS 1
+```
+
+### Watchdog de escritorio (`src\TrueCentralVms.Watchdog`)
+
+La capa de AFUERA: una ventana WPF que se instala junto al servidor
+(`{app}\watchdog`, con acceso directo en el menú Inicio y —si se marca la
+tarea— en el escritorio) y que no vive dentro del proceso vigilado. Muestra
+tres indicadores —servicio de Windows, API/panel web (`/api/health`) y
+PostgreSQL embebido (conexión TCP a su puerto)—, un resumen del estado
+general, el registro de actividad de la sesión y los botones **Iniciar
+servicio** / **Detener servicio** / **Abrir panel web**.
+
+- Sondea cada 2 s. Si el servicio se detiene **sin que nadie se lo haya
+  pedido desde ahí**, lo marca en rojo y vuelca los errores recientes del
+  Visor de eventos de Windows relacionados con el servidor: es lo primero que
+  se pregunta en un llamado de soporte.
+- Lee los puertos de la instalación que tiene al lado con la misma precedencia
+  que el servidor (`appsettings.json` < `.Production.json` < `.Local.json`), y
+  el `postgresql.conf` del clúster manda sobre el puerto configurado. Así
+  sigue sirviendo en un equipo que quedó con puertos distintos a los de
+  fábrica.
+- Sondea la API por `127.0.0.1` y no por `localhost`: con el servidor atado
+  solo a IPv4, resolver `::1` primero se comería el timeout y daría por caída
+  una API perfectamente sana.
+- Pide elevación en su manifiesto (`requireAdministrator`): controlar el
+  servicio la exige, y así el aviso de UAC aparece UNA vez, al abrirlo.
+- En un equipo de desarrollo —servidor corriendo como consola, sin servicio
+  instalado— informa "Servidor en ejecución (sin servicio de Windows)" con la
+  API y la base en verde, en vez de dar el sistema por caído.
+
+Cada apagado ordenado del servidor (lo pida el Watchdog, `services.msc` o el
+SCM al apagar el equipo) queda en la bitácora como `server-stopped`, al lado
+del `server-started` de cada arranque.
 
 ## Panel web
 

@@ -108,6 +108,49 @@ if ($FromProduct) {
 }
 
 # ---------------------------------------------------------------------------
+# 2b. Runtime de Visual C++ junto a PostgreSQL (despliegue "app-local")
+#
+# Los binarios de PostgreSQL para Windows (EDB) estan compilados con MSVC y
+# dependen de VCRUNTIME140/MSVCP140, que NO vienen con Windows. En un servidor
+# limpio, sin el redistribuible instalado, initdb.exe ni siquiera arranca: muere
+# con 0xC0000135 (DLL no encontrada) y el servicio no puede crear la base.
+# Copiarlas al lado de los .exe (la carpeta del ejecutable va primero en el
+# orden de busqueda de DLL) evita depender de lo que tenga instalado el equipo
+# destino y no cambia nada a nivel de maquina.
+# ---------------------------------------------------------------------------
+$crtNames = @('VCRUNTIME140.dll', 'VCRUNTIME140_1.dll', 'MSVCP140.dll')
+$pgBin    = Join-Path $repo 'tools\postgres\pgsql\bin'
+
+if (Test-Path $pgBin) {
+    # Preferir el redistribuible de Visual Studio si existe; si no, System32
+    # (son los mismos archivos que instala vc_redist.x64.exe).
+    $crtSources = @()
+    foreach ($vsRoot in @("${env:ProgramFiles}\Microsoft Visual Studio", "${env:ProgramFiles(x86)}\Microsoft Visual Studio")) {
+        if (Test-Path $vsRoot) {
+            $crtSources += Get-ChildItem -Path $vsRoot -Filter 'Microsoft.VC*.CRT' -Recurse -Directory -ErrorAction SilentlyContinue |
+                           Where-Object { $_.FullName -like '*\x64\*' } |
+                           Sort-Object FullName -Descending |
+                           Select-Object -ExpandProperty FullName
+        }
+    }
+    $crtSources += (Join-Path $env:SystemRoot 'System32')
+
+    $copied = 0
+    foreach ($name in $crtNames) {
+        $src = $crtSources | ForEach-Object { Join-Path $_ $name } | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($src) {
+            Copy-Item -LiteralPath $src -Destination (Join-Path $pgBin $name) -Force
+            $copied++
+        } else {
+            Write-Host ("  [FALTA]  {0} (runtime de Visual C++ para PostgreSQL)" -f $name) -ForegroundColor Yellow
+        }
+    }
+    if ($copied -gt 0) {
+        Write-Host ("  [OK]     runtime de Visual C++ junto a PostgreSQL ({0} archivos)" -f $copied) -ForegroundColor Green
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Resumen
 # ---------------------------------------------------------------------------
 Write-Host ""
@@ -116,7 +159,10 @@ $checks = [ordered]@{
     'native\hikvision\HCNetSDK.dll'          = 'Driver Hikvision'
     'native\dahua\dhnetsdk.dll'              = 'Driver Dahua'
     'tools\postgres\pgsql\bin\pg_ctl.exe'    = 'PostgreSQL embebido (servidor)'
+    'tools\postgres\pgsql\bin\VCRUNTIME140.dll' = 'Runtime de Visual C++ para PostgreSQL'
+    'tools\postgres\pgsql\bin\MSVCP140.dll'     = 'Runtime de Visual C++ para PostgreSQL (C++)'
     'tools\mediamtx\mediamtx.exe'            = 'MediaMTX (streaming)'
+    'tools\iprp\HikIpReceiverPro-Setup.exe'  = 'Hik IP Receiver Pro (receptor de paneles, opcional)'
     'tools\ffmpeg-flyleaf\avcodec-63.dll'    = 'FFmpeg (cliente WPF)'
     'tools\ffmpeg\bin\ffmpeg.exe'           = 'FFmpeg CLI (exportación y proyección al muro)'
 }
@@ -137,6 +183,8 @@ if ($missing -gt 0) {
     Write-Host "  - SDK Hikvision/Dahua : portal de desarrolladores del fabricante (versión Win64) -> Resources\"
     Write-Host "  - PostgreSQL portable : https://www.enterprisedb.com/download-postgresql-binaries -> tools\postgres\pgsql"
     Write-Host "  - MediaMTX v1.20      : https://github.com/bluenviron/mediamtx/releases -> tools\mediamtx"
+    Write-Host "  - Hik IP Receiver Pro : instalador oficial de Hikvision (V2.5.0 o superior; el API de alta de equipos existe desde la 2.5.0)"
+    Write-Host "                          renombrado a tools\iprp\HikIpReceiverPro-Setup.exe (opcional: sin el, la suite se compila sin el receptor)"
     Write-Host "  - FFmpeg para Flyleaf : asset del release de FlyleafLib con la MISMA versión que el paquete NuGet"
     Write-Host "                          https://github.com/SuRGeoNix/Flyleaf/releases -> carpeta FFmpeg\ -> tools\ffmpeg-flyleaf"
     Write-Host "  - FFmpeg CLI          : build de Windows (gyan.dev / BtbN) -> tools\ffmpeg (con bin\ffmpeg.exe y bin\ffprobe.exe)"

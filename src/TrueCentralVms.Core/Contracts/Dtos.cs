@@ -48,6 +48,47 @@ public sealed record SystemMetricsDto(
     double DiskPercent, double DiskUsedGb, double DiskTotalGb, string DiskName);
 
 // ---------------------------------------------------------------------------
+// Supervisor de servicios (watchdog)
+// ---------------------------------------------------------------------------
+
+/// <summary>Estado de un servicio supervisado por el watchdog del servidor.</summary>
+public enum ManagedServiceState
+{
+    /// <summary>Detenido a pedido de un administrador: el watchdog no lo toca.</summary>
+    Stopped,
+    Starting,
+    Running,
+    Stopping,
+    /// <summary>Cayó o dejó de responder; con auto-reinicio activo el watchdog lo reintenta.</summary>
+    Failed,
+    /// <summary>Deshabilitado en la configuración: no se ejecuta ni se supervisa.</summary>
+    Disabled,
+}
+
+/// <summary>
+/// Un servicio supervisado: proceso hijo (PostgreSQL, MediaMTX) o subsistema
+/// interno del servidor (monitor de dispositivos, paneles de alarma, ...).
+/// <paramref name="Kind"/> es "process" o "subsystem". <paramref name="CanStop"/>
+/// es false en los esenciales (la base de datos): solo se pueden reiniciar.
+/// </summary>
+public sealed record ManagedServiceDto(
+    string Id, string Name, string Description, string Kind,
+    ManagedServiceState State, DateTime? SinceUtc, string? Detail,
+    string? LastError, DateTime? LastErrorAtUtc,
+    int RestartCount, int FailedAttempts, DateTime? NextRetryAtUtc,
+    bool AutoRestart, bool CanStop, bool CanControl);
+
+/// <summary>El propio proceso del servidor (host de todos los servicios).</summary>
+public sealed record ServerProcessDto(
+    string Version, int ProcessId, DateTime StartedAtUtc, double UptimeSeconds,
+    bool IsWindowsService, string ServiceName, double WorkingSetMb,
+    int CheckIntervalSeconds, bool CanRestart, string? RestartHint);
+
+public sealed record ServicesOverviewDto(ServerProcessDto Server, IReadOnlyList<ManagedServiceDto> Services);
+
+public sealed record AutoRestartRequest(bool Enabled);
+
+// ---------------------------------------------------------------------------
 // Contrato del hub SignalR
 // ---------------------------------------------------------------------------
 
@@ -91,4 +132,7 @@ public static class VmsHubContract
 
     /// <summary>Un parlante IP cambió de estado de conexión (payload: SpeakerDto).</summary>
     public const string SpeakerStatusChanged = nameof(SpeakerStatusChanged);
+
+    /// <summary>Un servicio supervisado cambió de estado (payload: ManagedServiceDto).</summary>
+    public const string ServiceStateChanged = nameof(ServiceStateChanged);
 }

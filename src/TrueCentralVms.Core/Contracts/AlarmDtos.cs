@@ -141,6 +141,56 @@ public sealed record AlarmPanelWriteDto(
     /// <summary>Identificador del panel dentro de la pasarela (uuid, serie, cuenta o ID ISUP); solo drivers con NeedsDeviceId.</summary>
     string? DeviceId = null);
 
+// ---------------------------------------------------------------------------
+// Equipos DENTRO de la receptora (Hik IP Receiver Pro)
+//
+// Los paneles que reportan por ISUP/OTAP primero tienen que estar dados de
+// alta en la receptora. Estos DTO permiten hacerlo desde el VMS, sin abrir la
+// interfaz web del fabricante. Las credenciales viajan en el cuerpo (nunca en
+// la URL) y se pueden omitir indicando el panel ya guardado del que tomarlas.
+// ---------------------------------------------------------------------------
+
+/// <summary>Conexión con la receptora para operar su lista de equipos.</summary>
+public sealed record AlarmReceiverConnectionDto(
+    string Host,
+    int Port,
+    bool UseHttps,
+    string Username,
+    string? Password,
+    /// <summary>Panel ya guardado del que tomar la contraseña cuando no se envía.</summary>
+    int? PanelId = null);
+
+/// <summary>Equipo agregado en la receptora.</summary>
+public sealed record AlarmReceiverDeviceDto(
+    string DevIndex,
+    string Name,
+    string? Serial,
+    string? AccountId,
+    string? IsupId,
+    string? Model,
+    string? Version,
+    string? Status);
+
+/// <summary>Alta de un panel en la receptora (ISUP 5.0 u OTAP).</summary>
+public sealed record AlarmReceiverAddDeviceDto(
+    AlarmReceiverConnectionDto Receiver,
+    /// <summary>"isup" (ISUP 5.0 / EHome, por defecto) u "otap".</summary>
+    string Protocol,
+    /// <summary>ID del equipo configurado en el panel para reportar a la receptora.</summary>
+    string DeviceId,
+    /// <summary>Clave del equipo (EHome/OTAP key).</summary>
+    string? DeviceKey,
+    string Name,
+    /// <summary>"SecurityCP" (panel, por defecto) o "encodingDev".</summary>
+    string? DeviceType = null,
+    string? AccountId = null,
+    string? Remark = null);
+
+/// <summary>Baja de un equipo de la receptora por su uuid.</summary>
+public sealed record AlarmReceiverDeleteDeviceDto(
+    AlarmReceiverConnectionDto Receiver,
+    string DevIndex);
+
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record AlarmPanelProbeResultDto(
     bool Success,

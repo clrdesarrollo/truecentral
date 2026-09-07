@@ -9,6 +9,7 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Server.Services.Supervisor;
 using TrueCentralVms.Server.Services.Workflows;
 using TrueCentralVms.Server.Services.Workflows.Actions;
 
@@ -21,7 +22,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     Args = args,
     ContentRootPath = WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : null,
 });
-builder.Host.UseWindowsService(o => o.ServiceName = "CLRTrueCentralVMS");
+builder.Host.UseWindowsService(o => o.ServiceName = ServiceSupervisor.WindowsServiceName);
 // El apagado ordenado incluye detener PostgreSQL embebido (pg_ctl stop): darle
 // margen antes de que el host (o el SCM) corte el proceso.
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(60));
@@ -52,7 +53,8 @@ builder.Services.AddSingleton<SystemMetrics>();
 // Bitácora de auditoría (ISO 27001): registro solo-agregar de todas las
 // acciones, con purga opcional por retención (Audit:RetentionDays).
 builder.Services.AddSingleton<AuditService>();
-builder.Services.AddHostedService<AuditRetentionService>();
+builder.Services.AddSingleton<AuditRetentionService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AuditRetentionService>());
 
 // Registro de drivers de dispositivos. Para soportar una marca nueva (Dahua,
 // ONVIF, ...) basta con implementar IDeviceDriverFactory en su propio
@@ -61,7 +63,8 @@ builder.Services.AddSingleton<IDeviceDriverFactory, HikvisionDeviceDriverFactory
 builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaDeviceDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Onvif.OnvifDeviceDriverFactory>();
 builder.Services.AddSingleton<DriverRegistry>();
-builder.Services.AddHostedService<DeviceStatusMonitor>();
+builder.Services.AddSingleton<DeviceStatusMonitor>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceStatusMonitor>());
 
 // Muro de video: drivers de DECODIFICACIÓN (distintos de los de dispositivo:
 // aquí el equipo pinta las pantallas del muro). Para soportar una marca nueva
@@ -121,7 +124,16 @@ builder.Services.AddSingleton<StreamTokenService>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Rtsp.PlaybackRelayManager>();
 builder.Services.AddSingleton<MediaMtxManager>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MediaMtxManager>());
-builder.Services.AddHostedService<SessionAccounting>();
+builder.Services.AddSingleton<SessionAccounting>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionAccounting>());
+
+// Supervisor de servicios (watchdog): vigila procesos hijos y subsistemas, los
+// reinicia si caen y deja que un administrador los controle desde el panel.
+// Va AL FINAL de los hosted services: cuando empieza a juzgarlos, todos los
+// demás ya arrancaron. Los servicios supervisados se registran como singleton
+// + AddHostedService(sp => ...) para que el supervisor tome la MISMA instancia.
+builder.Services.AddSingleton<ServiceSupervisor>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ServiceSupervisor>());
 
 builder.Services.AddSignalR();
 builder.Services.AddMemoryCache();
@@ -224,6 +236,26 @@ app.Logger.LogInformation("CLR TrueCentral VMS v{Version} escuchando en {Urls}."
 // Evidencia de disponibilidad: cada arranque del servidor queda en la bitácora.
 await app.Services.GetRequiredService<AuditService>().LogSystemAsync("system", "server-started",
     detail: $"Servidor CLR TrueCentral VMS v{serverVersion} iniciado.");
+
+// ...y cada apagado ordenado, lo pida el Watchdog, services.msc o el propio
+// SCM al apagar el equipo. Va en ApplicationStopping y no en ApplicationStopped
+// porque PostgreSQL se detiene recién en ese último (ver más arriba): en este
+// punto la base sigue viva para recibir el evento.
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    try
+    {
+        app.Services.GetRequiredService<AuditService>()
+            .LogSystemAsync("system", "server-stopped",
+                detail: $"Servidor CLR TrueCentral VMS v{serverVersion} detenido.")
+            .GetAwaiter().GetResult();
+    }
+    catch (Exception ex)
+    {
+        // Un apagado no se puede abortar por no poder escribir la bitácora.
+        app.Logger.LogWarning(ex, "No se pudo registrar el apagado del servidor en la bitácora.");
+    }
+});
 
 // Precalentamiento del muro en segundo plano: sincroniza cada muro al arrancar
 // para que el primer comando del operador (p. ej. la pantalla completa por
