@@ -190,14 +190,18 @@ _ = Task.Run(async () =>
     using var scope = app.Services.CreateScope();
     var receiver = scope.ServiceProvider.GetRequiredService<LocalIpReceiverService>();
     // La receptora crea su propia base en el primer arranque y puede tardar
-    // varios minutos, mas de lo que tarda este servidor. Se reintenta durante
-    // una hora para que la activación no dependa de reiniciar el servicio.
-    for (int attempt = 1; attempt <= 60 && !stopping.IsCancellationRequested; attempt++)
+    // bastante más que este servidor; también puede reinstalarse por fuera. Por
+    // eso se insiste mientras el servicio viva: cada minuto la primera hora y
+    // cada diez minutos después, hasta que quede lista o se sepa que no se
+    // puede (activada por otro). Así la activación nunca depende de que alguien
+    // reinicie el servicio en el momento justo.
+    for (int attempt = 1; !stopping.IsCancellationRequested; attempt++)
     {
         var state = await receiver.EnsureActivatedAsync(stopping);
-        if (state.Present || !receiver.Enabled)
-            break;   // está (activada o no), o no hay nada que hacer
-        try { await Task.Delay(TimeSpan.FromMinutes(1), stopping); }
+        if (state.Final)
+            break;
+        var wait = attempt <= 60 ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(10);
+        try { await Task.Delay(wait, stopping); }
         catch (OperationCanceledException) { break; }
     }
 });

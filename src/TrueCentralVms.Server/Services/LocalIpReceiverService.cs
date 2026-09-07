@@ -83,13 +83,13 @@ public sealed class LocalIpReceiverService(
     public async Task<LocalReceiverState> EnsureActivatedAsync(CancellationToken ct = default)
     {
         if (!Enabled)
-            return new LocalReceiverState(false, false, "La receptora local está desactivada por configuración.");
+            return new LocalReceiverState(false, false, "La receptora local está desactivada por configuración.", Final: true);
 
         await _gate.WaitAsync(ct);
         try
         {
             if (HasCredentials)
-                return new LocalReceiverState(true, true, null);
+                return new LocalReceiverState(true, true, null, Final: true);
 
             using var http = CreateClient();
             if (!await IsReachableAsync(http, ct))
@@ -114,7 +114,7 @@ public sealed class LocalIpReceiverService(
                 logger.LogInformation(
                     "Receptora de paneles activada automáticamente en {Host}:{Port}; su credencial queda cifrada en {Path} " +
                     "y la administra el servidor (nadie necesita conocerla).", Host, Port, SecretPath);
-                return new LocalReceiverState(true, true, null);
+                return new LocalReceiverState(true, true, null, Final: true);
             }
 
             if (body.Contains("hasActivated", StringComparison.OrdinalIgnoreCase))
@@ -124,7 +124,7 @@ public sealed class LocalIpReceiverService(
                     "conoce el servidor. Escríbala una vez al agregar el panel, o reinstale la receptora para que el " +
                     "sistema la active solo.", Host, Port);
                 return new LocalReceiverState(true, false,
-                    "La receptora ya estaba activada con una contraseña que el sistema no conoce.");
+                    "La receptora ya estaba activada con una contraseña que el sistema no conoce.", Final: true);
             }
 
             logger.LogWarning("La receptora de {Host}:{Port} rechazó la activación automática: {Body}", Host, Port, body.Trim());
@@ -253,5 +253,10 @@ public sealed class LocalIpReceiverService(
     private static string Base64Ascii(string value) => Convert.ToBase64String(Encoding.ASCII.GetBytes(value));
 }
 
-/// <summary>Estado de la receptora local: si responde y si el servidor tiene su credencial.</summary>
-public sealed record LocalReceiverState(bool Present, bool Ready, string? Message);
+/// <summary>
+/// Estado de la receptora local: si responde, si el servidor tiene su
+/// credencial y si insistir tiene sentido. <paramref name="Final"/> es true
+/// cuando ya no hay nada que reintentar: o quedó lista, o la activó alguien
+/// más con una contraseña que este servidor no puede averiguar.
+/// </summary>
+public sealed record LocalReceiverState(bool Present, bool Ready, string? Message, bool Final = false);
