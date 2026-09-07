@@ -451,7 +451,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenSettings()
     {
-        var window = new Views.SettingsWindow(_settings) { Owner = Application.Current.MainWindow };
+        var window = new Views.SettingsWindow(_settings, _api) { Owner = Application.Current.MainWindow };
         if (window.ShowDialog() == true)
         {
             // El ajuste de imagen rige de inmediato en los cuadros existentes.
@@ -560,6 +560,30 @@ public partial class MainViewModel : ObservableObject
 
     private readonly DispatcherTimer _metricsTimer;
 
+    // ---------- Aviso de licencia (prueba por vencer, gracia, restricción) ----------
+
+    [ObservableProperty] private string _licenseWarning = "";
+    [ObservableProperty] private bool _hasLicenseWarning;
+    [ObservableProperty] private bool _licenseRestricted;
+    private readonly DispatcherTimer _licenseTimer;
+
+    /// <summary>Consulta el estado de licencia del servidor (cada 5 min y al
+    /// arrancar). Un servidor sin el endpoint (versión vieja) no muestra nada.</summary>
+    private async Task PollLicenseAsync()
+    {
+        try
+        {
+            var s = await _api.GetLicenseAsync();
+            LicenseWarning = s.Warning ?? "";
+            HasLicenseWarning = !string.IsNullOrEmpty(s.Warning);
+            LicenseRestricted = !s.Operational;
+        }
+        catch (ApiException)
+        {
+            // servidor caído o sin licenciamiento: no se inventa un aviso
+        }
+    }
+
     /// <summary>Umbrales de color: gris &lt; 70 %, amarillo 70–89 %, rojo ≥ 90 %.</summary>
     private static string LevelFor(double percent) =>
         percent >= 90 ? "Crit" : percent >= 70 ? "Warn" : "Ok";
@@ -653,6 +677,8 @@ public partial class MainViewModel : ObservableObject
         {
             if (entity is "devices" or "channels")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadTreeAsync());
+            if (entity is "license")
+                Application.Current.Dispatcher.InvokeAsync(() => _ = PollLicenseAsync());
         };
         _hub.DeviceStatusChanged += dto => Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -712,6 +738,13 @@ public partial class MainViewModel : ObservableObject
         _metricsTimer.Tick += async (_, _) => await PollMetricsAsync();
         _metricsTimer.Start();
         _ = PollMetricsAsync();
+
+        // Estado de licencia: aviso en la barra de estado (cada 5 min y cuando
+        // el servidor anuncia un cambio por el hub).
+        _licenseTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+        _licenseTimer.Tick += async (_, _) => await PollLicenseAsync();
+        _licenseTimer.Start();
+        _ = PollLicenseAsync();
     }
 
     public async Task LoadTreeAsync()
@@ -1108,6 +1141,7 @@ public partial class MainViewModel : ObservableObject
     public void Shutdown()
     {
         _metricsTimer.Stop();
+        _licenseTimer.Stop();
         // Las pantallas auxiliares mueren con la principal (cada una libera
         // sus players en su propio Closed).
         foreach (var window in _auxWindows.ToList())

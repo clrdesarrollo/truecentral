@@ -1,3 +1,4 @@
+using TrueCentralVms.Server.Services.Licensing;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Server.Auth;
@@ -11,7 +12,8 @@ public static class AuthApi
     public static void MapAuthApi(this WebApplication app)
     {
         app.MapPost("/api/auth/login", async (HttpContext ctx, LoginRequest request, VmsDbContext db,
-            TokenService tokens, PasswordGovernance passwords, AuditService audit, ILogger<Program> logger) =>
+            TokenService tokens, PasswordGovernance passwords, AuditService audit, LicenseService license,
+            ILogger<Program> logger) =>
         {
             // Servidor "desactivado": sin usuarios no hay login; hay que
             // completar la configuración inicial desde la máquina del servidor.
@@ -39,7 +41,20 @@ public static class AuthApi
                     statusCode: StatusCodes.Status403Forbidden);
             }
 
-            var (token, session) = tokens.Issue(user.Id, user.Username, user.Role);
+            // Cupo de clientes de escritorio simultáneos (la cabecera la manda
+            // solo el cliente WPF; el panel web no consume puesto). Con la
+            // licencia restringida el login sigue: el cliente muestra el aviso.
+            string? clientId = ctx.Request.Headers.TryGetValue("X-TCVMS-Client", out var clientHeader)
+                ? clientHeader.ToString() : null;
+            if (clientId is not null && license.IsOperational
+                && license.Deny(null, LicenseFeatures.MaxClientSessions, tokens.CountDesktopSessions(excludingClientId: clientId)) is { } denied)
+            {
+                await audit.LogAsAsync(ctx, user.Id, user.Username, user.Role, "license", "license-denied",
+                    targetType: "client", targetName: clientId, detail: denied, success: false);
+                return Results.Json(new { error = denied, licenseDenied = true }, statusCode: StatusCodes.Status402PaymentRequired);
+            }
+
+            var (token, session) = tokens.Issue(user.Id, user.Username, user.Role, clientId);
             logger.LogInformation("Auth: sesión iniciada por {Username} desde {Ip}.",
                 user.Username, ctx.Connection.RemoteIpAddress);
             await audit.LogAsAsync(ctx, user.Id, user.Username, user.Role, "auth", "login",

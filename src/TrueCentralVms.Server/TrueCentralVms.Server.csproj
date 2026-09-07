@@ -27,6 +27,9 @@
          proveedores) y subida a FTP/FTPS. -->
     <PackageReference Include="MailKit" Version="4.17.0" />
     <PackageReference Include="FluentFTP" Version="54.2.0" />
+    <!-- Licenciamiento: verificación Ed25519 del archivo .lic firmado por el
+         servidor central de licencias (.NET no trae Ed25519 nativo). -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -1,3 +1,4 @@
+using TrueCentralVms.Server.Services.Licensing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
@@ -27,7 +28,7 @@ public static class UsersApi
             return Results.Ok(users.Select(ToDto));
         });
 
-        app.MapPost("/api/users", async (HttpContext ctx, UserWriteDto request, VmsDbContext db,
+        app.MapPost("/api/users", async (HttpContext ctx, UserWriteDto request, VmsDbContext db, LicenseService license,
             PasswordGovernance passwords, IHubContext<VmsHub> hub, AuditService audit) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
@@ -41,6 +42,8 @@ public static class UsersApi
                 return Error("Ya existe un usuario con ese nombre.", StatusCodes.Status409Conflict);
             if (string.IsNullOrEmpty(request.Password))
                 return Error("La contraseña es obligatoria.");
+            if (request.Enabled && license.Deny(null, LicenseFeatures.MaxUsers, await db.Users.CountAsync(u => u.Enabled)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "user", username);
             if (await passwords.ValidateNewPasswordAsync(db, null, request.Password) is { } error)
                 return Error(error);
 
@@ -56,7 +59,7 @@ public static class UsersApi
             return Results.Ok(ToDto(user));
         });
 
-        app.MapPut("/api/users/{id:int}", async (HttpContext ctx, int id, UserWriteDto request, VmsDbContext db,
+        app.MapPut("/api/users/{id:int}", async (HttpContext ctx, int id, UserWriteDto request, VmsDbContext db, LicenseService license,
             PasswordGovernance passwords, TokenService tokens, IHubContext<VmsHub> hub, AuditService audit) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
@@ -95,6 +98,9 @@ public static class UsersApi
 
             user.Username = username;
             user.Role = request.Role;
+            if (!user.Enabled && request.Enabled
+                && license.Deny(null, LicenseFeatures.MaxUsers, await db.Users.CountAsync(u => u.Enabled && u.Id != id)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "user", user.Username);
             user.Enabled = request.Enabled;
             if (!user.Enabled)
                 tokens.RevokeUser(id);

@@ -1,3 +1,4 @@
+using TrueCentralVms.Server.Services.Licensing;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -121,13 +122,16 @@ public static class WorkflowsApi
             return workflow is null ? Results.NotFound() : Results.Ok(WorkflowMapper.ToDto(workflow));
         });
 
-        app.MapPost("/api/workflows", async (HttpContext ctx, WorkflowWriteDto request, VmsDbContext db,
+        app.MapPost("/api/workflows", async (HttpContext ctx, WorkflowWriteDto request, VmsDbContext db, LicenseService license,
             WorkflowEngine engine, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
             if (Validate(request, engine) is { } invalid) return Error(invalid);
             if (await db.Workflows.AnyAsync(w => w.Name == request.Name.Trim(), ct))
                 return Error("Ya existe una automatización con ese nombre.");
+            if (license.Deny(LicenseFeatures.ModuleAutomation, request.Enabled ? LicenseFeatures.AutomationRules : null,
+                    await db.Workflows.CountAsync(w => w.Enabled, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "workflow", request.Name.Trim());
 
             var workflow = new Workflow
             {
@@ -152,7 +156,7 @@ public static class WorkflowsApi
             return Results.Created($"/api/workflows/{workflow.Id}", WorkflowMapper.ToDto(workflow));
         });
 
-        app.MapPut("/api/workflows/{id:int}", async (HttpContext ctx, int id, WorkflowWriteDto request, VmsDbContext db,
+        app.MapPut("/api/workflows/{id:int}", async (HttpContext ctx, int id, WorkflowWriteDto request, VmsDbContext db, LicenseService license,
             WorkflowEngine engine, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
@@ -168,6 +172,10 @@ public static class WorkflowsApi
 
             workflow.Name = request.Name.Trim();
             workflow.Description = Clean(request.Description);
+            if (!workflow.Enabled && request.Enabled
+                && license.Deny(LicenseFeatures.ModuleAutomation, LicenseFeatures.AutomationRules,
+                    await db.Workflows.CountAsync(w => w.Enabled && w.Id != id, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "workflow", workflow.Name);
             workflow.Enabled = request.Enabled;
             workflow.TriggerType = request.TriggerType;
             workflow.ConditionsJson = WorkflowJson.Serialize(request.Conditions ?? new WorkflowConditionsDto());

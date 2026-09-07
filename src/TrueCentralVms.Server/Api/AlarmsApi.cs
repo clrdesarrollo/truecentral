@@ -1,3 +1,4 @@
+using TrueCentralVms.Server.Services.Licensing;
 using System.Net;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -142,7 +143,7 @@ public static class AlarmsApi
             return Results.Ok(AlarmMapper.ToDto(panel, service.IsLive(id), service.LastErrorOf(id)));
         });
 
-        app.MapPost("/api/alarms/panels", async (HttpContext ctx, AlarmPanelWriteDto request, VmsDbContext db,
+        app.MapPost("/api/alarms/panels", async (HttpContext ctx, AlarmPanelWriteDto request, VmsDbContext db, LicenseService license,
             AlarmDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
             AlarmPanelService service, AuditService audit, CancellationToken ct) =>
         {
@@ -150,6 +151,9 @@ public static class AlarmsApi
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (string.IsNullOrEmpty(request.Password))
                 return Error("La contraseña del panel es obligatoria.");
+            if (license.Deny(LicenseFeatures.ModuleAlarms, request.Enabled ? LicenseFeatures.AlarmPanels : null,
+                    await db.AlarmPanels.CountAsync(p => p.Enabled, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "alarm-panel", request.Name?.Trim());
             string? deviceId = DeviceIdOf(request);
             // En una pasarela varios paneles comparten dirección y puerto: lo
             // que no puede repetirse es el equipo dentro de ella.
@@ -199,7 +203,7 @@ public static class AlarmsApi
             return Results.Ok(AlarmMapper.ToDto(panel, false, null));
         });
 
-        app.MapPut("/api/alarms/panels/{id:int}", async (HttpContext ctx, int id, AlarmPanelWriteDto request, VmsDbContext db,
+        app.MapPut("/api/alarms/panels/{id:int}", async (HttpContext ctx, int id, AlarmPanelWriteDto request, VmsDbContext db, LicenseService license,
             AlarmDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
             AlarmPanelService service, AuditService audit, CancellationToken ct) =>
         {
@@ -252,6 +256,10 @@ public static class AlarmsApi
             panel.Username = request.Username;
             panel.PasswordCiphertext = protector.Protect(password);
             panel.GatewayDeviceId = deviceId;
+            if (!panel.Enabled && request.Enabled
+                && license.Deny(LicenseFeatures.ModuleAlarms, LicenseFeatures.AlarmPanels,
+                    await db.AlarmPanels.CountAsync(p => p.Enabled && p.Id != id, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "alarm-panel", panel.Name);
             panel.Enabled = request.Enabled;
             panel.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);

@@ -207,6 +207,26 @@ Módulo **Parlantes IP** (2026-09-02): entidad `Speaker` (migración `Speakers`;
 - **Alta y baja de equipos en la receptora desde el VMS** (`addDevice`/`delDevice`, API de la pasarela desde su V2.5.0): `HikvisionIpReceiverDriver.AddGatewayDeviceAsync` / `DeleteGatewayDeviceAsync` / `ListGatewayDevicesAsync`; endpoints `POST /api/alarms/receiver/devices/list`, `POST /api/alarms/receiver/devices` y `POST /api/alarms/receiver/devices/delete` (credenciales en el cuerpo, nunca en la URL; se pueden tomar de un panel ya guardado con `panelId`). El alta devuelve el `devIndex` (uuid) y el mantenedor web lo carga solo en el campo del panel. No se permite quitar de la pasarela un equipo que un panel del VMS esté usando. Auditoría: `receiver-devices-listed`, `receiver-device-added`, `receiver-device-removed`.
 - **Pendiente**: la activación inicial de la receptora (crear su contraseña de admin) sigue siendo un paso manual en `http://127.0.0.1:8091`; su API de activación (`PUT /ISAPI/System/activate`) no está documentada en la guía y usa RSA propietario.
 
+## Licenciamiento — 2026-09-07
+
+Integrado con `license_service_server` (producto `truecentral`, ver README §Licenciamiento).
+Decisiones:
+- Archivo `.lic` v2 con `signed_payload` (bytes firmados) para verificar en C# con
+  BouncyCastle sin canonicalizar JSON; clave pública compilada (`LicensingConstants`),
+  override solo en Debug.
+- Modos `ONLINE` (heartbeat + gracia, ambos firmados dentro del .lic) y `OFFLINE`
+  (solo archivo, conviene expiración). Activación sin internet por `.req` → backoffice → `.lic`.
+- Licencias base + **expansiones** (`ADDON` con `parent`) que se suman en el servidor
+  de licencias; el VMS solo conoce el archivo de la base.
+- Enforcement al **habilitar** (altas y PUT enable): video (canales sobrantes entran
+  deshabilitados), ANPR, paneles, decodificadores, muros, parlantes, automatizaciones,
+  usuarios y clientes de escritorio simultáneos (login 402). Modo restringido = 402 a
+  escrituras salvo auth/servicios/licencia.
+- Prueba incorporada de 30 días desde el primer arranque (state.json), anti-retroceso de reloj.
+- Pendiente para producción: clave pública y API key del servidor productivo en
+  `LicensingConstants` / `appsettings.Production.json`; el servidor de pruebas
+  192.168.10.232 arranca en prueba de 30 días y hay que emitirle licencia.
+
 ## Riesgos vigilados
 
 Patentes: el callback de mensajes de HCNetSDK es único por proceso y el delegado debe vivir en un campo estático (si el GC se lo lleva, el SDK llama a memoria liberada y el proceso cae) · las estructuras ITS del SDK cambian entre versiones: al actualizar HCNetSDK hay que revisar `ItsInterop` contra la cabecera nueva · Muro: el decodificador guarda su propio mapa de ventanas y el servidor re-sincroniza al arrancar (`WarmUpDecodersAsync`) — vigilar que un reinicio del servidor no deje ventanas huérfanas en el equipo · forma exacta del body de auth de MediaMTX (verificar contra docs v1.20 en M3) · marshaling x64 Dahua (harness de consola contra hardware real antes de integrar) · acople versión FlyleafLib↔FFmpeg (pinear juntos, LGPL shared build) · encoding URL de contraseñas con `@`/`:` en las source URLs · grant vencido en retry del cliente (re-pedir siempre) · interop Hik viejo + DLLs 6.1.9.48 (validar tamaños de structs en M2).

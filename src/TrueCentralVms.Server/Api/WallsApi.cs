@@ -1,3 +1,4 @@
+using TrueCentralVms.Server.Services.Licensing;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Server.Auth;
@@ -153,12 +154,14 @@ public static class WallsApi
             return dto is null ? Results.NotFound() : Results.Ok(dto);
         });
 
-        app.MapPost("/api/walls", async (HttpContext ctx, WallWriteDto request, VmsDbContext db,
+        app.MapPost("/api/walls", async (HttpContext ctx, WallWriteDto request, VmsDbContext db, LicenseService license,
             WallService walls, DecoderSessionManager sessions, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name))
                 return Error("El nombre es obligatorio.");
+            if (license.Deny(LicenseFeatures.ModuleVideowall, LicenseFeatures.Videowalls, await db.Walls.CountAsync(ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "wall", request.Name.Trim());
             var decoder = await db.Decoders.FindAsync([request.DecoderId], ct);
             if (decoder is null)
                 return Error("El decodificador indicado no existe.");

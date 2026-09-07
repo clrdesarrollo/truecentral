@@ -1,3 +1,4 @@
+using TrueCentralVms.Server.Services.Licensing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
@@ -136,7 +137,7 @@ public static class AnprApi
                 counts.GetValueOrDefault(d.Id))));
         });
 
-        app.MapPut("/api/anpr/sources/{deviceId:int}", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers,
+        app.MapPut("/api/anpr/sources/{deviceId:int}", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers, LicenseService license,
             AnprService anpr, IHubContext<VmsHub> hub, AuditService audit, int deviceId, AnprSourceWriteDto request) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
@@ -146,6 +147,10 @@ public static class AnprApi
                 return Error("El dispositivo no existe.", StatusCodes.Status404NotFound);
             if (request.Enabled && (drivers.Find(device.DriverKey) is not { } factory || !factory.Capabilities.SupportsAnpr))
                 return Error($"El driver '{device.DriverKey}' no entrega reconocimientos de patentes.");
+            if (request.Enabled && !device.AnprEnabled
+                && license.Deny(LicenseFeatures.ModuleAnpr, LicenseFeatures.AnprChannels,
+                    await db.Devices.CountAsync(d => d.AnprEnabled && d.Id != deviceId)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "device", device.Name);
 
             if (device.AnprEnabled != request.Enabled)
             {

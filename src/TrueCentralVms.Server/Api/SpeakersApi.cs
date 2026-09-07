@@ -1,3 +1,4 @@
+using TrueCentralVms.Server.Services.Licensing;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -143,12 +144,15 @@ public static class SpeakersApi
             return speaker is null ? Results.NotFound() : Results.Ok(service.ToDto(speaker));
         });
 
-        app.MapPost("/api/speakers", async (HttpContext ctx, SpeakerWriteDto request, VmsDbContext db, SpeakerDriverRegistry drivers,
+        app.MapPost("/api/speakers", async (HttpContext ctx, SpeakerWriteDto request, VmsDbContext db, SpeakerDriverRegistry drivers, LicenseService license,
             CredentialProtector protector, IHubContext<VmsHub> hub, SpeakerService service, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (string.IsNullOrEmpty(request.Password)) return Error("La contraseña del parlante es obligatoria.");
+            if (license.Deny(LicenseFeatures.ModuleSpeakers, request.Enabled ? LicenseFeatures.SpeakerChannels : null,
+                    await db.Speakers.CountAsync(s => s.Enabled, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "speaker", request.Name?.Trim());
             string host = request.Host.Trim();
             if (await db.Speakers.AnyAsync(s => s.Host == host && s.Port == request.Port, ct))
                 return Error("Ya existe un parlante con esa dirección y puerto.", StatusCodes.Status409Conflict);
@@ -189,7 +193,7 @@ public static class SpeakersApi
             return Results.Ok(service.ToDto(speaker));
         });
 
-        app.MapPut("/api/speakers/{id:int}", async (HttpContext ctx, int id, SpeakerWriteDto request, VmsDbContext db,
+        app.MapPut("/api/speakers/{id:int}", async (HttpContext ctx, int id, SpeakerWriteDto request, VmsDbContext db, LicenseService license,
             SpeakerDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub, SpeakerService service,
             AuditService audit, CancellationToken ct) =>
         {
@@ -231,6 +235,10 @@ public static class SpeakersApi
             speaker.Username = request.Username;
             speaker.PasswordCiphertext = protector.Protect(password);
             speaker.GroupName = GroupOf(request);
+            if (!speaker.Enabled && request.Enabled
+                && license.Deny(LicenseFeatures.ModuleSpeakers, LicenseFeatures.SpeakerChannels,
+                    await db.Speakers.CountAsync(s => s.Enabled && s.Id != id, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "speaker", speaker.Name);
             speaker.Enabled = request.Enabled;
             speaker.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);

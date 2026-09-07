@@ -254,6 +254,8 @@ async function renderDashboard() {
     try { usersCount = (await Api.get("/api/users")).length; } catch { /* sin permiso */ }
     try { sessionsCount = (await Api.get("/api/streams/active")).length; } catch { /* sin permiso */ }
   }
+  let license = null;
+  try { license = await Api.get("/api/system/license"); } catch { /* sin sesión aún */ }
   let servicesRunning = "—", servicesTotal = "—", servicesFailed = 0;
   try {
     const overview = await Api.get("/api/system/services");
@@ -282,6 +284,13 @@ async function renderDashboard() {
         <div class="card-label">Sesiones de video activas</div>
         <div class="card-value">${esc(sessionsCount)}</div>
       </div>` : ""}
+      ${license ? `
+      <a class="card" href="#/license" style="text-decoration:none;color:inherit">
+        <div class="card-label">Licencia</div>
+        <div class="card-value small">${licenseStateTag(license.state)}</div>
+        <div class="muted" style="font-size:12px">${esc(license.licenseKey || license.message || "")}</div>
+        ${license.warning ? `<div style="font-size:12px;color:${license.operational ? "#F59E0B" : "var(--danger)"}">${esc(license.warning)}</div>` : ""}
+      </a>` : ""}
       <a class="card" href="#/services" style="text-decoration:none;color:inherit">
         <div class="card-label">Servicios del servidor</div>
         <div class="card-value" style="color:${servicesFailed ? "var(--danger)" : "inherit"}">${servicesRunning}<span class="muted" style="font-size:13px"> de ${servicesTotal} en ejecución</span></div>
@@ -1161,6 +1170,7 @@ const routes = {
   "#/users": renderUsers,
   "#/audit": renderAudit,
   "#/services": renderServices,
+  "#/license": renderLicense,
 };
 
 // --- Menú lateral: nodos desplegables -------------------------------------
@@ -1235,6 +1245,7 @@ function navigate() {
 function enterApp() {
   showAppShell();
   setupNav();
+  refreshLicenseBanner();
   if (!location.hash || !routes[location.hash]) location.hash = "#/";
   navigate();
 }

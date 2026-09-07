@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using TrueCentralVms.Server.Services.Licensing;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using TrueCentralVms.Core.Contracts;
@@ -55,6 +56,13 @@ builder.Services.AddSingleton<SystemMetrics>();
 builder.Services.AddSingleton<AuditService>();
 builder.Services.AddSingleton<AuditRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AuditRetentionService>());
+
+// Licenciamiento contra el servidor central de licencias de CLRobotics:
+// archivo .lic firmado (verificación sin conexión) + heartbeat en línea con
+// período de gracia. Módulos y cupos por canal salen de la licencia; sin
+// licencia rige el período de prueba (Licensing:TrialDays).
+builder.Services.AddSingleton<LicenseService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<LicenseService>());
 
 // Registro de drivers de dispositivos. Para soportar una marca nueva (Dahua,
 // ONVIF, ...) basta con implementar IDeviceDriverFactory en su propio
@@ -200,6 +208,26 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// Modo restringido por licencia (vencida, revocada, prueba terminada, gracia
+// agotada): se rechazan con 402 las escrituras y las solicitudes de video.
+// Las lecturas, el login y la propia API de licencia siguen disponibles para
+// poder ver el motivo y regularizar. Nada se borra.
+app.Use(async (context, next) =>
+{
+    var license = context.RequestServices.GetRequiredService<LicenseService>();
+    if (!license.IsOperational && LicenseService.IsRestrictedRequest(context))
+    {
+        context.Response.StatusCode = StatusCodes.Status402PaymentRequired;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = license.Snapshot.Message ?? "El sistema está en modo restringido por licencia.",
+            licenseDenied = true,
+        });
+        return;
+    }
+    await next();
+});
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -217,6 +245,7 @@ app.MapStreamingAuthApi();
 app.MapPlaybackApi();
 app.MapDiscoveryApi();
 app.MapSystemApi();
+app.MapLicenseApi();
 app.MapDecodersApi();
 app.MapWallsApi();
 app.MapAnprApi();

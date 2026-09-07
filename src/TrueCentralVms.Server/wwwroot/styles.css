@@ -94,6 +94,13 @@ body {
   color: #93C5FD; padding: 10px 12px; border-radius: 8px;
   font-size: 12.5px; margin-bottom: 14px;
 }
+/* Franja de aviso de licencia bajo la barra superior */
+.license-banner {
+  display: flex; align-items: center; gap: 12px; padding: 8px 24px; font-size: 12.5px;
+  border-bottom: 1px solid rgba(245,158,11,.35); background: rgba(245,158,11,.10); color: #FCD34D;
+}
+.license-banner.danger { border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.12); color: #FCA5A5; }
+.license-banner a { color: inherit; font-weight: 600; }
 .warn-box {
   background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.35);
   color: #FCD34D; padding: 10px 12px; border-radius: 8px;

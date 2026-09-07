@@ -632,6 +632,56 @@ real: los canales 3–10 del NVR CIAPCO.
   AES-256-GCM (llave local junto a pgdata). Las credenciales solo existen en
   claro dentro de `mediamtx.runtime.yml`, generado en runtime y git-ignored.
 
+## Licenciamiento
+
+El VMS se licencia contra el **servidor central de licencias de CLRobotics**
+(`license_service_server`, producto `truecentral`). Modelo comercial:
+
+| Nivel | Cómo se vende | Cómo lo aplica el VMS |
+|---|---|---|
+| **Base** | Una licencia base por instalación (código `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`), vinculada al equipo (`hardware_id`) | Sin licencia base vigente el sistema entra en **modo restringido** |
+| **Módulo** | Característica booleana: `module_video`, `module_playback`, `module_anpr`, `module_alarms`, `module_access`, `module_videowall`, `module_speakers`, `module_automation` | Las altas del módulo se rechazan con HTTP 402 si no está incluido |
+| **Canal / cupo** | Característica entera: `video_channels`, `anpr_channels`, `alarm_panels`, `access_doors`, `videowalls`, `videowall_decoders`, `speaker_channels`, `automation_rules`, `max_users`, `max_client_sessions` | Cuenta los elementos **habilitados**; al llegar al cupo no se puede habilitar más (los canales de un equipo nuevo que no caben entran deshabilitados) |
+| **Expansión** | Licencia `ADDON` colgada de la base (packs "8 canales", "1 decodificador", ...) | Se suma sola en la siguiente revalidación en línea o al importar el `.lic` regenerado |
+
+Las claves viven en `Core\Contracts\LicenseDtos.cs` (`LicenseFeatures`) y son el
+contrato con el catálogo del servidor de licencias (`manage.py seed_truecentral`).
+El control de acceso figura en el catálogo aunque el módulo aún no existe.
+
+**Dos mecanismos de confianza** (`Server\Services\Licensing\`):
+
+- **Archivo firmado (`.lic`, Ed25519)**: fuente de verdad local. Se verifica con
+  la clave pública **compilada** en `LicensingConstants.ProductPublicKey` (la
+  firma cubre los bytes exactos de `signed_payload`, así el VMS no reproduce la
+  canonicalización JSON de Python). Solo en Debug se admite `Licensing:PublicKey`
+  para apuntar a un servidor de desarrollo. **Antes del instalador de producción
+  hay que pegar aquí la clave pública del servidor productivo.**
+- **Heartbeat en línea** (licencias `ONLINE`): cada `heartbeat_interval_days`
+  (firmado en el `.lic`, default 7) el servidor revalida contra `/api/v1/licenses/validate/`,
+  que devuelve un `.lic` fresco (trae expansiones y revocaciones). Si no se logra,
+  sigue operativo durante `grace_period_days` (default 30) avisando, y luego se
+  restringe. Las licencias `OFFLINE` (redes cerradas) no requieren heartbeat: valen
+  hasta `expires_at`.
+
+**Activación**: en línea (código en Sistema → Licencia; usa `Licensing:ServerUrl`
++ `Licensing:ApiKey`) o **sin internet**: el panel genera la solicitud `.req`
+(código + `hardware_id`), soporte la carga en el backoffice del servidor de
+licencias (detalle de la licencia → "Activación sin conexión") y devuelve el
+`.lic` que se importa. Desactivar libera el cupo del equipo (migración).
+
+**Período de prueba**: sin licencia rigen `Licensing:TrialDays` (30) con todos
+los módulos y cupos chicos (`LicensingConstants.TrialFeatures`). **Modo
+restringido** (prueba vencida, licencia vencida/revocada, gracia agotada, reloj
+retrocedido): la API responde 402 a toda escritura salvo login, servicios y la
+propia licencia; las lecturas siguen; nada se borra. Estado y archivos en
+`%ProgramData%\CLRTrueCentralVMS\license\` (junto a `pgdata`).
+
+Endpoints: `GET /api/system/license` (estado + uso de cupos), `POST .../activate`,
+`.../request`, `.../import`, `.../refresh`, `.../deactivate` (admin, auditados en la
+categoría `license`). El cliente WPF muestra el aviso en la barra de estado y el
+detalle en Configuración → Licencia; el cupo `max_client_sessions` cuenta máquinas
+distintas con sesión de escritorio (cabecera `X-TCVMS-Client`).
+
 ## Estado (v0.1.0)
 
 - **M1** esqueleto + PG embebido + auth + panel: ✅

@@ -1,3 +1,4 @@
+using TrueCentralVms.Server.Services.Licensing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
@@ -81,7 +82,7 @@ public static class DecodersApi
             return Results.Ok(decoders.Select(ToDto));
         });
 
-        app.MapPost("/api/decoders", async (HttpContext ctx, DecoderWriteDto request, VmsDbContext db,
+        app.MapPost("/api/decoders", async (HttpContext ctx, DecoderWriteDto request, VmsDbContext db, LicenseService license,
             DecoderDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
             AuditService audit, CancellationToken ct) =>
         {
@@ -89,6 +90,9 @@ public static class DecodersApi
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (string.IsNullOrEmpty(request.Password))
                 return Error("La contraseña del decodificador es obligatoria.");
+            if (license.Deny(LicenseFeatures.ModuleVideowall, request.Enabled ? LicenseFeatures.VideowallDecoders : null,
+                    await db.Decoders.CountAsync(d => d.Enabled, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "decoder", request.Name?.Trim());
             if (await db.Decoders.AnyAsync(d => d.Host == request.Host && d.Port == request.Port, ct))
                 return Error("Ya existe un decodificador con esa dirección y puerto.", StatusCodes.Status409Conflict);
 
@@ -118,7 +122,7 @@ public static class DecodersApi
             return Results.Ok(new { decoder = ToDto(decoder), capabilities = ToDto(caps) });
         });
 
-        app.MapPut("/api/decoders/{id:int}", async (HttpContext ctx, int id, DecoderWriteDto request, VmsDbContext db,
+        app.MapPut("/api/decoders/{id:int}", async (HttpContext ctx, int id, DecoderWriteDto request, VmsDbContext db, LicenseService license,
             DecoderDriverRegistry drivers, CredentialProtector protector, DecoderSessionManager sessions,
             IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
@@ -157,6 +161,10 @@ public static class DecodersApi
             decoder.Port = request.Port;
             decoder.Username = request.Username;
             decoder.PasswordCiphertext = protector.Protect(password);
+            if (!decoder.Enabled && request.Enabled
+                && license.Deny(LicenseFeatures.ModuleVideowall, LicenseFeatures.VideowallDecoders,
+                    await db.Decoders.CountAsync(d => d.Enabled && d.Id != id, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "decoder", decoder.Name);
             decoder.Enabled = request.Enabled;
             decoder.Notes = request.Notes;
             decoder.UpdatedAt = DateTime.UtcNow;

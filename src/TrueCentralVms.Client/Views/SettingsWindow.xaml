@@ -101,6 +101,8 @@
                              Checked="OnSectionChanged"/>
                 <RadioButton x:Name="NavRed" Content="Red" Style="{StaticResource SectionRadio}"
                              Checked="OnSectionChanged"/>
+                <RadioButton x:Name="NavLicencia" Content="Licencia" Style="{StaticResource SectionRadio}"
+                             Checked="OnSectionChanged"/>
             </StackPanel>
         </Border>
         <!-- Contenido del apartado -->
@@ -198,6 +200,22 @@
                          HorizontalAlignment="Left"/>
                 <TextBlock Style="{StaticResource SettingHint}"
                            Text="Entre 5 y 120 segundos. Se aplica al reiniciar la aplicación. El transporte de video es siempre RTSP sobre TCP."/>
+            </StackPanel>
+
+            <!-- ============ LICENCIA (solo lectura; se administra en el panel web) ============ -->
+            <StackPanel x:Name="SectionLicencia" Visibility="Collapsed">
+                <TextBlock Text="Licencia del servidor" Style="{StaticResource SectionTitle}"/>
+                <TextBlock x:Name="LicenseStateText" Foreground="{StaticResource TextBrush}" FontSize="13"
+                           FontWeight="SemiBold" Text="Consultando…"/>
+                <TextBlock x:Name="LicenseWarningText" Foreground="#F59E0B" FontSize="11.5" TextWrapping="Wrap"
+                           Margin="0,6,0,0" Visibility="Collapsed"/>
+                <TextBlock x:Name="LicenseDetailText" Foreground="{StaticResource MutedBrush}" FontSize="11.5"
+                           TextWrapping="Wrap" Margin="0,10,0,0"/>
+                <TextBlock Text="Módulos y cupos" Style="{StaticResource FieldLabel}" Margin="0,16,0,4"/>
+                <TextBlock x:Name="LicenseModulesText" Foreground="{StaticResource TextBrush}" FontSize="11.5"
+                           TextWrapping="Wrap" FontFamily="Consolas"/>
+                <TextBlock Style="{StaticResource SettingHint}"
+                           Text="La activación, la importación del archivo .lic y las expansiones se administran en el panel web del servidor (Sistema → Licencia)."/>
             </StackPanel>
         </Grid>
     </DockPanel>

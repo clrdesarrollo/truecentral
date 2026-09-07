@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using TrueCentralVms.Server.Services.Licensing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using TrueCentralVms.Core.Contracts;
@@ -131,6 +132,30 @@ public static class DevicesApi
         device.Channels.RemoveAll(c => !seen.Contains(c.ChannelNumber));
     }
 
+    /// <summary>
+    /// Cupo de canales de video de la licencia: los canales habilitados de
+    /// este equipo que no caben (contando los ya habilitados en los demás)
+    /// entran deshabilitados, de mayor a menor número. El equipo se agrega
+    /// igual; el administrador elige cuáles habilitar. Devuelve cuántos.
+    /// </summary>
+    private static async Task<int> EnforceChannelQuotaAsync(LicenseService license, VmsDbContext db, Device device, CancellationToken ct)
+    {
+        int quota = license.IsModuleEnabled(LicenseFeatures.ModuleVideo) ? license.Quota(LicenseFeatures.VideoChannels) : 0;
+        int elsewhere = await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != device.Id, ct);
+        int allowed = Math.Max(0, quota - elsewhere);
+        int trimmed = 0;
+        foreach (var channel in device.Channels.Where(c => c.Enabled).OrderBy(c => c.ChannelNumber))
+        {
+            if (allowed > 0) { allowed--; continue; }
+            channel.Enabled = false;
+            trimmed++;
+        }
+        return trimmed;
+    }
+
+    private static string QuotaNote(int trimmed) =>
+        trimmed == 0 ? "" : $"; {trimmed} canal(es) quedaron deshabilitados por el cupo de canales de la licencia";
+
     public static void MapDevicesApi(this WebApplication app)
     {
         // ------------------------------------------------------------------
@@ -160,10 +185,12 @@ public static class DevicesApi
 
         app.MapPost("/api/devices", async (HttpContext ctx, DeviceWriteDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, AuditService audit, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, AuditService audit, LicenseService license, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
+            if (license.Deny(LicenseFeatures.ModuleVideo, null, 0, 0) is { } denied)
+                return await license.DenyAsync(ctx, denied, "device", request.Name?.Trim());
             if (string.IsNullOrEmpty(request.Password))
                 return Error("La contraseña del dispositivo es obligatoria.");
             if (await db.Devices.AnyAsync(d => d.Host == request.Host && d.SdkPort == request.SdkPort, ct))
@@ -192,13 +219,14 @@ public static class DevicesApi
                 PasswordCiphertext = protector.Protect(request.Password),
             };
             ApplyProbe(device, info);
+            int trimmed = await EnforceChannelQuotaAsync(license, db, device, ct);
             db.Devices.Add(device);
             await db.SaveChangesAsync(ct);
 
             await audit.LogAsync(ctx, "devices", "device-created",
                 targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
                 detail: $"Agregó el dispositivo '{device.Name}' ({device.DriverKey}, {device.Host}:{device.SdkPort}, " +
-                        $"{device.Channels.Count} canales).",
+                        $"{device.Channels.Count} canales{QuotaNote(trimmed)}).",
                 data: new { device.Host, device.SdkPort, device.RtspPort, device.DriverKey, device.Model, device.SerialNumber });
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
@@ -207,7 +235,8 @@ public static class DevicesApi
 
         app.MapPut("/api/devices/{id:int}", async (HttpContext ctx, int id, DeviceWriteDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, Services.AnprService anpr, AuditService audit, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, Services.AnprService anpr, AuditService audit, LicenseService license,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -235,6 +264,7 @@ public static class DevicesApi
                 if (info is null)
                     return Error(probeError!);
                 ApplyProbe(device, info);
+                await EnforceChannelQuotaAsync(license, db, device, ct);
             }
 
             var changes = new List<string>();
@@ -308,7 +338,7 @@ public static class DevicesApi
         // ------------------------------------------------------------------
         app.MapPost("/api/devices/{id:int}/revalidate", async (HttpContext ctx, int id, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, AuditService audit, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, AuditService audit, LicenseService license, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -326,10 +356,11 @@ public static class DevicesApi
             }
 
             ApplyProbe(device, info);
+            int trimmed = await EnforceChannelQuotaAsync(license, db, device, ct);
             await db.SaveChangesAsync(ct);
             await audit.LogAsync(ctx, "devices", "device-revalidated",
                 targetType: "device", targetId: id.ToString(), targetName: device.Name,
-                detail: $"Revalidó '{device.Name}': {device.Channels.Count} canales, firmware {device.FirmwareVersion ?? "—"}.");
+                detail: $"Revalidó '{device.Name}': {device.Channels.Count} canales, firmware {device.FirmwareVersion ?? "—"}{QuotaNote(trimmed)}.");
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
             return Results.Ok(ToDto(device, device.Channels.Count));
@@ -389,7 +420,7 @@ public static class DevicesApi
 
         app.MapPut("/api/devices/{id:int}/channels/{channelId:int}", async (HttpContext ctx, int id, int channelId,
             ChannelWriteDto request, VmsDbContext db, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, AuditService audit, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, AuditService audit, LicenseService license, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var channel = await db.Channels.Include(c => c.Device)
@@ -397,6 +428,11 @@ public static class DevicesApi
             if (channel is null) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre del canal es obligatorio (máximo 128 caracteres).");
+
+            if (!channel.Enabled && request.Enabled
+                && license.Deny(LicenseFeatures.ModuleVideo, LicenseFeatures.VideoChannels,
+                    await db.Channels.CountAsync(c => c.Enabled && c.Id != channelId, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "channel", channel.Name);
 
             var changes = new List<string>();
             if (channel.Name != request.Name.Trim()) changes.Add($"nombre '{channel.Name}' → '{request.Name.Trim()}'");

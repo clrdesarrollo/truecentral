@@ -447,6 +447,10 @@ public sealed class ApiClient
         return SendAsync<List<AlarmEventDto>>(HttpMethod.Get, $"/api/alarms/events?{string.Join('&', query)}", null, ct);
     }
 
+    /// <summary>Estado del licenciamiento del servidor (avisos del cliente y apartado Licencia).</summary>
+    public Task<LicenseStatusDto> GetLicenseAsync(CancellationToken ct = default) =>
+        SendAsync<LicenseStatusDto>(HttpMethod.Get, "/api/system/license", null, ct);
+
     /// <summary>Uso de CPU/RAM/disco de la máquina del servidor (indicadores del navbar).</summary>
     public Task<SystemMetricsDto> GetSystemMetricsAsync(CancellationToken ct = default) =>
         SendAsync<SystemMetricsDto>(HttpMethod.Get, "/api/system/metrics", null, ct);
