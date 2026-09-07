@@ -318,6 +318,14 @@ cada 30 s y apenas llega un evento, así que lo que ve el operador es siempre
 el estado real del equipo. Hay dos drivers Hikvision:
 
 - **Directo** (`hikvision-isapi`): el VMS habla con el panel por su IP.
+> Con la receptora de este servidor el formulario pide solo lo que hay que
+> copiar del panel: su **ID y clave ISUP** (en el AX PRO, Comunicación → ISUP) y
+> el protocolo. Dirección, puerto y credenciales de la receptora son internos y
+> no se muestran, y al guardar el sistema da de alta el panel en ella. Para una
+> receptora ajena (en otro equipo) el formulario sigue pidiendo su dirección y
+> credenciales, y ofrece «Equipos de la receptora…» para ver y administrar su
+> inventario. Todo queda en la bitácora ISO 27001.
+
 > Los paneles se dan de alta **en la receptora desde el propio VMS**: en el
 > formulario del panel, «Equipos de la receptora…» lista los equipos que tiene
 > la pasarela, permite agregar uno nuevo con su ID y clave ISUP/OTAP y quitar

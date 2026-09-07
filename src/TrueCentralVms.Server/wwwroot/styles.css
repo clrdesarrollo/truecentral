@@ -196,6 +196,11 @@ table.grid tr:hover td { background: rgba(255,255,255,.02); }
 .tag.off { background: rgba(239,68,68,.14); color: var(--danger); }
 
 /* ---------- Modal y toast ---------- */
+/* El atributo hidden tiene que ganarle a las clases de maquetacion: sin esto,
+   .form-grid (display:grid) o .checkbox-row siguen mostrando el elemento
+   aunque se marque como oculto desde el JS. */
+[hidden] { display: none !important; }
+
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(4,8,12,.66);
   display: flex; align-items: center; justify-content: center; z-index: 50;
