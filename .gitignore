@@ -1,7 +1,7 @@
 # Compilación
 bin/
 obj/
-dist/
+/dist/
 .vs/
 *.user
 
@@ -10,20 +10,22 @@ dist/
 # Se reconstruyen con: build\setup-binaries.ps1
 # ---------------------------------------------------------------------------
 # SDKs de fábrica tal como los entrega el fabricante
-Resources/
+/Resources/
 # DLLs nativas que el servidor carga en runtime (derivadas de Resources\)
-native/
+/native/
 # PostgreSQL portable, MediaMTX y FFmpeg
-tools/
+/tools/
 
 # ---------------------------------------------------------------------------
 # Datos y secretos de runtime — NUNCA versionar
 # ---------------------------------------------------------------------------
 # Clúster PostgreSQL embebido: incluye tcvms-pg.secret (clave del superusuario)
 # y tcvms-data.key (llave AES que descifra las contraseñas de los dispositivos)
-pgdata/
+/pgdata/
+src/TrueCentralVms.Server/pgdata/
 # Estado local del licenciamiento (license.lic + state.json), junto a pgdata
-license/
+/license/
+src/TrueCentralVms.Server/license/
 *.secret
 *.key
 admin-initial.txt
@@ -32,11 +34,15 @@ admin-initial.txt
 mediamtx.runtime.yml
 # Ajustes por instalación (puertos, rutas)
 appsettings.Local.json
+# ...menos la plantilla que el instalador copia en cada equipo.
+!installer/config/appsettings.Local.json
 # Fotos de los reconocimientos de patentes (las guarda el servidor en runtime;
 # en la base solo queda su ruta)
-anpr/
+/anpr/
+src/TrueCentralVms.Server/anpr/
 # Fotos y sonidos de las automatizaciones (datos de runtime; la base guarda solo rutas)
-workflows/
+/workflows/
+src/TrueCentralVms.Server/workflows/
 # Salida del servidor cuando se lanza redirigiendo la consola
 src/TrueCentralVms.Server/*.log
 # Publicacion intermedia de los instaladores (installer/build-installers.ps1)
