@@ -863,12 +863,14 @@ begin
   RunHidden(SysTool('sc.exe'), 'config {#IprpService} start= auto');
   RunHidden(SysTool('sc.exe'), 'start {#IprpService}');
 
-  // Verificacion: la receptora tarda en levantar sus servicios internos.
+  // Verificacion. En el PRIMER arranque la receptora crea su propia base de
+  // datos (trae su PostgreSQL) y eso puede tardar varios minutos en una maquina
+  // modesta, asi que se espera hasta 6 minutos antes de avisar.
   Healthy := False;
   if FileExists(SysTool('curl.exe')) then
   begin
-    WizardForm.StatusLabel.Caption := 'Esperando al receptor de paneles de alarma...';
-    for I := 1 to 45 do
+    WizardForm.StatusLabel.Caption := 'Esperando al receptor de paneles de alarma (primer arranque, puede tardar unos minutos)...';
+    for I := 1 to 180 do
     begin
       // Se consulta la API y no la raiz, que quedo deshabilitada a proposito.
       // Un 401 (pide credenciales) ya demuestra que la receptora responde.
@@ -880,9 +882,17 @@ begin
       end;
       Sleep(2000);
     end;
-    if not Healthy and not WizardSilent() then
-      MsgBox('El receptor de paneles se instalo pero todavia no responde en 127.0.0.1:{#IprpWebPort}.' #13#10 +
-             'Revise el servicio {#IprpService} en unos minutos.', mbInformation, MB_OK);
+    if not Healthy and not IprpServiceRunning() and not WizardSilent() then
+      MsgBox('El receptor de paneles se instalo, pero su servicio ({#IprpService}) no esta corriendo.' #13#10#13#10 +
+             'Abra Servicios de Windows, inicielo a mano y revise el Visor de eventos si vuelve' #13#10 +
+             'a detenerse. Los paneles que reportan por ISUP no conectaran hasta entonces.',
+             mbError, MB_OK)
+    else if not Healthy and not WizardSilent() then
+      MsgBox('El receptor de paneles se instalo, pero todavia no responde en 127.0.0.1:{#IprpWebPort}.' #13#10#13#10 +
+             'No hace falta hacer nada: el servidor lo detecta y lo activa solo en cuanto termine' #13#10 +
+             'de arrancar (lo reintenta durante una hora). Si pasado ese rato los paneles siguen' #13#10 +
+             'sin conectar, revise el servicio {#IprpService} en Servicios de Windows.',
+             mbInformation, MB_OK);
   end;
 end;
 #endif
