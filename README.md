@@ -136,6 +136,10 @@ Qué hace la suite en el equipo, además de copiar archivos:
   registran por TCP 7091, 7660-7667 y 8661, que sí quedan abiertos en el
   firewall. Es un programa aparte en «Programas y características»:
   desinstalar el VMS no lo quita, y su base de eventos sobrevive.
+  Durante la instalación, el instalador del fabricante abre el navegador en la
+  página del receptor: es un paso suyo que hace incluso en modo silencioso y no
+  se puede desactivar. Esa ventana se puede cerrar sin más, no hay que
+  configurar nada ahí y queda en blanco en cuanto se le cambia el puerto.
 - **La receptora queda sin interfaz web.** Sirve en el mismo puerto su panel y
   su API, repartiendo por ruta, así que el instalador corta solo la raíz: quien
   abra `http://127.0.0.1:8091` recibe 403 y la API sigue funcionando. Así la

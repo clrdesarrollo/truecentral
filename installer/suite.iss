@@ -869,7 +869,11 @@ begin
 
   ResetOrphanIprp();
 
-  WizardForm.StatusLabel.Caption := 'Instalando el receptor de paneles de alarma...';
+  // Su instalador abre el navegador en su propia pagina al terminar (un
+  // ExecShell que hace incluso en modo silencioso, y que no se puede
+  // desactivar por parametro). Se avisa para que no confunda: esa ventana no
+  // hay que usarla, y quedara en blanco en cuanto le cambiemos el puerto.
+  WizardForm.StatusLabel.Caption := 'Instalando el receptor de paneles de alarma (puede abrirse una ventana del navegador: cierrela)...';
   // Instalador NSIS: /S es silencioso y /D (sin comillas y al final) fija la carpeta.
   if not Exec(Setup, '/S /D=' + IprpDir(), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
   begin
