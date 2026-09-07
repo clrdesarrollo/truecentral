@@ -26,7 +26,7 @@ public partial class MainWindow : Window
     private enum SvcState { NotInstalled, Stopped, Running, Pending, Unknown }
 
     private readonly ServerEnvironment _env = ServerEnvironment.Discover();
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMilliseconds(1800) };
+    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
 
     private bool _checking;             // hay un ciclo de verificación en curso
@@ -34,6 +34,8 @@ public partial class MainWindow : Window
     private bool _stopRequested;        // el último stop fue pedido desde acá (no es una caída)
     private SvcState _lastSvc = SvcState.Unknown;
     private bool? _lastApiOk;
+    /// <summary>Lectura anterior, para confirmar un cambio antes de anunciarlo.</summary>
+    private bool? _previousApiRead;
 
     private Brush Ok => (Brush)FindResource("OkBrush");
     private Brush Danger => (Brush)FindResource("DangerBrush");
@@ -176,9 +178,17 @@ public partial class MainWindow : Window
             _lastSvc = svc;
         }
 
-        if (_lastApiOk is { } last && last != apiOk && svc == SvcState.Running)
+        // Solo se anuncia un cambio confirmado por DOS lecturas seguidas: con el
+        // sondeo cada 2 s, un pico de carga puntual no debe verse como caída.
+        bool confirmed = _previousApiRead == apiOk;
+        if (confirmed && _lastApiOk is { } last && last != apiOk && svc == SvcState.Running)
+        {
             AddActivity(apiOk ? "La API volvió a responder." : "La API dejó de responder.", apiOk ? Ok : Warn);
-        _lastApiOk = apiOk;
+            _lastApiOk = apiOk;
+        }
+        else if (_lastApiOk is null)
+            _lastApiOk = apiOk;   // primera lectura: solo se toma nota
+        _previousApiRead = apiOk;
     }
 
     private void UpdateUi(SvcState svc, string svcDetail, bool apiOk, string? serverVersion, string apiDetail, bool dbOk)

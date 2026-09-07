@@ -823,6 +823,40 @@ begin
   DelTree(IprpDir(), True, True, True);
 end;
 
+// ¿Responde la API de la receptora en ese puerto? Un 401 (pide credenciales)
+// ya sirve: significa que esta arriba. curl sin --fail devuelve 0 con 401.
+function IprpApiResponds(Port: Integer): Boolean;
+begin
+  Result := FileExists(SysTool('curl.exe')) and
+            (RunHidden(SysTool('curl.exe'),
+               '--silent --output NUL --max-time 5 http://127.0.0.1:' + IntToStr(Port) +
+               '/ISAPI/System/deviceInfo?format=json') = 0);
+end;
+
+// Espera a que la receptora termine de arrancar, mirando los dos puertos: el
+// 80 de fabrica (instalacion nueva) y el {#IprpWebPort} (ya configurada por
+// nosotros en una actualizacion). Devuelve el puerto en que respondio, o 0.
+function WaitForIprpApi(TimeoutSeconds: Integer): Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 1 to TimeoutSeconds div 2 do
+  begin
+    if IprpApiResponds({#IprpWebPort}) then
+    begin
+      Result := {#IprpWebPort};
+      exit;
+    end;
+    if IprpApiResponds(80) then
+    begin
+      Result := 80;
+      exit;
+    end;
+    Sleep(2000);
+  end;
+end;
+
 procedure InstallIprp();
 var
   Setup: string;
@@ -847,6 +881,17 @@ begin
     exit;
   end;
 
+  // ANTES de tocar nada hay que dejar que la receptora termine su primer
+  // arranque: crea su propia base de datos (trae un PostgreSQL) y detener el
+  // servicio en mitad de eso deja el cluster a medio hacer y el servicio ya no
+  // vuelve a levantar. Se espera hasta 8 minutos a que su API conteste.
+  WizardForm.StatusLabel.Caption := 'Esperando a que el receptor termine de instalarse (crea su base de datos)...';
+  if WaitForIprpApi(480) = 0 then
+    if not WizardSilent() then
+      MsgBox('El receptor de paneles se instalo, pero no llego a arrancar dentro de 8 minutos.' #13#10#13#10 +
+             'Se continuara igual con su configuracion; si al terminar no responde, revise el' #13#10 +
+             'servicio {#IprpService} en Servicios de Windows.', mbInformation, MB_OK);
+
   WizardForm.StatusLabel.Caption := 'Dejando el receptor de paneles accesible solo desde este equipo...';
   StopIprpService();
   if not PatchIprpNginx() then
@@ -863,25 +908,16 @@ begin
   RunHidden(SysTool('sc.exe'), 'config {#IprpService} start= auto');
   RunHidden(SysTool('sc.exe'), 'start {#IprpService}');
 
-  // Verificacion. En el PRIMER arranque la receptora crea su propia base de
-  // datos (trae su PostgreSQL) y eso puede tardar varios minutos en una maquina
-  // modesta, asi que se espera hasta 6 minutos antes de avisar.
+  // Verificacion final: ya con el puerto cambiado, la receptora tiene que
+  // contestar en {#IprpWebPort}. Su base ya existe (se espero antes), asi que
+  // aqui solo se le da margen para reiniciar sus servicios.
   Healthy := False;
   if FileExists(SysTool('curl.exe')) then
   begin
-    WizardForm.StatusLabel.Caption := 'Esperando al receptor de paneles de alarma (primer arranque, puede tardar unos minutos)...';
-    for I := 1 to 180 do
-    begin
-      // Se consulta la API y no la raiz, que quedo deshabilitada a proposito.
-      // Un 401 (pide credenciales) ya demuestra que la receptora responde.
-      if RunHidden(SysTool('curl.exe'),
-           '--silent --output NUL --max-time 5 http://127.0.0.1:{#IprpWebPort}/ISAPI/System/deviceInfo?format=json') = 0 then
-      begin
-        Healthy := True;
-        break;
-      end;
-      Sleep(2000);
-    end;
+    WizardForm.StatusLabel.Caption := 'Esperando al receptor de paneles de alarma...';
+    Healthy := IprpApiResponds({#IprpWebPort});
+    if not Healthy then
+      Healthy := WaitForIprpApi(360) = {#IprpWebPort};
     if not Healthy and not IprpServiceRunning() and not WizardSilent() then
       MsgBox('El receptor de paneles se instalo, pero su servicio ({#IprpService}) no esta corriendo.' #13#10#13#10 +
              'Abra Servicios de Windows, inicielo a mano y revise el Visor de eventos si vuelve' #13#10 +
