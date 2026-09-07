@@ -242,6 +242,9 @@ async function alarmPanelModal(panel) {
           ${drivers.map((dr) => `<option value="${esc(dr.key)}" ${driver0?.key === dr.key ? "selected" : ""}>${esc(dr.displayName)}</option>`).join("")}
         </select>
       </div>
+      <label class="checkbox-row" id="al-local-row" hidden>
+        <input type="checkbox" id="al-local"> Usar la receptora instalada en este servidor (recomendado)
+      </label>
       <div class="form-grid">
         <div class="field">
           <label>Dirección (IP o hostname)</label>
@@ -296,9 +299,14 @@ async function alarmPanelModal(panel) {
       : "Use un usuario <b>local</b> del panel (el creado al activarlo, normalmente <b>admin</b>), no la cuenta de la nube Hik-Connect. Tras varios intentos fallidos el panel bloquea el acceso por 30 minutos.";
   });
 
+  $("#al-driver").addEventListener("change", refreshLocalReceiver);
+  refreshLocalReceiver();
+
   const readForm = () => ({
     name: $("#al-name").value.trim() || "(sin nombre)",
     driverKey: $("#al-driver").value,
+    // Los campos van deshabilitados en modo receptora local: se leen igual
+    // (el servidor pone la contraseña, que nunca viaja al navegador).
     host: $("#al-host").value.trim(),
     port: Number($("#al-port").value),
     useHttps: $("#al-https").checked,
@@ -306,6 +314,58 @@ async function alarmPanelModal(panel) {
     password: $("#al-password").value || null,
     enabled: $("#al-enabled").checked,
     deviceId: $("#al-device").value.trim() || null,
+  });
+
+  // ------------------------------------------------------------------
+  // Receptora instalada junto al servidor
+  //
+  // El instalador la deja en loopback y el servidor la activa solo con una
+  // contraseña que genera y guarda cifrada: por eso, marcando la casilla, no
+  // se piden credenciales (nadie tiene que conocerlas).
+  // ------------------------------------------------------------------
+  let localReceiver = null;
+
+  function applyLocalReceiver() {
+    const on = $("#al-local").checked && localReceiver;
+    if (on) {
+      $("#al-host").value = localReceiver.host;
+      $("#al-port").value = localReceiver.port;
+      $("#al-username").value = localReceiver.username;
+      $("#al-https").checked = false;
+      $("#al-password").value = "";
+      $("#al-password").required = false;
+    }
+    for (const id of ["#al-host", "#al-port", "#al-username", "#al-password"]) $(id).disabled = !!on;
+    $("#al-https").disabled = !!on;
+    const help = $("#al-cred-help");
+    if (on) {
+      help.innerHTML = "La receptora de este servidor la administra el sistema: su contraseña se generó sola al instalarla " +
+        "y queda guardada cifrada, nadie necesita conocerla. Solo falta indicar el <b>equipo dentro de la pasarela</b>, " +
+        "que puede agregarse aquí mismo con «Equipos de la receptora…».";
+    }
+  }
+
+  async function refreshLocalReceiver() {
+    const dr = drivers.find((x) => x.key === $("#al-driver").value);
+    const row = $("#al-local-row");
+    if (!dr?.needsDeviceId) { row.hidden = true; $("#al-local").checked = false; applyLocalReceiver(); return; }
+    if (localReceiver === null) {
+      try {
+        const r = await Api.get("/api/alarms/receiver/local");
+        localReceiver = r && r.ready ? r : false;
+      } catch { localReceiver = false; }
+    }
+    if (!localReceiver) { row.hidden = true; return; }
+    row.hidden = false;
+    // Panel existente que ya apunta a la receptora local, o panel nuevo: viene marcada.
+    if (!$("#al-local").dataset.touched)
+      $("#al-local").checked = isNew || (panel?.host === localReceiver.host && panel?.port === localReceiver.port);
+    applyLocalReceiver();
+  }
+
+  $("#al-local").addEventListener("change", () => {
+    $("#al-local").dataset.touched = "1";
+    applyLocalReceiver();
   });
 
   // ------------------------------------------------------------------

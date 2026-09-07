@@ -128,12 +128,27 @@ Qué hace la suite en el equipo, además de copiar archivos:
   `MSVCP140`) junto a los binarios de PostgreSQL. No viene con Windows: sin
   él `initdb.exe` muere con `0xC0000135` en un servidor recién instalado y la
   base nunca se crea.
-- Si se marca la tarea correspondiente, instala en silencio el **Hik IP
-  Receiver Pro** (receptora de los paneles que reportan por ISUP/OTAP) y lo
-  deja escuchando en `127.0.0.1:8091` en vez del puerto 80 abierto a la red:
-  su web/API la usa solo el servidor del VMS desde este mismo equipo. Los
-  paneles no usan ese puerto, se registran por TCP 7091, 7660-7667 y 8661,
-  que sí quedan abiertos en el firewall.
+- Instala en silencio el **Hik IP Receiver Pro**, la receptora de los paneles
+  que reportan por ISUP/OTAP (AX PRO, AX HYBRID PRO). No es opcional: sin ella
+  esos paneles no se pueden conectar. Queda escuchando en `127.0.0.1:8091` en
+  vez del puerto 80 abierto a la red, así que su web y su API las usa solo el
+  servidor del VMS desde este mismo equipo. Los paneles no usan ese puerto: se
+  registran por TCP 7091, 7660-7667 y 8661, que sí quedan abiertos en el
+  firewall. Es un programa aparte en «Programas y características»:
+  desinstalar el VMS no lo quita, y su base de eventos sobrevive.
+- **La receptora queda sin interfaz web.** Sirve en el mismo puerto su panel y
+  su API, repartiendo por ruta, así que el instalador corta solo la raíz: quien
+  abra `http://127.0.0.1:8091` recibe 403 y la API sigue funcionando. Así la
+  receptora es un servicio interno que nadie ve ni administra, ni siquiera
+  desde el propio servidor. Es reversible: el archivo original queda guardado
+  como `nginx.conf.clr-original` en la carpeta de la receptora.
+- **La receptora se activa sola.** En su primer arranque el servidor le crea la
+  contraseña de administrador, que genera al azar y guarda cifrada junto a los
+  datos (`tcvms-iprp.secret`, misma protección que la credencial de
+  PostgreSQL). Nadie la escribe ni la conoce: para el operador la receptora es
+  un servicio interno que no se ve, como PostgreSQL o MediaMTX. Al agregar un
+  panel basta marcar «Usar la receptora instalada en este servidor» y el
+  formulario deja de pedir dirección y credenciales.
 
 Compilar los instaladores (requiere Inno Setup 6, `winget install -e --id
 JRSoftware.InnoSetup`, y los binarios de `build\setup-binaries.ps1`):

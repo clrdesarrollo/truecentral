@@ -71,12 +71,30 @@ public static class AlarmsApi
         new(panel.Host, panel.Port, panel.UseHttps, panel.Username, protector.Unprotect(panel.PasswordCiphertext), panel.GatewayDeviceId);
 
     /// <summary>
+    /// ¿La dirección apunta a la receptora que el instalador dejó en este mismo
+    /// equipo? Se aceptan las tres formas de nombrar el loopback.
+    /// </summary>
+    private static bool IsLocalReceiver(LocalIpReceiverService local, string? host, int port) =>
+        local.Enabled && port == local.Port && host is not null &&
+        (string.Equals(host.Trim(), local.Host, StringComparison.OrdinalIgnoreCase) ||
+         host.Trim() is "127.0.0.1" or "localhost" or "::1" or "[::1]");
+
+    /// <summary>
+    /// Contraseña que el servidor guarda de la receptora local. Permite agregar
+    /// paneles sin que nadie escriba —ni conozca— esa credencial: la generó el
+    /// propio servidor al activar la receptora.
+    /// </summary>
+    private static string? LocalReceiverPassword(LocalIpReceiverService local, string? host, int port) =>
+        IsLocalReceiver(local, host, port) ? local.GetPassword() : null;
+
+    /// <summary>
     /// Arma la conexión con la receptora. La contraseña puede venir en el
     /// cuerpo o tomarse de un panel ya guardado (PanelId), para no obligar a
     /// reescribirla cada vez que se administra la lista de equipos.
     /// </summary>
     private static async Task<(AlarmConnectionInfo? Connection, string? Error)> ReceiverConnectionAsync(
-        AlarmReceiverConnectionDto? request, VmsDbContext db, CredentialProtector protector, CancellationToken ct)
+        AlarmReceiverConnectionDto? request, VmsDbContext db, CredentialProtector protector,
+        LocalIpReceiverService local, CancellationToken ct)
     {
         if (request is null)
             return (null, "Faltan los datos de la receptora.");
@@ -96,6 +114,13 @@ public static class AlarmsApi
             if (username.Length == 0) username = panel.Username;
             if (port is < 1 or > 65535) { port = panel.Port; useHttps = panel.UseHttps; }
             if (string.IsNullOrEmpty(password)) password = protector.Unprotect(panel.PasswordCiphertext);
+        }
+
+        // Receptora local: la credencial la pone el servidor.
+        if (string.IsNullOrEmpty(password) && LocalReceiverPassword(local, host, port) is { } localPassword)
+        {
+            password = localPassword;
+            if (username.Length == 0) username = LocalIpReceiverService.AdminUser;
         }
 
         if (host.Length == 0) return (null, "La dirección de la receptora es obligatoria.");
@@ -145,10 +170,14 @@ public static class AlarmsApi
 
         app.MapPost("/api/alarms/panels", async (HttpContext ctx, AlarmPanelWriteDto request, VmsDbContext db, LicenseService license,
             AlarmDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            AlarmPanelService service, AuditService audit, CancellationToken ct) =>
+            AlarmPanelService service, AuditService audit, LocalIpReceiverService local, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
+            // Con la receptora que instala la suite no se pide contraseña: la
+            // generó el servidor al activarla y nadie tiene que conocerla.
+            request = request with { Password = request.Password is { Length: > 0 } typed ? typed
+                : LocalReceiverPassword(local, request.Host, request.Port) };
             if (string.IsNullOrEmpty(request.Password))
                 return Error("La contraseña del panel es obligatoria.");
             if (license.Deny(LicenseFeatures.ModuleAlarms, request.Enabled ? LicenseFeatures.AlarmPanels : null,
@@ -297,7 +326,8 @@ public static class AlarmsApi
         // Probar conexión (sin persistir). Con ?panelId= reutiliza la clave guardada.
         // ------------------------------------------------------------------
         app.MapPost("/api/alarms/panels/probe", async (HttpContext ctx, AlarmPanelWriteDto request, VmsDbContext db,
-            AlarmDriverRegistry drivers, CredentialProtector protector, AuditService audit, int? panelId, CancellationToken ct) =>
+            AlarmDriverRegistry drivers, CredentialProtector protector, AuditService audit, LocalIpReceiverService local,
+            int? panelId, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -306,6 +336,7 @@ public static class AlarmsApi
             if (string.IsNullOrEmpty(password) && panelId is int existingId &&
                 await db.AlarmPanels.FindAsync([existingId], ct) is { } existing)
                 password = protector.Unprotect(existing.PasswordCiphertext);
+            password ??= LocalReceiverPassword(local, request.Host, request.Port);
             if (string.IsNullOrEmpty(password))
                 return Error("La contraseña del panel es obligatoria.");
 
@@ -334,11 +365,21 @@ public static class AlarmsApi
         // entrar a la interfaz web del fabricante. Las credenciales van en el
         // cuerpo (nunca en la URL) y pueden tomarse de un panel ya guardado.
         // ------------------------------------------------------------------
-        app.MapPost("/api/alarms/receiver/devices/list", async (HttpContext ctx, AlarmReceiverConnectionDto request,
-            VmsDbContext db, CredentialProtector protector, AuditService audit, string? search, CancellationToken ct) =>
+        app.MapGet("/api/alarms/receiver/local", async (HttpContext ctx, LocalIpReceiverService local, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
-            var (conn, error) = await ReceiverConnectionAsync(request, db, protector, ct);
+            var state = await local.EnsureActivatedAsync(ct);
+            // La contraseña NO se expone nunca: solo si el servidor la tiene.
+            return Results.Ok(new AlarmLocalReceiverDto(state.Present, state.Ready && local.HasCredentials,
+                local.Host, local.Port, LocalIpReceiverService.AdminUser, state.Message));
+        });
+
+        app.MapPost("/api/alarms/receiver/devices/list", async (HttpContext ctx, AlarmReceiverConnectionDto request,
+            VmsDbContext db, CredentialProtector protector, AuditService audit, LocalIpReceiverService local,
+            string? search, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            var (conn, error) = await ReceiverConnectionAsync(request, db, protector, local, ct);
             if (conn is null) return Error(error!);
 
             try
@@ -357,12 +398,13 @@ public static class AlarmsApi
         });
 
         app.MapPost("/api/alarms/receiver/devices", async (HttpContext ctx, AlarmReceiverAddDeviceDto request,
-            VmsDbContext db, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
+            VmsDbContext db, CredentialProtector protector, AuditService audit, LocalIpReceiverService local,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.DeviceId))
                 return Error("El ID del equipo es obligatorio.");
-            var (conn, error) = await ReceiverConnectionAsync(request.Receiver, db, protector, ct);
+            var (conn, error) = await ReceiverConnectionAsync(request.Receiver, db, protector, local, ct);
             if (conn is null) return Error(error!);
 
             string name = string.IsNullOrWhiteSpace(request.Name) ? request.DeviceId.Trim() : request.Name.Trim();
@@ -388,12 +430,13 @@ public static class AlarmsApi
         });
 
         app.MapPost("/api/alarms/receiver/devices/delete", async (HttpContext ctx, AlarmReceiverDeleteDeviceDto request,
-            VmsDbContext db, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
+            VmsDbContext db, CredentialProtector protector, AuditService audit, LocalIpReceiverService local,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.DevIndex))
                 return Error("Indique el equipo a quitar de la receptora.");
-            var (conn, error) = await ReceiverConnectionAsync(request.Receiver, db, protector, ct);
+            var (conn, error) = await ReceiverConnectionAsync(request.Receiver, db, protector, local, ct);
             if (conn is null) return Error(error!);
 
             string target = $"{conn.Host}:{conn.Port}";

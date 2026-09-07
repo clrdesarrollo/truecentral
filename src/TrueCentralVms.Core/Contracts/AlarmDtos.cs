@@ -150,6 +150,19 @@ public sealed record AlarmPanelWriteDto(
 // la URL) y se pueden omitir indicando el panel ya guardado del que tomarlas.
 // ---------------------------------------------------------------------------
 
+/// <summary>
+/// Receptora instalada junto al servidor. El servidor la activa solo y guarda
+/// su credencial: por eso aquí nunca viaja una contraseña, solo si el sistema
+/// ya la tiene (<c>Ready</c>) y dónde escucha.
+/// </summary>
+public sealed record AlarmLocalReceiverDto(
+    bool Present,
+    bool Ready,
+    string Host,
+    int Port,
+    string Username,
+    string? Message);
+
 /// <summary>Conexión con la receptora para operar su lista de equipos.</summary>
 public sealed record AlarmReceiverConnectionDto(
     string Host,

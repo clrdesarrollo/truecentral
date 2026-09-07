@@ -95,6 +95,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprService>());
 // basta con implementar IAlarmPanelDriverFactory y agregarla aquí.
 builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionAlarmPanelDriverFactory>();
 builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionIpReceiverDriverFactory>();
+// Receptora de paneles instalada junto al servidor: el servidor la activa solo
+// (contraseña generada y guardada cifrada) para que sea un servicio interno
+// que el operador no ve ni administra.
+builder.Services.AddSingleton<LocalIpReceiverService>();
 builder.Services.AddSingleton<AlarmDriverRegistry>();
 builder.Services.AddSingleton<AlarmPanelService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmPanelService>());
@@ -175,6 +179,25 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(
             "Sistema sin inicializar: abra http://localhost:5090 EN ESTA MÁQUINA para crear el primer administrador.");
 }
+
+// La receptora local se activa en segundo plano: si no está instalada o tarda
+// en levantar, el servidor arranca igual y lo deja anotado en el registro. Se
+// reintenta un rato porque la receptora arranca sus propios servicios (nginx,
+// su PostgreSQL) y puede tardar más que este servidor.
+_ = Task.Run(async () =>
+{
+    var stopping = app.Lifetime.ApplicationStopping;
+    using var scope = app.Services.CreateScope();
+    var receiver = scope.ServiceProvider.GetRequiredService<LocalIpReceiverService>();
+    for (int attempt = 1; attempt <= 10 && !stopping.IsCancellationRequested; attempt++)
+    {
+        var state = await receiver.EnsureActivatedAsync(stopping);
+        if (state.Present || !receiver.Enabled)
+            break;   // está (activada o no), o no hay nada que hacer
+        try { await Task.Delay(TimeSpan.FromSeconds(30), stopping); }
+        catch (OperationCanceledException) { break; }
+    }
+});
 
 app.UseCors();
 // WebSocket propio (fuera de SignalR) para la voz del operador hacia los parlantes.

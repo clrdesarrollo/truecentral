@@ -162,7 +162,7 @@ $checks = [ordered]@{
     'tools\postgres\pgsql\bin\VCRUNTIME140.dll' = 'Runtime de Visual C++ para PostgreSQL'
     'tools\postgres\pgsql\bin\MSVCP140.dll'     = 'Runtime de Visual C++ para PostgreSQL (C++)'
     'tools\mediamtx\mediamtx.exe'            = 'MediaMTX (streaming)'
-    'tools\iprp\HikIpReceiverPro-Setup.exe'  = 'Hik IP Receiver Pro (receptor de paneles, opcional)'
+    'tools\iprp\HikIpReceiverPro-Setup.exe'  = 'Hik IP Receiver Pro (receptor de paneles ISUP/OTAP)'
     'tools\ffmpeg-flyleaf\avcodec-63.dll'    = 'FFmpeg (cliente WPF)'
     'tools\ffmpeg\bin\ffmpeg.exe'           = 'FFmpeg CLI (exportación y proyección al muro)'
 }
@@ -184,7 +184,7 @@ if ($missing -gt 0) {
     Write-Host "  - PostgreSQL portable : https://www.enterprisedb.com/download-postgresql-binaries -> tools\postgres\pgsql"
     Write-Host "  - MediaMTX v1.20      : https://github.com/bluenviron/mediamtx/releases -> tools\mediamtx"
     Write-Host "  - Hik IP Receiver Pro : instalador oficial de Hikvision (V2.5.0 o superior; el API de alta de equipos existe desde la 2.5.0)"
-    Write-Host "                          renombrado a tools\iprp\HikIpReceiverPro-Setup.exe (opcional: sin el, la suite se compila sin el receptor)"
+    Write-Host "                          renombrado a tools\iprp\HikIpReceiverPro-Setup.exe (obligatorio para la suite: los AX PRO reportan por ISUP contra el)"
     Write-Host "  - FFmpeg para Flyleaf : asset del release de FlyleafLib con la MISMA versión que el paquete NuGet"
     Write-Host "                          https://github.com/SuRGeoNix/Flyleaf/releases -> carpeta FFmpeg\ -> tools\ffmpeg-flyleaf"
     Write-Host "  - FFmpeg CLI          : build de Windows (gyan.dev / BtbN) -> tools\ffmpeg (con bin\ffmpeg.exe y bin\ffprobe.exe)"

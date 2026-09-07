@@ -96,14 +96,12 @@ if ($buildSuite) {
     Assert-File (Join-Path $publish 'server\wwwroot\index.html') 'El publish del servidor no incluyó el panel web (wwwroot).'
     Assert-File (Join-Path $publish 'watchdog\TrueCentralVms.Watchdog.exe') 'Publique primero (quite -SkipPublish).'
     Assert-File (Join-Path $repo 'tools\postgres\pgsql\bin\pg_ctl.exe') "Copie los binarios oficiales de PostgreSQL x64 (bin\lib\share) en tools\postgres\pgsql. $setupHint"
-    # Receptor de paneles de alarma: OPCIONAL. Si no esta, la suite se compila
-    # sin el (el .iss lo detecta con FileExists y emite un warning).
+    # Receptor de paneles de alarma: OBLIGATORIO. Los paneles AX PRO y AX HYBRID
+    # PRO reportan por ISUP/OTAP contra el, asi que la suite no se entrega sin el.
     $iprpSetup = Join-Path $repo 'tools\iprp\HikIpReceiverPro-Setup.exe'
-    if (Test-Path $iprpSetup) {
-        Write-Host ("  Hik IP Receiver Pro: {0:N0} MB" -f ((Get-Item $iprpSetup).Length / 1MB)) -ForegroundColor DarkGray
-    } else {
-        Write-Warning "Sin tools\iprp\HikIpReceiverPro-Setup.exe: la suite se compilara SIN el receptor de paneles de alarma."
-    }
+    Assert-File $iprpSetup ("Copie el instalador oficial del Hik IP Receiver Pro (V2.5.0 o superior) como " +
+        "tools\iprp\HikIpReceiverPro-Setup.exe. $setupHint")
+    Write-Host ("  Hik IP Receiver Pro: {0:N0} MB" -f ((Get-Item $iprpSetup).Length / 1MB)) -ForegroundColor DarkGray
 
     # PostgreSQL (build MSVC de EDB) no arranca sin el runtime de Visual C++, que
     # NO viene con Windows: en un servidor limpio initdb.exe muere con
