@@ -594,16 +594,55 @@ begin
   Result := RunHidden(SysTool('cmd.exe'), '/c sc query {#IprpService} | find "RUNNING"') = 0;
 end;
 
+// «No esta RUNNING» no basta: durante el apagado el servicio pasa por
+// STOP_PENDING, y en ese estado el SCM rechaza la orden de arranque. Hay que
+// esperar a STOPPED de verdad antes de tocar sus archivos y volver a iniciarlo.
+function IprpServiceStopped(): Boolean;
+begin
+  Result := RunHidden(SysTool('cmd.exe'), '/c sc query {#IprpService} | find "STOPPED"') = 0;
+end;
+
 procedure StopIprpService();
 var
   I: Integer;
 begin
   RunHidden(SysTool('sc.exe'), 'stop {#IprpService}');
-  for I := 1 to 60 do
+  // El receptor apaga su nginx y su propio PostgreSQL: puede tardar. Hasta 2 min.
+  for I := 1 to 240 do
   begin
-    if not IprpServiceRunning() then
+    if IprpServiceStopped() then
       break;
     Sleep(500);
+  end;
+  Sleep(1000);
+end;
+
+// Arranque con reintentos: si el SCM todavia estaba ocupado con el apagado, el
+// primer intento se pierde y antes se daba por bueno sin comprobar nada, con lo
+// que el instalador se quedaba esperando a un servicio que nadie habia
+// arrancado. Devuelve true si quedo corriendo.
+function StartIprpService(): Boolean;
+var
+  Attempt, I: Integer;
+begin
+  Result := False;
+  for Attempt := 1 to 5 do
+  begin
+    if IprpServiceRunning() then
+    begin
+      Result := True;
+      exit;
+    end;
+    RunHidden(SysTool('sc.exe'), 'start {#IprpService}');
+    for I := 1 to 60 do            // hasta 30 s por intento
+    begin
+      if IprpServiceRunning() then
+      begin
+        Result := True;
+        exit;
+      end;
+      Sleep(500);
+    end;
   end;
 end;
 
@@ -910,7 +949,13 @@ begin
   ConfigureIprpFirewall();
 
   RunHidden(SysTool('sc.exe'), 'config {#IprpService} start= auto');
-  RunHidden(SysTool('sc.exe'), 'start {#IprpService}');
+  WizardForm.StatusLabel.Caption := 'Iniciando el receptor de paneles de alarma...';
+  if not StartIprpService() then
+    if not WizardSilent() then
+      MsgBox('El receptor de paneles quedo instalado y configurado, pero su servicio' #13#10 +
+             '({#IprpService}) no arranco despues de varios intentos.' #13#10#13#10 +
+             'Abralo a mano desde Servicios de Windows. El resto del sistema funciona:' #13#10 +
+             'el servidor lo activara solo en cuanto lo vea en marcha.', mbError, MB_OK);
 
   // Verificacion final: ya con el puerto cambiado, la receptora tiene que
   // contestar en {#IprpWebPort}. Su base ya existe (se espero antes), asi que
