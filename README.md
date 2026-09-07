@@ -138,8 +138,13 @@ Qué hace la suite en el equipo, además de copiar archivos:
   desinstalar el VMS no lo quita, y su base de eventos sobrevive.
   Durante la instalación, el instalador del fabricante abre el navegador en la
   página del receptor: es un paso suyo que hace incluso en modo silencioso y no
-  se puede desactivar. Esa ventana se puede cerrar sin más, no hay que
-  configurar nada ahí y queda en blanco en cuanto se le cambia el puerto.
+  se puede desactivar. El instalador de la suite pide cerrar el navegador antes
+  de empezar y, si se partió sin ninguno abierto, cierra esa ventana al
+  terminar (solo la que apunta al receptor: mira la línea de comandos, así que
+  no toca ninguna otra). Si se prefiere seguir con el navegador abierto, la
+  ventana queda ahí y basta con cerrarla a mano; no se cierra un navegador que
+  ya estaba en uso, porque ahí Windows abre una pestaña en vez de un proceso
+  nuevo y se perdería lo que hubiera abierto.
 - **La receptora queda sin interfaz web.** Sirve en el mismo puerto su panel y
   su API, repartiendo por ruta, así que el instalador corta solo la raíz: quien
   abra `http://127.0.0.1:8091` recibe 403 y la API sigue funcionando. Así la
