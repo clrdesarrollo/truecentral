@@ -96,25 +96,54 @@ public sealed class LocalIpReceiverService(
                 return new LocalReceiverState(false, false,
                     $"No hay una receptora de paneles escuchando en {Host}:{Port}.");
 
+            // Si la receptora dice que ya está activada, no hay nada que intentar.
+            if (await IsActivatedAsync(http, ct) is true)
+            {
+                logger.LogWarning(
+                    "La receptora de {Host}:{Port} ya estaba activada antes de instalar el sistema y su contraseña no la " +
+                    "conoce el servidor. Escríbala una vez al agregar el panel, o reinstale la receptora para que el " +
+                    "sistema la active solo.", Host, Port);
+                return new LocalReceiverState(true, false,
+                    "La receptora ya estaba activada con una contraseña que el sistema no conoce.", Final: true);
+            }
+
             string password = GeneratePassword();
-            string encrypted = await EncryptForReceiverAsync(http, password, ct);
+            string body = "";
 
-            using var request = new HttpRequestMessage(HttpMethod.Put, "/ISAPI/System/activate?format=json")
+            // Dos formas de mandar el mismo JSON: la del propio panel de la
+            // receptora (declarado como formulario) y la estándar. Distintas
+            // versiones del equipo aceptan una u otra, así que se prueban las
+            // dos antes de darse por vencido. Cada intento renueva el desafío:
+            // la llave de sesión se usa una sola vez.
+            foreach (string contentType in new[] { "application/x-www-form-urlencoded", "application/json" })
             {
-                Content = new StringContent(
-                    JsonSerializer.Serialize(new { ActivateInfo = new { password = encrypted } }),
-                    Encoding.UTF8, "application/json"),
-            };
-            using var response = await http.SendAsync(request, ct);
-            string body = await response.Content.ReadAsStringAsync(ct);
+                string encrypted = await EncryptForReceiverAsync(http, password, ct);
+                string json = JsonSerializer.Serialize(new { ActivateInfo = new { password = encrypted } });
 
-            if (response.IsSuccessStatusCode)
-            {
-                SavePassword(password);
-                logger.LogInformation(
-                    "Receptora de paneles activada automáticamente en {Host}:{Port}; su credencial queda cifrada en {Path} " +
-                    "y la administra el servidor (nadie necesita conocerla).", Host, Port, SecretPath);
-                return new LocalReceiverState(true, true, null, Final: true);
+                using var request = new HttpRequestMessage(HttpMethod.Put, "/ISAPI/System/activate?format=json")
+                {
+                    Content = contentType == "application/json"
+                        ? new StringContent(json, Encoding.UTF8, "application/json")
+                        : VendorBody(json),
+                };
+                using var response = await http.SendAsync(request, ct);
+                body = await response.Content.ReadAsStringAsync(ct);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    SavePassword(password);
+                    logger.LogInformation(
+                        "Receptora de paneles activada automáticamente en {Host}:{Port} (formato {ContentType}); su " +
+                        "credencial queda cifrada en {Path} y la administra el servidor (nadie necesita conocerla).",
+                        Host, Port, contentType, SecretPath);
+                    return new LocalReceiverState(true, true, null, Final: true);
+                }
+
+                if (body.Contains("hasActivated", StringComparison.OrdinalIgnoreCase))
+                    break;
+
+                logger.LogWarning("La receptora de {Host}:{Port} rechazó la activación enviada como {ContentType}: {Body}",
+                    Host, Port, contentType, body.Trim());
             }
 
             if (body.Contains("hasActivated", StringComparison.OrdinalIgnoreCase))
@@ -127,7 +156,6 @@ public sealed class LocalIpReceiverService(
                     "La receptora ya estaba activada con una contraseña que el sistema no conoce.", Final: true);
             }
 
-            logger.LogWarning("La receptora de {Host}:{Port} rechazó la activación automática: {Body}", Host, Port, body.Trim());
             return new LocalReceiverState(true, false, "La receptora rechazó la activación automática.");
         }
         catch (Exception ex)
@@ -138,6 +166,48 @@ public sealed class LocalIpReceiverService(
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Cuerpo tal como lo manda el propio panel de la receptora: JSON, pero
+    /// declarado como formulario. Se capturó de su interfaz web, y la
+    /// activación falla ("notActivated") si se envía como application/json.
+    /// </summary>
+    private static StringContent VendorBody(string json)
+    {
+        var content = new StringContent(json, Encoding.UTF8);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded") { CharSet = "UTF-8" };
+        return content;
+    }
+
+    /// <summary>
+    /// Estado de activación según la propia receptora. Null si no se pudo
+    /// determinar (el equipo ya activado responde 403 a esta consulta).
+    /// </summary>
+    private static async Task<bool?> IsActivatedAsync(HttpClient http, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await http.GetAsync("/ISAPI/System/activateStatus?format=json", ct);
+            string body = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+                return body.Contains("hasActivated", StringComparison.OrdinalIgnoreCase) ? true : null;
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("ActivateStatus", out var status) &&
+                status.TryGetProperty("Activated", out var activated))
+                return activated.ValueKind switch
+                {
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.Number => activated.GetInt32() != 0,
+                    _ => null,
+                };
+            return null;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -176,10 +246,13 @@ public sealed class LocalIpReceiverService(
     /// </summary>
     private static string GeneratePassword()
     {
+        // 16 caracteres: los equipos Hikvision suelen limitar la contrasena a 16,
+        // asi que pasarse de ahi hace fallar la activacion. Con cuatro clases y
+        // ese largo sobra fuerza (nadie la escribe: la guarda el servidor).
         const string Upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
         const string Lower = "abcdefghijkmnopqrstuvwxyz";
         const string Digits = "23456789";
-        const string Symbols = "@#%+=?";
+        const string Symbols = "@#%+=";
         string all = Upper + Lower + Digits + Symbols;
 
         var chars = new List<char>
@@ -189,7 +262,7 @@ public sealed class LocalIpReceiverService(
             Digits[RandomNumberGenerator.GetInt32(Digits.Length)],
             Symbols[RandomNumberGenerator.GetInt32(Symbols.Length)],
         };
-        while (chars.Count < 24)
+        while (chars.Count < 16)
             chars.Add(all[RandomNumberGenerator.GetInt32(all.Length)]);
 
         // Barajado Fisher-Yates para que las cuatro clases obligatorias no
@@ -213,7 +286,7 @@ public sealed class LocalIpReceiverService(
         string modulusHex = Convert.ToHexString(parameters.Modulus!).ToLowerInvariant().TrimStart('0');
 
         string challengeBody = JsonSerializer.Serialize(new { PublicKey = new { key = Base64Ascii(modulusHex) } });
-        using var content = new StringContent(challengeBody, Encoding.UTF8, "application/json");
+        using var content = VendorBody(challengeBody);
         using var response = await http.PostAsync("/ISAPI/Security/challenge?format=json", content, ct);
         string json = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
