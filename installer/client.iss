@@ -43,7 +43,16 @@ OutputBaseFilename=CLRTrueCentralVMS-Client-Setup-{#AppVersion}
 SetupIconFile=assets\truecentral.ico
 UninstallDisplayIcon={app}\{#ClientExe}
 UninstallDisplayName={#AppName}
+; Identificacion del .exe del instalador. Sin esto, Windows lo muestra como
+; "Setup/Uninstall" en el Administrador de tareas y en las propiedades del
+; archivo, que no dice nada de que producto es.
 VersionInfoVersion={#AppVersion}.0
+VersionInfoDescription=Instalador de {#AppName}
+VersionInfoProductName={#AppName}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoCompany={#Publisher}
+VersionInfoCopyright=(c) {#Publisher}
+VersionInfoOriginalFileName=CLRTrueCentralVMS-Client-Setup.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

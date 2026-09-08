@@ -90,7 +90,16 @@ OutputBaseFilename=CLRTrueCentralVMS-Suite-Setup-{#AppVersion}
 SetupIconFile=assets\truecentral.ico
 UninstallDisplayIcon={app}\{#ServerExe}
 UninstallDisplayName={#AppName} (servidor)
+; Identificacion del .exe del instalador. Sin esto, Windows lo muestra como
+; "Setup/Uninstall" en el Administrador de tareas y en las propiedades del
+; archivo, que no dice nada de que producto es.
 VersionInfoVersion={#AppVersion}.0
+VersionInfoDescription=Instalador de {#AppName} (servidor)
+VersionInfoProductName={#AppName}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoCompany={#Publisher}
+VersionInfoCopyright=(c) {#Publisher}
+VersionInfoOriginalFileName=CLRTrueCentralVMS-Suite-Setup.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -908,65 +917,36 @@ end;
 // con o sin :80). Una ventana abierta en otra cosa no coincide y no se toca; el
 // panel del VMS, que vive en el 5090, tampoco.
 //
-// El detalle que obliga a preguntar antes: si ya habia un navegador corriendo,
-// el ExecShell abre una PESTAÑA en el proceso existente en vez de un proceso
-// nuevo, y cerrarlo seria matarle al usuario lo que estuviera haciendo. Por eso
-// solo se cierra cuando se partio sin ningun navegador abierto.
+// Es seguro sin preguntar nada porque solo se cierran procesos que ARRANCARON
+// despues de lanzar su instalador. Si el usuario ya tenia el navegador abierto,
+// el ExecShell le abre una pestaña dentro de ese proceso, mas viejo, que queda
+// intacto: mejor una pestaña de mas que llevarse por delante su trabajo.
 // ---------------------------------------------------------------------------
-function BrowserRunning(): Boolean;
-begin
-  Result := RunHidden(PowerShellExe(),
-    '-NoProfile -Command "if (Get-Process msedge,chrome,firefox,brave,opera,iexplore -ErrorAction SilentlyContinue) { exit 1 } exit 0"') = 1;
-end;
-
-// Devuelve true si al terminar no queda ningun navegador abierto: entonces el
-// que aparezca despues sera el del receptor y se podra cerrar sin riesgo.
-function AskToCloseBrowser(): Boolean;
-var
-  I: Integer;
-begin
-  Result := not BrowserRunning();
-  if Result or WizardSilent() then
-    exit;
-
-  for I := 1 to 3 do
-  begin
-    if MsgBox('El instalador del receptor de paneles abre una ventana del navegador con su' #13#10 +
-              'propia pagina, y no hay forma de evitarlo. Esa ventana no sirve para nada:' #13#10 +
-              'quedara en blanco en cuanto el sistema le cambie el puerto.' #13#10#13#10 +
-              'Si cierra ahora su navegador, el sistema podra cerrarla sola al terminar.' #13#10#13#10 +
-              'Cerro el navegador?   (Si = ya lo cerre / No = seguir con el abierto)',
-              mbConfirmation, MB_YESNO) <> IDYES then
-      exit;
-    if not BrowserRunning() then
-    begin
-      Result := True;
-      exit;
-    end;
-  end;
-end;
-
 // Cierra el navegador que apunta al receptor: primero por las buenas (cierre de
 // ventana) y, si no hace caso en 3 s, a la fuerza.
-procedure CloseReceiverBrowser();
+procedure CloseReceiverBrowser(const SinceText: string);
 var
   Script: TArrayOfString;
   Path: string;
 begin
   Path := ExpandConstant('{tmp}\cerrar-navegador-receptor.ps1');
-  SetArrayLength(Script, 12);
-  Script[0]  := '# Cierra solo el navegador abierto por el instalador del receptor.';
-  Script[1]  := '$nombres = ''msedge.exe'',''chrome.exe'',''firefox.exe'',''brave.exe'',''opera.exe'',''iexplore.exe''';
-  Script[2]  := '$objetivo = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |';
-  Script[3]  := '  Where-Object { $nombres -contains $_.Name -and $_.CommandLine -match ''127\.0\.0\.1(:80)?([/\s"]|$)'' }';
-  Script[4]  := 'foreach ($p in $objetivo) {';
-  Script[5]  := '  $proc = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue';
-  Script[6]  := '  if ($proc) {';
-  Script[7]  := '    $null = $proc.CloseMainWindow()';
-  Script[8]  := '    Start-Sleep -Seconds 3';
-  Script[9]  := '    if (-not $proc.HasExited) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }';
-  Script[10] := '  }';
-  Script[11] := '}';
+  SetArrayLength(Script, 14);
+  Script[0]  := '# Cierra solo el navegador que abrio el instalador del receptor:';
+  Script[1]  := '# procesos nacidos DESPUES de lanzarlo y apuntando a su direccion.';
+  // Sin separadores: el '/' de un formato .NET se reemplaza por el separador
+  // del idioma del equipo, y en un Windows en espanol sale con guiones.
+  Script[2]  := '$desde = [datetime]::ParseExact(''' + SinceText + ''', ''yyyyMMddHHmmss'', [Globalization.CultureInfo]::InvariantCulture)';
+  Script[3]  := '$nombres = ''msedge.exe'',''chrome.exe'',''firefox.exe'',''brave.exe'',''opera.exe'',''iexplore.exe''';
+  Script[4]  := '$objetivo = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |';
+  Script[5]  := '  Where-Object { $nombres -contains $_.Name -and $_.CreationDate -ge $desde -and';
+  Script[6]  := '                 $_.CommandLine -match ''127\.0\.0\.1(:80)?([/\s"]|$)'' }';
+  Script[7]  := 'foreach ($p in $objetivo) {';
+  Script[8]  := '  $proc = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue';
+  Script[9]  := '  if ($proc) {';
+  Script[10] := '    $null = $proc.CloseMainWindow()';
+  Script[11] := '    Start-Sleep -Seconds 3';
+  Script[12] := '    if (-not $proc.HasExited) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }';
+  Script[13] := '  }' + #13#10 + '}';
   if not SaveStringsToFile(Path, Script, False) then
     exit;
   RunHidden(PowerShellExe(), '-NoProfile -ExecutionPolicy Bypass -File "' + Path + '"');
@@ -977,7 +957,8 @@ procedure InstallIprp();
 var
   Setup: string;
   ResultCode, I: Integer;
-  Healthy, CanCloseBrowser: Boolean;
+  Healthy: Boolean;
+  BrowserSince: string;
 begin
   Setup := ExpandConstant('{tmp}\HikIpReceiverPro-Setup.exe');
   if not FileExists(Setup) then
@@ -987,7 +968,10 @@ begin
 
   // Partir sin navegadores abiertos es lo que permite cerrar despues, sin
   // riesgo, la ventana que abre su instalador.
-  CanCloseBrowser := AskToCloseBrowser();
+  // Solo se cerraran navegadores ARRANCADOS despues de este momento: si el
+  // usuario ya tenia uno abierto, su instalador le abre una pestaña dentro de
+  // ese proceso, que es mas viejo y no se toca.
+  BrowserSince := GetDateTimeString('yyyymmddhhnnss', '-', ':');
 
   // Su instalador abre el navegador en su propia pagina al terminar (un
   // ExecShell que hace incluso en modo silencioso, y que no se puede
@@ -1005,8 +989,7 @@ begin
     exit;
   end;
 
-  if CanCloseBrowser then
-    CloseReceiverBrowser();
+  CloseReceiverBrowser(BrowserSince);
 
   // ANTES de tocar nada hay que dejar que la receptora termine su primer
   // arranque: crea su propia base de datos (trae un PostgreSQL) y detener el
