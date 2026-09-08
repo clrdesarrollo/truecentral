@@ -311,33 +311,36 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         var parameters = new Dictionary<string, object?> { [protocol == "OTAP" ? "OTAPID" : "EhomeID"] = deviceId };
         if (key is not null) parameters[protocol == "OTAP" ? "OTAPKey" : "EhomeKey"] = key;   // se reemplaza cifrada más abajo
         device[protocol == "OTAP" ? "OTAPParams" : "EhomeParams"] = parameters;
-        // El formulario del fabricante manda SIEMPRE accountID (el numero de
-        // abonado con el que el panel se identifica ante la central) y remark.
-        // Omitirlos es una de las cosas que la pasarela rechaza con
-        // "addDeviceFailed", asi que si no se indica se usa el propio ID.
-        device["accountID"] = string.IsNullOrWhiteSpace(spec.AccountId) ? deviceId : spec.AccountId.Trim();
-        device["remark"] = string.IsNullOrWhiteSpace(spec.Remark) ? "" : spec.Remark.Trim();
+        // El numero de abonado va SOLO si lo indicaron: probado contra el equipo,
+        // el alta que funciona es la que no lo lleva. Mandarlo siempre —como
+        // hace su formulario web— es justamente lo que la pasarela rechaza.
+        if (!string.IsNullOrWhiteSpace(spec.AccountId)) device["accountID"] = spec.AccountId.Trim();
+        if (!string.IsNullOrWhiteSpace(spec.Remark)) device["remark"] = spec.Remark.Trim();
 
         string keyField = protocol == "OTAP" ? "OTAPKey" : "EhomeKey";
 
-        // Intento 1: la clave cifrada, que es como la espera la pasarela. Si la
-        // pasarela no expone sus capacidades de seguridad, o si aun así rechaza
-        // el alta, se reintenta en claro: hay versiones que la aceptan tal cual.
-        var security = key is null ? null : await BuildSecurityKeyAsync(ClientOf(info), info, ct);
-        if (security is { } sec)
+        // Primero, la forma que se probó contra el equipo y funciona: la clave
+        // tal cual. Solo si esa falla se intenta cifrada (security=1), por si
+        // otra versión de la pasarela la exige así.
+        try
         {
-            parameters[keyField] = AesCbcHex(key!, sec.Key, sec.Iv);
+            return await PostAddDeviceAsync(info, device, "", ct);
+        }
+        catch (DriverException primera)
+        {
+            if (key is null || await BuildSecurityKeyAsync(ClientOf(info), info, ct) is not { } sec)
+                throw;
+
+            parameters[keyField] = AesCbcHex(key, sec.Key, sec.Iv);
             try
             {
                 return await PostAddDeviceAsync(info, device, $"&security=1&iv={sec.Iv}", ct);
             }
             catch (DriverException)
             {
-                parameters[keyField] = key;   // segundo intento, sin cifrar
+                throw primera;   // se informa el rechazo del intento normal, que es el util
             }
         }
-
-        return await PostAddDeviceAsync(info, device, "", ct);
     }
 
     /// <summary>Manda el alta y traduce el resultado que devuelve la pasarela.</summary>
