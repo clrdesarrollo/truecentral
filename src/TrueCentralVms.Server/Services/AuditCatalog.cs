@@ -114,6 +114,7 @@ public static class AuditCatalog
             new("receiver-devices-listed", "Equipos de la receptora consultados"),
             new("receiver-device-added", "Equipo agregado en la receptora"),
             new("receiver-device-removed", "Equipo quitado de la receptora"),
+            new("receiver-credential-viewed", "Credencial de la receptora consultada"),
             new("panel-refreshed", "Estado del panel actualizado a pedido"),
             new("area-armed", "Área armada"),
             new("area-disarmed", "Área desarmada"),

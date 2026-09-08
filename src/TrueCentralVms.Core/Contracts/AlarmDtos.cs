@@ -163,6 +163,13 @@ public sealed record AlarmLocalReceiverDto(
     string Username,
     string? Message);
 
+/// <summary>
+/// Credencial que el sistema generó para la receptora de este servidor. Solo se
+/// entrega a administradores y queda registrada en la bitácora: existe para
+/// diagnósticos, no para el uso diario.
+/// </summary>
+public sealed record AlarmLocalReceiverCredentialDto(string Host, int Port, string Username, string Password);
+
 /// <summary>Conexión con la receptora para operar su lista de equipos.</summary>
 public sealed record AlarmReceiverConnectionDto(
     string Host,

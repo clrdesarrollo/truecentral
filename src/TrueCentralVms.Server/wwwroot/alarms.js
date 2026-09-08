@@ -58,7 +58,8 @@ async function renderAlarmPanels() {
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Paneles de alarma <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
-      ${isAdmin ? `<button class="btn" id="btn-alarm-new">Agregar panel</button>` : ""}
+      ${isAdmin ? `<button class="btn ghost" id="btn-alarm-cred" title="Credencial que el sistema generó para la receptora de este servidor (para diagnósticos)">Credencial de la receptora</button>
+      <button class="btn" id="btn-alarm-new">Agregar panel</button>` : ""}
     </div>
     ${panels.length === 0 ? `
       <div class="info-box">
@@ -93,6 +94,26 @@ async function renderAlarmPanels() {
             <tr class="hidden" data-detail="${p.id}"><td colspan="11"></td></tr>`).join("")}
         </tbody>
       </table></div>`}`;
+
+  // Diagnóstico: mostrar la credencial que el sistema le puso a la receptora.
+  // Queda en la bitácora; para operar no hace falta conocerla.
+  $("#btn-alarm-cred")?.addEventListener("click", async () => {
+    try {
+      const c = await Api.get("/api/alarms/receiver/local/credential");
+      openModal(`
+        <h3>Credencial de la receptora</h3>
+        <div class="info-box">La generó el sistema al instalarla y la guarda cifrada. Sirve para entrar a la
+          interfaz del fabricante en un diagnóstico; para operar no hace falta. Esta consulta queda registrada
+          en la bitácora.</div>
+        <div class="field"><label>Dirección</label><input readonly value="http://${esc(c.host)}:${c.port}"></div>
+        <div class="field"><label>Usuario</label><input readonly value="${esc(c.username)}"></div>
+        <div class="field"><label>Contraseña</label><input readonly value="${esc(c.password)}"></div>
+        <div class="modal-actions"><button class="btn" type="button" id="cred-close">Cerrar</button></div>`, true);
+      $("#cred-close").addEventListener("click", closeModal);
+    } catch (err) {
+      toast(err.error ?? "No se pudo obtener la credencial.");
+    }
+  });
 
   $("#btn-alarm-new")?.addEventListener("click", () => alarmPanelModal(null));
   $$("#view .btn-edit").forEach((b) => b.addEventListener("click", (e) => {

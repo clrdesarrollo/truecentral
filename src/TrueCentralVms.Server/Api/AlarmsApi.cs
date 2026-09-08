@@ -374,6 +374,24 @@ public static class AlarmsApi
                 local.Host, local.Port, LocalIpReceiverService.AdminUser, state.Message));
         });
 
+        // La credencial de la receptora propia la genera y guarda el sistema, y no
+        // hace falta para operar. Pero un administrador puede necesitarla para
+        // entrar a la interfaz del fabricante en un diagnóstico, así que se
+        // puede consultar aquí: solo administradores y queda en la bitácora.
+        app.MapGet("/api/alarms/receiver/local/credential", async (HttpContext ctx, LocalIpReceiverService local,
+            AuditService audit) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (local.GetPassword() is not { Length: > 0 } password)
+                return Error("El sistema todavía no activó la receptora de este servidor: no hay credencial que mostrar.");
+
+            await audit.LogAsync(ctx, "alarms", "receiver-credential-viewed",
+                targetType: "alarm-receiver", targetName: $"{local.Host}:{local.Port}",
+                detail: "Consultó la credencial que el sistema generó para la receptora de este servidor.");
+            return Results.Ok(new AlarmLocalReceiverCredentialDto(local.Host, local.Port,
+                LocalIpReceiverService.AdminUser, password));
+        });
+
         app.MapPost("/api/alarms/receiver/devices/list", async (HttpContext ctx, AlarmReceiverConnectionDto request,
             VmsDbContext db, CredentialProtector protector, AuditService audit, LocalIpReceiverService local,
             string? search, CancellationToken ct) =>
