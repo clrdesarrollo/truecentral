@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using TrueCentralVms.Core.Contracts;
@@ -196,6 +197,75 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         return text;
     }
 
+    /// <summary>
+    /// La clave del panel (EhomeKey/OTAPKey) es un campo sensible: la pasarela
+    /// espera recibirlo CIFRADO, no en claro. Su propio panel web lo marca como
+    /// «security1» y lo cifra así (reproducido de su JavaScript):
+    ///
+    ///  1. <c>GET /ISAPI/Security/capabilities</c> entrega <c>salt</c>,
+    ///     <c>keyIterateNum</c> e <c>isIrreversible</c>.
+    ///  2. base = isIrreversible ? SHA256(usuario + salt + contraseña) : contraseña.
+    ///  3. llave = SHA256(base + "AaBbCcDd1234!@#$"), repitiendo SHA256 sobre el
+    ///     resultado hasta completar keyIterateNum vueltas; se toman los
+    ///     primeros 32 caracteres del hexadecimal (16 bytes = AES-128).
+    ///  4. El valor viaja como AES-128-CBC en hexadecimal, con un IV al azar que
+    ///     se manda en la URL: <c>&amp;security=1&amp;iv=…</c>.
+    ///
+    /// Enviarlo en claro es justo lo que hace fallar el alta con
+    /// «addDeviceFailed»: la pasarela intenta descifrar y no puede.
+    /// </summary>
+    private static async Task<(string Key, string Iv)?> BuildSecurityKeyAsync(HikvisionIsapiClient client,
+        AlarmConnectionInfo info, CancellationToken ct)
+    {
+        string? json;
+        try
+        {
+            json = await client.RequestAsync(HttpMethod.Get,
+                $"/ISAPI/Security/capabilities?format=json&username={Uri.EscapeDataString(info.Username)}", ct: ct);
+        }
+        catch (DriverException)
+        {
+            return null;   // sin capacidades no se puede derivar: se enviará en claro
+        }
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        using var doc = JsonDocument.Parse(json);
+        if (!HikvisionAlarmPanelDriver.TryGetPropertyIgnoreCase(doc.RootElement, "SecurityCap", out var cap))
+            return null;
+
+        int iterations = HikvisionAlarmPanelDriver.GetInt(cap, "keyIterateNum") ?? 0;
+        if (iterations <= 0)
+            return null;   // la pasarela no usa este esquema
+
+        string salt = HikvisionAlarmPanelDriver.GetString(cap, "salt") ?? "";
+        bool irreversible = HikvisionAlarmPanelDriver.TryGetPropertyIgnoreCase(cap, "isIrreversible", out var irr) &&
+                            irr.ValueKind == JsonValueKind.True;
+
+        string basis = irreversible ? Sha256Hex(info.Username + salt + info.Password) : info.Password;
+        string derived = Sha256Hex(basis + "AaBbCcDd1234!@#$");
+        for (int i = 1; i < iterations; i++)
+            derived = Sha256Hex(derived);
+
+        return (derived[..32], Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
+    }
+
+    private static string Sha256Hex(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    /// <summary>AES-128 CBC con relleno PKCS7; llave e IV en hexadecimal, salida hexadecimal.</summary>
+    private static string AesCbcHex(string plain, string keyHex, string ivHex)
+    {
+        using var aes = Aes.Create();
+        aes.Mode = CipherMode.CBC;
+        aes.Padding = PaddingMode.PKCS7;
+        aes.Key = Convert.FromHexString(keyHex);
+        aes.IV = Convert.FromHexString(ivHex);
+        using var encryptor = aes.CreateEncryptor();
+        byte[] bytes = Encoding.UTF8.GetBytes(plain);
+        return Convert.ToHexString(encryptor.TransformFinalBlock(bytes, 0, bytes.Length)).ToLowerInvariant();
+    }
+
     /// <summary>Lista los equipos agregados en la pasarela (opcionalmente filtrados).</summary>
     public static async Task<IReadOnlyList<GatewayDeviceSummary>> ListGatewayDevicesAsync(
         AlarmConnectionInfo info, string? keyword, CancellationToken ct = default)
@@ -235,18 +305,44 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
             ["devType"] = devType,
         };
         var parameters = new Dictionary<string, object?> { [protocol == "OTAP" ? "OTAPID" : "EhomeID"] = deviceId };
-        if (key is not null) parameters[protocol == "OTAP" ? "OTAPKey" : "EhomeKey"] = key;
+        if (key is not null) parameters[protocol == "OTAP" ? "OTAPKey" : "EhomeKey"] = key;   // se reemplaza cifrada más abajo
         device[protocol == "OTAP" ? "OTAPParams" : "EhomeParams"] = parameters;
         if (!string.IsNullOrWhiteSpace(spec.AccountId)) device["accountID"] = spec.AccountId.Trim();
         if (!string.IsNullOrWhiteSpace(spec.Remark)) device["remark"] = spec.Remark.Trim();
 
+        string keyField = protocol == "OTAP" ? "OTAPKey" : "EhomeKey";
+
+        // Intento 1: la clave cifrada, que es como la espera la pasarela. Si la
+        // pasarela no expone sus capacidades de seguridad, o si aun así rechaza
+        // el alta, se reintenta en claro: hay versiones que la aceptan tal cual.
+        var security = key is null ? null : await BuildSecurityKeyAsync(ClientOf(info), info, ct);
+        if (security is { } sec)
+        {
+            parameters[keyField] = AesCbcHex(key!, sec.Key, sec.Iv);
+            try
+            {
+                return await PostAddDeviceAsync(info, device, $"&security=1&iv={sec.Iv}", ct);
+            }
+            catch (DriverException)
+            {
+                parameters[keyField] = key;   // segundo intento, sin cifrar
+            }
+        }
+
+        return await PostAddDeviceAsync(info, device, "", ct);
+    }
+
+    /// <summary>Manda el alta y traduce el resultado que devuelve la pasarela.</summary>
+    private static async Task<string> PostAddDeviceAsync(AlarmConnectionInfo info, Dictionary<string, object?> device,
+        string extraQuery, CancellationToken ct)
+    {
         string body = JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["DeviceInList"] = new[] { new Dictionary<string, object?> { ["Device"] = device } },
         });
 
-        string json = await ManageAsync(info, "/ISAPI/ContentMgmt/DeviceMgmt/addDevice?format=json", body, ct,
-            "el alta de equipos");
+        string json = await ManageAsync(info, "/ISAPI/ContentMgmt/DeviceMgmt/addDevice?format=json" + extraQuery,
+            body, ct, "el alta de equipos");
 
         using var doc = JsonDocument.Parse(json);
         foreach (var item in HikvisionAlarmPanelDriver.EnumerateList(doc.RootElement, "DeviceOutList", "Device"))
@@ -303,6 +399,8 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         "deviceExist" => "Ese equipo ya está agregado en la pasarela.",
         "monitorNodeOverLimit" => "La pasarela llegó al límite de equipos de su licencia.",
         "badParameters" => "La pasarela rechazó los datos del equipo (revise el ID y la clave).",
+        "addDeviceFailed" => "La pasarela no pudo agregar el equipo: revise que el ID y la clave sean los que tiene " +
+                             "configurados el panel (en el AX PRO: Comunicación → ISUP) y que la clave tenga al menos 8 caracteres.",
         "noMemory" => "La pasarela no tiene memoria disponible para agregar el equipo.",
         var other => $"La pasarela no pudo agregar el equipo{(other is null ? "" : $" ({other})")}.",
     };
