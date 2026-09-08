@@ -293,6 +293,10 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         string? key = string.IsNullOrWhiteSpace(spec.DeviceKey) ? null : spec.DeviceKey.Trim();
         if (key is { Length: > 32 })
             throw new DriverException("La clave del equipo admite hasta 32 caracteres.");
+        // Los equipos Hikvision exigen 8 o más para la clave ISUP/OTAP; con
+        // menos, la pasarela rechaza el alta sin decir por qué.
+        if (key is { Length: < 8 })
+            throw new DriverException("La clave del equipo debe tener al menos 8 caracteres (es la que está configurada en el panel).");
         string name = string.IsNullOrWhiteSpace(spec.Name) ? deviceId : spec.Name.Trim();
         // "SecurityCP" (panel de alarma) o "encodingDev" (equipo de video).
         string devType = string.Equals(spec.DeviceType, "encodingDev", StringComparison.OrdinalIgnoreCase)
@@ -307,8 +311,12 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         var parameters = new Dictionary<string, object?> { [protocol == "OTAP" ? "OTAPID" : "EhomeID"] = deviceId };
         if (key is not null) parameters[protocol == "OTAP" ? "OTAPKey" : "EhomeKey"] = key;   // se reemplaza cifrada más abajo
         device[protocol == "OTAP" ? "OTAPParams" : "EhomeParams"] = parameters;
-        if (!string.IsNullOrWhiteSpace(spec.AccountId)) device["accountID"] = spec.AccountId.Trim();
-        if (!string.IsNullOrWhiteSpace(spec.Remark)) device["remark"] = spec.Remark.Trim();
+        // El formulario del fabricante manda SIEMPRE accountID (el numero de
+        // abonado con el que el panel se identifica ante la central) y remark.
+        // Omitirlos es una de las cosas que la pasarela rechaza con
+        // "addDeviceFailed", asi que si no se indica se usa el propio ID.
+        device["accountID"] = string.IsNullOrWhiteSpace(spec.AccountId) ? deviceId : spec.AccountId.Trim();
+        device["remark"] = string.IsNullOrWhiteSpace(spec.Remark) ? "" : spec.Remark.Trim();
 
         string keyField = protocol == "OTAP" ? "OTAPKey" : "EhomeKey";
 
@@ -351,10 +359,21 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
             if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
                 return HikvisionAlarmPanelDriver.GetString(item, "devIndex")
                        ?? throw new DriverException("La pasarela agregó el equipo pero no devolvió su identificador.");
-            throw new DriverException(DescribeAddFailure(HikvisionAlarmPanelDriver.GetString(item, "subStatusCode")));
+            // La respuesta literal va en el mensaje: sin ella hay que ir al
+            // servidor a buscarla, y es lo único que dice qué rechazó de verdad.
+            throw new DriverException(DescribeAddFailure(HikvisionAlarmPanelDriver.GetString(item, "subStatusCode")) +
+                                      $" [clave {(extraQuery.Length > 0 ? "cifrada" : "en claro")}; respuesta: {Shorten(json)}]");
         }
         // Lote entero fallido: la pasarela responde solo con ResponseStatus.
-        HikvisionAlarmPanelDriver.EnsureOk(json, "agregar el equipo");
+        try
+        {
+            HikvisionAlarmPanelDriver.EnsureOk(json, "agregar el equipo");
+        }
+        catch (DriverException ex)
+        {
+            throw new DriverException($"{ex.Message} [clave {(extraQuery.Length > 0 ? "cifrada" : "en claro")}; " +
+                                      $"respuesta: {Shorten(json)}]", ex);
+        }
         throw new DriverException("La pasarela no informó el resultado del alta del equipo.");
     }
 
@@ -385,6 +404,13 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
                 var other => $"La pasarela no pudo quitar el equipo{(other is null ? "" : $" ({other})")}.",
             });
         }
+    }
+
+    /// <summary>Recorta la respuesta cruda para que quepa en un mensaje de error.</summary>
+    private static string Shorten(string value)
+    {
+        string one = value.Replace("\r", " ").Replace("\n", " ").Trim();
+        return one.Length <= 300 ? one : one[..300] + "…";
     }
 
     private static string NormalizeProtocol(string? protocol) => (protocol ?? "").Trim().ToLowerInvariant() switch
