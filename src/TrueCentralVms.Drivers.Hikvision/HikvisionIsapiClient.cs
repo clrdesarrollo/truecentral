@@ -52,13 +52,15 @@ public sealed partial class HikvisionIsapiClient
     private static readonly ConcurrentDictionary<string, Entry> Entries = new();
 
     private readonly Entry _entry;
+    /// <summary>Cómo se nombra el equipo en los mensajes de error ("panel", "equipo de control de acceso").</summary>
+    private readonly string _noun;
 
     /// <param name="digestOnly">
     /// No probar el login de sesión: autenticar siempre por Digest (lo que
     /// documenta el Hik IP Receiver Pro para su API; su sesión web no habilita
     /// la suscripción de eventos).
     /// </param>
-    public HikvisionIsapiClient(AlarmConnectionInfo info, bool digestOnly = false)
+    public HikvisionIsapiClient(AlarmConnectionInfo info, bool digestOnly = false, string deviceNoun = "panel")
     {
         string key = $"{info.UseHttps}|{info.Host}|{info.Port}|{info.Username}|{info.Password}|{digestOnly}";
         _entry = Entries.GetOrAdd(key, _ =>
@@ -68,6 +70,7 @@ public sealed partial class HikvisionIsapiClient
             return entry;
         });
         _entry.LastUsed = DateTime.UtcNow;
+        _noun = deviceNoun;
     }
 
     public string BaseUrl => $"{(_entry.Info.UseHttps ? "https" : "http")}://{_entry.Info.Host}:{_entry.Info.Port}";
@@ -132,7 +135,7 @@ public sealed partial class HikvisionIsapiClient
             return null;
         string text = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
-            throw new DriverException(DescribeFailure(response.StatusCode, text));
+            throw new DriverException(DescribeFailure(response.StatusCode, text, _noun));
         return text;
     }
 
@@ -144,7 +147,7 @@ public sealed partial class HikvisionIsapiClient
         {
             string text = await response.Content.ReadAsStringAsync(ct);
             response.Dispose();
-            throw new DriverException(DescribeFailure(response.StatusCode, text));
+            throw new DriverException(DescribeFailure(response.StatusCode, text, _noun));
         }
         return response;
     }
@@ -165,7 +168,7 @@ public sealed partial class HikvisionIsapiClient
             // mantenedor.
             string target = response.Headers.Location?.ToString() ?? "otra dirección";
             response.Dispose();
-            throw new DriverException($"El panel redirige a {target}: active HTTPS y use ese puerto en la configuración del panel.");
+            throw new DriverException($"El {_noun} redirige a {target}: active HTTPS y use ese puerto en su configuración.");
         }
         if (response.StatusCode != HttpStatusCode.Unauthorized)
             return response;
@@ -173,7 +176,7 @@ public sealed partial class HikvisionIsapiClient
         // 401: o el digest no sirve en este equipo, o la sesión web caducó.
         string text = await response.Content.ReadAsStringAsync(ct);
         response.Dispose();
-        ThrowIfLocked(text);
+        ThrowIfLocked(text, _noun);
 
         await SessionLoginAsync(ct);
         response = await SendOnceAsync(method, path, body, contentType, ct, streaming);
@@ -182,8 +185,8 @@ public sealed partial class HikvisionIsapiClient
 
         text = await response.Content.ReadAsStringAsync(ct);
         response.Dispose();
-        ThrowIfLocked(text);
-        throw new DriverException("El panel rechazó las credenciales (usuario o contraseña incorrectos).");
+        ThrowIfLocked(text, _noun);
+        throw new DriverException($"El {_noun} rechazó las credenciales (usuario o contraseña incorrectos).");
     }
 
     private async Task<HttpResponseMessage> SendOnceAsync(HttpMethod method, string path, string? body, string contentType,
@@ -206,11 +209,11 @@ public sealed partial class HikvisionIsapiClient
         }
         catch (HttpRequestException ex)
         {
-            throw new DriverException($"No se pudo conectar con el panel en {_entry.Info.Host}:{_entry.Info.Port}: {ex.Message}", ex);
+            throw new DriverException($"No se pudo conectar con el {_noun} en {_entry.Info.Host}:{_entry.Info.Port}: {ex.Message}", ex);
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new DriverException($"El panel en {_entry.Info.Host}:{_entry.Info.Port} no respondió a tiempo.");
+            throw new DriverException($"El {_noun} en {_entry.Info.Host}:{_entry.Info.Port} no respondió a tiempo.");
         }
     }
 
@@ -241,11 +244,11 @@ public sealed partial class HikvisionIsapiClient
             }
             catch (HttpRequestException ex)
             {
-                throw new DriverException($"No se pudo conectar con el panel en {_entry.Info.Host}:{_entry.Info.Port}: {ex.Message}", ex);
+                throw new DriverException($"No se pudo conectar con el {_noun} en {_entry.Info.Host}:{_entry.Info.Port}: {ex.Message}", ex);
             }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested)
             {
-                throw new DriverException($"El panel en {_entry.Info.Host}:{_entry.Info.Port} no respondió a tiempo.");
+                throw new DriverException($"El {_noun} en {_entry.Info.Host}:{_entry.Info.Port} no respondió a tiempo.");
             }
             _entry.AuthProbed = true;
             if (cap is null || !cap.Contains("<challenge>", StringComparison.OrdinalIgnoreCase))
@@ -285,7 +288,7 @@ public sealed partial class HikvisionIsapiClient
             }
             catch (HttpRequestException ex)
             {
-                throw new DriverException($"El panel no ofrece login de sesión y rechazó el digest: {ex.Message}", ex);
+                throw new DriverException($"El {_noun} no ofrece login de sesión y rechazó el digest: {ex.Message}", ex);
             }
 
             var doc = XDocument.Parse(cap);
@@ -298,7 +301,7 @@ public sealed partial class HikvisionIsapiClient
             bool irreversible = string.Equals(Value("isIrreversible"), "true", StringComparison.OrdinalIgnoreCase);
             string version = Value("sessionIDVersion");
             if (sessionId.Length == 0 || challenge.Length == 0)
-                throw new DriverException("El panel no entregó el reto de login de sesión (respuesta inesperada).");
+                throw new DriverException($"El {_noun} no entregó el reto de login de sesión (respuesta inesperada).");
 
             string encoded;
             if (irreversible)
@@ -337,11 +340,11 @@ public sealed partial class HikvisionIsapiClient
             };
             using var response = await _entry.PlainHttp.SendAsync(request, ct);
             string text = await response.Content.ReadAsStringAsync(ct);
-            ThrowIfLocked(text);
+            ThrowIfLocked(text, _noun);
             if (!response.IsSuccessStatusCode)
                 throw new DriverException(response.StatusCode == HttpStatusCode.Unauthorized
-                    ? "El panel rechazó las credenciales (usuario o contraseña incorrectos)."
-                    : DescribeFailure(response.StatusCode, text));
+                    ? $"El {_noun} rechazó las credenciales (usuario o contraseña incorrectos)."
+                    : DescribeFailure(response.StatusCode, text, _noun));
 
             string? newSession = null;
             try
@@ -350,7 +353,7 @@ public sealed partial class HikvisionIsapiClient
                 newSession = login.Descendants().FirstOrDefault(e => e.Name.LocalName == "sessionID")?.Value?.Trim();
                 string status = login.Descendants().FirstOrDefault(e => e.Name.LocalName == "statusValue")?.Value?.Trim() ?? "";
                 if (status.Length > 0 && status != "200")
-                    throw new DriverException("El panel rechazó el login de sesión: " +
+                    throw new DriverException($"El {_noun} rechazó el login de sesión: " +
                         (login.Descendants().FirstOrDefault(e => e.Name.LocalName == "statusString")?.Value ?? status));
             }
             catch (System.Xml.XmlException)
@@ -379,13 +382,16 @@ public sealed partial class HikvisionIsapiClient
     // Errores
     // ------------------------------------------------------------------
 
-    [GeneratedRegex("<lockStatus>\\s*lock\\s*</lockStatus>", RegexOptions.IgnoreCase)]
+    // Los equipos contestan XML o JSON segun el endpoint (el IP Receiver Pro usa
+    // JSON), asi que los patrones aceptan las dos formas: <lockStatus>lock</...>
+    // y "lockStatus":"lock".
+    [GeneratedRegex("(<lockStatus>\\s*lock\\s*</lockStatus>)|(\"lockStatus\"\\s*:\\s*\"lock\")", RegexOptions.IgnoreCase)]
     private static partial Regex LockedPattern();
 
-    [GeneratedRegex("<unlockTime>\\s*(\\d+)\\s*</unlockTime>", RegexOptions.IgnoreCase)]
+    [GeneratedRegex("(<unlockTime>\\s*(?<v>\\d+)\\s*</unlockTime>)|(\"unlockTime\"\\s*:\\s*(?<v>\\d+))", RegexOptions.IgnoreCase)]
     private static partial Regex UnlockTimePattern();
 
-    [GeneratedRegex("<retryLoginTime>\\s*(\\d+)\\s*</retryLoginTime>", RegexOptions.IgnoreCase)]
+    [GeneratedRegex("(<retryLoginTime>\\s*(?<v>\\d+)\\s*</retryLoginTime>)|(\"retryLoginTime\"\\s*:\\s*(?<v>\\d+))", RegexOptions.IgnoreCase)]
     private static partial Regex RetryLoginTimePattern();
 
     /// <summary>
@@ -396,23 +402,23 @@ public sealed partial class HikvisionIsapiClient
     /// se vuelve a intentar, porque el siguiente fallo deja al panel sin
     /// monitoreo durante 30 min.
     /// </summary>
-    private static void ThrowIfLocked(string? body)
+    private static void ThrowIfLocked(string? body, string noun = "panel")
     {
         if (string.IsNullOrEmpty(body)) return;
         var r = RetryLoginTimePattern().Match(body);
-        if (r.Success && int.TryParse(r.Groups[1].Value, out int left) && left <= 1)
-            throw new DriverException("El panel rechazó las credenciales y está a un intento de bloquear el acceso. " +
+        if (r.Success && int.TryParse(r.Groups["v"].Value, out int left) && left <= 1)
+            throw new DriverException($"El {noun} rechazó las credenciales y está a un intento de bloquear el acceso. " +
                                       "Verifique el usuario y la contraseña antes de reintentar.");
         if (!LockedPattern().IsMatch(body)) return;
         var m = UnlockTimePattern().Match(body);
-        string wait = m.Success && int.TryParse(m.Groups[1].Value, out int seconds)
+        string wait = m.Success && int.TryParse(m.Groups["v"].Value, out int seconds)
             ? $" Se libera en {seconds / 60} min."
             : "";
-        throw new DriverException("El panel bloqueó el acceso por intentos de login fallidos." + wait +
+        throw new DriverException($"El {noun} bloqueó el acceso por intentos de login fallidos." + wait +
                                   " Verifique el usuario y la contraseña antes de reintentar.");
     }
 
-    private static string DescribeFailure(HttpStatusCode status, string body)
+    private static string DescribeFailure(HttpStatusCode status, string body, string noun = "panel")
     {
         string? statusString = null, subStatus = null, errorMsg = null;
         if (body.TrimStart().StartsWith('<'))
@@ -441,11 +447,11 @@ public sealed partial class HikvisionIsapiClient
         string detail = string.Join(" · ", new[] { statusString, subStatus, errorMsg }.Where(s => !string.IsNullOrWhiteSpace(s))!);
         return status switch
         {
-            HttpStatusCode.Forbidden => "El panel denegó la operación (el usuario no tiene permiso)." + Suffix(detail),
-            HttpStatusCode.NotFound => "El panel no soporta esta función (recurso ISAPI inexistente)." + Suffix(detail),
-            HttpStatusCode.BadRequest => "El panel rechazó la solicitud." + Suffix(detail),
-            HttpStatusCode.Locked => "El panel rechazó la orden: el recurso está bloqueado." + Suffix(detail),
-            _ => $"El panel respondió {(int)status}." + Suffix(detail),
+            HttpStatusCode.Forbidden => $"El {noun} denegó la operación (el usuario no tiene permiso)." + Suffix(detail),
+            HttpStatusCode.NotFound => $"El {noun} no soporta esta función (recurso ISAPI inexistente)." + Suffix(detail),
+            HttpStatusCode.BadRequest => $"El {noun} rechazó la solicitud." + Suffix(detail),
+            HttpStatusCode.Locked => $"El {noun} rechazó la orden: el recurso está bloqueado." + Suffix(detail),
+            _ => $"El {noun} respondió {(int)status}." + Suffix(detail),
         };
 
         static string Suffix(string detail) => detail.Length > 0 ? $" ({detail})" : "";

@@ -355,7 +355,19 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         string json = await ManageAsync(info, "/ISAPI/ContentMgmt/DeviceMgmt/addDevice?format=json" + extraQuery,
             body, ct, "el alta de equipos");
 
-        using var doc = JsonDocument.Parse(json);
+        // La pasarela puede contestar algo que no es JSON (una pagina de error de
+        // su nginx, por ejemplo). Sin esto reventaba con un 500 sin explicacion.
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(json);
+        }
+        catch (JsonException)
+        {
+            throw new DriverException($"La pasarela respondió algo que no se pudo interpretar al agregar el equipo: {Shorten(json)}");
+        }
+        using (doc)
+        {
         foreach (var item in HikvisionAlarmPanelDriver.EnumerateList(doc.RootElement, "DeviceOutList", "Device"))
         {
             string? status = HikvisionAlarmPanelDriver.GetString(item, "status");
@@ -367,6 +379,8 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
             throw new DriverException(DescribeAddFailure(HikvisionAlarmPanelDriver.GetString(item, "subStatusCode")) +
                                       $" [clave {(extraQuery.Length > 0 ? "cifrada" : "en claro")}; respuesta: {Shorten(json)}]");
         }
+        }
+
         // Lote entero fallido: la pasarela responde solo con ResponseStatus.
         try
         {

@@ -413,6 +413,10 @@ public static class AlarmsApi
                     detail: $"No pudo listar los equipos de la receptora: {ex.Message}", success: false);
                 return Error(ex.Message);
             }
+            catch (Exception ex)
+            {
+                return Error($"Error inesperado al consultar la receptora: {ex.Message}");
+            }
         });
 
         app.MapPost("/api/alarms/receiver/devices", async (HttpContext ctx, AlarmReceiverAddDeviceDto request,
@@ -444,6 +448,15 @@ public static class AlarmsApi
                     detail: $"No pudo agregar el equipo «{name}» (ID {request.DeviceId.Trim()}) a la receptora {target}: {ex.Message}",
                     success: false);
                 return Error(ex.Message);
+            }
+            // Sin esto, cualquier cosa inesperada llegaba al navegador como un
+            // «Error 500» pelado, que no dice nada de lo que paso.
+            catch (Exception ex)
+            {
+                await audit.LogAsync(ctx, "alarms", "receiver-device-added",
+                    targetType: "alarm-receiver", targetName: target,
+                    detail: $"Error inesperado al agregar el equipo «{name}»: {ex}", success: false);
+                return Error($"Error inesperado al agregar el equipo en la receptora: {ex.Message}");
             }
         });
 
@@ -479,6 +492,10 @@ public static class AlarmsApi
                     targetType: "alarm-receiver", targetName: target,
                     detail: $"No pudo quitar el equipo {devIndex} de la receptora {target}: {ex.Message}", success: false);
                 return Error(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return Error($"Error inesperado al quitar el equipo de la receptora: {ex.Message}");
             }
         });
 
