@@ -133,6 +133,18 @@ public static class VmsHubContract
     /// <summary>Un parlante IP cambió de estado de conexión (payload: SpeakerDto).</summary>
     public const string SpeakerStatusChanged = nameof(SpeakerStatusChanged);
 
+    /// <summary>Un equipo de control de acceso cambió de estado de conexión (payload: AccessDeviceDto).</summary>
+    public const string AccessDeviceStatusChanged = nameof(AccessDeviceStatusChanged);
+
+    /// <summary>Una puerta cambió de modo o de estado de hoja (payload: AccessDoorStateDto).</summary>
+    public const string AccessDoorStateChanged = nameof(AccessDoorStateChanged);
+
+    /// <summary>Alguien pasó (o lo rechazaron) por una puerta (payload: AccessEventDto).</summary>
+    public const string AccessEventReceived = nameof(AccessEventReceived);
+
+    /// <summary>Cambió lo escrito en los equipos para una persona (payload: AccessPersonDto).</summary>
+    public const string AccessPersonSyncChanged = nameof(AccessPersonSyncChanged);
+
     /// <summary>Un servicio supervisado cambió de estado (payload: ManagedServiceDto).</summary>
     public const string ServiceStateChanged = nameof(ServiceStateChanged);
 }
