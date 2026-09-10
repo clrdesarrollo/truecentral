@@ -179,6 +179,417 @@ Módulo **Parlantes IP** (2026-09-02): entidad `Speaker` (migración `Speakers`;
 - **Auditoría** (categoría `speakers`): alta/edición/borrado/prueba, play/play-failed, stop, talk-started/stopped/rejected (con segundos de audio y motivo), volumen, biblioteca (subida/borrado/TTS) y caídas/recuperaciones del sondeo.
 - **Pendiente**: validar el panel del cliente WPF con el usuario (micrófono real, varios parlantes marcados) y probar la sincronía con un segundo parlante físico.
 
+## Control de acceso — 2026-09-08 / 2026-09-09
+
+Módulo nuevo, en dos etapas. **Etapa 1: el administrador de dispositivos.**
+**Etapa 2 (2026-09-09): la operación** — puertas, horarios, niveles de acceso,
+padrón de personas e historial. Queda pendiente el enganche con
+automatizaciones y video.
+
+- **Modelo**: `AccessDevice` + `AccessDoor` (migración `AccessControlDevices`),
+  entidad aparte de `Device` — no tiene canales de video, tiene puertas. La
+  contraseña va cifrada con AES-GCM como en paneles y parlantes. La **puerta**
+  es la unidad que cuenta la licencia (`access_doors`; la prueba de 30 días pasó
+  a traer el módulo activo con 4 puertas, antes venía apagado).
+- **Contratos**: `IAccessControlDriver`/`AccessDriverRegistry` en Core
+  (`ProbeAsync` = identificación + capacidades + puertas; `PingAsync` = sondeo
+  liviano de estado), DTOs en `Contracts\AccessDtos.cs`.
+- **Multimarca (2026-09-08)**: tres drivers en el registro, uno por familia de
+  transporte. El mantenedor se adapta a la marca elegida porque el catálogo de
+  drivers ahora declara con qué se autentica (`AccessAuthMode`) y una ayuda
+  para el formulario:
+  - `hikvision-isapi` — ISAPI sobre HTTP, usuario y contraseña.
+  - `dahua-http` (`DahuaAccessDriver`) — CGI del equipo con Digest:
+    `magicBox.cgi` para identificación, `configManager.cgi?name=AccessControl`
+    para confirmar el subsistema y contar puertas (una entrada
+    `table.AccessControl[i]` por puerta) y `recordFinder.cgi?getQuerySize` para
+    saber si lleva tarjetas y eventos. **Nunca** se sondea
+    `accessControl.cgi?action=openDoor`: esa llamada abre la puerta.
+  - `zkteco-tcp` (`ZkTecoAccessDriver` + `ZkProtocol`/`ZkConnection`) —
+    protocolo propio del fabricante en TCP 4370, implementado de cero
+    (framing `50 50 82 7d` + largo, checksum que se envuelve en 65535, y el
+    cifrado de la clave de comunicación con la sesión). El equipo **no tiene
+    usuario**: la credencial es la *Comm Key* numérica (0 de fábrica), y acepta
+    **una sola conexión a la vez**, así que cada operación abre y cierra su
+    sesión y el descubrimiento no identifica a los equipos ya administrados
+    (los estaría peleando con el sondeo de estado).
+- **Driver `hikvision-isapi`** (`HikvisionAccessDriver`): reutiliza el
+  transporte ISAPI de los paneles (`HikvisionIsapiClient`, que ahora recibe
+  cómo nombrar al equipo en sus mensajes de error). Lee `/ISAPI/System/deviceInfo`
+  y confirma que es control de acceso con `/ISAPI/AccessControl/Door/param/capabilities`
+  (o `/ISAPI/AccessControl/capabilities`, o `…/RemoteControl/door/capabilities`);
+  de ahí saca cuántas puertas administra y les pide el nombre a
+  `/ISAPI/AccessControl/Door/param/{n}`. Las capacidades (apertura remota,
+  eventos, tarjeta, huella, rostro, cupos de personas y tarjetas) se consultan
+  de forma **tolerante**: un 404 significa "no lo soporta", no un error, porque
+  los firmware de la familia varían mucho en qué rutas exponen.
+- **Servicio y API**: `AccessControlService` (sondeo de estado cada 60 s, hasta
+  4 equipos en paralelo, cambios auditados y empujados por el hub) y
+  `AccessApi` (`/api/access/devices` CRUD, `/{id}/revalidate`, `/probe`,
+  `/drivers`). Hub: `AccessDeviceStatusChanged` + `ConfigChanged("access-devices")`.
+- **Descubrimiento**: `GET /api/discovery/scan?kind=access` corre SADP
+  (Hikvision), DHDiscover (Dahua) y el sondeo propio de ZKTeco —WS-Discovery no
+  distingue equipos de control de acceso, así que ahí se omite— y devuelve
+  **solo los equipos compatibles**, clasificados por el `ClassifyModel` de cada
+  driver: DS-K1T/DS-K5 y ASI/ASA terminal, DS-K2 y ASC controladora, DS-K3 y
+  ASG torniquete. La intercomunicación (DS-KH/KV/KD/KB, VT*) y las cerraduras
+  autónomas quedan fuera. ZKTeco no tiene anuncio propio: se difunde por UDP
+  4370 el mismo saludo del SDK y a quien contesta se le pregunta el modelo con
+  una sesión corta con la clave de fábrica (con clave propia aparece igual,
+  sin identificar).
+- **Panel web**: `#/access` (`wwwroot\access.js`), bajo *Dispositivos → Control
+  de acceso*: tabla de equipos administrados (tipo, dirección, modelo, firmware,
+  puertas, funciones, conexión) con Revalidar/Editar/Eliminar, y debajo la tabla
+  **SADP** de equipos en línea con **Agregar** en un clic.
+- **Auditoría** (categoría `access`): alta, edición, borrado, prueba de
+  conexión, revalidación, sondeo de la red y caídas/recuperaciones del sondeo.
+
+### Etapa 2 — la operación (2026-09-09)
+
+- **La cadena de decisión**, que es lo que ordena todo el resto:
+  `HORARIO (cuándo) + PUERTAS (por dónde) = NIVEL DE ACCESO`, y el nivel se le
+  asigna a las PERSONAS. El VMS es la fuente de verdad y los equipos son una
+  caché suya.
+- **Modelo** (migración `AccessControlCatalog`): `AccessSchedule` +
+  `AccessScheduleSegment`, `AccessLevel` con sus dos tablas de unión
+  (`AccessLevelDoor`, `AccessLevelPerson`), `AccessPerson` + `AccessCard`
+  (clave de teclado cifrada con AES-GCM como el resto de las credenciales),
+  `AccessPersonDevice` (qué pasó al escribir a cada persona en CADA equipo) y
+  `AccessEvent` (historial). `AccessDoor` gana modo/sensor/lectura y
+  `AccessDevice` una marca de agua de eventos (`LastEventAt`), que sobrevive al
+  reinicio del servidor.
+- **`AccessPlanSlot`: por qué existe.** Los equipos guardan los horarios en una
+  tabla NUMERADA y cada persona referencia, por puerta, UN número de esa tabla.
+  Cuando alguien llega a la misma puerta por dos niveles con horarios distintos,
+  lo correcto es escribir la UNIÓN (uno la deja pasar el martes, el otro el
+  jueves ⇒ pasa los dos días), y esa unión también necesita su número. La tabla
+  reparte ranuras **por huella del contenido**: mismos tramos ⇒ misma ranura, así
+  que cien personas del mismo nivel no gastan cien ranuras. Tope 128 (el de los
+  Hikvision de acceso, el más chico de la familia); agotarlo es un error con
+  mensaje, no un fallo silencioso.
+- **Sincronizador** (`AccessSyncService`): calcula, por persona, qué le
+  corresponde en cada equipo, saca una **huella** de eso y sólo escribe si
+  cambió. Los horarios se suben ANTES que la persona (una ranura vacía la
+  rechaza el equipo) y una vez por equipo y pasada. Lo que falla queda pendiente
+  con su motivo y se reintenta cada 5 min; un equipo caído deja la persona
+  `Pending`, no `Failed`, que es lo que evita convertir un corte de red en una
+  alarma de configuración. Borrar a alguien del VMS lo borra de los equipos: si
+  no, seguiría entrando.
+- **Reenvío forzado** (`MarkForResendAsync`): la huella de lo aplicado es lo que
+  evita molestar a los equipos al pepe, pero también es lo que hace que un
+  terminal reseteado se quede vacío para siempre —el VMS lo cree al día—. Los
+  botones *Reenviar todo* (`/api/access/sync/full`) y *Reenviar padrón* por
+  equipo (`/api/access/devices/{id}/resync`) borran esa huella a propósito y
+  vuelven a escribir. Las pasadas se serializan con un semáforo: la API y el
+  lazo de fondo pueden pedirla a la vez y dos en paralelo se pisarían las filas
+  de estado. **Verificado contra el DS-K1T321MFWX**: misma huella (el contenido
+  no cambió) pero `SyncedAt` nuevo, o sea que el equipo se reescribió de verdad.
+- **Eventos EN VIVO** (`alertStream`): el sondeo no sirve para un guardia
+  mirando el monitoreo, así que los equipos que saben empujar sus eventos se
+  escuchan de verdad. `GET /ISAPI/Event/notification/alertStream` deja la
+  respuesta abierta y manda cada evento como una parte MIME con un JSON
+  (`multipart/mixed; boundary=MIME_boundary`, verificado contra el
+  DS-K1T321MFWX). **Ojo**: en el flujo los códigos se llaman
+  `majorEventType`/`subEventType`, no `major`/`minor` como en la búsqueda del
+  historial; el parser entiende los dos.
+  Se eligió `alertStream` sobre `httpHosts` —la otra vía que soporta el
+  equipo— porque NO hay que configurar nada EN el terminal (httpHosts pide
+  darle una URL nuestra y solo admite dos, que pueden estar ocupadas por un
+  HikCentral) y porque la conexión la abre el servidor, así que anda igual
+  detrás de NAT. Una escucha por equipo, con reintento creciente hasta 60 s.
+- **Lector de eventos** (`AccessEventService`): el sondeo quedó como RESPALDO
+  de la escucha en vivo —cubre a las marcas que no empujan y tapa los huecos de
+  cuando la escucha estuvo caída o el servidor apagado—. Sondea cada 15 s desde
+  la marca de agua de cada equipo, ata los eventos a la persona del padrón por su
+  identificador (o por la tarjeta, si el equipo sólo informa eso) y purga según
+  `Access:EventRetentionDays` (365). Los accesos **no** van a la bitácora de
+  auditoría: esa registra lo que hacen los USUARIOS del VMS.
+- **Drivers**: Hikvision completo (`RemoteControl/door` para las órdenes,
+  `AcsWorkStatus` para el modo de cada puerta, `AcsEvent` paginado para el
+  historial, `UserInfo`/`CardInfo` para las personas y
+  `UserRightWeekPlanCfg` + `UserRightPlanTemplate` para los horarios; se manda
+  `doorRight` Y `RightPlan` porque los firmware viejos sólo entienden el
+  primero). Dahua: apertura/cierre por `accessControl.cgi` y historial por el
+  buscador de registros de cuatro pasos; ZKTeco: `CMD_UNLOCK` y el historial
+  binario de 40 bytes por renglón. En esas dos marcas el padrón se carga en el
+  equipo, y `SupportsPersonSync` hace que la interfaz lo diga en vez de ofrecer
+  algo que va a fallar.
+- **Códigos de evento**: las cuatro tablas de `HikvisionAccessDriver` son las
+  constantes `MAJOR_`/`MINOR_` del **CHCNetSDK de control de acceso**, 274
+  códigos: `MAJOR_EVENT` (0x5, lo que pasa en la puerta), `MAJOR_ALARM` (0x1,
+  sabotaje/coacción/incendio), `MAJOR_EXCEPTION` (0x2, el equipo fallando) y
+  `MAJOR_OPERATION` (0x3, lo que alguien le ordenó). Aunque las constantes
+  vengan del SDK, los códigos son los mismos que manda ISAPI, en el historial
+  y en el flujo en vivo. Se escriben **en hexadecimal** igual que en el SDK
+  para poder cotejarlos uno a uno: la tabla anterior estaba deducida en
+  decimal y por eso se había corrido seis códigos (el botón de salida es
+  `0x17`, no 21). Lo que igual no esté **no se adivina**: se guarda como
+  "Otro" con su código y su JSON crudo a la vista, porque inventar una
+  traducción mostraría un rechazo como si fuera un acceso concedido. La
+  credencial (tarjeta/huella/rostro) se saca además de `currentVerifyMode`,
+  que pisa a la de la tabla cuando el equipo lo informa.
+- **API** (`AccessCatalogApi`): `/api/access/doors` (+ `/{id}/command`),
+  `/schedules`, `/levels` (+ `/{id}/persons`), `/persons` (+ `/{id}/sync`),
+  `/events`, `/overview`, `/sync`, `/departments`. Operar una puerta y mirar el
+  historial es de cualquier usuario (es el trabajo del guardia); configurar
+  horarios, niveles y personas es de administrador (es decidir quién entra).
+- **Panel web** (`wwwrootccess-catalog.js`), menú *Control de acceso*:
+  `#/access-monitor` (puertas en vivo + lo que va pasando), `#/access-persons`,
+  `#/access-levels`, `#/access-schedules` (editor semanal con "+ tramo" y
+  "copiar a todos") y `#/access-events`. El alta de personas es un **asistente
+  de tres pasos** (datos / credenciales / accesos): lo escrito vive en un
+  borrador en memoria, no en el DOM —el cuerpo del modal se redibuja al cambiar
+  de paso—, cada paso valida lo suyo antes de dejar avanzar y se guarda UNA vez
+  al final, así cancelar no deja personas a medio crear. Editando, los tres
+  pasos están abiertos desde el principio y "Guardar cambios" está en todos.
+- **Supervisor**: los tres servicios del módulo (estado, padrón, historial)
+  entran al catálogo de *Sistema → Servicios*.
+
+### El login ISAPI de la familia DS-K (2026-09-09)
+
+Un DS-K1T804AMF devolvía **401 con la contraseña correcta** —la misma que entra
+sin problemas por iVMS-4200— mientras que otro terminal andaba bien. Preguntando
+al equipo salieron tres manías del firmware, cada una suficiente por sí sola
+para el rechazo:
+
+1. **`Content-Type: application/xml; charset=utf-8`** → 401. Sin el `charset`,
+   el MISMO hash entra. (`StringContent(xml, Encoding.UTF8, "application/xml")`
+   agrega el charset solo: hay que armar el cuerpo con `ByteArrayContent`.)
+2. **`?timeStamp=` en la URL del `sessionLogin`** → 401. Es un rompecachés que
+   cualquier servidor ignoraría; este no.
+3. **Reusar el reto** de una llamada anterior a `sessionLogin/capabilities` →
+   401. El equipo lo rota en cada consulta, así que cada intento necesita el
+   suyo.
+
+Y hay una cuarta, la peor: **cualquier cabecera `Accept` o `User-Agent` en la
+petición** también devuelve 401. Sin cabeceras propias, el mismo hash entra.
+
+**La solución no fue pelear con eso, sino evitarlo**: en los terminales DS-K el
+**digest anda de una** (200 a la primera, verificado), así que el driver de
+control de acceso construye su cliente con `digestOnly: true`. Los paneles de
+alarma siguen prefiriendo el login de sesión porque ellos sí rechazan el digest;
+son familias con manías opuestas. Si algún firmware DS-K rechazara el digest, el
+transporte cae solo al login de sesión ante el primer 401, así que no se pierde
+nada.
+
+Igual quedó arreglado el camino del login de sesión (cliente sin cabeceras
+propias, sin charset, sin timeStamp y reutilizando el reto ya pedido), con
+`SessionLoginStyle` para reintentar con la forma anterior si hiciera falta:
+**cuál funcionó queda anotado por conexión**, porque cada rechazo le consume un
+intento de login a la cuenta.
+
+**Ojo con el bloqueo**: una vez que el equipo bloquea, el digest queda bloqueado
+también, así que no se lo puede ni reiniciar por ISAPI — hay que esperar los 30
+minutos o cortarle la corriente.
+
+Lección para la próxima: **diagnosticar contra un equipo Hikvision cuesta
+intentos de login**. Investigando esto se bloqueó el terminal 30 minutos. Si hay
+que probar formas de autenticación, conviene hacerlo contra un equipo de banco,
+no contra uno en servicio.
+
+### Huellas — el complemento de enrolamiento (2026-09-09)
+
+- **Por qué un proceso aparte**: el navegador no llega al lector USB. El
+  complemento (`src\TrueCentralVms.WebControl`, WPF en bandeja) expone su API
+  con Kestrel **solo en 127.0.0.1** —sin urlacl y sin elevación, así arranca con
+  la sesión sin UAC— y el panel lo descubre probando 5081, 25471 y 25472.
+  Portado del `TrueCentral.WebControl` de vwcontroller, que ya estaba validado
+  contra el lector real.
+- **Lector**: DS-K1F820-F por `FPModule_SDK.dll` (P/Invoke). Dos rarezas del
+  hardware que están documentadas en el código porque cuestan de adivinar:
+  Windows lo presenta como **unidad de CD-ROM USB** (el SDK abre `\.\D:` y le
+  habla por SCSI), y el SDK **no admite indicarle cuál abrir** —para forzar uno
+  se toman los otros con un `FileStream` exclusivo—. Además bloquea durante todo
+  el enrolamiento y avisa por callback, así que la captura vive en un hilo
+  propio y el panel sondea el estado.
+- **Modelo**: `AccessFingerprint` (persona + número de dedo 1..10 + plantilla
+  **cifrada** + calidad + origen), migración `AccessFingerprints`. La plantilla
+  NUNCA sale del servidor: el DTO informa qué dedo está tomado, con qué calidad
+  y de dónde salió. En el panel, una huella que ya estaba viaja con
+  `template: null`, que es como se dice "dejá la que tenés".
+- **Bajada a los equipos** (las tres cosas verificadas preguntándole al
+  DS-K1T321MFWX, porque la documentación no coincide con el firmware):
+  `POST /ISAPI/AccessControl/FingerPrintDownload` —con PUT contesta
+  `methodNotAllowed`— y el objeto raíz del cuerpo se llama **`FingerPrintCfg`**,
+  no como la ruta: si no, responde `MessageParametersLack: FingerPrintCfg`, que
+  es justamente el nombre que espera. Para borrar,
+  `PUT /ISAPI/AccessControl/FingerPrint/Delete` **con barra**; la
+  `FingerPrintDelete` que documentan otros modelos responde `notSupport`. Las
+  dos formas quedaron con respaldo, porque los firmware de la familia difieren.
+  `enableCardReader` sale de `FingerPrintCfg/capabilities`, que declara su
+  `@max` (1 en un terminal), con respaldo de un lector por puerta.
+  `SupportsFingerprintSync` va aparte de `SupportsPersonSync` porque escribir
+  personas es una cosa y la biometría otra.
+- **El borrado previo NO se pasa por alto**: se borran las huellas de la persona
+  antes de escribir las nuevas, y si el borrado falla se corta con un error en
+  vez de seguir. Si el equipo se quedara con una huella que en el VMS ya no
+  está, esa huella seguiría abriendo la puerta — es el único lugar del módulo
+  donde tolerar un fallo sería un agujero de seguridad. (Al borrar la persona
+  entera sí se tolera: lo que le quita el acceso es el borrado de la persona,
+  que viene enseguida.)
+  Única excepción, y **con evidencia**: si el borrado falla se le pregunta al
+  equipo qué huellas tiene la persona
+  (`POST /ISAPI/AccessControl/FingerPrintUpload`), y solo si CONTESTA que
+  ninguna (`status: NoFP`) se sigue adelante. El V1.4.0 responde
+  `badParameters` al borrado de alguien que no tiene ninguna huella, así que
+  sin esto no se le puede escribir biometría a ese equipo nunca. Si el equipo
+  no sabe contestar la consulta, no se tolera nada: se corta igual.
+  El error que se informa es el de la ruta que **contestó algo con sentido**, no
+  el de la última probada: la segunda ruta de borrado responde `notSupport` en
+  los equipos que tienen la primera, y quedarse con eso tapaba el motivo real.
+- **Las diez huellas entran** (hasta diez dedos por persona, como corresponde),
+  pero LEERLAS es lo difícil. La consulta `FingerPrintUpload` devuelve **UN
+  dedo por llamada** aunque la persona tenga varios, y paginar con
+  `searchResultPosition` repite el mismo: hay que preguntar dedo por dedo
+  (`fingerPrintID` en la condición). Creerle la lista corta a esa consulta fue
+  lo que hizo que la comprobación acusara huellas perdidas que sí estaban.
+  El filtro por dedo tampoco es universal: el DS-K1T804AMF V1.4.0 lo ignora y
+  contesta que tiene cualquier dedo que se le nombre. Eso deja la comprobación
+  corta en ese equipo, pero nunca acusando en falso, que es el lado seguro.
+- **El equipo aplica lo que se le manda EN DIFERIDO**, y eso obliga a esperar
+  en dos lugares, no en uno. Durante unos 3 s sigue contestando el estado
+  anterior y a la operación pegada le dice `deviceBusy · leaderFP`. Lo que
+  cuesta descubrir es que **el BORRADO también es diferido**: si se escribe la
+  primera huella enseguida, el borrado la alcanza por dentro y se la lleva
+  puesta —quedaba siempre sin el primer dedo, y el equipo contestaba OK a las
+  dos escrituras—. Por eso se espera a que el equipo CONFIRME que no le queda
+  ninguna antes de escribir, hay un respiro entre huella y huella, y la
+  comprobación reintenta en vez de leer una sola vez.
+
+- **Una credencial que falla NO corta a las demás.** Tarjetas, huellas y rostro
+  se escriben cada una por su cuenta: si el equipo no sabe modelar la foto, la
+  persona igual queda escrita con su puerta, su clave, sus tarjetas y sus
+  huellas, y el error dice QUÉ faltó en vez de dejar todo en rojo sin explicar.
+  Antes una foto chica dejaba a la persona entera como fallida en ese equipo
+  aunque el resto ya estuviera adentro, y el operador no sabía que igual podía
+  entrar. El equipo sigue quedando en rojo —falta algo, y eso hay que verlo—
+  pero el mensaje empieza por lo que SÍ quedó.
+  (Lo que no se tolera es el núcleo: la ficha de la persona y los horarios. Sin
+  eso no hay nada que escribirle encima.)
+
+### Leer la tarjeta en el lector
+
+- `GET /ISAPI/AccessControl/CaptureCardInfo?format=json` deja al equipo
+  esperando que pasen una tarjeta y contesta
+  `{"CardInfo":{"cardNo":"3558822549"}}`. Verificado con una tarjeta real.
+  **No responde enseguida**: se queda unos 10 s y, si no pasó nadie, contesta
+  `deviceError`. Eso NO es un fallo, es "todavía nada": el panel vuelve a pedirlo
+  mientras el diálogo esté abierto. Con POST o PUT contesta `methodNotAllowed`:
+  es un GET.
+- **El 404 de estos equipos NO significa "esa ruta no existe"**: con eso dicen
+  "no pasó nadie" y "ya hay otra captura". Con el `allowNotFound` normal, el
+  cliente devolvía null y el panel mostraba "este equipo no sabe leer una
+  tarjeta" mientras el lector la esperaba en la cara del operador. Va con
+  `allowNotFound: false` para poder leer el cuerpo.
+- Atiende **una captura a la vez**; a la segunda contesta `deviceBusy`, que se
+  trata igual que "todavía nada".
+- **Cuánto espera el equipo cambia por firmware**, y eso marca el ritmo del
+  bucle: el DS-K1T321MFWX deja la petición abierta unos 10 s, y el
+  DS-K1T804AMF V1.4.0 contesta al instante (medido: 843 respuestas en 140 s).
+  Por eso el panel espera 1,2 s entre pedidos: sin eso le haría seis por
+  segundo al mismo terminal que está atendiendo eventos y sincronización.
+- **El LECTOR no se puede elegir: el equipo ignora `cardReaderNo`.** Confirmado
+  con una prueba alternada contra el DS-K1T321MFWX: pidiendo por turnos el
+  lector 1 y el 2 mientras se pasaba la MISMA tarjeta por el MISMO lector
+  físico, la leyó en los dos casos. O sea que el terminal escucha en todos sus
+  lectores y el parámetro es decorativo (también contesta igual para un lector
+  que no existe). Por eso el panel ofrece elegir el EQUIPO y no el lector: no
+  se ofrece un control que no hace nada. El parámetro se manda igual si el
+  llamador lo pide, por si algún firmware sí lo respeta.
+
+### Rostro (terminales con cámara)
+
+- Se guarda la **FOTO**, no una plantilla: el modelo lo arma el propio terminal,
+  así que hay que conservar la imagen para poder mandársela a un equipo nuevo.
+  Va cifrada como las huellas (`AccessFace`, migración `AccessFaces`), una por
+  persona, y no viaja en el JSON del padrón: se pide aparte por
+  `GET /api/access/persons/{id}/face`, porque pesa cientos de veces más que la
+  ficha y el listado la traería para todos sin necesitarla.
+- **Matrícula**: `POST /ISAPI/Intelligent/FDLib/FaceDataRecord` en
+  `multipart/form-data`, con una parte JSON llamada `FaceDataRecord` y otra
+  binaria llamada `img`. Biblioteca `FDID=1` / `blackFD`, hasta 500 rostros, JPG
+  o PNG (todo verificado contra el DS-K1T321MFWX).
+- **El separador del multipart va SIN comillas.** .NET escribe
+  `boundary="----xxx"`, que es válido según el RFC, y el terminal contesta
+  `badJsonFormat`: su parser se queda con la comilla pegada y no encuentra
+  ninguna parte. La cabecera se arma a mano por eso.
+- **Borrado**: `PUT /ISAPI/Intelligent/FDLib/FDSearch/Delete` con
+  `{"FPID":[{"value":"<legajo>"}]}` —con la lista de strings a secas contesta
+  `MessageParametersLack`—. Se tolera el `notSupport`: un equipo sin cámara no
+  puede estar guardando un rostro, y sin esa tolerancia toda persona quedaba
+  fallida en los terminales sin biblioteca de caras.
+- **La foto CHICA es el rechazo más común.** Medido con una foto real: a
+  135×189 px el equipo contesta `SubpicAnalysisModelingError`, y **esa misma
+  imagen ampliada al doble (270×378) la acepta**. No hay un mínimo publicado, así
+  que el panel no bloquea: avisa cuando el lado menor baja de 300 px y muestra la
+  medida, y el mensaje de rechazo nombra el tamaño primero. Ampliar una foto
+  chica pasa el filtro pero no agrega detalle: conviene una original grande.
+- **El borrado del rostro también es diferido**, igual que el de las huellas: si
+  se escribe encima antes de que termine, el equipo contesta
+  `deviceUserAlreadyExistFace`. Se espera a que confirme que ya no lo tiene.
+- **El rechazo típico no es de red**: `SubpicAnalysisModelingError · saveFacePic`
+  significa que el equipo leyó todo bien y no encontró una cara utilizable en la
+  foto. Se traduce a un mensaje que dice qué hacer (foto de frente, despejada,
+  bien iluminada) en vez de mostrar el código.
+- **Se COMPRUEBA lo escrito**: después de bajar las huellas se vuelven a leer
+  del equipo y se comparan con las del plan (`VerifyFingerprintsAsync`). Sin
+  esto el VMS marcaba `Synced` a una persona de la que solo había entrado la
+  mitad de la biometría —y peor: en un equipo había quedado una huella ajena al
+  padrón, matriculada en el propio terminal, que el VMS daba por buena—. Como
+  el equipo contesta en diferido, la lectura se reintenta (4 × 1,5 s) antes de
+  acusar una pérdida; leer una sola vez daba falsos positivos.
+- **El borrado de huellas necesita el cuerpo DETALLADO en los firmware viejos**:
+  el DS-K1T804AMF V1.4.0 solo borra si además del legajo se le mandan
+  `enableCardReader` y `fingerPrintID` (los diez dedos) dentro de
+  `EmployeeNoDetail` —su esquema los declara, y sin ellos contesta un
+  `badParameters` que no dice cuál falta—. Se prueba primero esa forma y después
+  la escueta, que es la que aceptan los firmware nuevos.
+- **`searchID`: el campo que más cuesta** (vale para huellas, personas e
+  historial). Es una **sesión de búsqueda**: si se repite un valor ya usado, el
+  equipo contesta como si la búsqueda estuviera agotada —`NoFP`, "no tiene
+  huellas"— aunque la persona sí las tenga. Con un valor fijo, la consulta que
+  decide si un borrado fallido es benigno habría dado siempre "no hay nada que
+  revocar": el agujero exacto que esa consulta viene a tapar. Va uno nuevo por
+  búsqueda (el mismo entre páginas de UNA búsqueda, que es como se pagina).
+  Y el **largo** tiene tope por ruta y por firmware, con rechazo mudo
+  (`badParameters`, sin decir qué campo): el DS-K1T804AMF V1.4.0 acepta 32 en
+  las huellas pero solo **20** en el historial; el DS-K1T321MFWX V3.9.20 acepta
+  64. `Guid.ToString()` da 36 y no entra en ninguno de los dos topes del viejo,
+  así que su historial fallaba entero. Se usan **16** caracteres, que entran en
+  todos. Mismo criterio con `maxResults`: el V1.4.0 declara `@max=10` en
+  `AcsEvent`, así que se pide de a 10 en todos los equipos.
+- **Probado de punta a punta**: con una plantilla sintética en el padrón, el
+  sincronizador la bajó al DS-K1T321MFWX y la persona quedó `Synced` sin error;
+  después se quitó del VMS y el reenvío la borró también del equipo.
+- **Empaquetado**: `installer\complemento.iss` →
+  `CLRTrueCentralVMS-Complemento-Setup-<v>.exe`, que la suite publica en
+  `webcontrol\` del servidor; `/api/webcontrol/info|installer` lo ofrecen desde
+  el propio panel cuando falta.
+- **Verificado contra hardware**: el DS-K1F820-F conectado responde
+  (`DS-K1F820-F_GML_GM_V1.2.0_build190306`, SDK
+  `FPModuleSDK_Win_x64_V2.2.0_Build190225`); descubrimiento del complemento,
+  listado del lector, prueba de conexión, inicio de captura ("apoye el dedo",
+  paso 1 de 3) y cancelación, todo desde el panel. Falta apoyar un dedo de
+  verdad y ver la plantilla bajar a un terminal.
+
+- **Validado con hardware (2026-09-09)**: contra un **DS-K1T321MFWX** real se
+  escribió una persona completa —horario semanal (`UserRightWeekPlanCfg`),
+  plantilla de horario (`UserRightPlanTemplate`), persona con clave y permisos
+  por puerta (`UserInfo`)— y quedó `Synced`. **El equipo cuenta los topes en
+  BYTES, no en caracteres**: `templateName` recortado a 32 *caracteres* eran 34
+  *bytes* por los acentos, y lo rechazaba con
+  `Invalid Content · beyondARGSRangeLimit · templateName`. De ahí `Truncate` por
+  bytes y `PlanLabel`, que además transcribe el nombre del horario a ASCII
+  porque es una etiqueta interna del equipo que no lee nadie (el nombre de la
+  PERSONA sí conserva los acentos: ese se muestra en el terminal). Falta todavía
+  probar la bajada de una huella (`FingerPrintDownload`) y el resto de las rutas
+  (puertas, eventos) contra el equipo.
+- **Pendiente**: validar el resto de las rutas ISAPI/CGI contra hardware (las de
+  puertas, eventos y biometría siguen tomadas de la documentación);
+  después, padrón para Dahua y ZKTeco,
+  huella y rostro (hoy se enrolan en el propio terminal), disparador de
+  automatizaciones por evento de acceso y enganche con video.
+
 ## Supervisor de servicios (watchdog) — 2026-09-03
 
 - **Qué**: watchdog interno del servidor (`Services\Supervisor\`) que vigila PostgreSQL embebido, MediaMTX y los ocho subsistemas `BackgroundService` (monitor de dispositivos, contabilidad de sesiones, paneles de alarma, receptor SIA DC-09, parlantes IP, ANPR, automatizaciones, retención de bitácora), y permite a un administrador iniciarlos / detenerlos / reiniciarlos y apagar el auto-reinicio por servicio desde **Sistema → Servicios** del panel web.

@@ -506,6 +506,170 @@ audio de la biblioteca del equipo o un texto leído en voz alta con las marcas
 `{zona}`, `{panel}`, etc. Todo queda en la bitácora (categoría *Parlantes IP*):
 quién habló, cuánto tiempo, qué se reprodujo y en qué equipos.
 
+## Control de acceso
+
+Terminales y controladoras de puertas de tres marcas:
+
+| Marca | Equipos | Cómo se conecta | Credencial |
+|---|---|---|---|
+| Hikvision | DS-K1T, DS-K2, DS-K3, DS-K5 | ISAPI (HTTP) | usuario y contraseña |
+| Dahua | ASI, ASA, ASC, ASG | CGI (HTTP) | usuario y contraseña |
+| ZKTeco | terminales y controladoras | protocolo del SDK (TCP 4370) | clave de comunicación (Comm Key, 0 de fábrica) |
+
+Los **equipos** se administran en **Dispositivos → Control de acceso** (rol
+Admin): dirección, puerto, credencial
+según la marca (el formulario cambia solo al elegirla), ubicación opcional y
+**Probar conexión**, que muestra modelo, tipo, firmware, cuántas **puertas**
+administra (con sus nombres) y qué sabe hacer (apertura remota, eventos,
+tarjeta, huella, rostro y los cupos de personas y tarjetas del equipo). Al
+guardar se valida contra el equipo: si no contesta, si la credencial no sirve o
+si no es un equipo de control de acceso, no se guarda nada.
+
+Debajo de la tabla, **Equipos en línea** lista lo que responde en el segmento
+de red del servidor —SADP para Hikvision, DHDiscover para Dahua y el sondeo
+propio de ZKTeco—, filtrado a lo **compatible**, con **Agregar** en un clic.
+Los videoporteros (DS-KH/KV/KD, VT), las cámaras y las alarmas no aparecen
+aquí: se administran en sus propias páginas. Los sondeos son de difusión y no
+cruzan routers ni VPN; un equipo fuera del segmento se agrega escribiendo su
+dirección.
+
+Particularidades de ZKTeco, que se notan en el mantenedor: el equipo no tiene
+usuario (la credencial es la **clave de comunicación**, un número), no habla
+HTTPS y **acepta una sola conexión a la vez**, así que el VMS abre y cierra
+sesión en cada operación y el descubrimiento no vuelve a interrogar a los
+equipos que ya administra.
+
+> **Si un equipo rechaza una contraseña que sí funciona en iVMS**: el VMS
+> reintenta solo con la otra forma de login que acepta la familia (hay firmware
+> de la línea DS-K que rechaza el `charset` del `Content-Type` o el
+> `timeStamp` de la URL). Lo que NO conviene es insistir a mano: los equipos
+> Hikvision bloquean el inicio de sesión a los pocos intentos fallidos, y el VMS
+> avisa cuántos quedan y cuántos minutos falta para que se libere.
+
+El servidor sondea cada equipo habilitado una vez por minuto para mantener el
+estado de conexión y, a los que saben informarlo, les pregunta en qué modo está
+cada puerta; **Revalidar** relee a pedido modelo, firmware, capacidades y
+puertas. La licencia cuenta **puertas** (`access_doors`).
+
+### Quién entra, por dónde y cuándo
+
+La operación vive en el menú **Control de acceso**, y la cadena de decisión es
+siempre la misma:
+
+    HORARIO (cuándo)  +  PUERTAS (por dónde)  =  NIVEL DE ACCESO
+    NIVEL DE ACCESO   →  PERSONAS                (quién puede)
+
+- **Horarios**: los tramos en que se puede pasar, hasta 8 por día (es el tope de
+  los equipos). Viene uno de fábrica, 24/7, que no se edita ni se borra. El
+  editor tiene «+ tramo» y «Copiar a todos» para no repetir siete veces lo mismo.
+- **Niveles de acceso**: un puñado de puertas más un horario. Es lo que se le
+  asigna a la gente. Quien tiene dos niveles pasa por las puertas de los dos, y
+  si una misma puerta le llega por ambos, vale la **suma** de sus horarios (uno
+  la deja pasar el martes y el otro el jueves: pasa los dos días).
+- **Personas**: el padrón. Se cargan con un **asistente de tres pasos** —quién
+  es, con qué se identifica, por dónde pasa— en vez de un formulario de veinte
+  campos: nombre, departamento, cargo y **vigencia** (los equipos la respetan
+  solos); después **tarjetas**, **huellas** y **clave de teclado** —las dos
+  últimas guardadas cifradas y que nunca se devuelven—; y al final los niveles
+  de acceso, con una frase que resume por dónde va a entrar antes de guardar.
+  Se guarda una sola vez, al terminar: cancelar a mitad de camino no deja
+  personas a medio crear. El identificador con el que los equipos la reconocen
+  se asigna al crearla y no cambia nunca.
+
+### Huellas: el complemento de enrolamiento
+
+El panel web no puede hablar con el lector USB del puesto —ningún navegador
+puede—, así que esa parte la hace un **complemento** que se instala en el PC
+donde está el lector (el de RR.HH. o portería, no el servidor). Corre en la
+bandeja del sistema, arranca con Windows y expone su API **solo en 127.0.0.1**;
+el panel lo descubre en los puertos 5081, 25471 y 25472, y si no lo encuentra
+ofrece descargarlo del propio servidor.
+
+- **Lector**: Hikvision **DS-K1F820-F / DS-K1F800-F** (FPModule_SDK V2.2.0).
+  Windows lo ve como una unidad de CD-ROM USB, no como un puerto serie: el
+  complemento los busca ahí y ofrece además la detección automática del SDK.
+- **Cómo se enrola**: en *Personas → paso Credenciales* hay una grilla con los
+  diez dedos y un botón **Capturar** en cada uno. El diálogo guía las tres
+  apoyadas del dedo, muestra la imagen del sensor y la **calidad** de la
+  plantilla (bajo 60/100 conviene repetir).
+- **Dónde queda**: la plantilla viaja del complemento al panel y del panel al
+  servidor, que la guarda **cifrada con AES-256-GCM** y **nunca la devuelve** —
+  la API informa qué dedo está tomado y con qué calidad, no el dato biométrico.
+  De ahí el sincronizador la baja a los equipos que la aceptan.
+- **El rostro** se sigue tomando en el propio terminal, con la persona delante.
+
+Se compila con el resto (`installeruild-installers.ps1`) y sale como
+`CLRTrueCentralVMS-Complemento-Setup-<versión>.exe`; la suite lo deja publicado
+en la carpeta `webcontrol\` del servidor, que es de donde el panel lo ofrece.
+El SDK del lector lo copia `build\setup-binaries.ps1` desde `Resources\`.
+- **Monitoreo**: las puertas en vivo, con **Abrir** (pulso), **Mantener
+  abierta**, **Normal** y **Bloquear**, y debajo lo que va pasando. Cada orden
+  queda en la bitácora con su autor.
+- **Historial**: quién pasó por dónde y cuándo, con filtros por fecha, puerta,
+  resultado y persona. Se purga solo según `Access:EventRetentionDays` (365 días
+  por omisión).
+
+Los accesos llegan **en vivo**: a los equipos que saben empujar sus eventos el
+servidor les mantiene una escucha abierta, así que una tarjeta o el botón de
+salida aparecen en el monitoreo en el momento, no en el próximo sondeo (medido
+contra un terminal real: llegan en menos de un segundo). El sondeo sigue
+existiendo como respaldo —cubre a las marcas que no empujan y recupera lo que
+haya pasado mientras el servidor estuvo apagado—, y que las dos vías traigan el
+mismo evento no duplica nada.
+
+El VMS es la **fuente de verdad** y los equipos son una copia suya: cualquier
+cambio en personas, niveles u horarios deja a los afectados *pendientes* y un
+servicio en segundo plano los escribe en los equipos que correspondan. Lo que
+no se puede escribir no se pierde —queda pendiente con su motivo a la vista
+(equipo caído, credencial rechazada) y se reintenta solo cada 5 minutos—; la
+columna **En los equipos** de la lista de personas muestra ese estado.
+
+Para empujarlo a mano hay tres botones, de menos a más:
+
+| Botón | Dónde | Qué hace |
+|---|---|---|
+| **Reintentar** | fila de una persona | Reescribe **esa** persona en sus equipos. |
+| **Escribir pendientes** | *Personas* | Escribe ahora lo que esté pendiente, sin esperar el reintento solo. |
+| **Reenviar todo** | *Personas* | Reescribe el padrón **completo**, aunque el VMS dé los equipos por al día. |
+| **Reenviar padrón** | fila de un equipo | Lo mismo, pero contra **ese** equipo. |
+
+La diferencia entre los dos primeros y los dos últimos importa: el
+sincronizador guarda una huella de lo último que cada equipo aceptó y, si no
+cambió nada, no lo vuelve a molestar. Los botones de **reenviar** borran esa
+huella a propósito. Es lo que hace falta cuando el equipo perdió el padrón sin
+que el VMS se entere: se reemplazó el terminal, se lo volvió a fábrica, o
+alguien le borró personas desde su pantalla. En las marcas que no aceptan el
+padrón (Dahua, ZKTeco) el botón por equipo no aparece.
+
+Todo queda en la bitácora (categoría *Control de acceso*): altas y bajas de
+equipos, órdenes sobre puertas, cambios de horarios, niveles y personas, y las
+consultas al historial. Los accesos en sí **no** van a la bitácora —esa
+registra lo que hacen los usuarios del VMS, y esto es lo que hace la gente
+frente a una puerta—: su registro es el historial del módulo.
+
+**Qué acepta cada marca.** El padrón (personas, credenciales, huellas y
+horarios) hoy solo lo escriben los equipos **Hikvision**; en Dahua y ZKTeco el VMS opera las
+puertas y lee su historial, pero las personas se cargan en el propio equipo, y
+la interfaz lo dice en vez de ofrecer algo que va a fallar. Dahua tampoco acepta
+«mantener abierta» ni «bloquear» desde el VMS, y ZKTeco solo acepta la apertura
+remota: esos modos se configuran en el equipo.
+
+> Validado a medias contra hardware: la escritura del padrón en Hikvision
+> (horarios, plantillas de horario y personas) está probada contra un
+> **DS-K1T321MFWX** real; las rutas de puertas, eventos y biometría todavía
+> salen de la documentación del fabricante. Ojo con un detalle que costó:
+> **los equipos cuentan los topes de texto en bytes, no en caracteres**, así que
+> un nombre con acentos entra menos de lo que parece. En los terminales con
+> cámara se puede cargar además una **foto de la persona** para que entre por
+> reconocimiento facial: se elige desde el mismo asistente, y el modelo lo arma
+> el propio terminal, así que si la foto no le sirve lo dice al momento y el
+> VMS lo explica en castellano. Los códigos de evento
+> están tomados de las tablas oficiales del fabricante (274 en total: puerta,
+> alarma, fallas del equipo y órdenes remotas), así que el historial se lee en
+> castellano y no en números. Lo que aun así no figure se guarda como «Otro»
+> con su código y su respuesta cruda a la vista, en vez de adivinarse: mostrar
+> un rechazo como si fuera un acceso concedido sería peor que no traducirlo.
+
 ## Aplicaciones → Reconocimiento de patentes
 
 Lecturas de patentes (ANPR/LPR) de las cámaras ITS, en vivo y con historial.
@@ -643,6 +807,10 @@ mantenedor con wizard "Probar conexión", canales, revalidación, snapshots y
 descubrimiento SADP · `#/decoders` decodificadores de muro · `#/walls` muros
 de video (estructura y operación) · `#/workflows` automatizaciones (disparadores, acciones,
 historial de ejecuciones, correo saliente y sonidos) ·
+`#/access` control de acceso (equipos y descubrimiento SADP filtrado) ·
+`#/access-monitor` puertas en vivo · `#/access-persons` padrón ·
+`#/access-levels` niveles de acceso · `#/access-schedules` horarios ·
+`#/access-events` historial de accesos ·
 `#/sessions` sesiones de video en vivo con **Expulsar**
 (corta la sesión RTSP en MediaMTX; el espectador puede reconectarse — no
 bloquea la cuenta) · `#/users` mantenedor de usuarios.
@@ -678,7 +846,8 @@ El VMS se licencia contra el **servidor central de licencias de CLRobotics**
 
 Las claves viven en `Core\Contracts\LicenseDtos.cs` (`LicenseFeatures`) y son el
 contrato con el catálogo del servidor de licencias (`manage.py seed_truecentral`).
-El control de acceso figura en el catálogo aunque el módulo aún no existe.
+El control de acceso cuenta **puertas** (`access_doors`), no equipos: es la
+unidad que el cliente entiende y la que paga.
 
 **Dos mecanismos de confianza** (`Server\Services\Licensing\`):
 
