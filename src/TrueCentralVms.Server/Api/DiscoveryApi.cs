@@ -1,5 +1,9 @@
 ﻿using System.Net;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using TrueCentralVms.Core.Contracts;
+using TrueCentralVms.Drivers.Dahua;
+using TrueCentralVms.Drivers.Hikvision;
 using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Services;
 
@@ -11,8 +15,10 @@ namespace TrueCentralVms.Server.Api;
 /// (ONVIF, UDP 3702) corren en paralelo y el resultado se unifica por IP —
 /// si un equipo responde por su protocolo de fábrica y además por ONVIF, gana
 /// la entrada de fábrica (trae serie, puertos y estado de activación).
-/// Solo se listan equipos de VIDEO: controles de acceso, intercomunicadores,
-/// alarmas y switches se filtran.
+/// Por omisión solo se listan equipos de VIDEO: controles de acceso,
+/// intercomunicadores, alarmas y switches se filtran. Con ?kind= se pide otra
+/// familia: <c>decoders</c> (decodificadores de muro) o <c>access</c> (control
+/// de acceso, y ahí solo lo que el módulo sabe manejar).
 ///
 /// Limitación común: los sondeos son multicast/broadcast y no cruzan routers
 /// ni VPN; solo se ve el segmento L2 del servidor. DHDiscover acepta además
@@ -23,20 +29,25 @@ public static partial class DiscoveryApi
     public static void MapDiscoveryApi(this WebApplication app)
     {
         app.MapGet("/api/discovery/scan", async (HttpContext ctx, ILogger<Program> logger,
-            Services.AuditService audit, string? host, string? kind, CancellationToken ct) =>
+            Services.AuditService audit, Data.VmsDbContext db, string? host, string? kind, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
             // kind=decoders: solo decodificadores de muro (Hikvision DS-64/69/C10, Dahua NVD);
             // el resto de los equipos de video se omite (lo usa la página Decodificadores).
             bool decodersOnly = string.Equals(kind, "decoders", StringComparison.OrdinalIgnoreCase);
+            // kind=access: solo equipos de control de acceso COMPATIBLES (los que
+            // el módulo sabe administrar); lo usa la página Control de acceso.
+            bool accessOnly = string.Equals(kind, "access", StringComparison.OrdinalIgnoreCase);
 
             // El panel repite el sondeo solo cada 30 s mientras la página está
             // abierta: se audita una vez por usuario cada 10 min.
             if (audit.ShouldLog($"scan:{session.UserId}", TimeSpan.FromMinutes(10)))
-                await audit.LogAsync(ctx, "devices", "discovery-scan",
-                    detail: decodersOnly
-                        ? "Sondeó la red en busca de decodificadores de muro (SADP, DHDiscover)."
-                        : "Sondeó la red en busca de equipos de video (SADP, DHDiscover, WS-Discovery).");
+                await audit.LogAsync(ctx, accessOnly ? "access" : "devices", "discovery-scan",
+                    detail: accessOnly
+                        ? "Sondeó la red en busca de equipos de control de acceso (SADP)."
+                        : decodersOnly
+                            ? "Sondeó la red en busca de decodificadores de muro (SADP, DHDiscover)."
+                            : "Sondeó la red en busca de equipos de video (SADP, DHDiscover, WS-Discovery).");
 
             IPAddress? directed = null;
             if (!string.IsNullOrWhiteSpace(host) && !IPAddress.TryParse(host.Trim(), out directed))
@@ -46,31 +57,63 @@ public static partial class DiscoveryApi
             var window = TimeSpan.FromSeconds(4);
             var sadpTask = SadpDiscovery.ScanAsync(window, logger, ct);
             var dahuaTask = DahuaDiscovery.ScanAsync(window, logger, directed, ct);
-            var onvifTask = WsDiscovery.ScanAsync(window, logger, ct);
-            await Task.WhenAll(sadpTask, dahuaTask, onvifTask);
+            // Cada familia se pregunta solo donde puede contestar algo útil:
+            // WS-Discovery no distingue equipos de control de acceso, y ZKTeco
+            // no aparece en ningún otro sondeo (habla su propio protocolo).
+            var onvifTask = accessOnly ? Task.FromResult(new List<OnvifDiscoveredDto>()) : WsDiscovery.ScanAsync(window, logger, ct);
+            var knownZk = accessOnly
+                ? (await db.AccessDevices.AsNoTracking().Where(d => d.DriverKey == "zkteco-tcp")
+                    .Select(d => d.Host).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : [];
+            var zkTask = accessOnly
+                ? ZkDiscovery.ScanAsync(window, logger, directed, knownZk, ct)
+                : Task.FromResult(new List<ZkDiscoveredDto>());
+            await Task.WhenAll(sadpTask, dahuaTask, onvifTask, zkTask);
 
             var rows = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var d in sadpTask.Result)
             {
-                if (CategorizeHikvision(d.Model) is not { } category) continue;
+                string? category = accessOnly ? CategorizeAccess(d.Model) : CategorizeHikvision(d.Model);
+                if (category is null) continue;
                 if (decodersOnly && category != "Decodificador") continue;
                 rows[d.Ip] = new
                 {
-                    d.Ip, Brand = "Hikvision", DriverKey = "hikvision-netsdk",
+                    d.Ip, Brand = "Hikvision",
+                    // El control de acceso se administra por ISAPI (puerto HTTP), no por el SDK.
+                    DriverKey = accessOnly ? "hikvision-isapi" : "hikvision-netsdk",
                     d.CommandPort, d.HttpPort, d.Model, d.Serial, d.Mac, d.Activated, Category = category,
                 };
             }
 
             foreach (var d in dahuaTask.Result)
             {
-                if (CategorizeDahua(d.DeviceClass, d.Model) is not { } category) continue;
+                string? category = accessOnly
+                    ? CategorizeDahuaAccess(d.DeviceClass, d.Model)
+                    : CategorizeDahua(d.DeviceClass, d.Model);
+                if (category is null) continue;
                 if (decodersOnly && category != "Decodificador") continue;
                 rows[d.Ip] = new
                 {
-                    d.Ip, Brand = "Dahua", DriverKey = "dahua-netsdk",
+                    d.Ip, Brand = "Dahua",
+                    // El control de acceso se administra por el CGI HTTP del equipo, no por el SDK.
+                    DriverKey = accessOnly ? "dahua-http" : "dahua-netsdk",
                     CommandPort = d.SdkPort, d.HttpPort, d.Model, d.Serial, d.Mac,
                     Activated = true, Category = category,
+                };
+            }
+
+            foreach (var d in zkTask.Result)
+            {
+                if (rows.ContainsKey(d.Ip)) continue;   // ya lo anunció su marca
+                rows[d.Ip] = new
+                {
+                    d.Ip, Brand = "ZKTeco", DriverKey = "zkteco-tcp",
+                    CommandPort = d.Port, HttpPort = d.Port,
+                    // Sin la clave de comunicación de fábrica el equipo no se
+                    // identifica: se lista igual, con lo que se sabe de él.
+                    Model = d.Model.Length > 0 ? d.Model : "ZKTeco (sin identificar)",
+                    d.Serial, d.Mac, Activated = true, Category = "Terminal",
                 };
             }
 
@@ -90,6 +133,34 @@ public static partial class DiscoveryApi
             return Results.Ok(rows.OrderBy(r => r.Key, StringComparer.OrdinalIgnoreCase).Select(r => r.Value));
         });
     }
+
+    /// <summary>
+    /// Etiqueta del equipo de control de acceso Dahua; null = no lo es o el
+    /// módulo todavía no lo maneja. La clase que anuncia DHDiscover sirve de
+    /// respaldo cuando el modelo llega vacío.
+    /// </summary>
+    private static string? CategorizeDahuaAccess(string deviceClass, string model) =>
+        (DahuaAccessDriver.ClassifyModel(model) ?? DahuaAccessDriver.ClassifyModel(deviceClass)) switch
+        {
+            AccessDeviceKind.Terminal => "Terminal",
+            AccessDeviceKind.Controller => "Controladora",
+            AccessDeviceKind.Turnstile => "Torniquete",
+            _ => null,
+        };
+
+    /// <summary>
+    /// Etiqueta del equipo de control de acceso; null = no es de control de
+    /// acceso o el módulo todavía no lo maneja (intercomunicación y cerraduras
+    /// autónomas): el administrador muestra SOLO lo compatible para no ofrecer
+    /// altas que fallarían.
+    /// </summary>
+    private static string? CategorizeAccess(string model) => HikvisionAccessDriver.ClassifyModel(model) switch
+    {
+        AccessDeviceKind.Terminal => "Terminal",
+        AccessDeviceKind.Controller => "Controladora",
+        AccessDeviceKind.Turnstile => "Torniquete",
+        _ => null,
+    };
 
     /// <summary>
     /// Clasifica por el modelo Hikvision; null = no es un equipo de video (se
