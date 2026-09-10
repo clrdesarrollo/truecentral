@@ -38,10 +38,17 @@ public sealed partial class HikvisionIsapiClient
         public required HttpClient Http;
         /// <summary>Mismo CookieContainer, SIN credenciales: en modo sesión el panel recibe solo la cookie.</summary>
         public required HttpClient PlainHttp;
+        /// <summary>
+        /// Cliente SIN cabeceras por defecto, solo para el login de sesión.
+        /// Comparte las cookies con los otros dos.
+        /// </summary>
+        public required HttpClient LoginHttp;
         public required CookieContainer Cookies;
         public required AlarmConnectionInfo Info;
         /// <summary>true = se autentica por sesión web (el equipo ofrece el reto o rechazó el digest).</summary>
         public bool SessionMode;
+        /// <summary>Forma del POST de login que aceptó este equipo (null: todavía no se sabe).</summary>
+        public SessionLoginStyle? LoginStyle;
         /// <summary>Ya se decidió cómo autenticar (una sola vez por conexión cacheada).</summary>
         public bool AuthProbed;
         public string? SessionId;
@@ -103,10 +110,22 @@ public sealed partial class HikvisionIsapiClient
             digestHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
             plainHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
         }
+        // Tercer handler para el login: mismas cookies, sin cabeceras propias.
+        var loginHandler = new HttpClientHandler
+        {
+            CookieContainer = cookies,
+            UseCookies = true,
+            AllowAutoRedirect = false,
+        };
+        if (info.UseHttps)
+            loginHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+
         return new Entry
         {
             Http = Configure(new HttpClient(digestHandler)),
             PlainHttp = Configure(new HttpClient(plainHandler)),
+            // A propósito SIN Configure: ver LoginHttp.
+            LoginHttp = new HttpClient(loginHandler) { Timeout = RequestTimeout },
             Cookies = cookies,
             Info = info,
         };
@@ -139,6 +158,43 @@ public sealed partial class HikvisionIsapiClient
         return text;
     }
 
+    /// <summary>
+    /// Sube un archivo con metadatos, como pide la matrícula de rostros:
+    /// <c>multipart/form-data</c> con una parte JSON y otra binaria. Es la única
+    /// forma que aceptan los terminales para la foto —el modelo lo arman ellos,
+    /// no se les manda una plantilla— y por eso no alcanza con el envío normal.
+    /// </summary>
+    public async Task<string?> RequestMultipartAsync(string path, string jsonPartName, string json,
+        string filePartName, string fileName, byte[] file, string fileContentType, CancellationToken ct)
+    {
+        HttpContent Build()
+        {
+            // El separador va SIN comillas. .NET escribe
+            // `boundary="----xxx"` —válido según el RFC— y el terminal
+            // responde `badJsonFormat`: su parser se queda con la comilla
+            // pegada al separador y no encuentra ninguna parte. Por eso la
+            // cabecera se arma a mano.
+            string boundary = "----TrueCentral" + Guid.NewGuid().ToString("N");
+            var form = new MultipartFormDataContent(boundary);
+            form.Headers.Remove("Content-Type");
+            form.Headers.TryAddWithoutValidation("Content-Type", $"multipart/form-data; boundary={boundary}");
+
+            var meta = new StringContent(json, Encoding.UTF8, "application/json");
+            form.Add(meta, jsonPartName);
+            var blob = new ByteArrayContent(file);
+            blob.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(fileContentType);
+            form.Add(blob, filePartName, fileName);
+            return form;
+        }
+
+        using var response = await SendAsync(HttpMethod.Post, path, null, "application/json", ct, content: Build);
+        string text = await response.Content.ReadAsStringAsync(ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        if (!response.IsSuccessStatusCode)
+            throw new DriverException(DescribeFailure(response.StatusCode, text, _noun));
+        return text;
+    }
+
     /// <summary>Solicitud de flujo largo (alertStream, suscripción de eventos): devuelve la respuesta abierta con las cabeceras leídas.</summary>
     public async Task<HttpResponseMessage> OpenStreamAsync(string path, CancellationToken ct, HttpMethod? method = null, string? body = null)
     {
@@ -153,12 +209,12 @@ public sealed partial class HikvisionIsapiClient
     }
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, string? body, string contentType,
-        CancellationToken ct, bool streaming = false)
+        CancellationToken ct, bool streaming = false, Func<HttpContent>? content = null)
     {
         _entry.LastUsed = DateTime.UtcNow;
         if (!_entry.AuthProbed)
             await ProbeAuthAsync(ct);
-        var response = await SendOnceAsync(method, path, body, contentType, ct, streaming);
+        var response = await SendOnceAsync(method, path, body, contentType, ct, streaming, content);
         if (response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Redirect
             or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
         {
@@ -176,24 +232,27 @@ public sealed partial class HikvisionIsapiClient
         // 401: o el digest no sirve en este equipo, o la sesión web caducó.
         string text = await response.Content.ReadAsStringAsync(ct);
         response.Dispose();
-        ThrowIfLocked(text, _noun);
+        ThrowIfLocked(text);
 
         await SessionLoginAsync(ct);
-        response = await SendOnceAsync(method, path, body, contentType, ct, streaming);
+        response = await SendOnceAsync(method, path, body, contentType, ct, streaming, content);
         if (response.StatusCode != HttpStatusCode.Unauthorized)
             return response;
 
         text = await response.Content.ReadAsStringAsync(ct);
         response.Dispose();
-        ThrowIfLocked(text, _noun);
-        throw new DriverException($"El {_noun} rechazó las credenciales (usuario o contraseña incorrectos).");
+        ThrowIfLocked(text);
+        throw new DriverException(BadCredentials(text));
     }
 
     private async Task<HttpResponseMessage> SendOnceAsync(HttpMethod method, string path, string? body, string contentType,
-        CancellationToken ct, bool streaming)
+        CancellationToken ct, bool streaming, Func<HttpContent>? content = null)
     {
         var request = new HttpRequestMessage(method, BaseUrl + path);
-        if (body is not null)
+        // El contenido se FABRICA en cada intento: un HttpContent ya enviado no
+        // se puede volver a mandar, y acá se reintenta al caducar la sesión.
+        if (content is not null) request.Content = content();
+        else if (body is not null)
             request.Content = new StringContent(body, Encoding.UTF8, contentType);
         if (_entry.SessionMode && _entry.SessionId is { } sid && _entry.Cookies.GetCookies(new Uri(BaseUrl)).Count == 0)
             request.Headers.TryAddWithoutValidation("Cookie", $"WebSession={sid}");
@@ -231,6 +290,7 @@ public sealed partial class HikvisionIsapiClient
     /// </summary>
     private async Task ProbeAuthAsync(CancellationToken ct)
     {
+        string? reto = null;
         await _entry.LoginLock.WaitAsync(ct);
         try
         {
@@ -239,7 +299,7 @@ public sealed partial class HikvisionIsapiClient
             string? cap;
             try
             {
-                using var response = await _entry.PlainHttp.GetAsync(capUrl, ct);
+                using var response = await _entry.LoginHttp.GetAsync(capUrl, ct);
                 cap = response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync(ct) : null;
             }
             catch (HttpRequestException ex)
@@ -256,12 +316,13 @@ public sealed partial class HikvisionIsapiClient
             // Desde ya en modo sesión: cualquier petición concurrente sale sin
             // Digest (un 401 sin credenciales no cuenta como intento fallido).
             _entry.SessionMode = true;
+            reto = cap;
         }
         finally
         {
             _entry.LoginLock.Release();
         }
-        await SessionLoginAsync(ct);
+        await SessionLoginAsync(reto, ct);
     }
 
     /// <summary>
@@ -274,99 +335,177 @@ public sealed partial class HikvisionIsapiClient
     /// <c>encodePwd</c>): sin él, el panel responde 401 aunque la clave sea
     /// correcta.
     /// </summary>
-    private async Task SessionLoginAsync(CancellationToken ct)
+    private Task SessionLoginAsync(CancellationToken ct) => SessionLoginAsync(null, ct);
+
+    private async Task SessionLoginAsync(string? capabilities, CancellationToken ct)
     {
         await _entry.LoginLock.WaitAsync(ct);
         try
         {
-            var info = _entry.Info;
-            string capUrl = $"{BaseUrl}/ISAPI/Security/sessionLogin/capabilities?username={Uri.EscapeDataString(info.Username)}";
-            string cap;
-            try
+            // Se prueban las formas conocidas del POST de login: la primera es
+            // la que manda la propia página web del equipo; la segunda, la que
+            // veníamos usando. Ver SessionLoginStyle para el porqué.
+            var estilos = _entry.LoginStyle is { } conocida ? new[] { conocida } : LoginStyles;
+            string lastText = "";
+            var lastStatus = HttpStatusCode.Unauthorized;
+
+            bool primero = true;
+            foreach (var estilo in estilos)
             {
-                cap = await _entry.PlainHttp.GetStringAsync(capUrl, ct);
-            }
-            catch (HttpRequestException ex)
-            {
-                throw new DriverException($"El {_noun} no ofrece login de sesión y rechazó el digest: {ex.Message}", ex);
+                // El reto ya pedido sirve UNA vez; el siguiente intento pide el suyo.
+                var (ok, status, text) = await TrySessionLoginAsync(estilo, ct, primero ? capabilities : null);
+                primero = false;
+                if (ok)
+                {
+                    _entry.LoginStyle = estilo;
+                    return;
+                }
+                lastStatus = status;
+                lastText = text;
+                // Un bloqueo por intentos no se reintenta con otra forma: cada
+                // intento extra renueva el bloqueo.
+                ThrowIfLocked(text);
+                if (status != HttpStatusCode.Unauthorized) break;
             }
 
-            var doc = XDocument.Parse(cap);
-            string Value(string name) => doc.Descendants().FirstOrDefault(e => e.Name.LocalName == name)?.Value?.Trim() ?? "";
-            string sessionId = Value("sessionID");
-            string challenge = Value("challenge");
-            string salt = Value("salt");
-            string salt2 = Value("salt2");
-            int iterations = int.TryParse(Value("iterations"), out int it) ? it : 100;
-            bool irreversible = string.Equals(Value("isIrreversible"), "true", StringComparison.OrdinalIgnoreCase);
-            string version = Value("sessionIDVersion");
-            if (sessionId.Length == 0 || challenge.Length == 0)
-                throw new DriverException($"El {_noun} no entregó el reto de login de sesión (respuesta inesperada).");
-
-            string encoded;
-            if (irreversible)
-            {
-                encoded = Sha256Hex(info.Username + salt + info.Password);
-                // Doble salt (AX Hybrid PRO DS-PHA64-LP V1.1.2 y, en general,
-                // los paneles vinculados a Hik-Connect): un segundo SHA-256 con
-                // salt2 sobre el hash anterior, ANTES del reto. Verificado con
-                // 200 OK contra el panel real; con un solo salt responde 401.
-                if (salt2.Length > 0)
-                    encoded = Sha256Hex(info.Username + salt2 + encoded);
-                encoded = Sha256Hex(encoded + challenge);
-                for (int i = 2; i < iterations; i++)
-                    encoded = Sha256Hex(encoded);
-            }
-            else
-            {
-                encoded = Sha256Hex(info.Password + challenge);
-                for (int i = 1; i < iterations; i++)
-                    encoded = Sha256Hex(encoded);
-            }
-
-            string xml =
-                "<SessionLogin>" +
-                $"<userName>{Escape(info.Username)}</userName>" +
-                $"<password>{encoded}</password>" +
-                $"<sessionID>{sessionId}</sessionID>" +
-                "<isSessionIDValidLongTerm>false</isSessionIDValidLongTerm>" +
-                $"<sessionIDVersion>{(version.Length > 0 ? version : "2.1")}</sessionIDVersion>" +
-                "</SessionLogin>";
-
-            long stamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/ISAPI/Security/sessionLogin?timeStamp={stamp}")
-            {
-                Content = new StringContent(xml, Encoding.UTF8, "application/xml"),
-            };
-            using var response = await _entry.PlainHttp.SendAsync(request, ct);
-            string text = await response.Content.ReadAsStringAsync(ct);
-            ThrowIfLocked(text, _noun);
-            if (!response.IsSuccessStatusCode)
-                throw new DriverException(response.StatusCode == HttpStatusCode.Unauthorized
-                    ? $"El {_noun} rechazó las credenciales (usuario o contraseña incorrectos)."
-                    : DescribeFailure(response.StatusCode, text, _noun));
-
-            string? newSession = null;
-            try
-            {
-                var login = XDocument.Parse(text);
-                newSession = login.Descendants().FirstOrDefault(e => e.Name.LocalName == "sessionID")?.Value?.Trim();
-                string status = login.Descendants().FirstOrDefault(e => e.Name.LocalName == "statusValue")?.Value?.Trim() ?? "";
-                if (status.Length > 0 && status != "200")
-                    throw new DriverException($"El {_noun} rechazó el login de sesión: " +
-                        (login.Descendants().FirstOrDefault(e => e.Name.LocalName == "statusString")?.Value ?? status));
-            }
-            catch (System.Xml.XmlException)
-            {
-                // Algunos firmware responden vacío y solo fijan la cookie.
-            }
-            _entry.SessionMode = true;
-            _entry.SessionId = string.IsNullOrEmpty(newSession) ? sessionId : newSession;
+            throw new DriverException(lastStatus == HttpStatusCode.Unauthorized
+                ? BadCredentials(lastText)
+                : DescribeFailure(lastStatus, lastText, _noun));
         }
         finally
         {
             _entry.LoginLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Formas del POST de <c>sessionLogin</c>, en orden de preferencia.
+    ///
+    /// No es un capricho: el DS-K1T804AMF (y la familia DS-K de control de
+    /// acceso) devuelve <b>401 con la contraseña correcta</b> si el
+    /// <c>Content-Type</c> lleva <c>charset</c> o si la URL trae
+    /// <c>?timeStamp=</c>. Verificado contra el equipo: quitando cualquiera de
+    /// las dos, el mismo hash entra. <see cref="Web"/> es lo que manda su propia
+    /// página de login; <see cref="Classic"/> es lo que veníamos usando y lo que
+    /// aceptan los paneles de alarma.
+    ///
+    /// Cuál funcionó queda anotado en la conexión, así que el rodeo se paga una
+    /// sola vez: importa, porque cada rechazo le consume un intento de login a
+    /// la cuenta del equipo.
+    /// </summary>
+    internal enum SessionLoginStyle
+    {
+        /// <summary>Content-Type sin charset y sin timeStamp en la URL.</summary>
+        Web,
+        /// <summary>Content-Type con charset y timeStamp en la URL.</summary>
+        Classic,
+    }
+
+    private static readonly SessionLoginStyle[] LoginStyles = [SessionLoginStyle.Web, SessionLoginStyle.Classic];
+
+    /// <summary>
+    /// Un intento de login completo con una forma concreta. El reto se pide DE
+    /// NUEVO cada vez: el equipo lo rota y reusar el anterior es un rechazo
+    /// seguro (también verificado contra el equipo).
+    /// </summary>
+    private async Task<(bool Ok, HttpStatusCode Status, string Text)> TrySessionLoginAsync(
+        SessionLoginStyle style, CancellationToken ct, string? capabilities = null)
+    {
+        var info = _entry.Info;
+        string capUrl = $"{BaseUrl}/ISAPI/Security/sessionLogin/capabilities?username={Uri.EscapeDataString(info.Username)}";
+        string cap;
+        try
+        {
+            // Si ya se pidió el reto (lo hace ProbeAuthAsync para decidir el
+            // modo), se usa ESE: pedirlo otra vez lo invalida.
+            cap = capabilities ?? await _entry.LoginHttp.GetStringAsync(capUrl, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new DriverException($"El {_noun} no ofrece login de sesión y rechazó el digest: {ex.Message}", ex);
+        }
+
+        var doc = XDocument.Parse(cap);
+        string Value(string name) => doc.Descendants().FirstOrDefault(e => e.Name.LocalName == name)?.Value?.Trim() ?? "";
+        string sessionId = Value("sessionID");
+        string challenge = Value("challenge");
+        string salt = Value("salt");
+        string salt2 = Value("salt2");
+        int iterations = int.TryParse(Value("iterations"), out int it) ? it : 100;
+        bool irreversible = string.Equals(Value("isIrreversible"), "true", StringComparison.OrdinalIgnoreCase);
+        string version = Value("sessionIDVersion");
+        if (sessionId.Length == 0 || challenge.Length == 0)
+            throw new DriverException($"El {_noun} no entregó el reto de login de sesión (respuesta inesperada).");
+
+        string encoded;
+        if (irreversible)
+        {
+            encoded = Sha256Hex(info.Username + salt + info.Password);
+            // Doble salt (AX Hybrid PRO DS-PHA64-LP V1.1.2 y, en general, los
+            // paneles vinculados a Hik-Connect): un segundo SHA-256 con salt2
+            // sobre el hash anterior, ANTES del reto. Verificado con 200 OK
+            // contra el panel real; con un solo salt responde 401.
+            if (salt2.Length > 0)
+                encoded = Sha256Hex(info.Username + salt2 + encoded);
+            encoded = Sha256Hex(encoded + challenge);
+            for (int i = 2; i < iterations; i++)
+                encoded = Sha256Hex(encoded);
+        }
+        else
+        {
+            encoded = Sha256Hex(info.Password + challenge);
+            for (int i = 1; i < iterations; i++)
+                encoded = Sha256Hex(encoded);
+        }
+
+        string xml =
+            "<SessionLogin>" +
+            $"<userName>{Escape(info.Username)}</userName>" +
+            $"<password>{encoded}</password>" +
+            $"<sessionID>{sessionId}</sessionID>" +
+            "<isSessionIDValidLongTerm>false</isSessionIDValidLongTerm>" +
+            $"<sessionIDVersion>{(version.Length > 0 ? version : "2.1")}</sessionIDVersion>" +
+            "</SessionLogin>";
+
+        string url = $"{BaseUrl}/ISAPI/Security/sessionLogin";
+        if (style == SessionLoginStyle.Classic)
+            url += $"?timeStamp={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+        if (style == SessionLoginStyle.Classic)
+        {
+            request.Content = new StringContent(xml, Encoding.UTF8, "application/xml");
+        }
+        else
+        {
+            // StringContent agrega "; charset=utf-8" y este firmware lo rechaza:
+            // el cuerpo va como bytes, con el Content-Type puesto a mano.
+            var content = new ByteArrayContent(Encoding.UTF8.GetBytes(xml));
+            content.Headers.TryAddWithoutValidation("Content-Type", "application/xml");
+            request.Content = content;
+        }
+
+        using var response = await _entry.LoginHttp.SendAsync(request, ct);
+        string text = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode) return (false, response.StatusCode, text);
+
+        string? newSession = null;
+        try
+        {
+            var login = XDocument.Parse(text);
+            newSession = login.Descendants().FirstOrDefault(e => e.Name.LocalName == "sessionID")?.Value?.Trim();
+            string status = login.Descendants().FirstOrDefault(e => e.Name.LocalName == "statusValue")?.Value?.Trim() ?? "";
+            if (status.Length > 0 && status != "200")
+                throw new DriverException($"El {_noun} rechazó el login de sesión: " +
+                    (login.Descendants().FirstOrDefault(e => e.Name.LocalName == "statusString")?.Value ?? status));
+        }
+        catch (System.Xml.XmlException)
+        {
+            // Algunos firmware responden vacío y solo fijan la cookie.
+        }
+        _entry.SessionMode = true;
+        _entry.SessionId = string.IsNullOrEmpty(newSession) ? sessionId : newSession;
+        return (true, response.StatusCode, text);
     }
 
     private static string Sha256Hex(string value)
@@ -402,20 +541,49 @@ public sealed partial class HikvisionIsapiClient
     /// se vuelve a intentar, porque el siguiente fallo deja al panel sin
     /// monitoreo durante 30 min.
     /// </summary>
-    private static void ThrowIfLocked(string? body, string noun = "panel")
+    private void ThrowIfLocked(string? body) => ThrowIfLocked(body, _noun, Address);
+
+    /// <summary>Dónde ocurrió: va en todos los mensajes, porque el operador suele tener varios equipos.</summary>
+    private string Address => $"{_entry.Info.Host}:{_entry.Info.Port}";
+
+    private static void ThrowIfLocked(string? body, string noun = "panel", string? address = null)
     {
         if (string.IsNullOrEmpty(body)) return;
+        string donde = address is null ? "" : $" en {address}";
+
+        // Bloqueo efectivo: hay que DEJAR de intentar, cada intento lo renueva.
+        if (LockedPattern().IsMatch(body))
+        {
+            var m = UnlockTimePattern().Match(body);
+            string wait = m.Success && int.TryParse(m.Groups["v"].Value, out int seconds)
+                ? $" Se libera en {Math.Max(1, seconds / 60)} minuto(s)."
+                : "";
+            throw new DriverException(
+                $"El {noun}{donde} bloqueó el inicio de sesión por intentos fallidos.{wait} " +
+                "Verifique el usuario y la contraseña: reintentar ahora solo alarga el bloqueo.");
+        }
+
+        // A un intento del bloqueo: se corta igual, para no gastarlo.
         var r = RetryLoginTimePattern().Match(body);
         if (r.Success && int.TryParse(r.Groups["v"].Value, out int left) && left <= 1)
-            throw new DriverException($"El {noun} rechazó las credenciales y está a un intento de bloquear el acceso. " +
-                                      "Verifique el usuario y la contraseña antes de reintentar.");
-        if (!LockedPattern().IsMatch(body)) return;
-        var m = UnlockTimePattern().Match(body);
-        string wait = m.Success && int.TryParse(m.Groups["v"].Value, out int seconds)
-            ? $" Se libera en {seconds / 60} min."
-            : "";
-        throw new DriverException($"El {noun} bloqueó el acceso por intentos de login fallidos." + wait +
-                                  " Verifique el usuario y la contraseña antes de reintentar.");
+            throw new DriverException(
+                $"El {noun}{donde} rechazó las credenciales y queda UN intento antes de que bloquee el " +
+                "inicio de sesión. Verifique el usuario y la contraseña antes de reintentar.");
+    }
+
+    /// <summary>
+    /// Mensaje de "usuario o contraseña incorrectos" con lo que el propio equipo
+    /// informa: dónde fue y cuántos intentos le quedan a la cuenta antes de que
+    /// bloquee. Saberlo evita el clásico "probé tres veces más y me quedé afuera".
+    /// </summary>
+    private string BadCredentials(string? body)
+    {
+        string mensaje = $"El {_noun} en {Address} rechazó las credenciales (usuario o contraseña incorrectos).";
+        if (string.IsNullOrEmpty(body)) return mensaje;
+        var r = RetryLoginTimePattern().Match(body);
+        if (r.Success && int.TryParse(r.Groups["v"].Value, out int left) && left > 1)
+            mensaje += $" Quedan {left} intentos antes de que el equipo bloquee el inicio de sesión.";
+        return mensaje;
     }
 
     private static string DescribeFailure(HttpStatusCode status, string body, string noun = "panel")
