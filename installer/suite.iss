@@ -481,7 +481,9 @@ begin
   RunHidden(SysTool('netsh.exe'),
     'advfirewall firewall add rule name="CLR TrueCentral VMS Server" dir=in action=allow protocol=TCP localport={#WebPort},{#ArcPort} profile=any');
   // Respuestas del descubrimiento de equipos: SADP (UDP 37020), WS-Discovery
-  // (UDP 3702) y Dahua (UDP 37810). Regla por programa: solo este servidor.
+  // (UDP 3702), Dahua (UDP 37810) y ZKTeco (UDP 4370, control de acceso).
+  // La regla va POR PROGRAMA, no por puerto: alcanza para cualquier familia
+  // que se agregue despues sin tocar el firewall.
   RunHidden(SysTool('netsh.exe'),
     'advfirewall firewall add rule name="CLR TrueCentral VMS Server (descubrimiento)" dir=in action=allow protocol=UDP program="'
     + ExpandConstant('{app}') + '\{#ServerExe}" profile=any');
