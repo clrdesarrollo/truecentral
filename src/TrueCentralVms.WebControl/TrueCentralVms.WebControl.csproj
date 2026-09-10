@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- NotifyIcon (icono de bandeja) vive en WinForms; el complemento corre en
+         segundo plano y su ventana es solo para diagnóstico. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- FPModule_SDK.dll es nativa x64: el complemento no puede correr como x86. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon Condition="Exists('..\TrueCentralVms.Client\Assets\truecentral.ico')">..\TrueCentralVms.Client\Assets\truecentral.ico</ApplicationIcon>
+    <AssemblyTitle>CLR TrueCentral VMS — Complemento de enrolamiento</AssemblyTitle>
+    <Product>CLR TrueCentral VMS</Product>
+    <Company>CLRobotics</Company>
+    <RootNamespace>TrueCentralVms.WebControl</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- El complemento publica su API en 127.0.0.1 con Kestrel (sin urlacl ni
+         permisos de administrador, a diferencia de HttpListener). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- Enumeración de los lectores conectados (WMI). -->
+    <PackageReference Include="System.Management" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SDK del lector de huellas (Hikvision FPModule V2.2.0, x64). Lo puebla
+         build\setup-binaries.ps1 desde Resources\; si falta, el complemento
+         compila igual y avisa en su ventana que no encontró la DLL. -->
+    <None Include="..\..\native\hikvision-fp\*.dll" CopyToOutputDirectory="PreserveNewest" TargetPath="%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

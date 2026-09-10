@@ -65,6 +65,17 @@
   #error No existe el instalador del Hik IP Receiver Pro (tools\iprp\HikIpReceiverPro-Setup.exe). Es un componente obligatorio de la suite: obtengalo con build\setup-binaries.ps1.
 #endif
 
+; Complemento de enrolamiento (lector de huellas USB): la suite lo publica en
+; la carpeta webcontrol\ del servidor, que es de donde el panel web lo ofrece
+; en descarga a los puestos que lo necesiten.
+#define AgentSetupName "CLRTrueCentralVMS-Complemento-Setup-" + AppVersion + ".exe"
+#define AgentSetup     "..\dist\" + AgentSetupName
+#if FileExists(AgentSetup)
+  #define HasAgent
+#else
+  #pragma warning "No existe " + AgentSetup + ": la suite se compila SIN el complemento de enrolamiento (compile primero complemento.iss)."
+#endif
+
 #define ClientSetupName "CLRTrueCentralVMS-Client-Setup-" + AppVersion + ".exe"
 #define ClientSetup    "..\dist\" + ClientSetupName
 #if FileExists(ClientSetup)
@@ -131,6 +142,8 @@ Type: filesandordirs; Name: "{app}\HCNetSDKCom"
 Type: filesandordirs; Name: "{app}\watchdog"
 ; Instaladores del cliente de versiones anteriores (se publica el nuevo).
 Type: files; Name: "{app}\client-setup\CLRTrueCentralVMS-Client-Setup-*.exe"
+; Complemento de enrolamiento de versiones anteriores (se publica el nuevo).
+Type: files; Name: "{app}\webcontrol\CLRTrueCentralVMS-Complemento-Setup-*.exe"
 
 [Files]
 ; Servidor publicado (self-contained). Se excluyen los restos de desarrollo
@@ -156,6 +169,14 @@ Source: "{#FfmpegDir}\LICENSE"; DestDir: "{app}\tools\ffmpeg"; Flags: ignorevers
 ; queda guardado para llevarlo a los demás puestos de operación.
 #ifdef HasClient
 Source: "{#ClientSetup}"; DestDir: "{app}\client-setup"; Flags: ignoreversion
+#endif
+
+; Complemento de enrolamiento: NO se instala en el servidor (el lector se
+; conecta al puesto del operador, no acá). Queda publicado para que el panel
+; web lo ofrezca en descarga cuando alguien vaya a enrolar una huella y no lo
+; tenga instalado — es la carpeta que mira /api/webcontrol/info.
+#ifdef HasAgent
+Source: "{#AgentSetup}"; DestDir: "{app}\webcontrol"; Flags: ignoreversion
 #endif
 
 ; Receptor de paneles de alarma: se ejecuta y se borra (no queda ocupando

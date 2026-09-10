@@ -13,7 +13,8 @@
      (native\ y tools\: build\setup-binaries.ps1).
   4. Compila los .iss con Inno Setup 6 y deja los instaladores en dist\:
        dist\CLRTrueCentralVMS-Client-Setup-<versión>.exe
-       dist\CLRTrueCentralVMS-Suite-Setup-<versión>.exe   (incluye el del cliente)
+       dist\CLRTrueCentralVMS-Complemento-Setup-<versión>.exe  (lector de huellas)
+       dist\CLRTrueCentralVMS-Suite-Setup-<versión>.exe   (incluye los dos anteriores)
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File installer\build-installers.ps1
@@ -25,7 +26,7 @@ param(
     # Versión x.y.z; por defecto se lee del archivo VERSION en la raíz del repo.
     [string]$Version,
     # Compilar solo uno de los instaladores ('Ambos' = suite y cliente).
-    [ValidateSet('Suite', 'Client', 'Ambos')]
+    [ValidateSet('Suite', 'Client', 'Complemento', 'Ambos')]
     [string]$Solo = 'Ambos',
     # Reutilizar build\publish existente (no vuelve a publicar los proyectos).
     [switch]$SkipPublish
@@ -45,6 +46,9 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Versión inválida: '$Version
 # compilar (o tener ya compilado) el del cliente.
 $buildSuite  = ($Solo -eq 'Ambos' -or $Solo -eq 'Suite')
 $buildClient = ($Solo -eq 'Ambos' -or $Solo -eq 'Client')
+# El complemento de enrolamiento (lector de huellas USB) va con la suite: es
+# ella la que lo publica para que el panel lo ofrezca en descarga.
+$buildAgent  = ($Solo -eq 'Ambos' -or $Solo -eq 'Suite' -or $Solo -eq 'Complemento')
 $publish = Join-Path $repo 'build\publish'
 $dist = Join-Path $repo 'dist'
 
@@ -83,6 +87,9 @@ if (-not $SkipPublish) {
     if ($buildClient) {
         Invoke-Publish 'src\TrueCentralVms.Client\TrueCentralVms.Client.csproj' (Join-Path $publish 'client')
     }
+    if ($buildAgent) {
+        Invoke-Publish 'src\TrueCentralVms.WebControl\TrueCentralVms.WebControl.csproj' (Join-Path $publish 'complemento')
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -112,6 +119,11 @@ if ($buildSuite) {
     }
     Assert-File (Join-Path $repo 'tools\mediamtx\mediamtx.exe') "Copie MediaMTX v1.20 en tools\mediamtx. $setupHint"
     Assert-File (Join-Path $repo 'tools\ffmpeg\bin\ffmpeg.exe') "Copie FFmpeg (build de gyan.dev) en tools\ffmpeg. $setupHint"
+}
+if ($buildAgent) {
+    Assert-File (Join-Path $publish 'complemento\TrueCentralVms.WebControl.exe') 'Publique primero (quite -SkipPublish).'
+    Assert-File (Join-Path $publish 'complemento\FPModule_SDK.dll') ("El publish del complemento no incluyó el SDK del " +
+        "lector de huellas (native\hikvision-fp\FPModule_SDK.dll). $setupHint")
 }
 if ($buildClient) {
     Assert-File (Join-Path $publish 'client\TrueCentralVms.Client.exe') 'Publique primero (quite -SkipPublish).'
@@ -185,6 +197,7 @@ function Invoke-Iscc([string]$Script) {
 # El cliente va PRIMERO: la suite empaqueta su instalador para poder
 # instalarlo en el mismo equipo y dejarlo disponible para los demás puestos.
 if ($buildClient) { Invoke-Iscc 'client.iss' }
+if ($buildAgent) { Invoke-Iscc 'complemento.iss' }
 if ($buildSuite) {
     $clientSetup = Join-Path $dist "CLRTrueCentralVMS-Client-Setup-$Version.exe"
     if (-not (Test-Path $clientSetup)) {

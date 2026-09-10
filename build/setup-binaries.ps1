@@ -90,6 +90,25 @@ if (-not (Test-Path $resources)) {
     } else {
         Write-Warning "Dahua: no se encontró una carpeta Bin\ con dhnetsdk.dll dentro de Resources\."
     }
+
+    # Lector de huellas USB (FPModule_SDK, Hikvision): lo usa el COMPLEMENTO de
+    # enrolamiento, no el servidor. Es una sola DLL x64; se busca en cualquier
+    # parte de Resources\ porque el paquete del fabricante cambia de forma según
+    # la versión.
+    $fpDll = Get-ChildItem $resources -Recurse -File -Filter 'FPModule_SDK.dll' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($fpDll) {
+        $dest = Join-Path $repo 'native\hikvision-fp'
+        New-Item -ItemType Directory -Force $dest | Out-Null
+        Copy-Item $fpDll.FullName $dest -Force
+        $header = Get-ChildItem $fpDll.Directory.FullName -Filter 'FPModule_SDK.h' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($header) { Copy-Item $header.FullName $dest -Force }
+        Write-Host "  OK  SDK del lector de huellas -> $dest" -ForegroundColor Green
+    } else {
+        Write-Warning ("Lector de huellas: no se encontró FPModule_SDK.dll en Resources\. " +
+            "El complemento de enrolamiento no podrá capturar huellas sin él.")
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -158,6 +177,7 @@ Write-Host "Estado:" -ForegroundColor Cyan
 $checks = [ordered]@{
     'native\hikvision\HCNetSDK.dll'          = 'Driver Hikvision'
     'native\dahua\dhnetsdk.dll'              = 'Driver Dahua'
+    'native\hikvision-fp\FPModule_SDK.dll'   = 'SDK del lector de huellas USB (complemento)'
     'tools\postgres\pgsql\bin\pg_ctl.exe'    = 'PostgreSQL embebido (servidor)'
     'tools\postgres\pgsql\bin\VCRUNTIME140.dll' = 'Runtime de Visual C++ para PostgreSQL'
     'tools\postgres\pgsql\bin\MSVCP140.dll'     = 'Runtime de Visual C++ para PostgreSQL (C++)'
@@ -181,6 +201,8 @@ if ($missing -gt 0) {
     Write-Host ""
     Write-Host "Faltan $missing componente(s). Dónde obtenerlos:" -ForegroundColor Yellow
     Write-Host "  - SDK Hikvision/Dahua : portal de desarrolladores del fabricante (versión Win64) -> Resources\"
+    Write-Host "  - SDK lector de huella: FPModule_SDK V2.2.0 x64 (viene con el DS-K1F820-F) -> Resources\"
+    Write-Host "                          solo hace falta para el complemento de enrolamiento, no para el servidor"
     Write-Host "  - PostgreSQL portable : https://www.enterprisedb.com/download-postgresql-binaries -> tools\postgres\pgsql"
     Write-Host "  - MediaMTX v1.20      : https://github.com/bluenviron/mediamtx/releases -> tools\mediamtx"
     Write-Host "  - Hik IP Receiver Pro : instalador oficial de Hikvision (V2.5.0 o superior; el API de alta de equipos existe desde la 2.5.0)"

@@ -1,0 +1,90 @@
+<Window x:Class="TrueCentralVms.WebControl.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CLR TrueCentral VMS — Complemento de enrolamiento"
+        Style="{StaticResource DarkWindow}"
+        Width="640" Height="600"
+        MinWidth="560" MinHeight="500"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="24,20,24,16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Encabezado -->
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <StackPanel>
+                <TextBlock FontSize="24" FontWeight="Bold">
+                    CLR <Run Foreground="{StaticResource AccentBrush}">TrueCentral</Run>
+                </TextBlock>
+                <TextBlock Foreground="{StaticResource MutedBrush}">Web Control — hardware local para el panel web</TextBlock>
+            </StackPanel>
+            <TextBlock x:Name="VersionText" HorizontalAlignment="Right" VerticalAlignment="Top"
+                       Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+        </Grid>
+
+        <!-- Estado -->
+        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="16,13" Margin="0,0,0,10">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse x:Name="StatusDot" Width="14" Height="14" Fill="{StaticResource MutedBrush}"
+                             VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <TextBlock x:Name="StatusText" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"
+                               Text="Iniciando…"/>
+                </StackPanel>
+                <TextBlock x:Name="SdkText" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="26,6,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Lectores detectados (solo diagnóstico: la selección se hace en el panel web) -->
+        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="16,13" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="Lectores detectados" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,7"/>
+                <ItemsControl x:Name="ReaderList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Name}" Margin="0,2" TextWrapping="Wrap"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,7,0,0" TextWrapping="Wrap"
+                           Text="El modo de captura y el lector se eligen en el panel web (Personas → Credenciales → Capturar con lector)."/>
+            </StackPanel>
+        </Border>
+
+        <!-- Acciones -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,14">
+            <Button x:Name="RefreshButton" Click="OnRefreshClick" MinWidth="150">Actualizar lectores</Button>
+            <Button x:Name="TestButton" Style="{StaticResource PrimaryButton}" Click="OnTestClick"
+                    MinWidth="150" Margin="10,0,0,0">Probar lector</Button>
+        </StackPanel>
+
+        <!-- Actividad -->
+        <Border Grid.Row="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="4">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="Actividad" Foreground="{StaticResource MutedBrush}"
+                           FontSize="12" Margin="10,7,10,5"/>
+                <ScrollViewer x:Name="ActivityScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="10,0,10,7">
+                    <StackPanel x:Name="ActivityPanel"/>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- Pie -->
+        <TextBlock Grid.Row="5" x:Name="FooterText" Foreground="{StaticResource MutedBrush}" FontSize="11"
+                   Margin="0,10,0,0" TextWrapping="Wrap"
+                   Text="Al cerrar esta ventana el web control sigue corriendo en la bandeja del sistema."/>
+    </Grid>
+</Window>
