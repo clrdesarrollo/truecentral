@@ -172,7 +172,11 @@ public static class AccessApi
             if (await db.AccessDevices.AnyAsync(d => d.Host == host && d.Port == request.Port, ct))
                 return Error("Ya existe un equipo de control de acceso con esa dirección y puerto.", StatusCodes.Status409Conflict);
 
-            var conn = new AccessConnectionInfo(host, request.Port, request.UseHttps, request.Username, request.Password);
+            // Sin clave = cadena vacía, no null: los equipos con clave de
+            // comunicación (ZKTeco) se dan de alta sin contraseña y "vacío"
+            // significa 0 para ellos.
+            var conn = new AccessConnectionInfo(host, request.Port, request.UseHttps, request.Username,
+                request.Password ?? "");
             var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             if (info is null)
             {
