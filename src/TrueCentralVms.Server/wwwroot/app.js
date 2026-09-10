@@ -59,9 +59,10 @@ function openModal(html, size) {
   $("#modal-backdrop").classList.remove("hidden");
 }
 function closeModal() { $("#modal-backdrop").classList.add("hidden"); }
-$("#modal-backdrop")?.addEventListener("click", (e) => {
-  if (e.target.id === "modal-backdrop") closeModal();
-});
+// Un clic en el fondo NO cierra el modal: acá casi todos son formularios (alta
+// de un equipo, asistente de personas, editor de horarios) y un clic al lado
+// perdía todo lo escrito sin preguntar. Se cierran por su botón Cancelar o
+// Cerrar, que todos tienen.
 
 function formatDate(iso) {
   if (!iso) return "—";
@@ -622,7 +623,7 @@ function renderOnlineDevices(devices) {
   box.innerHTML = `
     <div class="table-scroll"><table class="grid">
       <thead><tr>
-        <th>IP</th><th>Marca</th><th>Tipo</th><th>Modelo</th><th>N° serie</th><th>Puerto SDK</th>
+        <th>IP</th><th>Marca</th><th>Tipo</th><th>Modelo</th><th>N° serie</th><th>${esc(opt.portLabel ?? "Puerto SDK")}</th>
         <th>MAC</th><th>Estado</th><th></th>
       </tr></thead>
       <tbody>${lastScan.map((d, i) => {
@@ -634,7 +635,7 @@ function renderOnlineDevices(devices) {
           <td>${esc(d.category)}</td>
           <td>${esc(d.model)}</td>
           <td class="muted">${esc(d.serial)}</td>
-          <td class="muted">${d.commandPort}</td>
+          <td class="muted">${opt.portOf ? opt.portOf(d) : d.commandPort}</td>
           <td class="muted">${esc(d.mac)}</td>
           <td>${added ? `<span class="tag on">Agregado</span>`
                 : d.activated === false ? `<span class="tag off">Sin activar</span>`
@@ -1162,6 +1163,12 @@ const routes = {
   "#/": renderDashboard,
   "#/devices": renderDevices,
   "#/alarm-panels": renderAlarmPanels,
+  "#/access": renderAccessDevices,
+  "#/access-monitor": renderAccessMonitor,
+  "#/access-persons": renderAccessPersons,
+  "#/access-levels": renderAccessLevels,
+  "#/access-schedules": renderAccessSchedules,
+  "#/access-events": renderAccessEvents,
   "#/speakers": renderSpeakers,
   "#/workflows": renderWorkflows,
   "#/decoders": renderDecoders,
@@ -1228,6 +1235,9 @@ function navigate() {
   clearInterval(discoveryTimer); // ídem el de equipos en línea
   clearInterval(alarmsTimer);    // ídem el de paneles de alarma
   clearInterval(speakersTimer);  // ídem el de parlantes IP
+  clearInterval(accessTimer);    // ídem el de control de acceso
+  clearInterval(accessDoorsTimer);  // ídem el del monitoreo de puertas
+  clearInterval(accessEventsTimer); // ídem el del historial de accesos
   clearInterval(workflowsTimer); // ídem el del historial de automatizaciones
   clearInterval(servicesTimer);  // ídem el del supervisor de servicios
   const hash = location.hash || "#/";

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -42,6 +42,7 @@
           <div class="nav-children">
             <a href="#/devices" data-route="devices">Fuentes de video</a>
             <a href="#/alarm-panels" data-route="alarm-panels">Paneles de alarma</a>
+            <a href="#/access" data-route="access">Control de acceso</a>
             <a href="#/speakers" data-route="speakers">Parlantes IP</a>
             <div class="nav-group" data-group="videowall">
               <button type="button" class="nav-toggle">
@@ -52,6 +53,19 @@
                 <a href="#/walls" data-route="walls">Muro de video</a>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div class="nav-group" data-group="access">
+          <button type="button" class="nav-toggle">
+            <span class="caret" aria-hidden="true"></span><span>Control de acceso</span>
+          </button>
+          <div class="nav-children">
+            <a href="#/access-monitor" data-route="access-monitor">Monitoreo</a>
+            <a href="#/access-persons" data-route="access-persons">Personas</a>
+            <a href="#/access-levels" data-route="access-levels">Niveles de acceso</a>
+            <a href="#/access-schedules" data-route="access-schedules">Horarios</a>
+            <a href="#/access-events" data-route="access-events">Historial</a>
           </div>
         </div>
 
@@ -117,9 +131,12 @@
   <script src="walls.js?v=2"></script>
   <script src="alarms.js?v=6"></script>
   <script src="speakers.js?v=7"></script>
+  <script src="access.js?v=4"></script>
+  <script src="enroll.js?v=1"></script>
+  <script src="access-catalog.js?v=8"></script>
   <script src="workflows.js?v=9"></script>
   <script src="services.js?v=1"></script>
   <script src="license.js?v=1"></script>
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>

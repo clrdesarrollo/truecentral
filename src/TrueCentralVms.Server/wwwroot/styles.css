@@ -342,3 +342,113 @@ pre.diag { white-space: pre-wrap; font-size: 12px; margin: 0; color: var(--muted
 .wf-thumbs img {
   width: 190px; border: 1px solid var(--border); border-radius: 8px; display: block;
 }
+
+/* ---------- Control de acceso: puertas, horarios y credenciales ---------- */
+.access-door .row-actions .btn { padding: 5px 10px; font-size: 12.5px; }
+
+/* Editor semanal de horarios: una fila por día. */
+.access-day {
+  display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center;
+  padding: 7px 0; border-bottom: 1px solid var(--border);
+}
+.access-day:last-child { border-bottom: none; }
+.access-day-name { color: var(--muted); font-size: 13px; flex: 0 0 92px; }
+/* Los tramos se llevan el espacio sobrante y los botones quedan al final:
+   en una pantalla angosta bajan de línea en vez de estirar la ventana. */
+.access-day-segments { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1 1 260px; }
+.access-day-actions { display: flex; gap: 6px; margin-left: auto; }
+.access-day-actions .btn { padding: 4px 9px; font-size: 12px; white-space: nowrap; }
+
+/* Un tramo horario, o una tarjeta: campos cortos con su botón de quitar. */
+.access-segment { display: inline-flex; align-items: center; gap: 6px; }
+.access-segment input { width: auto; min-width: 118px; }
+.access-segment .btn { padding: 2px 8px; font-size: 12px; line-height: 1.4; }
+
+/* Puertas agrupadas por el equipo que las administra. */
+.access-door-group { margin-bottom: 12px; }
+.access-door-group-name {
+  font-size: 12px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .4px; margin-bottom: 4px;
+}
+
+/* Asistente por pasos (alta y edición de personas). La cabecera es
+   navegable: cada paso es un botón, y el que todavía no se visitó va
+   deshabilitado para que no se salte el llenado. */
+.wizard-steps {
+  display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap;
+}
+.wizard-step {
+  display: flex; align-items: center; gap: 10px; flex: 1 1 180px;
+  padding: 9px 12px; text-align: left; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--muted);
+  font: inherit; font-size: 13px;
+}
+.wizard-step:disabled { opacity: .5; cursor: default; }
+.wizard-step.active { border-color: var(--accent); color: var(--text); }
+.wizard-step.done { color: var(--text); }
+.wizard-step-n {
+  display: grid; place-items: center; flex: 0 0 22px; height: 22px;
+  border-radius: 999px; background: var(--border); color: var(--text);
+  font-size: 12px; font-weight: 700;
+}
+.wizard-step.active .wizard-step-n { background: var(--accent); }
+.wizard-step.done .wizard-step-n { background: var(--ok); }
+.wizard-step-title { display: block; font-weight: 600; }
+.wizard-step-hint { display: block; font-size: 11.5px; color: var(--muted); }
+
+/* ---------- Captura de huella con el lector USB (enroll.js) ---------- */
+/* El diálogo se abre POR ENCIMA del asistente de personas, que ya usa el
+   modal del panel (z-index 50). */
+.enroll-backdrop { z-index: 80; }
+.enroll-modal { width: 560px; max-width: calc(100vw - 32px); }
+
+.enroll-sources { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.enroll-source {
+  display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px;
+  border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+}
+.enroll-source:has(input:checked) { border-color: var(--accent); background: var(--panel-2); }
+.enroll-source.disabled { opacity: .5; cursor: not-allowed; }
+.enroll-source input { margin-top: 3px; }
+
+.enroll-agent {
+  border: 1px solid var(--border); border-left-width: 3px;
+  border-radius: 8px; padding: 11px 13px; font-size: 13px;
+}
+.enroll-agent.ok { border-left-color: var(--ok); }
+.enroll-agent.warn { border-left-color: var(--warn); }
+
+.enroll-capture { display: flex; gap: 16px; align-items: stretch; margin: 14px 0; }
+.enroll-preview {
+  width: 168px; min-height: 200px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 8px; overflow: hidden; text-align: center; padding: 6px;
+}
+/* La imagen del sensor es chica y en escala de grises: ampliarla suavizada la
+   vuelve una mancha, así que se escala sin interpolar. */
+.enroll-preview img { max-width: 100%; max-height: 260px; image-rendering: pixelated; }
+.enroll-progress { flex: 1; }
+.enroll-message { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+
+/* Un dedo de la grilla de huellas del asistente. */
+.access-finger {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 0; font-size: 13px;
+}
+.access-finger .btn { padding: 3px 9px; font-size: 12px; }
+
+/* El rostro del asistente: la foto y sus botones, uno al lado del otro. */
+.access-face { display: flex; gap: 14px; align-items: flex-start; }
+.access-face-photo {
+  width: 108px; height: 132px; flex: none; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+}
+.access-face-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.access-face-empty {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 12px;
+}
+.access-face-actions { display: flex; flex-direction: column; gap: 8px; }
+.access-face-actions .btn { padding: 3px 9px; font-size: 12px; }
