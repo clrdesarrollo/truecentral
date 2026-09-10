@@ -30,6 +30,22 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     // Parlantes IP
     public DbSet<Speaker> Speakers => Set<Speaker>();
 
+    // Control de acceso (terminales y controladoras de puertas)
+    public DbSet<AccessDevice> AccessDevices => Set<AccessDevice>();
+    public DbSet<AccessDoor> AccessDoors => Set<AccessDoor>();
+    public DbSet<AccessSchedule> AccessSchedules => Set<AccessSchedule>();
+    public DbSet<AccessPlanSlot> AccessPlanSlots => Set<AccessPlanSlot>();
+    public DbSet<AccessScheduleSegment> AccessScheduleSegments => Set<AccessScheduleSegment>();
+    public DbSet<AccessLevel> AccessLevels => Set<AccessLevel>();
+    public DbSet<AccessLevelDoor> AccessLevelDoors => Set<AccessLevelDoor>();
+    public DbSet<AccessLevelPerson> AccessLevelPersons => Set<AccessLevelPerson>();
+    public DbSet<AccessPerson> AccessPersons => Set<AccessPerson>();
+    public DbSet<AccessCard> AccessCards => Set<AccessCard>();
+    public DbSet<AccessFingerprint> AccessFingerprints => Set<AccessFingerprint>();
+    public DbSet<AccessFace> AccessFaces => Set<AccessFace>();
+    public DbSet<AccessPersonDevice> AccessPersonDevices => Set<AccessPersonDevice>();
+    public DbSet<AccessEvent> AccessEvents => Set<AccessEvent>();
+
     // Automatizaciones (workflows): disparador + acciones, y su historial
     public DbSet<Workflow> Workflows => Set<Workflow>();
     public DbSet<WorkflowAction> WorkflowActions => Set<WorkflowAction>();
@@ -169,6 +185,191 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(s => s.LastError).HasMaxLength(512);
             e.Property(s => s.Status).HasConversion<string>().HasMaxLength(16);
             e.HasIndex(s => new { s.Host, s.Port }).IsUnique();
+        });
+
+        // -------------------------------------------------------------------
+        // Control de acceso
+        // -------------------------------------------------------------------
+        modelBuilder.Entity<AccessDevice>(e =>
+        {
+            e.Property(a => a.Name).HasMaxLength(128);
+            e.Property(a => a.DriverKey).HasMaxLength(32);
+            e.Property(a => a.Host).HasMaxLength(255);
+            e.Property(a => a.Username).HasMaxLength(64);
+            e.Property(a => a.Location).HasMaxLength(128);
+            e.Property(a => a.Model).HasMaxLength(64);
+            e.Property(a => a.SerialNumber).HasMaxLength(64);
+            e.Property(a => a.FirmwareVersion).HasMaxLength(64);
+            e.Property(a => a.MacAddress).HasMaxLength(32);
+            e.Property(a => a.LastError).HasMaxLength(512);
+            e.Property(a => a.Kind).HasConversion<string>().HasMaxLength(16);
+            e.Property(a => a.Status).HasConversion<string>().HasMaxLength(16);
+            e.HasIndex(a => new { a.Host, a.Port }).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessDoor>(e =>
+        {
+            e.Property(d => d.Name).HasMaxLength(128);
+            e.Property(d => d.Mode).HasConversion<string>().HasMaxLength(16);
+            e.HasOne(d => d.AccessDevice)
+                .WithMany(a => a.Doors)
+                .HasForeignKey(d => d.AccessDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(d => new { d.AccessDeviceId, d.Number }).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessSchedule>(e =>
+        {
+            e.Property(s => s.Name).HasMaxLength(128);
+            e.Property(s => s.Description).HasMaxLength(512);
+            e.HasIndex(s => s.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessPlanSlot>(e =>
+        {
+            e.Property(s => s.Hash).HasMaxLength(64);
+            e.Property(s => s.Label).HasMaxLength(64);
+            e.HasIndex(s => s.Number).IsUnique();
+            e.HasIndex(s => s.Hash).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessScheduleSegment>(e =>
+        {
+            e.HasOne(s => s.AccessSchedule)
+                .WithMany(s => s.Segments)
+                .HasForeignKey(s => s.AccessScheduleId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(s => new { s.AccessScheduleId, s.Day });
+        });
+
+        modelBuilder.Entity<AccessLevel>(e =>
+        {
+            e.Property(l => l.Name).HasMaxLength(128);
+            e.Property(l => l.Description).HasMaxLength(512);
+            e.HasIndex(l => l.Name).IsUnique();
+            // Un horario en uso no se puede borrar: primero hay que sacarlo de
+            // los niveles que lo usan (si no, quedarían sin decir "cuándo").
+            e.HasOne(l => l.AccessSchedule)
+                .WithMany(s => s.Levels)
+                .HasForeignKey(l => l.AccessScheduleId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AccessLevelDoor>(e =>
+        {
+            e.HasKey(x => new { x.AccessLevelId, x.AccessDoorId });
+            e.HasOne(x => x.AccessLevel)
+                .WithMany(l => l.Doors)
+                .HasForeignKey(x => x.AccessLevelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Borrar un equipo (y con él sus puertas) saca esas puertas de los
+            // niveles; el nivel sobrevive con las que le queden.
+            e.HasOne(x => x.AccessDoor)
+                .WithMany(d => d.Levels)
+                .HasForeignKey(x => x.AccessDoorId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AccessLevelPerson>(e =>
+        {
+            e.HasKey(x => new { x.AccessLevelId, x.AccessPersonId });
+            e.HasOne(x => x.AccessLevel)
+                .WithMany(l => l.Persons)
+                .HasForeignKey(x => x.AccessLevelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.AccessPerson)
+                .WithMany(p => p.Levels)
+                .HasForeignKey(x => x.AccessPersonId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AccessPerson>(e =>
+        {
+            e.Property(p => p.EmployeeNo).HasMaxLength(32);
+            e.Property(p => p.FirstName).HasMaxLength(64);
+            e.Property(p => p.LastName).HasMaxLength(64);
+            e.Property(p => p.Department).HasMaxLength(128);
+            e.Property(p => p.Position).HasMaxLength(128);
+            e.Property(p => p.Email).HasMaxLength(255);
+            e.Property(p => p.Phone).HasMaxLength(32);
+            e.Property(p => p.Notes).HasMaxLength(1024);
+            e.Property(p => p.SyncError).HasMaxLength(512);
+            e.Property(p => p.SyncState).HasConversion<string>().HasMaxLength(16);
+            e.Ignore(p => p.FullName);
+            e.HasIndex(p => p.EmployeeNo).IsUnique();
+            e.HasIndex(p => new { p.LastName, p.FirstName });
+        });
+
+        modelBuilder.Entity<AccessCard>(e =>
+        {
+            e.Property(c => c.Number).HasMaxLength(32);
+            e.HasOne(c => c.AccessPerson)
+                .WithMany(p => p.Cards)
+                .HasForeignKey(c => c.AccessPersonId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Dos personas con la misma tarjeta serían dos identidades para el
+            // mismo trozo de plástico: el equipo no sabría a quién anotar.
+            e.HasIndex(c => c.Number).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessFingerprint>(e =>
+        {
+            e.Property(f => f.Source).HasMaxLength(128);
+            e.HasOne(f => f.AccessPerson)
+                .WithMany(p => p.Fingerprints)
+                .HasForeignKey(f => f.AccessPersonId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Un dedo por persona: volver a capturar el mismo reemplaza la anterior.
+            e.HasIndex(f => new { f.AccessPersonId, f.Number }).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessFace>(e =>
+        {
+            e.Property(f => f.ContentType).HasMaxLength(32);
+            e.Property(f => f.Source).HasMaxLength(128);
+            e.HasOne(f => f.AccessPerson)
+                .WithOne(p => p.Face)
+                .HasForeignKey<AccessFace>(f => f.AccessPersonId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Un rostro por persona: los terminales guardan un modelo por
+            // legajo, así que una foto nueva reemplaza a la anterior.
+            e.HasIndex(f => f.AccessPersonId).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessPersonDevice>(e =>
+        {
+            e.Property(x => x.Error).HasMaxLength(512);
+            e.Property(x => x.AppliedHash).HasMaxLength(64);
+            e.Property(x => x.State).HasConversion<string>().HasMaxLength(16);
+            e.HasOne(x => x.AccessPerson)
+                .WithMany(p => p.Devices)
+                .HasForeignKey(x => x.AccessPersonId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.AccessDevice)
+                .WithMany()
+                .HasForeignKey(x => x.AccessDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.AccessPersonId, x.AccessDeviceId }).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessEvent>(e =>
+        {
+            e.Property(x => x.DeviceName).HasMaxLength(128);
+            e.Property(x => x.DoorName).HasMaxLength(128);
+            e.Property(x => x.Description).HasMaxLength(512);
+            e.Property(x => x.EmployeeNo).HasMaxLength(32);
+            e.Property(x => x.PersonName).HasMaxLength(128);
+            e.Property(x => x.CardNumber).HasMaxLength(32);
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.Credential).HasConversion<string>().HasMaxLength(16);
+            e.HasOne(x => x.AccessDevice)
+                .WithMany()
+                .HasForeignKey(x => x.AccessDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.Timestamp);
+            e.HasIndex(x => x.AccessPersonId);
+            // El sondeo pregunta "¿ya tenía este evento?" por equipo y hora.
+            e.HasIndex(x => new { x.AccessDeviceId, x.Timestamp });
         });
 
         modelBuilder.Entity<AlarmPanel>(e =>

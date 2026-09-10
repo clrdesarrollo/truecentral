@@ -41,10 +41,16 @@ public sealed class CredentialProtector(EmbeddedPostgres postgres)
         }
     }
 
-    public byte[] Protect(string plaintext)
+    public byte[] Protect(string plaintext) =>
+        ProtectBytes(System.Text.Encoding.UTF8.GetBytes(plaintext));
+
+    /// <summary>
+    /// Igual que <see cref="Protect(string)"/> pero para datos que NO son
+    /// texto: la foto del rostro es un JPEG, y pasarla por UTF-8 la rompería.
+    /// </summary>
+    public byte[] ProtectBytes(byte[] plain)
     {
         byte[] nonce = RandomNumberGenerator.GetBytes(NonceSize);
-        byte[] plain = System.Text.Encoding.UTF8.GetBytes(plaintext);
         byte[] cipher = new byte[plain.Length];
         byte[] tag = new byte[TagSize];
 
@@ -58,7 +64,11 @@ public sealed class CredentialProtector(EmbeddedPostgres postgres)
         return blob;
     }
 
-    public string Unprotect(byte[] blob)
+    public string Unprotect(byte[] blob) =>
+        System.Text.Encoding.UTF8.GetString(UnprotectBytes(blob));
+
+    /// <summary>Descifra datos que no son texto (ver <see cref="ProtectBytes"/>).</summary>
+    public byte[] UnprotectBytes(byte[] blob)
     {
         if (blob.Length < NonceSize + TagSize)
             throw new InvalidOperationException("Credencial cifrada corrupta.");
@@ -70,6 +80,6 @@ public sealed class CredentialProtector(EmbeddedPostgres postgres)
 
         using var aes = new AesGcm(Key, TagSize);
         aes.Decrypt(nonce, cipher, tag, plain);
-        return System.Text.Encoding.UTF8.GetString(plain);
+        return plain;
     }
 }

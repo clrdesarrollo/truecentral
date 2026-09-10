@@ -5,6 +5,7 @@
     <ProjectReference Include="..\TrueCentralVms.Drivers.Dahua\TrueCentralVms.Drivers.Dahua.csproj" />
     <ProjectReference Include="..\TrueCentralVms.Drivers.Hikvision\TrueCentralVms.Drivers.Hikvision.csproj" />
     <ProjectReference Include="..\TrueCentralVms.Drivers.Onvif\TrueCentralVms.Drivers.Onvif.csproj" />
+    <ProjectReference Include="..\TrueCentralVms.Drivers.ZkTeco\TrueCentralVms.Drivers.ZkTeco.csproj" />
   </ItemGroup>
 
   <!-- DLLs nativas de los SDK: se copian junto al ejecutable. Hikvision

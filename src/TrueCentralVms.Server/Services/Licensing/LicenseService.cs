@@ -183,7 +183,7 @@ public sealed class LicenseService : BackgroundService
             [LicenseFeatures.VideoChannels] = await db.Channels.CountAsync(c => c.Enabled, ct),
             [LicenseFeatures.AnprChannels] = await db.Devices.CountAsync(d => d.AnprEnabled, ct),
             [LicenseFeatures.AlarmPanels] = await db.AlarmPanels.CountAsync(p => p.Enabled, ct),
-            [LicenseFeatures.AccessDoors] = 0,
+            [LicenseFeatures.AccessDoors] = await db.AccessDoors.CountAsync(d => d.Enabled && d.AccessDevice!.Enabled, ct),
             [LicenseFeatures.Videowalls] = await db.Walls.CountAsync(ct),
             [LicenseFeatures.VideowallDecoders] = await db.Decoders.CountAsync(d => d.Enabled, ct),
             [LicenseFeatures.SpeakerChannels] = await db.Speakers.CountAsync(s => s.Enabled, ct),

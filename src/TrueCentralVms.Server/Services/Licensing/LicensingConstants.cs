@@ -32,7 +32,6 @@ public static class LicensingConstants
     /// <summary>
     /// Cupos del período de prueba incorporado: todos los módulos disponibles
     /// con cupos chicos, para evaluar el producto completo antes de comprar.
-    /// El control de acceso queda fuera porque el VMS aún no lo implementa.
     /// </summary>
     public static readonly IReadOnlyDictionary<string, object> TrialFeatures = new Dictionary<string, object>
     {
@@ -45,8 +44,8 @@ public static class LicensingConstants
         [LicenseFeatures.AnprChannels] = 2,
         [LicenseFeatures.ModuleAlarms] = true,
         [LicenseFeatures.AlarmPanels] = 2,
-        [LicenseFeatures.ModuleAccess] = false,
-        [LicenseFeatures.AccessDoors] = 0,
+        [LicenseFeatures.ModuleAccess] = true,
+        [LicenseFeatures.AccessDoors] = 4,
         [LicenseFeatures.ModuleVideowall] = true,
         [LicenseFeatures.Videowalls] = 1,
         [LicenseFeatures.VideowallDecoders] = 2,

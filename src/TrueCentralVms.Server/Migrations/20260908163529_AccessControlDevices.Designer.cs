@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TrueCentralVms.Server.Data;
@@ -11,9 +12,11 @@ using TrueCentralVms.Server.Data;
 namespace TrueCentralVms.Server.Migrations
 {
     [DbContext(typeof(VmsDbContext))]
-    partial class VmsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260908163529_AccessControlDevices")]
+    partial class AccessControlDevices
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,38 +24,6 @@ namespace TrueCentralVms.Server.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessCard", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AccessPersonId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("Enabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Number")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccessPersonId");
-
-                    b.HasIndex("Number")
-                        .IsUnique();
-
-                    b.ToTable("AccessCards");
-                });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessDevice", b =>
                 {
@@ -93,9 +64,6 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<string>("LastError")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
-
-                    b.Property<DateTime?>("LastEventAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
@@ -187,27 +155,13 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
-                    b.Property<bool?>("IsOpen")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Mode")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<bool>("NameFromDevice")
-                        .HasColumnType("boolean");
-
                     b.Property<int>("Number")
                         .HasColumnType("integer");
-
-                    b.Property<DateTime?>("StateReadAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -218,461 +172,6 @@ namespace TrueCentralVms.Server.Migrations
                         .IsUnique();
 
                     b.ToTable("AccessDoors");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessEvent", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("AccessDeviceId")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("AccessPersonId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("CardNumber")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<string>("Credential")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
-                    b.Property<string>("DeviceName")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("DoorName")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<int?>("DoorNumber")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("EmployeeNo")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<int?>("MajorType")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("MinorType")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("PersonName")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("RawJson")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("ReceivedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("Timestamp")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccessPersonId");
-
-                    b.HasIndex("Timestamp");
-
-                    b.HasIndex("AccessDeviceId", "Timestamp");
-
-                    b.ToTable("AccessEvents");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessFace", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AccessPersonId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Bytes")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<byte[]>("ImageCiphertext")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<string>("Source")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccessPersonId")
-                        .IsUnique();
-
-                    b.ToTable("AccessFaces");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessFingerprint", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AccessPersonId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("Number")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("Quality")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Source")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<byte[]>("TemplateCiphertext")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccessPersonId", "Number")
-                        .IsUnique();
-
-                    b.ToTable("AccessFingerprints");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessLevel", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AccessScheduleId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
-                    b.Property<bool>("Enabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccessScheduleId");
-
-                    b.HasIndex("Name")
-                        .IsUnique();
-
-                    b.ToTable("AccessLevels");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessLevelDoor", b =>
-                {
-                    b.Property<int>("AccessLevelId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("AccessDoorId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("AccessLevelId", "AccessDoorId");
-
-                    b.HasIndex("AccessDoorId");
-
-                    b.ToTable("AccessLevelDoors");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessLevelPerson", b =>
-                {
-                    b.Property<int>("AccessLevelId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("AccessPersonId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("AssignedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("AccessLevelId", "AccessPersonId");
-
-                    b.HasIndex("AccessPersonId");
-
-                    b.ToTable("AccessLevelPersons");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPerson", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Department")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("Email")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("EmployeeNo")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<bool>("Enabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("FirstName")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("LastName")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTime?>("LastSyncedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1024)
-                        .HasColumnType("character varying(1024)");
-
-                    b.Property<string>("Phone")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<byte[]>("PinCiphertext")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<string>("Position")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("SyncError")
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
-                    b.Property<string>("SyncState")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ValidFrom")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ValidTo")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EmployeeNo")
-                        .IsUnique();
-
-                    b.HasIndex("LastName", "FirstName");
-
-                    b.ToTable("AccessPersons");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPersonDevice", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AccessDeviceId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("AccessPersonId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("AppliedHash")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Error")
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
-                    b.Property<bool>("PendingRemoval")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<DateTime?>("SyncedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccessDeviceId");
-
-                    b.HasIndex("AccessPersonId", "AccessDeviceId")
-                        .IsUnique();
-
-                    b.ToTable("AccessPersonDevices");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPlanSlot", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Hash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Label")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<int>("Number")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("SegmentsJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Hash")
-                        .IsUnique();
-
-                    b.HasIndex("Number")
-                        .IsUnique();
-
-                    b.ToTable("AccessPlanSlots");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessSchedule", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
-                    b.Property<bool>("IsBuiltIn")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<int>("PlanNumber")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Name")
-                        .IsUnique();
-
-                    b.ToTable("AccessSchedules");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessScheduleSegment", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AccessScheduleId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Day")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("EndMinutes")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("StartMinutes")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccessScheduleId", "Day");
-
-                    b.ToTable("AccessScheduleSegments");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmArea", b =>
@@ -2130,17 +1629,6 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("WorkflowRuns");
                 });
 
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessCard", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
-                        .WithMany("Cards")
-                        .HasForeignKey("AccessPersonId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AccessPerson");
-                });
-
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessDoor", b =>
                 {
                     b.HasOne("TrueCentralVms.Server.Data.Entities.AccessDevice", "AccessDevice")
@@ -2150,118 +1638,6 @@ namespace TrueCentralVms.Server.Migrations
                         .IsRequired();
 
                     b.Navigation("AccessDevice");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessEvent", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessDevice", "AccessDevice")
-                        .WithMany()
-                        .HasForeignKey("AccessDeviceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AccessDevice");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessFace", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
-                        .WithOne("Face")
-                        .HasForeignKey("TrueCentralVms.Server.Data.Entities.AccessFace", "AccessPersonId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AccessPerson");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessFingerprint", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
-                        .WithMany("Fingerprints")
-                        .HasForeignKey("AccessPersonId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AccessPerson");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessLevel", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessSchedule", "AccessSchedule")
-                        .WithMany("Levels")
-                        .HasForeignKey("AccessScheduleId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("AccessSchedule");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessLevelDoor", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessDoor", "AccessDoor")
-                        .WithMany("Levels")
-                        .HasForeignKey("AccessDoorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessLevel", "AccessLevel")
-                        .WithMany("Doors")
-                        .HasForeignKey("AccessLevelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AccessDoor");
-
-                    b.Navigation("AccessLevel");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessLevelPerson", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessLevel", "AccessLevel")
-                        .WithMany("Persons")
-                        .HasForeignKey("AccessLevelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
-                        .WithMany("Levels")
-                        .HasForeignKey("AccessPersonId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AccessLevel");
-
-                    b.Navigation("AccessPerson");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPersonDevice", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessDevice", "AccessDevice")
-                        .WithMany()
-                        .HasForeignKey("AccessDeviceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
-                        .WithMany("Devices")
-                        .HasForeignKey("AccessPersonId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AccessDevice");
-
-                    b.Navigation("AccessPerson");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessScheduleSegment", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessSchedule", "AccessSchedule")
-                        .WithMany("Segments")
-                        .HasForeignKey("AccessScheduleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AccessSchedule");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmArea", b =>
@@ -2432,38 +1808,6 @@ namespace TrueCentralVms.Server.Migrations
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessDevice", b =>
                 {
                     b.Navigation("Doors");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessDoor", b =>
-                {
-                    b.Navigation("Levels");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessLevel", b =>
-                {
-                    b.Navigation("Doors");
-
-                    b.Navigation("Persons");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPerson", b =>
-                {
-                    b.Navigation("Cards");
-
-                    b.Navigation("Devices");
-
-                    b.Navigation("Face");
-
-                    b.Navigation("Fingerprints");
-
-                    b.Navigation("Levels");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessSchedule", b =>
-                {
-                    b.Navigation("Levels");
-
-                    b.Navigation("Segments");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmPanel", b =>

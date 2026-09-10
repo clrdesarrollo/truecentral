@@ -106,6 +106,15 @@ public sealed class ServiceSupervisor : BackgroundService
             () => config.GetValue("Alarms:Receiver:Enabled", true)
                 ? null
                 : "Deshabilitado en la configuración (Alarms:Receiver:Enabled = false).");
+        yield return new HostedServiceAdapter("access-control", "Control de acceso",
+            "Sondeo de estado de terminales y controladoras, y del modo de cada puerta.",
+            sp.GetRequiredService<AccessControlService>());
+        yield return new HostedServiceAdapter("access-sync", "Padrón de control de acceso",
+            "Escribe personas, credenciales, horarios y permisos en los equipos de control de acceso.",
+            sp.GetRequiredService<AccessSyncService>());
+        yield return new HostedServiceAdapter("access-events", "Historial de accesos",
+            "Trae de cada equipo quién pasó por cada puerta y lo guarda en el VMS.",
+            sp.GetRequiredService<AccessEventService>());
         yield return new HostedServiceAdapter("speakers", "Parlantes IP",
             "Sondeo de estado, reproducción sincronizada y voz en vivo hacia los altavoces de red.",
             sp.GetRequiredService<SpeakerService>());

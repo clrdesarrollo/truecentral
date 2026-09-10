@@ -103,6 +103,24 @@ builder.Services.AddSingleton<AlarmDriverRegistry>();
 builder.Services.AddSingleton<AlarmPanelService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmPanelService>());
 
+// Control de acceso: drivers, registro y servicio (sondeo de estado de terminales y controladoras).
+// Tres marcas, tres transportes: ISAPI (HTTP) en Hikvision, CGI (HTTP) en
+// Dahua y el protocolo propio del SDK (TCP 4370) en ZKTeco.
+builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionAccessDriverFactory>();
+builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaAccessDriverFactory>();
+builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.ZkTeco.ZkTecoAccessDriverFactory>();
+builder.Services.AddSingleton<AccessDriverRegistry>();
+builder.Services.AddSingleton<AccessControlService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessControlService>());
+// El padrón (personas, credenciales, horarios y niveles) lo escribe el
+// sincronizador en los equipos, y el historial de accesos lo trae el lector de
+// eventos: van aparte porque tienen ritmos distintos (uno reacciona a los
+// cambios del operador, el otro sondea cada 15 s).
+builder.Services.AddSingleton<AccessSyncService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessSyncService>());
+builder.Services.AddSingleton<AccessEventService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessEventService>());
+
 // Parlantes IP: drivers, registro y servicio (sondeo de estado, reproducción sincronizada, voz en vivo).
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFactory>();
@@ -172,6 +190,10 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
     await db.Database.MigrateAsync();
+
+    // Control de acceso: el horario 24/7 tiene que existir desde el principio,
+    // porque es el que se ofrece por omisión al crear el primer nivel de acceso.
+    await AccessCatalogApi.EnsureBuiltInScheduleAsync(db, CancellationToken.None);
 
     // El servidor se distribuye "desactivado": sin usuarios no hay login. El
     // primer administrador se crea desde el asistente del panel web, solo
@@ -283,6 +305,8 @@ app.MapAnprApi();
 app.MapAuditApi();
 app.MapAlarmsApi();
 app.MapSpeakersApi();
+app.MapAccessApi();
+app.MapAccessCatalogApi();
 app.MapWorkflowsApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);

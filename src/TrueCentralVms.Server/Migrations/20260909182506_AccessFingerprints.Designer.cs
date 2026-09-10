@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TrueCentralVms.Server.Data;
@@ -11,9 +12,11 @@ using TrueCentralVms.Server.Data;
 namespace TrueCentralVms.Server.Migrations
 {
     [DbContext(typeof(VmsDbContext))]
-    partial class VmsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260909182506_AccessFingerprints")]
+    partial class AccessFingerprints
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -297,44 +300,6 @@ namespace TrueCentralVms.Server.Migrations
                     b.HasIndex("AccessDeviceId", "Timestamp");
 
                     b.ToTable("AccessEvents");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessFace", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AccessPersonId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Bytes")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<byte[]>("ImageCiphertext")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<string>("Source")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccessPersonId")
-                        .IsUnique();
-
-                    b.ToTable("AccessFaces");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessFingerprint", b =>
@@ -2163,17 +2128,6 @@ namespace TrueCentralVms.Server.Migrations
                     b.Navigation("AccessDevice");
                 });
 
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessFace", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
-                        .WithOne("Face")
-                        .HasForeignKey("TrueCentralVms.Server.Data.Entities.AccessFace", "AccessPersonId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AccessPerson");
-                });
-
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessFingerprint", b =>
                 {
                     b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
@@ -2451,8 +2405,6 @@ namespace TrueCentralVms.Server.Migrations
                     b.Navigation("Cards");
 
                     b.Navigation("Devices");
-
-                    b.Navigation("Face");
 
                     b.Navigation("Fingerprints");
 
