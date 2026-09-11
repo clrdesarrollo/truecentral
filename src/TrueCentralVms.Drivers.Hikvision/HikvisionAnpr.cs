@@ -29,12 +29,6 @@ internal static class HikvisionAnpr
     /// <summary>Ventana de agrupación de los mensajes de una misma pasada.</summary>
     private static readonly TimeSpan GroupWindow = TimeSpan.FromMilliseconds(900);
 
-    private static readonly Lock Sync = new();
-
-    /// <summary>El delegado vive en un campo estático: si el GC lo recolecta,
-    /// el SDK llama a memoria liberada y el proceso cae.</summary>
-    private static CHCNetSDK.MSGCallBack? _callback;
-
     /// <summary>Suscripciones activas por sesión de login (lUserID del SDK).</summary>
     private static readonly ConcurrentDictionary<int, Action<PlateRecognition>> Handlers = new();
 
@@ -45,7 +39,10 @@ internal static class HikvisionAnpr
     public static IPlateSubscription Subscribe(DeviceConnectionInfo info, Action<PlateRecognition> onPlate)
     {
         HikvisionSdk.EnsureInitialized();
-        EnsureCallbackInstalled();
+        // El callback del SDK es único por proceso: lo administra
+        // HikvisionAlarmChannel y enruta por sesión (también lo usan los
+        // eventos de analítica).
+        HikvisionAlarmChannel.EnsureInstalled();
 
         // Sesión propia (no la caché de PTZ: esa se poda a los 3 minutos de
         // ocio y se llevaría el canal de alarma con ella).
@@ -59,6 +56,7 @@ internal static class HikvisionAnpr
         }
 
         Handlers[userId] = onPlate;
+        HikvisionAlarmChannel.Register(userId, (command, data, length) => OnSdkMessage(userId, command, data, length));
         var param = new ItsInterop.NET_DVR_SETUPALARM_PARAM
         {
             dwSize = (uint)Marshal.SizeOf<ItsInterop.NET_DVR_SETUPALARM_PARAM>(),
@@ -71,6 +69,7 @@ internal static class HikvisionAnpr
         {
             uint code = CHCNetSDK.NET_DVR_GetLastError();
             Handlers.TryRemove(userId, out _);
+            HikvisionAlarmChannel.Unregister(userId);
             CHCNetSDK.NET_DVR_Logout(userId);
             throw new DriverException(
                 $"El equipo {info.Host} no aceptó el canal de eventos de patentes: " +
@@ -90,6 +89,7 @@ internal static class HikvisionAnpr
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return ValueTask.CompletedTask;
             Handlers.TryRemove(userId, out _);
+            HikvisionAlarmChannel.Unregister(userId);
             DiscardPendingOf(userId);
             CHCNetSDK.NET_DVR_CloseAlarmChan_V30(alarmHandle);
             CHCNetSDK.NET_DVR_Logout(userId);
@@ -97,51 +97,25 @@ internal static class HikvisionAnpr
         }
     }
 
-    private static void EnsureCallbackInstalled()
-    {
-        lock (Sync)
-        {
-            if (_callback is not null) return;
-            _callback = OnSdkMessage;
-            if (!CHCNetSDK.NET_DVR_SetDVRMessageCallBack_V30(_callback, IntPtr.Zero))
-            {
-                _callback = null;
-                uint code = CHCNetSDK.NET_DVR_GetLastError();
-                throw new DriverException(
-                    $"No se pudo instalar el receptor de eventos del SDK Hikvision (error {code}).");
-            }
-        }
-    }
-
     // ------------------------------------------------------------------
-    // Callback del SDK (hilo del SDK: copiar y salir rápido)
+    // Mensajes del SDK (hilo del SDK: copiar y salir rápido)
     // ------------------------------------------------------------------
 
-    private static void OnSdkMessage(int command, ref CHCNetSDK.NET_DVR_ALARMER alarmer, IntPtr info, uint length, IntPtr user)
+    private static void OnSdkMessage(int userId, int command, IntPtr info, uint length)
     {
-        try
-        {
-            if (alarmer.byUserIDValid == 0 || !Handlers.ContainsKey(alarmer.lUserID))
-                return;
-            if (info == IntPtr.Zero || length == 0)
-                return;
+        if (!Handlers.ContainsKey(userId)) return;
 
-            var (recognition, groupNo) = command switch
-            {
-                CHCNetSDK.COMM_ITS_PLATE_RESULT => ParseItsPlate(info, length),
-                CHCNetSDK.COMM_ITS_GATE_VEHICLE => ParseGateVehicle(info, length),
-                CHCNetSDK.COMM_UPLOAD_PLATE_RESULT => ParseLegacyPlate(info, length),
-                _ => (null, 0u),
-            };
-            if (recognition is null)
-                return;
-
-            Accumulate(alarmer.lUserID, groupNo, recognition);
-        }
-        catch
+        var (recognition, groupNo) = command switch
         {
-            // Una excepción aquí viaja por la pila del SDK: jamás debe escapar.
-        }
+            CHCNetSDK.COMM_ITS_PLATE_RESULT => ParseItsPlate(info, length),
+            CHCNetSDK.COMM_ITS_GATE_VEHICLE => ParseGateVehicle(info, length),
+            CHCNetSDK.COMM_UPLOAD_PLATE_RESULT => ParseLegacyPlate(info, length),
+            _ => (null, 0u),
+        };
+        if (recognition is null)
+            return;
+
+        Accumulate(userId, groupNo, recognition);
     }
 
     // ------------------------------------------------------------------

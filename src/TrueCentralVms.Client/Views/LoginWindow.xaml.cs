@@ -13,9 +13,13 @@ public partial class LoginWindow : Window
     /// usuario vuelve a esta ventana) no debe reintentar en bucle.</summary>
     private static bool _autoLoginAttempted;
 
-    public LoginWindow()
+    /// <param name="skipAutoLogin">true al volver desde un cierre de sesión:
+    /// sin esto el auto-login volvería a entrar de inmediato con la cuenta que
+    /// el usuario acaba de cerrar.</param>
+    public LoginWindow(bool skipAutoLogin = false)
     {
         InitializeComponent();
+        if (skipAutoLogin) _autoLoginAttempted = true;
         ServerBox.Text = _settings.ServerUrl;
         UserBox.Text = _settings.Username;
         RememberCheck.IsChecked = _settings.RememberPassword;

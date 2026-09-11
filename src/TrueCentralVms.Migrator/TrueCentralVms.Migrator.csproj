@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- El driver Hikvision es x64 (HCNetSDK nativo); acá solo se usa su cliente ISAPI, pero la plataforma tiene que coincidir. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationIcon Condition="Exists('..\TrueCentralVms.Client\Assets\truecentral.ico')">..\TrueCentralVms.Client\Assets\truecentral.ico</ApplicationIcon>
+    <AssemblyTitle>CLR TrueCentral VMS — Migrador desde HikCentral</AssemblyTitle>
+    <Product>CLR TrueCentral VMS</Product>
+    <Company>CLRobotics</Company>
+    <RootNamespace>TrueCentralVms.Migrator</RootNamespace>
+    <AssemblyName>TrueCentralMigrador</AssemblyName>
+    <SatelliteResourceLanguages>es</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Contratos del padrón (AccessPersonWriteDto y compañía) -->
+    <ProjectReference Include="..\TrueCentralVms.Core\TrueCentralVms.Core.csproj" />
+    <!-- Cliente ISAPI con Digest, el mismo que usa el servidor para hablar con los terminales -->
+    <ProjectReference Include="..\TrueCentralVms.Drivers.Hikvision\TrueCentralVms.Drivers.Hikvision.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\TrueCentralVms.Client\Assets\logo.png" LogicalName="logo.png" Condition="Exists('..\TrueCentralVms.Client\Assets\logo.png')" />
+  </ItemGroup>
+
+</Project>

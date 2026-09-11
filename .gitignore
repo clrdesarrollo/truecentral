@@ -47,3 +47,8 @@ src/TrueCentralVms.Server/workflows/
 src/TrueCentralVms.Server/*.log
 # Publicacion intermedia de los instaladores (installer/build-installers.ps1)
 build/publish/
+
+# Salidas temporales de publicación y del migrador, y base de pruebas del launch server-dev
+/build/tmp-publish/
+/build/pgdata-dev/
+**/build/tmp-migrador/

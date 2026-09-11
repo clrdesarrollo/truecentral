@@ -154,6 +154,57 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <!-- Usuario del navbar: botón que despliega el menú de la sesión. Va
+             dentro del área de arrastre del WindowChrome, así que marca
+             IsHitTestVisibleInChrome para que el clic llegue al botón. -->
+        <Style x:Key="UserMenuToggle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="10,5">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- Acción del menú del usuario (fila completa, alineada a la izquierda) -->
+        <Style x:Key="UserMenuItem" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="0,0,7,7" Padding="14,10">
+                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#22303F"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid x:Name="RootShell">
@@ -217,8 +268,55 @@
                     </Ellipse>
                     <TextBlock Text="{Binding ConnectionStatus}" Foreground="{StaticResource MutedBrush}"
                                FontSize="11.5" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                    <TextBlock Text="{Binding UserLabel}" Foreground="{StaticResource MutedBrush}"
-                               FontSize="11.5" VerticalAlignment="Center"/>
+                    <!-- Usuario: abre el menú de la sesión (servidor + cerrar sesión) -->
+                    <Grid VerticalAlignment="Center">
+                        <ToggleButton x:Name="UserMenuToggle" Style="{StaticResource UserMenuToggle}"
+                                      ToolTip="Sesión">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding UserLabel}" VerticalAlignment="Center"/>
+                                <TextBlock Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="8"
+                                           VerticalAlignment="Center" Margin="7,1,0,0"/>
+                            </StackPanel>
+                        </ToggleButton>
+                        <!-- Se alinea a la derecha del botón: ver PlaceUserMenu en el código -->
+                        <Popup x:Name="UserMenuPopup" PlacementTarget="{Binding ElementName=UserMenuToggle}"
+                               Placement="Custom" AllowsTransparency="True" StaysOpen="False"
+                               IsOpen="{Binding IsChecked, ElementName=UserMenuToggle}">
+                            <Border Background="{StaticResource Panel2Brush}" BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="8" MinWidth="248" Margin="8">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.45" Color="#000000"/>
+                                </Border.Effect>
+                                <StackPanel>
+                                    <!-- Cabecera: quién soy (informativa, no cliqueable) -->
+                                    <StackPanel Margin="14,12,14,10">
+                                        <TextBlock Text="{Binding UserLabel}" Foreground="{StaticResource TextBrush}"
+                                                   FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding RoleLabel}" Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="11" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                    <Border Height="1" Background="{StaticResource BorderBrush}"/>
+                                    <!-- Servidor de esta sesión (informativo, no cliqueable) -->
+                                    <StackPanel Margin="14,10,14,12">
+                                        <TextBlock Text="Conectado al servidor" Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="10.5"/>
+                                        <TextBlock Text="{Binding ServerLabel}" Foreground="{StaticResource TextBrush}"
+                                                   FontSize="12" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding ServerLabel}"/>
+                                    </StackPanel>
+                                    <Border Height="1" Background="{StaticResource BorderBrush}"/>
+                                    <Button Style="{StaticResource UserMenuItem}" Click="OnLogoutClick"
+                                            ToolTip="Cerrar la sesión y volver a la pantalla de inicio de sesión">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE7E8;" FontFamily="Segoe MDL2 Assets" FontSize="13"
+                                                       VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <TextBlock Text="Cerrar sesión" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </Grid>
                 </StackPanel>
 
                 <!-- Viñetas de módulos -->

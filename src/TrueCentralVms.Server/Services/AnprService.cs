@@ -292,6 +292,10 @@ public sealed class AnprService(
         await hub.Clients.All.SendAsync(VmsHubContract.PlateRecognized, dto, ct);
         logger.LogInformation("Patente {Plate} reconocida en '{Device}' ({Confidence}%).",
             entity.PlateNumber, device.Name, entity.Confidence);
+
+        // Automatizaciones ("patente de la lista → abrir el portón").
+        scope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>().Publish(
+            Workflows.WorkflowTrigger.FromPlate(entity, device.Name, channel?.Name ?? $"Canal {entity.ChannelNumber}", channel?.Id));
     }
 
     /// <summary>Recorta al largo de la columna: un firmware raro no debe reventar el insert.</summary>

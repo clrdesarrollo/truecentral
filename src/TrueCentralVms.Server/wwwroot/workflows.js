@@ -3,9 +3,10 @@
 // Se carga ANTES que app.js: este archivo solo declara funciones (sin efectos
 // al cargar) y app.js las referencia desde su tabla de rutas.
 //
-// El editor se arma con el catálogo del servidor (/api/workflows/catalog):
-// los disparadores, las acciones y las marcas de plantilla salen de allá. Lo
-// único que vive aquí es CÓMO se pinta cada acción (WF_FIELDS).
+// Aquí viven el listado, las alertas, el historial, el correo saliente y los
+// sonidos. El EDITOR es un diagrama de flujo aparte (workflow-editor.js,
+// ruta #/workflows/edit); lo único compartido con él es CÓMO se pinta la
+// configuración de cada acción (WF_FIELDS + wfFieldHtml + wfReadField).
 "use strict";
 
 let workflowsTimer = null;
@@ -37,10 +38,7 @@ const WF_DAYS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes"
 
 const WF_EMAIL_BODY =
   "{tipo}: {evento}\n\n" +
-  "Panel: {panel}\n" +
-  "Área: {area}\n" +
-  "Zona: {zona}\n" +
-  "Código: {codigo}\n" +
+  "Equipo: {equipo}\n" +
   "Fecha y hora: {fechahora}\n\n" +
   "Aviso automático de CLR TrueCentral VMS ({servidor}) — automatización «{workflow}».";
 
@@ -55,7 +53,7 @@ const WF_FIELDS = {
   email: [
     { k: "to", t: "text", label: "Para", placeholder: "guardia@empresa.cl, jefe@empresa.cl" },
     { k: "cc", t: "text", label: "Copia (opcional)" },
-    { k: "subject", t: "text", label: "Asunto", def: "{tipo} en {panel}" },
+    { k: "subject", t: "text", label: "Asunto", def: "{tipo}: {evento}" },
     { k: "body", t: "textarea", label: "Mensaje", def: WF_EMAIL_BODY, rows: 8 },
     { k: "attachSnapshots", t: "check", label: "Adjuntar las fotos capturadas antes en esta ejecución", def: true },
   ],
@@ -78,7 +76,7 @@ const WF_FIELDS = {
     { k: "contentType", t: "text", label: "Tipo de contenido", def: "application/json",
       when: (c) => (c.method || "POST") !== "GET" },
     { k: "body", t: "textarea", label: "Cuerpo", rows: 5, when: (c) => (c.method || "POST") !== "GET",
-      placeholder: '{"panel":"{panel}","evento":"{evento}","zona":"{zona}","hora":"{fechahora}"}' },
+      placeholder: '{"equipo":"{equipo}","evento":"{evento}","hora":"{fechahora}"}' },
     { k: "headers", t: "textarea", label: "Cabeceras (una por línea: Nombre: valor)", rows: 2 },
     { k: "auth", t: "select", label: "Autenticación", def: "None",
       options: [["None", "Ninguna"], ["Basic", "Básica"], ["Digest", "Digest"]], rerender: true },
@@ -132,8 +130,8 @@ const WF_FIELDS = {
     { k: "method", t: "select", label: "Método", def: "GET", options: [["GET", "GET"], ["POST", "POST"]], when: (c) => c.mode === "http" },
   ],
   notify: [
-    { k: "title", t: "text", label: "Título", def: "{tipo} en {panel}" },
-    { k: "message", t: "text", label: "Mensaje", def: "{evento} · {zona} · {fechahora}" },
+    { k: "title", t: "text", label: "Título", def: "{tipo}: {equipo}" },
+    { k: "message", t: "text", label: "Mensaje", def: "{evento} · {fechahora}" },
     { k: "severity", t: "select", label: "Importancia", def: "Warning",
       options: [["Critical", "Crítica"], ["Warning", "Advertencia"], ["Info", "Informativa"]] },
     { k: "attachSnapshot", t: "check", label: "Mostrar la foto capturada en el aviso", def: true },
@@ -146,6 +144,25 @@ const WF_FIELDS = {
     { k: "soundRepeat", t: "number", label: "Repeticiones del sonido", def: 1, min: 0, max: 5,
       when: (c) => !!c.sound,
       help: "0 = suena sin parar hasta que un operador confirme la alerta, la silencie o cierre la ventana." },
+  ],
+  door: [
+    { k: "command", t: "select", label: "Orden", def: "Open",
+      options: [["Open", "Abrir (pulso: abre y se vuelve a cerrar)"], ["RemainOpen", "Mantener abierta hasta nueva orden"],
+        ["RemainLocked", "Bloquear (no entra nadie, ni con credencial)"], ["Close", "Cerrar / volver a normal"]] },
+    { k: "doorIds", t: "doors", label: "Puertas" },
+  ],
+  panel: [
+    { k: "panelId", t: "panel", label: "Panel de alarma", rerender: true },
+    { k: "areaNumber", t: "area", label: "Área", def: 0 },
+    { k: "command", t: "select", label: "Orden", def: "Arm", rerender: true,
+      options: [["Arm", "Armar"], ["Disarm", "Desarmar"], ["ClearAlarm", "Borrar / silenciar la alarma"]] },
+    { k: "mode", t: "select", label: "Modo de armado", def: "Away", when: (c) => (c.command || "Arm") === "Arm",
+      options: [["Away", "Total (fuera de casa)"], ["Stay", "Parcial (en casa / perimetral)"]] },
+  ],
+  "ptz-preset": [
+    { k: "channelId", t: "ptzcamera", label: "Cámara PTZ" },
+    { k: "preset", t: "number", label: "Preset (1–300)", def: 1, min: 1, max: 300,
+      help: "El preset se guarda en la propia cámara (desde la vista en vivo del cliente o su web)." },
   ],
 };
 
@@ -201,6 +218,7 @@ async function renderWorkflows() {
   const isAdmin = Api.role === "Admin";
   const actionLabel = (key) => catalog.actions.find((a) => a.key === key)?.label ?? key;
   const triggerLabel = (key) => catalog.triggers.find((t) => t.key === key)?.label ?? key;
+  const stepsOf = (w) => (w.graph?.nodes || []).filter((n) => n.kind !== "trigger").length;
 
   $("#view").innerHTML = `
     <div class="toolbar">
@@ -217,30 +235,31 @@ async function renderWorkflows() {
     ${workflows.length === 0 ? `
       <div class="info-box">
         Todavía no hay automatizaciones. ${isAdmin
-          ? "Con <b>Nueva automatización</b> puede, por ejemplo, hacer que al alarmarse un panel el servidor tome una foto de la cámara del sector, la envíe por correo, la suba a un FTP, haga sonar un parlante IP y avise a otro sistema por HTTP."
+          ? "Con <b>Nueva automatización</b> se abre el editor de diagrama: parta de un disparador (una alarma de panel, una cámara caída, una patente leída, un acceso, una analítica de video, una hora del día o una llamada externa), agregue condiciones sí/no y conecte acciones: foto, correo, FTP, HTTP, parlante, aviso a los operadores, abrir puerta, armar/desarmar, mover un PTZ."
           : "Un administrador debe crearlas."}
       </div>` : `
       <div class="table-scroll"><table class="grid">
         <thead><tr>
-          <th>Nombre</th><th>Cuándo</th><th>Condiciones</th><th>Qué hace</th>
-          <th>Espera</th><th>Ejecuciones</th><th>Última</th><th>Estado</th><th></th>
+          <th>Nombre</th><th>Cuándo</th><th>Filtro</th><th>Qué hace</th>
+          <th>Pasos</th><th>Espera</th><th>Ejecuciones</th><th>Última</th><th>Estado</th><th></th>
         </tr></thead>
         <tbody>
           ${workflows.map((w) => `
             <tr data-id="${w.id}">
               <td>${esc(w.name)}${w.description ? `<div class="muted" style="font-size:11px">${esc(w.description)}</div>` : ""}</td>
               <td>${esc(triggerLabel(w.triggerType))}</td>
-              <td class="muted" style="font-size:12px;max-width:280px">${esc(wfConditionsText(w))}</td>
+              <td class="muted" style="font-size:12px;max-width:260px">${esc(wfConditionsText(w))}</td>
               <td><div class="chip-row" style="margin:0">${w.actions.map((a) =>
                 `<span class="chip" ${a.enabled ? "" : 'style="opacity:.5"'}>${esc(actionLabel(a.type))}</span>`).join("")}</div></td>
+              <td class="muted">${stepsOf(w)}</td>
               <td class="muted">${w.cooldownSeconds > 0 ? `${w.cooldownSeconds} s` : "—"}</td>
               <td>${w.runCount}</td>
               <td class="muted">${w.lastRunAt ? wfDate(w.lastRunAt) : "—"}</td>
               <td>${w.enabled ? `<span class="tag on">Activa</span>` : `<span class="tag off">Pausada</span>`}</td>
               <td class="row-actions">
                 ${isAdmin ? `<button class="btn ghost btn-wf-test" title="Ejecuta las acciones de verdad con un evento de ejemplo">Probar</button>
-                <button class="btn ghost btn-wf-edit">Editar</button>
-                <button class="btn danger btn-wf-delete">Eliminar</button>` : ""}
+                <button class="btn ghost btn-wf-edit">Abrir</button>
+                <button class="btn danger btn-wf-delete">Eliminar</button>` : `<button class="btn ghost btn-wf-edit">Ver</button>`}
               </td>
             </tr>`).join("")}
         </tbody>
@@ -250,12 +269,12 @@ async function renderWorkflows() {
     <h3 style="margin-top:22px">Últimas ejecuciones</h3>
     <div id="wf-runs"><div class="info-box">Cargando…</div></div>`;
 
-  $("#btn-wf-new")?.addEventListener("click", () => workflowModal(null));
+  $("#btn-wf-new")?.addEventListener("click", () => { location.hash = "#/workflows/edit"; });
   $("#btn-wf-smtp")?.addEventListener("click", wfSmtpModal);
   $("#btn-wf-audio")?.addEventListener("click", wfAudioModal);
   $$("#view .btn-wf-edit").forEach((b) => b.addEventListener("click", (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
-    workflowModal(workflows.find((w) => w.id === id));
+    location.hash = `#/workflows/edit?id=${id}`;
   }));
   $$("#view .btn-wf-delete").forEach((b) => b.addEventListener("click", async (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
@@ -270,7 +289,7 @@ async function renderWorkflows() {
   $$("#view .btn-wf-test").forEach((b) => b.addEventListener("click", async (e) => {
     const button = e.target;
     const id = Number(button.closest("tr").dataset.id);
-    if (!confirm("La prueba ejecuta las acciones DE VERDAD (envía el correo, sube el archivo, hace sonar el parlante) con un evento de ejemplo. ¿Continuar?")) return;
+    if (!confirm("La prueba ejecuta las acciones DE VERDAD (envía el correo, sube el archivo, abre la puerta, hace sonar el parlante) con un evento de ejemplo. ¿Continuar?")) return;
     button.disabled = true;
     button.textContent = "Probando…";
     try {
@@ -297,24 +316,10 @@ async function renderWorkflows() {
   }, 10000);
 }
 
-/// Resumen legible de las condiciones (columna del listado).
+/// Resumen legible del filtro del disparador (columna del listado).
 function wfConditionsText(workflow) {
-  const c = workflow.conditions || {};
-  const parts = [];
-  const names = (list, table) => list.map((v) => (table.find((t) => t[0] === v) || [v, v])[1]).join(", ");
-  if (c.panelIds?.length) parts.push(`${c.panelIds.length} panel(es)`);
-  if (c.kinds?.length) parts.push(names(c.kinds, WF_KINDS));
-  if (c.severities?.length) parts.push(names(c.severities, WF_SEVERITIES));
-  if (c.statuses?.length) parts.push(names(c.statuses, WF_STATUSES));
-  if (c.areaNumbers?.length) parts.push(`áreas ${c.areaNumbers.join(", ")}`);
-  if (c.zoneNumbers?.length) parts.push(`zonas ${c.zoneNumbers.join(", ")}`);
-  if (c.codes?.length) parts.push(`códigos ${c.codes.join(", ")}`);
-  if (c.sources?.length) parts.push(names(c.sources, WF_SOURCES));
-  if (c.textContains) parts.push(`texto «${c.textContains}»`);
-  if (c.sustainedSeconds > 0) parts.push(`sostenido ≥ ${c.sustainedSeconds} s`);
-  if (c.fromTime || c.toTime) parts.push(`${c.fromTime || "00:00"}–${c.toTime || "24:00"}`);
-  if (c.daysOfWeek?.length && c.daysOfWeek.length < 7) parts.push(c.daysOfWeek.map((d) => WF_DAYS[d].slice(0, 3)).join("/"));
-  return parts.length ? parts.join(" · ") : "Cualquier evento";
+  const text = wfeConditionsSummary(workflow.conditions || {}, workflow.triggerType);
+  return text || "Cualquier evento";
 }
 
 function wfDate(value) {
@@ -418,7 +423,7 @@ async function wfLoadRuns() {
   }
   container.innerHTML = `
     <div class="table-scroll"><table class="grid">
-      <thead><tr><th>Fecha</th><th>Automatización</th><th>Qué la disparó</th><th>Acciones</th><th>Resultado</th><th>Origen</th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Automatización</th><th>Qué la disparó</th><th>Pasos</th><th>Resultado</th><th>Origen</th></tr></thead>
       <tbody>
         ${data.items.map((r) => `
           <tr class="audit-row" data-run="${r.id}">
@@ -447,10 +452,10 @@ function wfRunModal(run) {
       <div class="muted">Fecha</div><div>${wfDate(run.startedAt)}</div>
       <div class="muted">Disparo</div><div>${esc(run.triggerSummary)}</div>
       <div class="muted">Origen</div><div>${esc(run.startedBy)}</div>
-      <div class="muted">Resultado</div><div>${run.success ? `<span class="tag on">Todas las acciones se ejecutaron</span>` : `<span class="tag off">${esc(run.error || "Con errores")}</span>`}</div>
+      <div class="muted">Resultado</div><div>${run.success ? `<span class="tag on">Todos los pasos se ejecutaron</span>` : `<span class="tag off">${esc(run.error || "Con errores")}</span>`}</div>
     </div>
     <div class="table-scroll"><table class="grid">
-      <thead><tr><th>#</th><th>Acción</th><th>Resultado</th><th>Detalle</th><th>Duración</th></tr></thead>
+      <thead><tr><th>#</th><th>Paso</th><th>Resultado</th><th>Detalle</th><th>Duración</th></tr></thead>
       <tbody>
         ${run.steps.map((s) => `
           <tr>
@@ -476,356 +481,13 @@ function wfRunModal(run) {
 }
 
 // ---------------------------------------------------------------------------
-// Editor de automatizaciones
+// Campos de configuración de las acciones (compartidos con el editor)
 // ---------------------------------------------------------------------------
 
-async function workflowModal(workflow) {
-  const isNew = !workflow;
-  let catalog, cameras, panels, audio, speakers;
-  try {
-    [catalog, cameras, panels, audio, speakers] = await Promise.all([
-      wfCatalog(), wfCameras(), Api.get("/api/alarms/panels"), Api.get("/api/workflows/audio"), wfSpeakers(),
-    ]);
-  } catch (err) { toast(err.error, true); return; }
-
-  // Estado del editor: se trabaja sobre una copia y solo se envía al guardar.
-  const state = {
-    name: workflow?.name ?? "",
-    description: workflow?.description ?? "",
-    enabled: workflow ? workflow.enabled : true,
-    triggerType: workflow?.triggerType ?? catalog.triggers[0].key,
-    cooldownSeconds: workflow?.cooldownSeconds ?? 60,
-    conditions: JSON.parse(JSON.stringify(workflow?.conditions ?? {})),
-    actions: (workflow?.actions ?? []).map((a) => ({
-      id: a.id, type: a.type, enabled: a.enabled, continueOnError: a.continueOnError,
-      delaySeconds: a.delaySeconds, config: JSON.parse(JSON.stringify(a.config ?? {})),
-      secret: "", hasSecret: a.hasSecret,
-    })),
-  };
-
-  openModal(`
-    <h3>${isNew ? "Nueva automatización" : "Editar automatización"}</h3>
-    <div id="wf-modal-error"></div>
-    <form id="wf-form">
-      <div class="form-grid">
-        <div class="field">
-          <label>Nombre</label>
-          <input id="wf-name" required maxlength="128" value="${esc(state.name)}" placeholder="Alarma bodega: foto y correo">
-        </div>
-        <div class="field">
-          <label>Tiempo mínimo entre ejecuciones (s)</label>
-          <input id="wf-cooldown" type="number" min="0" max="86400" value="${state.cooldownSeconds}">
-        </div>
-      </div>
-      <div class="field">
-        <label>Descripción (opcional)</label>
-        <input id="wf-description" maxlength="512" value="${esc(state.description)}">
-      </div>
-      <div class="field">
-        <label>¿Cuándo se ejecuta?</label>
-        <select id="wf-trigger">
-          ${catalog.triggers.map((t) => `<option value="${esc(t.key)}" ${t.key === state.triggerType ? "selected" : ""}>${esc(t.label)}</option>`).join("")}
-        </select>
-        <div class="muted" style="font-size:12px;margin-top:4px" id="wf-trigger-help"></div>
-      </div>
-      <div id="wf-conditions"></div>
-      <h4 style="margin:18px 0 8px">Acciones</h4>
-      <div id="wf-actions"></div>
-      <div class="chip-row" id="wf-add-actions">
-        ${catalog.actions.map((a) => `<button type="button" class="btn ghost btn-wf-add" data-type="${esc(a.key)}" title="${esc(a.description)}">+ ${esc(a.label)}</button>`).join("")}
-      </div>
-      <div class="info-box" style="margin-top:12px">
-        En los textos puede usar marcas que el servidor reemplaza con los datos del evento:
-        ${catalog.placeholders.map((p) => `<code title="${esc(p.label)}">{${esc(p.key)}}</code>`).join(" ")}
-      </div>
-      <label class="checkbox-row"><input type="checkbox" id="wf-enabled" ${state.enabled ? "checked" : ""}> Automatización activa</label>
-      <div class="modal-actions">
-        <button class="btn ghost" type="button" id="wf-cancel">Cancelar</button>
-        <button class="btn" type="submit" id="wf-save">${isNew ? "Crear" : "Guardar cambios"}</button>
-      </div>
-    </form>`, "wider");
-
-  const drawTriggerHelp = () => {
-    const trigger = catalog.triggers.find((t) => t.key === state.triggerType);
-    $("#wf-trigger-help").textContent = trigger?.description ?? "";
-  };
-
-  // --- Condiciones ---------------------------------------------------------
-  // Zonas y áreas ofrecidas: las de los paneles marcados (o las de todos si no
-  // hay ninguno). Se listan CON SU NOMBRE — pedirle números al operador sería
-  // pedirle que se sepa de memoria el orden interno del panel. Las que estén
-  // guardadas y ya no existan se conservan para no perderlas al editar.
-  const markedPanelIds = () =>
-    $$("#wf-conditions [data-panel]").filter((i) => i.checked).map((i) => Number(i.dataset.panel));
-
-  const itemsOf = (pick, saved) => {
-    const ids = markedPanelIds();
-    const chosen = panels.filter((p) => ids.length === 0 || ids.includes(p.id));
-    const map = new Map();
-    chosen.forEach((p) => pick(p).forEach((item) => {
-      if (!map.has(item.number)) map.set(item.number, `${item.number} · ${item.name}`);
-    }));
-    (saved || []).forEach((n) => { if (!map.has(n)) map.set(n, `${n} · (ya no existe en el panel)`); });
-    return [...map.entries()].sort((a, b) => a[0] - b[0]);
-  };
-
-  const zoneItems = () => itemsOf((p) => p.zones, state.conditions.zoneNumbers);
-  const areaItems = () => itemsOf((p) => p.areas, state.conditions.areaNumbers);
-
-  const drawConditions = () => {
-    const c = state.conditions;
-    const isAlarmEvent = state.triggerType === "alarm-event";
-    const checkList = (items, selected, prefix) => `
-      <div class="wf-check-grid">
-        ${items.map(([value, label]) => `
-          <label class="checkbox-row"><input type="checkbox" data-${prefix}="${esc(String(value))}"
-            ${(selected || []).map(String).includes(String(value)) ? "checked" : ""}> ${esc(label)}</label>`).join("")}
-      </div>`;
-
-    $("#wf-conditions").innerHTML = `
-      <div class="field">
-        <label>Paneles (ninguno marcado = todos)</label>
-        ${panels.length === 0 ? `<div class="muted">No hay paneles de alarma configurados.</div>`
-          : checkList(panels.map((p) => [p.id, p.name]), c.panelIds, "panel")}
-      </div>
-      ${isAlarmEvent ? `
-        <div class="field">
-          <label>Tipo de evento (ninguno = todos)</label>
-          ${checkList(WF_KINDS, c.kinds, "kind")}
-        </div>
-        <div class="field">
-          <label>Severidad (ninguna = todas)</label>
-          ${checkList(WF_SEVERITIES, c.severities, "severity")}
-        </div>
-        <div class="field">
-          <label>Zonas / sensores (ninguna marcada = cualquiera)</label>
-          ${zoneItems().length === 0
-            ? `<div class="muted">El panel elegido todavía no informa zonas.</div>`
-            : checkList(zoneItems(), c.zoneNumbers, "zone")}
-          <div class="muted" style="font-size:11.5px;margin-top:3px">
-            Para que cada sensor dispare acciones distintas, cree una automatización por zona.
-          </div>
-        </div>
-        <div class="field">
-          <label>Áreas (ninguna marcada = cualquiera)</label>
-          ${areaItems().length === 0
-            ? `<div class="muted">El panel elegido todavía no informa áreas.</div>`
-            : checkList(areaItems(), c.areaNumbers, "area")}
-        </div>
-        <div class="form-grid">
-          <div class="field">
-            <label>Códigos del evento (coma)</label>
-            <input id="wf-codes" value="${esc((c.codes || []).join(", "))}" placeholder="1130, 1120">
-          </div>
-          <div class="field">
-            <label>La descripción contiene</label>
-            <input id="wf-text" value="${esc(c.textContains || "")}" placeholder="intrusión">
-          </div>
-        </div>
-        <div class="field">
-          <label>Cómo se supo (ninguno = cualquiera)</label>
-          ${checkList(WF_SOURCES, c.sources, "source")}
-        </div>
-        <div class="field">
-          <label>Solo si la condición se sostiene (segundos)</label>
-          <input id="wf-sustained" type="number" min="0" max="600" value="${c.sustainedSeconds || 0}">
-          <div class="muted" style="font-size:11.5px;margin-top:3px">
-            0 = ejecutar de inmediato. Con un valor mayor el servidor vigila la zona durante ese tiempo
-            (la lee cada segundo) y ejecuta solo si la interrupción se mantiene; tolera las pausas cortas
-            del detector, porque los sensores de movimiento informan por pulsos y no de corrido. Los
-            paneles vigilados así se sondean cada 2 s para no perderse una interrupción breve.
-          </div>
-        </div>`
-      : `
-        <div class="field">
-          <label>Estado de conexión que dispara (ninguno = cualquiera)</label>
-          ${checkList(WF_STATUSES, c.statuses, "status")}
-        </div>`}
-      <div class="field">
-        <label>Días de la semana (ninguno = todos)</label>
-        ${checkList(WF_DAYS.map((d, i) => [i, d]), c.daysOfWeek, "day")}
-      </div>
-      <div class="form-grid">
-        <div class="field">
-          <label>Desde (hora local, opcional)</label>
-          <input id="wf-from" type="time" value="${esc(c.fromTime || "")}">
-        </div>
-        <div class="field">
-          <label>Hasta (opcional; si es menor, la ventana cruza la medianoche)</label>
-          <input id="wf-to" type="time" value="${esc(c.toTime || "")}">
-        </div>
-      </div>`;
-
-    // Cambiar de panel cambia sus zonas y áreas: se redibuja conservando lo marcado.
-    $$("#wf-conditions [data-panel]").forEach((box) => box.addEventListener("change", () => {
-      readConditions();
-      drawConditions();
-    }));
-  };
-
-  const readConditions = () => {
-    const marked = (prefix) => $$(`#wf-conditions [data-${prefix}]`).filter((i) => i.checked).map((i) => i.dataset[prefix]);
-    const strings = (id) => ($(`#${id}`)?.value || "").split(",").map((v) => v.trim()).filter((v) => v.length > 0);
-    const isAlarmEvent = state.triggerType === "alarm-event";
-    state.conditions = {
-      panelIds: marked("panel").map(Number),
-      kinds: isAlarmEvent ? marked("kind") : [],
-      severities: isAlarmEvent ? marked("severity") : [],
-      statuses: isAlarmEvent ? [] : marked("status"),
-      areaNumbers: isAlarmEvent ? marked("area").map(Number) : [],
-      zoneNumbers: isAlarmEvent ? marked("zone").map(Number) : [],
-      codes: isAlarmEvent ? strings("wf-codes") : [],
-      sources: isAlarmEvent ? marked("source") : [],
-      textContains: isAlarmEvent ? ($("#wf-text")?.value.trim() || null) : null,
-      sustainedSeconds: isAlarmEvent ? (Number($("#wf-sustained")?.value) || 0) : 0,
-      daysOfWeek: marked("day").map(Number),
-      fromTime: $("#wf-from")?.value || null,
-      toTime: $("#wf-to")?.value || null,
-    };
-  };
-
-  // --- Acciones ------------------------------------------------------------
-  const drawActions = () => {
-    const box = $("#wf-actions");
-    if (state.actions.length === 0) {
-      box.innerHTML = `<div class="info-box">Sin acciones todavía: agregue al menos una con los botones de abajo.</div>`;
-      return;
-    }
-    box.innerHTML = state.actions.map((action, index) => {
-      const info = catalog.actions.find((a) => a.key === action.type);
-      const fields = (WF_FIELDS[action.type] || []).filter((f) => !f.when || f.when(action.config));
-      return `
-        <div class="wf-action" data-index="${index}">
-          <div class="wf-action-head">
-            <strong>${index + 1}. ${esc(info?.label ?? action.type)}</strong>
-            <div class="row-actions">
-              <button type="button" class="btn ghost btn-wf-up" ${index === 0 ? "disabled" : ""} title="Subir">↑</button>
-              <button type="button" class="btn ghost btn-wf-down" ${index === state.actions.length - 1 ? "disabled" : ""} title="Bajar">↓</button>
-              <button type="button" class="btn danger btn-wf-remove">Quitar</button>
-            </div>
-          </div>
-          <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(info?.description ?? "")}</div>
-          ${fields.map((f) => wfFieldHtml(action, f, cameras, audio, speakers)).join("")}
-          <div class="form-grid">
-            <div class="field">
-              <label>Esperar antes de ejecutar (s)</label>
-              <input type="number" min="0" max="600" data-delay value="${action.delaySeconds || 0}">
-            </div>
-            <div class="field" style="display:flex;align-items:flex-end">
-              <label class="checkbox-row"><input type="checkbox" data-continue ${action.continueOnError ? "checked" : ""}> Seguir con las demás si esta falla</label>
-            </div>
-          </div>
-          <label class="checkbox-row"><input type="checkbox" data-enabled ${action.enabled ? "checked" : ""}> Acción activa</label>
-        </div>`;
-    }).join("");
-
-    // Cada cambio se guarda en el estado: así el editor sobrevive a los
-    // redibujados (mover acciones, cambiar el modo de un parlante...).
-    $$("#wf-actions .wf-action").forEach((card) => {
-      const index = Number(card.dataset.index);
-      const action = state.actions[index];
-      card.querySelectorAll("[data-key]").forEach((input) => {
-        input.addEventListener("change", () => {
-          wfReadField(action, input);
-          const field = (WF_FIELDS[action.type] || []).find((f) => f.k === input.dataset.key);
-          if (field?.rerender) { readActionsMeta(); drawActions(); }
-        });
-      });
-      card.querySelectorAll(".btn-field-play").forEach((play) => play.addEventListener("click", () => {
-        const select = card.querySelector(`[data-key="${play.dataset.for}"]`);
-        const name = select?.value || "";
-        // "(sin sonido)" y el pitido del sistema no son archivos del servidor.
-        if (!name || name === "sistema") { toast("Ese aviso no usa un archivo de sonido."); return; }
-        wfTogglePreview(name, play);
-      }));
-      card.querySelector("[data-delay]").addEventListener("change", (e) => { action.delaySeconds = Number(e.target.value) || 0; });
-      card.querySelector("[data-continue]").addEventListener("change", (e) => { action.continueOnError = e.target.checked; });
-      card.querySelector("[data-enabled]").addEventListener("change", (e) => { action.enabled = e.target.checked; });
-      card.querySelector(".btn-wf-remove").addEventListener("click", () => {
-        readActionsMeta();
-        state.actions.splice(index, 1);
-        drawActions();
-      });
-      card.querySelector(".btn-wf-up").addEventListener("click", () => {
-        readActionsMeta();
-        [state.actions[index - 1], state.actions[index]] = [state.actions[index], state.actions[index - 1]];
-        drawActions();
-      });
-      card.querySelector(".btn-wf-down").addEventListener("click", () => {
-        readActionsMeta();
-        [state.actions[index + 1], state.actions[index]] = [state.actions[index], state.actions[index + 1]];
-        drawActions();
-      });
-    });
-  };
-
-  // Vuelca a memoria lo que hay en pantalla (antes de redibujar o guardar).
-  const readActionsMeta = () => {
-    $$("#wf-actions .wf-action").forEach((card) => {
-      const action = state.actions[Number(card.dataset.index)];
-      if (!action) return;
-      card.querySelectorAll("[data-key]").forEach((input) => wfReadField(action, input));
-      action.delaySeconds = Number(card.querySelector("[data-delay]").value) || 0;
-      action.continueOnError = card.querySelector("[data-continue]").checked;
-      action.enabled = card.querySelector("[data-enabled]").checked;
-    });
-  };
-
-  $("#wf-trigger").addEventListener("change", (e) => {
-    state.triggerType = e.target.value;
-    readConditions();
-    drawTriggerHelp();
-    drawConditions();
-  });
-  $$("#wf-add-actions .btn-wf-add").forEach((b) => b.addEventListener("click", () => {
-    readActionsMeta();
-    const type = b.dataset.type;
-    const config = {};
-    (WF_FIELDS[type] || []).forEach((f) => { if (f.def !== undefined && f.k !== "secret") config[f.k] = f.def; });
-    state.actions.push({ id: 0, type, enabled: true, continueOnError: true, delaySeconds: 0, config, secret: "", hasSecret: false });
-    drawActions();
-  }));
-  $("#wf-cancel").addEventListener("click", () => { wfStopPreview(); closeModal(); });
-
-  drawTriggerHelp();
-  drawConditions();
-  drawActions();
-
-  $("#wf-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    readConditions();
-    readActionsMeta();
-    const payload = {
-      name: $("#wf-name").value.trim(),
-      description: $("#wf-description").value.trim() || null,
-      enabled: $("#wf-enabled").checked,
-      triggerType: state.triggerType,
-      cooldownSeconds: Number($("#wf-cooldown").value) || 0,
-      conditions: state.conditions,
-      actions: state.actions.map((a) => ({
-        id: a.id, type: a.type, enabled: a.enabled, continueOnError: a.continueOnError,
-        delaySeconds: a.delaySeconds, config: a.config, secret: a.secret || null,
-      })),
-    };
-    const button = $("#wf-save");
-    button.disabled = true;
-    try {
-      if (isNew) await Api.post("/api/workflows", payload);
-      else await Api.put(`/api/workflows/${workflow.id}`, payload);
-      wfStopPreview();
-      closeModal();
-      toast(isNew ? "Automatización creada." : "Automatización actualizada.");
-      renderWorkflows();
-    } catch (err) {
-      $("#wf-modal-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
-    } finally {
-      button.disabled = false;
-    }
-  });
-}
-
-/// HTML de un campo de configuración de acción.
-function wfFieldHtml(action, field, cameras, audio, speakers = []) {
+/// HTML de un campo de configuración de acción. `lists` trae las listas del
+/// servidor: { cameras, audio, speakers, doors, panels }.
+function wfFieldHtml(action, field, lists) {
+  const { cameras = [], audio = [], speakers = [], doors = [], panels = [] } = lists;
   const value = action.config[field.k];
   const current = value === undefined ? field.def : value;
   const attributes = `data-key="${esc(field.k)}" data-type="${esc(field.t)}"`;
@@ -857,6 +519,15 @@ function wfFieldHtml(action, field, cameras, audio, speakers = []) {
               ${esc(c.deviceName)} · ${esc(c.channelName)}</label>`).join("")}
           </div>`}${help}</div>`;
     }
+    case "ptzcamera": {
+      const ptz = cameras.filter((c) => c.supportsPtz);
+      return `<div class="field"><label>${esc(field.label)}</label>
+        ${ptz.length === 0 ? `<div class="muted">Ninguna cámara informa PTZ.</div>` : `
+          <select ${attributes}>
+            <option value="">(elija la cámara)</option>
+            ${ptz.map((c) => `<option value="${c.channelId}" ${String(current ?? "") === String(c.channelId) ? "selected" : ""}>${esc(c.deviceName)} · ${esc(c.channelName)}</option>`).join("")}
+          </select>`}${help}</div>`;
+    }
     case "speakers": {
       const selected = (current || []).map(String);
       return `<div class="field"><label>${esc(field.label)}</label>
@@ -867,6 +538,32 @@ function wfFieldHtml(action, field, cameras, audio, speakers = []) {
               ${esc(s.name)}${s.groupName ? ` <span class="muted">· ${esc(s.groupName)}</span>` : ""}</label>`).join("")}
           </div>`}${help}</div>`;
     }
+    case "doors": {
+      const selected = (current || []).map(String);
+      return `<div class="field"><label>${esc(field.label)}</label>
+        ${doors.length === 0 ? `<div class="muted">No hay puertas (Dispositivos → Control de acceso).</div>` : `
+          <div class="wf-check-grid" ${attributes}>
+            ${doors.map((d) => `<label class="checkbox-row" ${d.enabled ? "" : 'title="Puerta desactivada"'}>
+              <input type="checkbox" data-door="${d.doorId}" ${selected.includes(String(d.doorId)) ? "checked" : ""}>
+              ${esc(d.deviceName)} · ${esc(d.name)}</label>`).join("")}
+          </div>`}${help}</div>`;
+    }
+    case "panel":
+      return `<div class="field"><label>${esc(field.label)}</label>
+        ${panels.length === 0 ? `<div class="muted">No hay paneles de alarma configurados.</div>` : `
+          <select ${attributes}>
+            <option value="">(elija el panel)</option>
+            ${panels.map((p) => `<option value="${p.id}" ${String(current ?? "") === String(p.id) ? "selected" : ""}>${esc(p.name)}</option>`).join("")}
+          </select>`}${help}</div>`;
+    case "area": {
+      const panel = panels.find((p) => p.id === Number(action.config.panelId));
+      const areas = panel?.areas || [];
+      return `<div class="field"><label>${esc(field.label)}</label>
+        <select ${attributes}>
+          <option value="0" ${!current ? "selected" : ""}>Todas las áreas</option>
+          ${areas.map((a) => `<option value="${a.number}" ${Number(current) === a.number ? "selected" : ""}>${a.number} · ${esc(a.name)}</option>`).join("")}
+        </select>${help}</div>`;
+    }
     case "audio": {
       // Con `optional` la lista permite "sin sonido"; con `system`, el pitido
       // del sistema operativo, que no necesita ningún archivo cargado.
@@ -875,7 +572,7 @@ function wfFieldHtml(action, field, cameras, audio, speakers = []) {
       if (field.system) extra.push(["sistema", "Pitido del sistema del equipo"]);
       if (audio.length === 0 && extra.length === 0)
         return `<div class="field"><label>${esc(field.label)}</label>
-          <div class="muted">Aún no hay sonidos: súbalos con el botón <b>Sonidos</b>.</div>${help}</div>`;
+          <div class="muted">Aún no hay sonidos: súbalos con el botón <b>Sonidos</b> del listado.</div>${help}</div>`;
       const options = extra.concat(audio.map((a) => [a.displayName, a.displayName + (a.ready ? "" : " (sin convertir)")]));
       return `<div class="field"><label>${esc(field.label)}</label>
         <div style="display:flex;gap:8px;align-items:center">
@@ -905,6 +602,15 @@ function wfReadField(action, input) {
     case "speakers":
       action.config[key] = Array.from(input.querySelectorAll("[data-speaker]"))
         .filter((c) => c.checked).map((c) => Number(c.dataset.speaker));
+      break;
+    case "doors":
+      action.config[key] = Array.from(input.querySelectorAll("[data-door]"))
+        .filter((c) => c.checked).map((c) => Number(c.dataset.door));
+      break;
+    case "panel":
+    case "area":
+    case "ptzcamera":
+      action.config[key] = Number(input.value) || 0;
       break;
     default: action.config[key] = input.value; break;
   }

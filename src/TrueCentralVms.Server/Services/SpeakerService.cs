@@ -137,6 +137,13 @@ public sealed class SpeakerService(
                     targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
                     detail: $"El parlante '{speaker.Name}' ({speaker.Host}) no responde: {result.Error}", success: false);
             await hub.Clients.All.SendAsync(VmsHubContract.SpeakerStatusChanged, ToDto(speaker), ct);
+
+            // Automatizaciones ("parlante sin conexión → avisar"). Resuelto al
+            // vuelo: el motor contiene la acción de parlantes, que usa este servicio.
+            if (previous != SpeakerStatus.Unknown || result.Status != SpeakerStatus.Online)
+                writeScope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>().Publish(
+                    Workflows.WorkflowTrigger.FromDeviceStatus("speaker", speaker.Id, speaker.Name, speaker.Host, speaker.Model,
+                        result.Status.ToString(), result.Error));
         }
         await writeDb.SaveChangesAsync(ct);
     }

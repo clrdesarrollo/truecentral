@@ -1171,6 +1171,7 @@ const routes = {
   "#/access-events": renderAccessEvents,
   "#/speakers": renderSpeakers,
   "#/workflows": renderWorkflows,
+  "#/workflows/edit": renderWorkflowEditor,
   "#/decoders": renderDecoders,
   "#/walls": renderWalls,
   "#/sessions": renderSessions,
@@ -1240,15 +1241,23 @@ function navigate() {
   clearInterval(accessEventsTimer); // ídem el del historial de accesos
   clearInterval(workflowsTimer); // ídem el del historial de automatizaciones
   clearInterval(servicesTimer);  // ídem el del supervisor de servicios
+  // La ruta puede llevar parámetros (#/workflows/edit?id=7): la tabla se
+  // consulta sin ellos, y el enlace del menú se marca también en las
+  // subrutas (#/workflows/edit resalta "Automatizaciones").
   const hash = location.hash || "#/";
-  const render = routes[hash] || renderDashboard;
+  const base = hash.split("?")[0];
+  const render = routes[base] || renderDashboard;
   let active = null;
   $$("#nav a").forEach((a) => {
-    const on = a.getAttribute("href") === hash;
+    const href = a.getAttribute("href");
+    const on = href === base || (href !== "#/" && base.startsWith(href + "/"));
     a.classList.toggle("active", on);
     if (on) active = a;
   });
   revealActiveNav(active);
+  // Las páginas a pantalla completa (editor de automatizaciones) cambian la
+  // clase del contenedor; cada navegación parte limpia.
+  $("#view").className = "";
   render();
 }
 
@@ -1256,7 +1265,7 @@ function enterApp() {
   showAppShell();
   setupNav();
   refreshLicenseBanner();
-  if (!location.hash || !routes[location.hash]) location.hash = "#/";
+  if (!location.hash || !routes[location.hash.split("?")[0]]) location.hash = "#/";
   navigate();
 }
 

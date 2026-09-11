@@ -285,8 +285,24 @@ public sealed partial class AlarmPanelItem : ObservableObject
     [ObservableProperty] private bool _isBusy;
 
     public string Name => Dto.Name;
-    public string Host => (Dto.UseHttps ? $"https://{Dto.Host}:{Dto.Port}" : $"{Dto.Host}:{Dto.Port}") +
-                          (string.IsNullOrEmpty(Dto.DeviceId) ? "" : $" · {Dto.DeviceId}");
+    /// <summary>Dirección de red tal cual, sin decir de quién es.</summary>
+    private string Address => Dto.UseHttps ? $"https://{Dto.Host}:{Dto.Port}" : $"{Dto.Host}:{Dto.Port}";
+
+    /// <summary>El panel llega a través de una receptora (pasarela) y no directo.</summary>
+    public bool ViaReceiver => !string.IsNullOrEmpty(Dto.DeviceId);
+
+    /// <summary>
+    /// Dirección que se muestra. Con una receptora de por medio, ESA dirección
+    /// es la de la receptora, no la del panel: el panel reporta hacia ella y
+    /// el sistema nunca ve su IP. Se dice con todas las letras para que nadie
+    /// la confunda con la del equipo.
+    /// </summary>
+    public string Host => ViaReceiver ? $"Receptora {Address}  ·  panel {Dto.DeviceId}" : Address;
+
+    public string HostTooltip => ViaReceiver
+        ? $"El panel «{Dto.DeviceId}» reporta a la receptora {Address}. Esa es la dirección de la receptora: " +
+          "la del panel no la conoce el sistema, porque es el panel el que llama."
+        : $"Dirección del panel: {Address}";
     public string Model => Dto.Model ?? "—";
     public string Detail => string.Join("  ·  ", new[] { Dto.Model, Dto.SerialNumber, Dto.FirmwareVersion }.Where(s => !string.IsNullOrWhiteSpace(s))!);
     public bool IsOnline => Dto.Status == AlarmPanelStatus.Online;

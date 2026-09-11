@@ -251,8 +251,15 @@ public sealed class AccessEventService(
         if (tracked.LastEventAt is null || ultimo > tracked.LastEventAt) tracked.LastEventAt = ultimo;
         await db.SaveChangesAsync(ct);
 
+        // Automatizaciones ("acceso denegado fuera de horario → foto y aviso").
+        // Resuelto al vuelo: el motor contiene la acción de puertas, que usa
+        // el servicio de acceso del que este depende.
+        var workflows = scope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>();
         foreach (var entity in stored)
+        {
             await hub.Clients.All.SendAsync(VmsHubContract.AccessEventReceived, ToDto(entity), ct);
+            workflows.Publish(Workflows.WorkflowTrigger.FromAccessEvent(entity));
+        }
     }
 
     /// <summary>

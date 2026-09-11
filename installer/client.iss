@@ -142,10 +142,30 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Settings: string;
 begin
   if CurUninstallStep = usUninstall then
   begin
     KillClientTools();
     RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS Client MediaMTX"');
+  end;
+
+  if CurUninstallStep = usPostUninstall then
+  begin
+    // Preferencias y registros del operador: no son "datos del sistema" (eso
+    // vive en el servidor), pero sí guardan la dirección del servidor, el
+    // último usuario y la disposición del muro. Desinstalar el cliente es
+    // quitarlo del puesto: no queda nada suyo.
+    Settings := ExpandConstant('{userappdata}\CLRTrueCentralVMS');
+    DeleteFile(Settings + '\client.json');
+    // La carpeta es compartida con el complemento de enrolamiento: se quita
+    // solo si queda vacía.
+    RemoveDir(Settings);
+    // Registros de la proyección de pantalla (ScreenProjection.LogDir).
+    DelTree(ExpandConstant('{localappdata}\CLRTrueCentral'), True, True, True);
+    // Certificados que MediaMTX se genera solo: no están en el registro de
+    // instalación, así que Inno los deja y con ellos la carpeta.
+    DelTree(ExpandConstant('{app}\tools'), True, True, True);
   end;
 end;

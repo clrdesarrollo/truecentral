@@ -6,6 +6,7 @@
     <Project Path="src/TrueCentralVms.Drivers.Hikvision/TrueCentralVms.Drivers.Hikvision.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.Onvif/TrueCentralVms.Drivers.Onvif.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.ZkTeco/TrueCentralVms.Drivers.ZkTeco.csproj" />
+    <Project Path="src/TrueCentralVms.Migrator/TrueCentralVms.Migrator.csproj" />
     <Project Path="src/TrueCentralVms.Server/TrueCentralVms.Server.csproj" />
     <Project Path="src/TrueCentralVms.Watchdog/TrueCentralVms.Watchdog.csproj" />
     <Project Path="src/TrueCentralVms.WebControl/TrueCentralVms.WebControl.csproj" />

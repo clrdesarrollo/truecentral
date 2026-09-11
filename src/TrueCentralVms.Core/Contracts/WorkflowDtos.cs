@@ -3,9 +3,11 @@ using System.Text.Json;
 namespace TrueCentralVms.Core.Contracts;
 
 // DTOs del módulo Automatizaciones (workflows): "cuando pase ESTO, hacer
-// ESTO OTRO". Un workflow = un disparador + condiciones + una lista ordenada
-// de acciones. Los tipos de disparador y de acción son CLAVES ESTABLES (van a
-// la base): se agregan claves nuevas, no se renombran las existentes.
+// ESTO OTRO". Un workflow = un disparador + condiciones + un DIAGRAMA DE
+// FLUJO (nodos y conexiones) que parte del disparador y pasa por condiciones
+// (sí/no), esperas y acciones. Los tipos de disparador y de acción son CLAVES
+// ESTABLES (van a la base): se agregan claves nuevas, no se renombran las
+// existentes.
 
 /// <summary>Disparadores disponibles. La clave se guarda en la base.</summary>
 public static class WorkflowTriggerTypes
@@ -14,8 +16,21 @@ public static class WorkflowTriggerTypes
     public const string AlarmEvent = "alarm-event";
     /// <summary>Cambio de conexión del servidor con un panel de alarma.</summary>
     public const string PanelStatus = "panel-status";
+    /// <summary>Un equipo (cámara/grabador, terminal de acceso o parlante) perdió o recuperó la conexión.</summary>
+    public const string DeviceStatus = "device-status";
+    /// <summary>Analítica o alarma de una cámara/grabador: movimiento, cruce de línea, intrusión, pérdida de video...</summary>
+    public const string VideoEvent = "video-event";
+    /// <summary>Una cámara ANPR leyó una patente.</summary>
+    public const string PlateRecognized = "plate-recognized";
+    /// <summary>Evento de control de acceso: acceso concedido/denegado, puerta forzada, mantenida abierta...</summary>
+    public const string AccessEvent = "access-event";
+    /// <summary>Hora programada (días de la semana + horas).</summary>
+    public const string Schedule = "schedule";
+    /// <summary>Llamada HTTP de otro sistema (webhook con clave propia).</summary>
+    public const string Webhook = "webhook";
 
-    public static readonly string[] All = [AlarmEvent, PanelStatus];
+    public static readonly string[] All =
+        [AlarmEvent, PanelStatus, DeviceStatus, VideoEvent, PlateRecognized, AccessEvent, Schedule, Webhook];
 }
 
 /// <summary>Acciones disponibles. La clave se guarda en la base.</summary>
@@ -33,8 +48,86 @@ public static class WorkflowActionTypes
     public const string Speaker = "speaker";
     /// <summary>Avisar a los operadores conectados (panel web y clientes).</summary>
     public const string Notify = "notify";
+    /// <summary>Dar una orden a una puerta del control de acceso (abrir, mantener abierta, bloquear, cerrar).</summary>
+    public const string Door = "door";
+    /// <summary>Armar, desarmar o borrar la alarma de un área de un panel.</summary>
+    public const string Panel = "panel";
+    /// <summary>Mover una cámara PTZ a un preset.</summary>
+    public const string PtzPreset = "ptz-preset";
 
-    public static readonly string[] All = [Snapshot, Email, Ftp, Http, Speaker, Notify];
+    public static readonly string[] All = [Snapshot, Email, Ftp, Http, Speaker, Notify, Door, Panel, PtzPreset];
+}
+
+/// <summary>Tipos de nodo del diagrama de una automatización.</summary>
+public static class WorkflowNodeKinds
+{
+    /// <summary>Punto de partida (uno solo por diagrama): el disparador y su filtro.</summary>
+    public const string Trigger = "trigger";
+    /// <summary>Pregunta sí/no sobre el evento (misma forma que el filtro del disparador).</summary>
+    public const string Condition = "condition";
+    /// <summary>Una acción.</summary>
+    public const string Action = "action";
+    /// <summary>Espera N segundos antes de seguir.</summary>
+    public const string Delay = "delay";
+    /// <summary>Fin de la rama (opcional: una rama sin salida también termina).</summary>
+    public const string End = "end";
+
+    public static readonly string[] All = [Trigger, Condition, Action, Delay, End];
+}
+
+/// <summary>Puertos de salida de un nodo: por dónde sigue el flujo.</summary>
+public static class WorkflowPorts
+{
+    /// <summary>Salida única (disparador, espera) o "siguiente" de una acción que terminó bien.</summary>
+    public const string Next = "next";
+    /// <summary>Condición cumplida.</summary>
+    public const string Yes = "yes";
+    /// <summary>Condición no cumplida.</summary>
+    public const string No = "no";
+    /// <summary>La acción falló.</summary>
+    public const string Error = "error";
+}
+
+/// <summary>Naturaleza de un evento de cámara/grabador (analíticas y alarmas del equipo).</summary>
+public enum VideoEventKind
+{
+    Other,
+    /// <summary>Detección de movimiento.</summary>
+    Motion,
+    /// <summary>Cruce de línea virtual.</summary>
+    LineCrossing,
+    /// <summary>Intrusión en una región.</summary>
+    Intrusion,
+    /// <summary>Entrada a una región.</summary>
+    RegionEntrance,
+    /// <summary>Salida de una región.</summary>
+    RegionExit,
+    /// <summary>Merodeo.</summary>
+    Loitering,
+    /// <summary>Objeto abandonado o retirado.</summary>
+    ObjectLeftOrTaken,
+    /// <summary>Estacionamiento indebido.</summary>
+    Parking,
+    /// <summary>Movimiento rápido / carrera.</summary>
+    FastMoving,
+    /// <summary>Aglomeración de personas.</summary>
+    Crowd,
+    /// <summary>Detección de rostro.</summary>
+    FaceDetection,
+    /// <summary>Conteo de personas (cruce de línea de conteo).</summary>
+    PeopleCounting,
+    /// <summary>Pérdida de la señal de video.</summary>
+    VideoLoss,
+    /// <summary>Tapado/sabotaje de la cámara.</summary>
+    Tamper,
+    /// <summary>Anomalía de video (cambio de escena, desenfoque, señal anómala).</summary>
+    VideoException,
+    /// <summary>Anomalía de audio (pérdida o subida brusca).</summary>
+    AudioException,
+    /// <summary>Entrada de alarma (contacto seco) del equipo.</summary>
+    AlarmInput,
+    /// <summary>Falla del equipo (disco, grabación, red).</summary>
+    DeviceFault,
 }
 
 /// <summary>
@@ -73,7 +166,84 @@ public sealed record WorkflowConditionsDto(
     /// <summary>Hora local de inicio de la ventana horaria ("22:00"); null = sin restricción.</summary>
     string? FromTime = null,
     /// <summary>Hora local de fin ("06:00"); si es menor que la de inicio, la ventana cruza la medianoche.</summary>
-    string? ToTime = null);
+    string? ToTime = null,
+
+    // --- Conexión de equipos (disparador device-status) ---
+    /// <summary>Clase de equipo: "video" (cámara/grabador), "access" (terminal de acceso), "speaker" (parlante). Vacío = todas.</summary>
+    IReadOnlyList<string>? DeviceKinds = null,
+    /// <summary>Cámaras/grabadores (Ids de Devices). También filtra patentes y eventos de video.</summary>
+    IReadOnlyList<int>? DeviceIds = null,
+    /// <summary>Equipos de control de acceso (Ids de AccessDevices). También filtra eventos de acceso.</summary>
+    IReadOnlyList<int>? AccessDeviceIds = null,
+    /// <summary>Parlantes IP (Ids de Speakers).</summary>
+    IReadOnlyList<int>? SpeakerIds = null,
+    /// <summary>Estados de conexión que disparan: "Online" | "Offline" | "AuthFailed".</summary>
+    IReadOnlyList<string>? DeviceStatuses = null,
+
+    // --- Eventos de cámara (disparador video-event) ---
+    IReadOnlyList<VideoEventKind>? VideoEventKinds = null,
+    /// <summary>Canales de video (Ids de Channels).</summary>
+    IReadOnlyList<int>? ChannelIds = null,
+
+    // --- Patentes (disparador plate-recognized) ---
+    /// <summary>Patentes de la lista (admiten * y ? como comodines).</summary>
+    IReadOnlyList<string>? Plates = null,
+    /// <summary>"any" (cualquiera) | "listed" (solo las de la lista) | "unlisted" (todas menos las de la lista).</summary>
+    string? PlateMatch = null,
+    /// <summary>Confianza mínima de la lectura (0–100); null = sin mínimo.</summary>
+    int? MinConfidence = null,
+
+    // --- Control de acceso (disparador access-event) ---
+    IReadOnlyList<AccessEventKind>? AccessKinds = null,
+    IReadOnlyList<AccessCredentialKind>? Credentials = null,
+    /// <summary>Números de puerta en el equipo.</summary>
+    IReadOnlyList<int>? DoorNumbers = null,
+    /// <summary>Identificadores de persona (EmployeeNo).</summary>
+    IReadOnlyList<string>? EmployeeNos = null,
+
+    // --- Horario (disparador schedule) ---
+    /// <summary>Horas del día ("07:30", "22:00") en que dispara, los días marcados en DaysOfWeek.</summary>
+    IReadOnlyList<string>? ScheduleTimes = null,
+
+    // --- Llamada externa (disparador webhook) ---
+    /// <summary>Clave secreta de la URL: POST /api/workflows/hook/{clave}.</summary>
+    string? HookKey = null);
+
+/// <summary>
+/// Nodo del diagrama. <paramref name="Kind"/> dice qué es; los demás campos
+/// se usan según el tipo: los nodos de acción llevan el tipo y la
+/// configuración de la acción, los de condición su filtro, los de espera sus
+/// segundos. La posición (X, Y) es solo para dibujarlo.
+/// </summary>
+public sealed record WorkflowNodeDto(
+    string Id,
+    string Kind,
+    double X,
+    double Y,
+    /// <summary>Rótulo que puso el usuario (opcional).</summary>
+    string? Label = null,
+    /// <summary>Acción: tipo (ver <see cref="WorkflowActionTypes"/>).</summary>
+    string? Type = null,
+    /// <summary>Acción: configuración propia del tipo.</summary>
+    JsonElement? Config = null,
+    /// <summary>Acción: si está desactivada se salta (sigue por "siguiente").</summary>
+    bool Enabled = true,
+    /// <summary>Espera: segundos. Acción: espera previa.</summary>
+    int DelaySeconds = 0,
+    /// <summary>Condición: el filtro que se evalúa (sí/no).</summary>
+    WorkflowConditionsDto? Conditions = null,
+    /// <summary>Acción (lectura): tiene contraseña guardada.</summary>
+    bool HasSecret = false,
+    /// <summary>Acción (escritura): contraseña nueva; null o vacío = mantener la actual.</summary>
+    string? Secret = null,
+    /// <summary>Acción: id de la fila guardada (0 en las nuevas); sirve para arrastrar la contraseña al editar.</summary>
+    int ActionId = 0);
+
+/// <summary>Conexión entre dos nodos. <paramref name="Port"/> es la salida del origen (ver <see cref="WorkflowPorts"/>).</summary>
+public sealed record WorkflowEdgeDto(string From, string To, string Port = WorkflowPorts.Next);
+
+/// <summary>El diagrama completo.</summary>
+public sealed record WorkflowGraphDto(IReadOnlyList<WorkflowNodeDto> Nodes, IReadOnlyList<WorkflowEdgeDto> Edges);
 
 /// <summary>
 /// Acción de un workflow. <paramref name="Config"/> es la configuración
@@ -91,7 +261,9 @@ public sealed record WorkflowActionDto(
     int DelaySeconds,
     JsonElement Config,
     /// <summary>La acción tiene una contraseña guardada.</summary>
-    bool HasSecret);
+    bool HasSecret,
+    /// <summary>Nodo del diagrama al que pertenece.</summary>
+    string? NodeId = null);
 
 /// <summary>
 /// Alta/edición de una acción. <paramref name="Secret"/> null o vacío =
@@ -120,8 +292,15 @@ public sealed record WorkflowDto(
     long RunCount,
     DateTime CreatedAt,
     string CreatedBy,
-    IReadOnlyList<WorkflowActionDto> Actions);
+    IReadOnlyList<WorkflowActionDto> Actions,
+    /// <summary>El diagrama completo (siempre presente: las automatizaciones antiguas se convierten a una línea recta).</summary>
+    WorkflowGraphDto Graph);
 
+/// <summary>
+/// Alta/edición. Si viene <paramref name="Graph"/>, las acciones salen de sus
+/// nodos y <paramref name="Actions"/> se ignora; sin diagrama (clientes
+/// antiguos) se arma una línea recta con las acciones en orden.
+/// </summary>
 public sealed record WorkflowWriteDto(
     string Name,
     string? Description,
@@ -129,9 +308,10 @@ public sealed record WorkflowWriteDto(
     string TriggerType,
     WorkflowConditionsDto? Conditions,
     int CooldownSeconds,
-    IReadOnlyList<WorkflowActionWriteDto> Actions);
+    IReadOnlyList<WorkflowActionWriteDto>? Actions = null,
+    WorkflowGraphDto? Graph = null);
 
-/// <summary>Resultado de una acción dentro de una ejecución.</summary>
+/// <summary>Resultado de un paso (acción, condición o espera) dentro de una ejecución.</summary>
 public sealed record WorkflowRunStepDto(
     int Order,
     string Type,
@@ -140,7 +320,9 @@ public sealed record WorkflowRunStepDto(
     string? Detail,
     int ElapsedMs,
     /// <summary>Rutas relativas de los archivos que produjo (fotos), servibles por /api/workflows/files.</summary>
-    IReadOnlyList<string>? Files);
+    IReadOnlyList<string>? Files,
+    /// <summary>Nodo del diagrama que produjo este paso (para pintarlo en el editor).</summary>
+    string? NodeId = null);
 
 /// <summary>Ejecución de un workflow (historial).</summary>
 public sealed record WorkflowRunDto(
@@ -157,11 +339,32 @@ public sealed record WorkflowRunDto(
     string StartedBy,
     IReadOnlyList<WorkflowRunStepDto> Steps);
 
-public sealed record WorkflowTriggerInfoDto(string Key, string Label, string Description);
+public sealed record WorkflowTriggerInfoDto(string Key, string Label, string Description,
+    /// <summary>Marcas propias de este disparador (además de las comunes: fecha, hora, servidor, workflow).</summary>
+    IReadOnlyList<WorkflowPlaceholderDto>? Placeholders = null,
+    /// <summary>Grupo para el menú del editor ("Alarma", "Video", "Acceso", "Sistema").</summary>
+    string? Group = null);
 
 public sealed record WorkflowActionInfoDto(string Key, string Label, string Description,
     /// <summary>La acción puede llevar contraseña (se guarda cifrada).</summary>
-    bool UsesSecret);
+    bool UsesSecret,
+    /// <summary>Grupo para el menú del editor ("Avisar", "Capturar", "Equipos", "Integración").</summary>
+    string? Group = null);
+
+/// <summary>
+/// Puerta elegible en la acción "orden a una puerta" y en las condiciones de
+/// acceso (lista plana: equipo + puerta).
+/// </summary>
+public sealed record WorkflowDoorDto(int DoorId, int DeviceId, string DeviceName, int Number, string Name, bool Enabled);
+
+/// <summary>Equipo (cámara/grabador) elegible en los disparadores de conexión, video y patentes.</summary>
+public sealed record WorkflowDeviceDto(int Id, string Name, string DriverKey,
+    /// <summary>El driver sabe recibir eventos de analítica del equipo.</summary>
+    bool SupportsEvents,
+    /// <summary>El driver sabe recibir patentes.</summary>
+    bool SupportsAnpr,
+    /// <summary>El equipo está marcado como fuente de patentes.</summary>
+    bool AnprEnabled);
 
 /// <summary>Marca reemplazable en los textos de las acciones ({panel}, {zona}...).</summary>
 public sealed record WorkflowPlaceholderDto(string Key, string Label);

@@ -122,7 +122,11 @@ public sealed record AlarmPanelDto(
     DateTime? LastStateAt,
     DateTime CreatedAt,
     IReadOnlyList<AlarmAreaDto> Areas,
-    IReadOnlyList<AlarmZoneDto> Zones)
+    IReadOnlyList<AlarmZoneDto> Zones,
+    /// <summary>El servidor guarda la clave ISUP/OTAP del panel (puede re-registrarlo solo en la receptora).</summary>
+    bool HasDeviceKey = false,
+    /// <summary>"isup" u "otap" (drivers de pasarela).</summary>
+    string? DeviceProtocol = null)
 {
     /// <summary>Alguna área o zona del panel está en alarma ahora.</summary>
     public bool InAlarm => Areas.Any(a => a.InAlarm) || Zones.Any(z => z.InAlarm);
@@ -139,7 +143,16 @@ public sealed record AlarmPanelWriteDto(
     string? Password,
     bool Enabled = true,
     /// <summary>Identificador del panel dentro de la pasarela (uuid, serie, cuenta o ID ISUP); solo drivers con NeedsDeviceId.</summary>
-    string? DeviceId = null);
+    string? DeviceId = null,
+    /// <summary>
+    /// Clave ISUP/OTAP con la que el panel reporta a la receptora (drivers de
+    /// pasarela). El servidor la guarda cifrada y con ella vuelve a registrar
+    /// el equipo si desaparece de la receptora. En edición, null o vacía =
+    /// mantener la guardada.
+    /// </summary>
+    string? DeviceKey = null,
+    /// <summary>"isup" (por defecto) u "otap": protocolo con que el panel reporta a la receptora.</summary>
+    string? DeviceProtocol = null);
 
 // ---------------------------------------------------------------------------
 // Equipos DENTRO de la receptora (Hik IP Receiver Pro)
@@ -190,6 +203,13 @@ public sealed record AlarmReceiverDeviceDto(
     string? Model,
     string? Version,
     string? Status);
+
+/// <summary>
+/// Equipos registrados en la receptora de este servidor que ningún panel del
+/// VMS usa (altas a medias o hechas por fuera). <paramref name="Error"/> va
+/// cuando la receptora no se pudo consultar.
+/// </summary>
+public sealed record AlarmReceiverOrphansDto(IReadOnlyList<AlarmReceiverDeviceDto> Devices, string? Error);
 
 /// <summary>Alta de un panel en la receptora (ISUP 5.0 u OTAP).</summary>
 public sealed record AlarmReceiverAddDeviceDto(

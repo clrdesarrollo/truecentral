@@ -519,6 +519,16 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
     public Task<IPlateSubscription> SubscribePlatesAsync(DeviceConnectionInfo info, Action<PlateRecognition> onPlate,
         CancellationToken ct = default) =>
         Task.Run(() => HikvisionAnpr.Subscribe(info, onPlate), ct);
+
+    // ------------------------------------------------------------------
+    // Eventos de analítica y alarma (movimiento, cruce de línea, intrusión...)
+    // ------------------------------------------------------------------
+
+    public bool SupportsEvents => true;
+
+    public Task<IDeviceEventSubscription> SubscribeEventsAsync(DeviceConnectionInfo info, Action<DeviceEvent> onEvent,
+        CancellationToken ct = default) =>
+        Task.Run(() => HikvisionEvents.Subscribe(info, onEvent), ct);
 }
 
 /// <summary>Fábrica del driver Hikvision (clave estable para la base de datos).</summary>
@@ -531,7 +541,8 @@ public sealed class HikvisionDeviceDriverFactory : IDeviceDriverFactory
         SupportsDiscovery: false, // SADP se habilita en el hito M4
         DefaultSdkPort: 8000,
         DefaultRtspPort: 554,
-        SupportsAnpr: true);
+        SupportsAnpr: true,
+        SupportsEvents: true);
 
     public IDeviceDriver Create() => new HikvisionDeviceDriver();
 }

@@ -5,7 +5,8 @@ using TrueCentralVms.Client.Services;
 namespace TrueCentralVms.Client.Views;
 
 /// <summary>
-/// Ventana de Configuración, por apartados (Video / Imagen / Sonido / Red).
+/// Ventana de Configuración, por apartados (Video / Imagen / Sonido / Red /
+/// Sistema).
 /// Edita la instancia de ClientSettings del shell: al Guardar se persiste y
 /// los cambios rigen de inmediato (salvo los marcados "al reiniciar").
 /// </summary>
@@ -39,6 +40,11 @@ public partial class SettingsWindow : Window
 
         VolumeSlider.Value = Math.Clamp(settings.DefaultVolume, 0, 100);
         TimeoutBox.Text = settings.ApiTimeoutSeconds.ToString();
+
+        AutoLoginCheck.IsChecked = settings.AutoLogin;
+        AutoLoginAccountText.Text = settings.Username is { Length: > 0 } user
+            ? $"Cuenta del inicio automático: {user} en {settings.ServerUrl}"
+            : "";
     }
 
     /// <summary>Apartado Licencia: solo lectura del estado que informa el servidor.</summary>
@@ -84,6 +90,7 @@ public partial class SettingsWindow : Window
         SectionImagen.Visibility = NavImagen.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionSonido.Visibility = NavSonido.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionRed.Visibility = NavRed.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SectionSistema.Visibility = NavSistema.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionLicencia.Visibility = NavLicencia.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -131,6 +138,9 @@ public partial class SettingsWindow : Window
         _settings.FitGridToDevice = GridFit.IsChecked == true;
         _settings.DefaultVolume = (int)VolumeSlider.Value;
         _settings.ApiTimeoutSeconds = timeout;
+        // Apagar el inicio automático rige desde el próximo arranque del
+        // cliente; la contraseña recordada se administra en el propio login.
+        _settings.AutoLogin = AutoLoginCheck.IsChecked == true;
         _settings.Save();
         DialogResult = true;
     }

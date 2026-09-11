@@ -339,7 +339,8 @@ public sealed class AlarmPanelService(
             }
 
             var connection = ConnectionOf(panel);
-            string fingerprint = $"{panel.DriverKey}|{connection.UseHttps}|{connection.Host}|{connection.Port}|{connection.Username}|{connection.Password}|{connection.DeviceId}";
+            string fingerprint = $"{panel.DriverKey}|{connection.UseHttps}|{connection.Host}|{connection.Port}|{connection.Username}|{connection.Password}|{connection.DeviceId}" +
+                                 $"|{Convert.ToBase64String(panel.GatewayKeyCiphertext ?? [])}|{panel.GatewayProtocol}";
             if (worker.Fingerprint != fingerprint)
             {
                 await CloseAsync(panel.Id, worker);
@@ -441,13 +442,54 @@ public sealed class AlarmPanelService(
             }
 
             AlarmPanelState state;
+            string? gatewayMessage = null;
             try
             {
-                state = await factory.Create().GetStateAsync(ConnectionOf(panel), ct);
+                var driver = factory.Create();
+                var connection = ConnectionOf(panel);
+                // Pasarela (receptora): antes de leer, asegurar que el equipo
+                // siga registrado en ella. Es la verdad de lo que funciona; el
+                // VMS guarda ID y clave y aquí los hace cumplir sin que nadie
+                // tenga que mirar la receptora.
+                if (driver is IAlarmGatewayDriver gateway && panel.GatewayDeviceId is { Length: > 0 })
+                {
+                    var registration = await gateway.EnsureRegisteredAsync(connection, panel.GatewayDeviceId,
+                        panel.GatewayKeyCiphertext is { Length: > 0 } cipher ? credentials.Unprotect(cipher) : null,
+                        panel.GatewayProtocol, replaceIfPresent: false, name: panel.Name, ct: ct);
+                    if (registration.StableDeviceId is { Length: > 0 } stable &&
+                        !string.Equals(stable, panel.GatewayDeviceId, StringComparison.Ordinal))
+                    {
+                        // El uuid de la pasarela cambia si el equipo se vuelve a
+                        // registrar; el ID ISUP/OTAP no. Se guarda el estable.
+                        logger.LogInformation("Panel '{Name}': identificador en la receptora '{Old}' → '{New}'.",
+                            panel.Name, panel.GatewayDeviceId, stable);
+                        panel.GatewayDeviceId = stable;
+                        panel.UpdatedAt = DateTime.UtcNow;
+                        await db.SaveChangesAsync(ct);
+                        connection = connection with { DeviceId = stable };
+                    }
+                    switch (registration.Outcome)
+                    {
+                        case GatewayRegistrationOutcome.ReRegistered:
+                            await audit.LogSystemAsync("alarms", "receiver-device-added",
+                                targetType: "alarm-receiver", targetName: $"{panel.Host}:{panel.Port}",
+                                detail: $"Sincronización con la receptora: el panel '{panel.Name}' (ID {panel.GatewayDeviceId}) " +
+                                        $"no estaba registrado y se registró de nuevo (uuid {registration.DevIndex}).",
+                                origin: "sistema");
+                            logger.LogWarning("Panel '{Name}': {Message}", panel.Name, registration.Message);
+                            break;
+                        case GatewayRegistrationOutcome.NotRegistered:
+                            throw new DriverException(registration.Message ?? "El equipo no está registrado en la receptora.");
+                        case GatewayRegistrationOutcome.RegisteredOffline:
+                            gatewayMessage = registration.Message;
+                            break;
+                    }
+                }
+                state = await driver.GetStateAsync(connection, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                string message = ex is DriverException ? ex.Message : $"No se pudo leer el estado: {ex.Message}";
+                string message = gatewayMessage ?? (ex is DriverException ? ex.Message : $"No se pudo leer el estado: {ex.Message}");
                 bool auth = message.Contains("credenciales", StringComparison.OrdinalIgnoreCase) ||
                             message.Contains("bloque", StringComparison.OrdinalIgnoreCase);
                 worker.LastError = message;
@@ -952,7 +994,8 @@ public static class AlarmMapper
         lastError ?? p.LastError, p.LastSeenAt, p.LastStateAt, p.CreatedAt,
         p.Areas.OrderBy(a => a.Number).Select(a => new AlarmAreaDto(a.Number, a.Name, a.Enabled, a.ArmState, a.InAlarm,
             p.Zones.Count(z => z.AreaNumber == a.Number), a.ExitDelaySeconds)).ToList(),
-        p.Zones.OrderBy(z => z.Number).Select(ToDto).ToList());
+        p.Zones.OrderBy(z => z.Number).Select(ToDto).ToList(),
+        p.GatewayKeyCiphertext is { Length: > 0 }, p.GatewayProtocol);
 
     public static AlarmZoneDto ToDto(AlarmZone z) => new(
         z.Number, z.AreaNumber, z.Name, z.ZoneType, z.DetectorType, z.Status,

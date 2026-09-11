@@ -433,7 +433,11 @@ el estado real del equipo. Hay dos drivers Hikvision:
   armado, desarmado y bypass van por
   la pasarela, y los eventos llegan por su suscripción (CIDAlarm con el
   usuario que armó/desarmó, y la conexión/desconexión del panel respecto de
-  la pasarela). Además el VMS actúa como **centro receptor de
+  la pasarela). La pasarela admite **una sola suscripción a la vez** —a la
+  segunda le contesta «No more task can be added»—, así que el servidor abre
+  una por receptora y le cuelga todos sus paneles, repartiendo cada evento a
+  su dueño: con dos o más paneles en la misma receptora, si no, uno quedaba
+  siempre con el canal de eventos cerrado. Además el VMS actúa como **centro receptor de
 alarmas (SIA DC-09, protocolos ADM-CID y SIA-DCS por TCP, puerto 5091,
 `Alarms:Receiver`)**: en el panel se configura como *Alarm Receiving Center*
 con la IP del servidor y ese puerto, y el equipo reporta con confirmación
@@ -491,35 +495,67 @@ dirección de un panel habilitado; el resto se rechaza y queda en la bitácora.
 ## Automatizaciones (workflows)
 
 "Cuando pase ESTO, hacer ESTO OTRO", sin programar nada: el servidor escucha
-lo que ocurre y ejecuta acciones solo. Hoy dispara con los **paneles de
-alarma** (cualquier evento: alarma, armado, anulación, falla…) y con la
-**conexión** del servidor con un panel; el motor es genérico, así que sumar un
-disparador nuevo (patentes, cámara fuera de línea) es publicar un
-`WorkflowTrigger` más.
+lo que ocurre y ejecuta acciones solo. Cada automatización es un **diagrama
+de flujo** que se arma en un editor visual del panel web (`#/workflows/edit`,
+al estilo Bizagi/Lucid): un **punto de partida** (el disparador y su filtro),
+y desde ahí se agregan pasos —**condiciones sí/no**, **esperas**, **acciones**
+y **fines**— conectados con flechas. Cada acción tiene dos salidas
+(*Siguiente* y *Si falla*); cada condición, *Sí* y *No*. Se agrega un paso
+haciendo clic en el círculo de salida de otro (menú), arrastrando desde la
+paleta o con clic en la paleta (se conecta después del paso seleccionado);
+las flechas se dibujan arrastrando de un puerto de salida a otro paso. El
+motor recorre el diagrama tal cual está dibujado; las ramas que salen de un
+mismo punto corren una tras otra, de izquierda a derecha. El botón **Probar**
+guarda, ejecuta las acciones de verdad con un evento de ejemplo y pinta en el
+diagrama qué paso salió bien y cuál no. Las automatizaciones anteriores al
+editor se muestran como una línea recta.
+
+**Disparadores** (`WorkflowTriggerTypes`):
+
+| Disparador | Cuándo | Filtro |
+|---|---|---|
+| **Evento de panel de alarma** | alarma, sensor interrumpido, armado, anulación, falla… | paneles, tipo, severidad, zonas y áreas por nombre, códigos Contact-ID, origen, texto, condición sostenida |
+| **Conexión con un panel** | el servidor pierde o recupera un panel | paneles, estado |
+| **Evento de cámara (analítica)** | movimiento, cruce de línea, intrusión, entrada/salida de región, merodeo, objeto abandonado, aglomeración, rostro, conteo, pérdida de video, cámara tapada, anomalía de audio/video, entrada de alarma, falla del equipo | tipo de evento, equipos, cámaras (canales) |
+| **Lectura de patente** | una cámara ANPR leyó una placa | cámaras, **lista blanca / lista negra** con comodines (`*`, `?`), confianza mínima |
+| **Evento de control de acceso** | acceso concedido/denegado, puerta abierta/cerrada, forzada, mantenida abierta, sabotaje | resultado, credencial, equipos, puertas, personas, texto |
+| **Conexión de un equipo** | una cámara/grabador, terminal de acceso o parlante IP pierde o recupera la conexión | clase de equipo, equipos, estado |
+| **Horario programado** | a las horas indicadas, los días marcados | horas (hh:mm), días |
+| **Llamada externa (HTTP)** | otro sistema hace `POST /api/workflows/hook/{clave}` (clave de 40 hex generada por el servidor; el cuerpo JSON queda como marcas `{campo}`) | — |
+
+Todos admiten además **ventana horaria** (días de la semana y rango, que
+puede cruzar la medianoche: 22:00 a 06:00), y las mismas condiciones se usan
+en los pasos de **condición** del diagrama ("¿es de noche?", "¿la patente es
+de un residente?"). Los eventos de cámara los reciben hoy los equipos
+**Hikvision** por el canal de alarma del SDK (`HikvisionEvents`; las reglas se
+configuran en la web del propio equipo). El servidor se suscribe solo a los
+equipos que pida alguna automatización habilitada (`VideoEventService`): sin
+automatizaciones de ese tipo no se abre ningún canal.
 
 Acciones disponibles (`IWorkflowActionExecutor`, una clase cada una):
 
 | Acción | Qué hace |
 |---|---|
-| **Capturar foto** | Snapshot JPEG de las cámaras elegidas (1–5 por cámara). Queda en disco y disponible para las acciones siguientes. |
+| **Capturar foto** | Snapshot JPEG de las cámaras elegidas (1–5 por cámara). Queda en disco y disponible para las acciones siguientes. La foto que trae el propio evento (analíticas con captura) también queda disponible. |
 | **Enviar correo** | SMTP con MailKit (STARTTLS, TLS implícito o sin cifrar), adjuntando las fotos capturadas. |
 | **Subir a FTP** | FTP/FTPS (explícito o implícito) con las fotos y un informe de texto opcional; la carpeta remota admite marcas y se crea sola. |
 | **Llamar a un servicio (HTTP)** | GET/POST/PUT/… a otro sistema, con cabeceras, cuerpo y autenticación básica o digest. |
 | **Sonar parlante IP** | Hikvision (audio bidireccional ISAPI: el servidor le envía el sonido ya convertido a G.711 al ritmo real), Axis (`playclip.cgi`) o cualquier marca por URL. |
 | **Avisar a los operadores** | Notificación en vivo por el hub a todos los conectados, **con la foto capturada** y **alarma sonora en el equipo del operador** (el sonido lo elige la automatización entre los cargados en el servidor, o el pitido del sistema). |
+| **Orden a una puerta** | Abrir (pulso), mantener abierta, bloquear o cerrar puertas del control de acceso ("patente de la lista → abrir el portón"). Queda en la bitácora como orden del sistema. |
+| **Armar / desarmar panel** | Armar (total o parcial), desarmar o borrar la alarma de un área (o todas) de un panel ("a las 22:00 armar la bodega"). |
+| **Mover cámara PTZ a preset** | Apunta un domo a un preset guardado en el equipo antes de sacar la foto. |
 
 Los textos (asunto, cuerpo, URL, carpeta remota…) admiten **marcas** que el
-servidor reemplaza con los datos del evento: `{panel}`, `{evento}`, `{tipo}`,
-`{severidad}`, `{codigo}`, `{area}`, `{zona}`, `{operador}`, `{fechahora}`,
-`{workflow}`, `{servidor}`… En las URL los valores se escapan.
+servidor reemplaza con los datos del evento: comunes (`{evento}`, `{tipo}`,
+`{severidad}`, `{equipo}`, `{fechahora}`, `{workflow}`, `{servidor}`…) y
+propias de cada disparador (`{panel}`, `{zona}`, `{patente}`, `{camara}`,
+`{regla}`, `{persona}`, `{puerta}`, `{tarjeta}`, `{estado}`…); el editor las
+lista al elegir el disparador. En las URL los valores se escapan.
 
-Condiciones del disparador: paneles, tipo de evento, severidad, **áreas y
-zonas elegidas por nombre** (para que cada sensor pueda disparar acciones
-distintas: una automatización por zona), códigos Contact-ID, origen (panel /
-sondeo / VMS), texto contenido y **ventana horaria** (días de la semana y
-rango, que puede cruzar la medianoche: 22:00 a 06:00). Cada automatización
-tiene además un **tiempo mínimo entre ejecuciones** (60 s por omisión): un
-detector que rebota veinte veces no manda veinte correos.
+Cada automatización tiene además un **tiempo mínimo entre ejecuciones** (60 s
+por omisión): un detector que rebota veinte veces no manda veinte correos, y
+una cámara con movimiento continuo (que informa cada segundo) tampoco.
 
 **Condición sostenida**: la automatización se ejecuta solo si la interrupción
 se mantiene N segundos — el servidor vigila la zona cada segundo durante ese
@@ -576,8 +612,10 @@ acción, cuánto demoró y las fotos que capturó, y en la **bitácora de
 auditoría** (categoría `workflows`). El botón **Probar** ejecuta las acciones
 de verdad con un evento de ejemplo, sin esperar a que el panel se alarme.
 
-Panel web `#/workflows`: mantenedor, historial, configuración del **servidor
-de correo** y carga de **sonidos** para los parlantes (se convierten a G.711
+Panel web `#/workflows`: listado (con el número de pasos de cada diagrama),
+historial, configuración del **servidor de correo** y carga de **sonidos**
+para los parlantes; `#/workflows/edit?id=N` abre el **editor de diagrama**
+(rol Admin). Los sonidos se convierten a G.711
 µ-law y A-law con el FFmpeg que ya viene con el sistema). Las contraseñas de
 cada acción (FTP, servicio HTTP, parlante) y la del correo se guardan cifradas
 con AES-256-GCM y nunca salen por la API. Configuración en `appsettings.json`

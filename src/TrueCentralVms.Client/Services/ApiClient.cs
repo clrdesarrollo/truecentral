@@ -70,6 +70,32 @@ public sealed class ApiClient
     }
 
     /// <summary>
+    /// Cierra la sesión en el servidor: revoca el token y deja el "Cierre de
+    /// sesión" en la bitácora de auditoría. Es de mejor esfuerzo — si el
+    /// servidor no responde, la sesión local se abandona igual (el token
+    /// caduca solo) y el cliente vuelve al login.
+    /// </summary>
+    public async Task LogoutAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            if (BaseUrl is not null && Token is not null)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, BaseUrl + "/api/auth/logout");
+                using var response = await _http.SendAsync(request, ct);
+            }
+        }
+        catch { /* sin red o servidor caído: el token queda expirando solo */ }
+        finally
+        {
+            // Sin contraseña guardada no hay relogin: nada revive esta sesión.
+            Token = null;
+            _password = null;
+            _http.DefaultRequestHeaders.Authorization = null;
+        }
+    }
+
+    /// <summary>
     /// Renueva la sesión con las credenciales del login original. Devuelve
     /// true si hay token nuevo (o si otro hilo ya lo renovó: las celdas de
     /// video y el sondeo de métricas pueden chocar con el 401 a la vez).
@@ -300,6 +326,28 @@ public sealed class ApiClient
 
     public Task DeleteWallLayoutAsync(int wallId, int layoutId, CancellationToken ct = default) =>
         SendAsync<object?>(HttpMethod.Delete, $"/api/walls/{wallId}/layouts/{layoutId}", null, ct);
+
+    // ---------------------------------------------------------------------
+    // Vistas guardadas del monitoreo en vivo (Custom View de iVMS-4200)
+    // ---------------------------------------------------------------------
+
+    /// <summary>Vistas del usuario más las compartidas por otros puestos.</summary>
+    public Task<List<LiveViewDto>> GetLiveViewsAsync(CancellationToken ct = default) =>
+        SendAsync<List<LiveViewDto>>(HttpMethod.Get, "/api/live-views", null, ct);
+
+    public Task<LiveViewDto> CreateLiveViewAsync(LiveViewSaveRequest request, CancellationToken ct = default) =>
+        SendAsync<LiveViewDto>(HttpMethod.Post, "/api/live-views", request, ct);
+
+    public Task<LiveViewDto> UpdateLiveViewAsync(int id, LiveViewSaveRequest request, CancellationToken ct = default) =>
+        SendAsync<LiveViewDto>(HttpMethod.Put, $"/api/live-views/{id}", request, ct);
+
+    public Task DeleteLiveViewAsync(int id, CancellationToken ct = default) =>
+        SendAsync<object?>(HttpMethod.Delete, $"/api/live-views/{id}", null, ct);
+
+    /// <summary>Pide la versión vigente de la vista y deja el registro de que
+    /// este puesto la cargó (la grilla la arma el cliente).</summary>
+    public Task<LiveViewDto> ApplyLiveViewAsync(int id, CancellationToken ct = default) =>
+        SendAsync<LiveViewDto>(HttpMethod.Post, $"/api/live-views/{id}/apply", null, ct);
 
     /// <summary>
     /// Fotograma JPEG de un canal para la vista previa del muro; null si el
@@ -655,6 +703,14 @@ public sealed class ApiClient
             catch { /* cuerpo no JSON */ }
             throw new ApiException(error ?? $"Error del servidor ({(int)response.StatusCode}).");
         }
+
+        // Un servidor más ANTIGUO no conoce la ruta y, en vez de un 404,
+        // devuelve el HTML del panel (la aplicación de una sola página atiende
+        // todo lo que no sea API). Sin esto, el cliente moriría intentando
+        // leer ese HTML como JSON y el usuario vería un error incomprensible.
+        if (response.Content.Headers.ContentType?.MediaType == "text/html")
+            throw new ApiException(
+                "El servidor no reconoce esta función: probablemente tenga una versión más antigua que este cliente.");
 
         return (await response.Content.ReadFromJsonAsync<T>(Json, ct))!;
     }

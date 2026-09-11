@@ -104,6 +104,17 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Settings: string;
 begin
   if CurUninstallStep = usUninstall then KillAgent();
+
+  if CurUninstallStep = usPostUninstall then
+  begin
+    // Ajustes del lector de este puesto. La carpeta la comparte con el cliente
+    // de escritorio (client.json), así que solo se quita si queda vacía.
+    Settings := ExpandConstant('{userappdata}\CLRTrueCentralVMS');
+    DeleteFile(Settings + '\web-control.json');
+    RemoveDir(Settings);
+  end;
 end;

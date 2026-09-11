@@ -231,6 +231,25 @@ public static class AccessCatalogApi
         });
 
         // Escribir ahora lo que esté pendiente, sin esperar el reintento solo.
+        // Avance de la escritura en los equipos y conteo por estado: es lo que
+        // muestra la barra de la página de Personas. Solo lectura.
+        app.MapGet("/api/access/sync/status", async (HttpContext ctx, VmsDbContext db, AccessSyncService sync,
+            CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            var counts = await db.AccessPersons.GroupBy(p => p.SyncState)
+                .Select(g => new { State = g.Key, Count = g.Count() }).ToListAsync(ct);
+            int Of(AccessSyncState state) => counts.FirstOrDefault(c => c.State == state)?.Count ?? 0;
+            return Results.Ok(new
+            {
+                progress = sync.Progress,
+                pending = Of(AccessSyncState.Pending),
+                failed = Of(AccessSyncState.Failed),
+                synced = Of(AccessSyncState.Synced),
+                notApplicable = Of(AccessSyncState.NotApplicable),
+            });
+        });
+
         app.MapPost("/api/access/sync", async (HttpContext ctx, AccessSyncService sync, AuditService audit,
             CancellationToken ct) =>
         {

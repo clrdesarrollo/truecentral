@@ -419,6 +419,26 @@ public sealed record AccessEventDto(
 public sealed record AccessEventPageDto(int Total, int Page, int PageSize, IReadOnlyList<AccessEventDto> Items);
 
 /// <summary>Resumen del módulo para la portada de Control de acceso.</summary>
+/// <summary>
+/// Avance de la pasada de escritura en los equipos, para la barra de la
+/// página de Personas. <see cref="Total"/> es cuántas personas tomó la pasada
+/// al empezar; <see cref="SecondsPerPerson"/> es el promedio de lo que va
+/// escrito, para estimar lo que falta.
+/// </summary>
+public sealed record AccessSyncProgressDto(
+    bool Running,
+    DateTime? StartedAt,
+    int Total,
+    int Done,
+    int Failed,
+    string? CurrentPerson,
+    string? CurrentDevice,
+    double? SecondsPerPerson,
+    DateTime? FinishedAt)
+{
+    public static readonly AccessSyncProgressDto Idle = new(false, null, 0, 0, 0, null, null, null, null);
+}
+
 public sealed record AccessOverviewDto(
     int Devices,
     int DevicesOnline,

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -68,6 +69,54 @@ public sealed class AccessSyncService(
         if (_wake.CurrentCount == 0) _wake.Release();
     }
 
+    // ==================================================================
+    // Avance de la pasada (barra de progreso del panel)
+    // ==================================================================
+
+    private readonly object _progressLock = new();
+    private AccessSyncProgressDto _progress = AccessSyncProgressDto.Idle;
+
+    /// <summary>Instantánea del avance de la pasada en curso (o de la última que terminó).</summary>
+    public AccessSyncProgressDto Progress
+    {
+        get { lock (_progressLock) return _progress; }
+    }
+
+    /// <summary>
+    /// Actualiza el avance y lo publica por el hub sin esperar: el avance es
+    /// informativo y no puede frenar la escritura si el hub tarda.
+    /// </summary>
+    private void Report(Func<AccessSyncProgressDto, AccessSyncProgressDto> change)
+    {
+        AccessSyncProgressDto next;
+        lock (_progressLock) next = _progress = change(_progress);
+        _ = hub.Clients.All.SendAsync(VmsHubContract.AccessSyncProgress, next);
+    }
+
+    // ==================================================================
+    // Reintento con espera creciente
+    // ==================================================================
+
+    /// <summary>
+    /// Quién falló y cuántas veces. Una persona que el equipo rechaza (foto
+    /// que no sirve, equipo caído) no se reintenta en cada pasada: espera 5,
+    /// 10, 20… minutos hasta una hora. Sin esto, cincuenta personas con la
+    /// foto rechazada se reescribían completas cada vuelta y la cola de las
+    /// demás avanzaba a paso de tortuga. Vive en memoria: tras reiniciar el
+    /// servidor se reintenta enseguida, que es lo esperable.
+    /// </summary>
+    private readonly ConcurrentDictionary<int, (int Attempts, DateTime LastAt)> _failures = new();
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromHours(1);
+
+    private static TimeSpan Backoff(int attempts)
+    {
+        var delay = TimeSpan.FromMinutes(5 * Math.Pow(2, Math.Max(0, attempts - 1)));
+        return delay > MaxBackoff ? MaxBackoff : delay;
+    }
+
+    private bool DueForRetry(int personId, DateTime now) =>
+        !_failures.TryGetValue(personId, out var f) || now >= f.LastAt + Backoff(f.Attempts);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // El sondeo de estado necesita una vuelta para saber qué equipos están
@@ -77,7 +126,7 @@ public sealed class AccessSyncService(
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            try { await SyncPendingAsync(stoppingToken); }
+            try { await SyncPendingAsync(stoppingToken, retryFailedNow: false); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception ex) { logger.LogWarning(ex, "La escritura del padrón en los equipos falló."); }
 
@@ -252,45 +301,109 @@ public sealed class AccessSyncService(
     // Escritura
     // ==================================================================
 
-    /// <summary>Escribe en los equipos todo lo que esté pendiente. Devuelve cuántas personas quedaron al día.</summary>
-    public async Task<int> SyncPendingAsync(CancellationToken ct)
+    /// <summary>
+    /// Escribe en los equipos todo lo que esté pendiente. Devuelve cuántas
+    /// personas se procesaron. Con <paramref name="retryFailedNow"/> (botones
+    /// del panel) las que fallaron se reintentan ya; el lazo de fondo respeta
+    /// la espera creciente.
+    /// </summary>
+    public async Task<int> SyncPendingAsync(CancellationToken ct, bool retryFailedNow = true)
     {
         await _pass.WaitAsync(ct);
-        try { return await RunPassAsync(ct); }
+        try { return await RunPassAsync(retryFailedNow, ct); }
         finally { _pass.Release(); }
     }
 
-    private async Task<int> RunPassAsync(CancellationToken ct)
+    private async Task<int> RunPassAsync(bool retryFailedNow, CancellationToken ct)
     {
-        int done = 0;
-        while (!ct.IsCancellationRequested)
+        int done = 0, failed = 0;
+        var started = DateTime.UtcNow;
+        // Cada persona se toma UNA vez por pasada: si sigue fallando vuelve a
+        // la cola de la pasada siguiente, no a la de esta (antes, cincuenta
+        // rechazadas mantenían la pasada girando sobre sí misma sin terminar).
+        var seen = new List<int>();
+        bool first = true;
+        try
         {
-            using var scope = scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
-
-            var pending = await PendingQuery(db).OrderBy(p => p.Id).Take(BatchSize).ToListAsync(ct);
-            if (pending.Count == 0) break;
-
-            // Los horarios ya escritos en esta pasada no se reescriben: un
-            // equipo con cien personas del mismo nivel recibe su horario una vez.
-            var writtenPlans = new HashSet<(int Device, int Slot)>();
-            foreach (var person in pending)
+            while (!ct.IsCancellationRequested)
             {
-                await SyncPersonAsync(db, person, writtenPlans, ct);
-                done++;
+                using var scope = scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+
+                if (first)
+                {
+                    first = false;
+                    int total = await CountDueAsync(db, retryFailedNow, ct);
+                    if (total == 0) return 0;
+                    Report(_ => new AccessSyncProgressDto(true, started, total, 0, 0, null, null, null, null));
+                }
+                var pending = await LoadBatchAsync(db, retryFailedNow, seen, ct);
+                if (pending.Count == 0) break;
+                seen.AddRange(pending.Select(p => p.Id));
+
+                // Los horarios ya escritos en esta pasada no se reescriben: un
+                // equipo con cien personas del mismo nivel recibe su horario una vez.
+                var writtenPlans = new HashSet<(int Device, int Slot)>();
+                foreach (var person in pending)
+                {
+                    Report(p => p with { CurrentPerson = person.FullName, CurrentDevice = null });
+                    await SyncPersonAsync(db, person, writtenPlans, ct);
+                    done++;
+                    if (person.SyncState == AccessSyncState.Failed)
+                    {
+                        failed++;
+                        _failures.AddOrUpdate(person.Id, (1, DateTime.UtcNow), (_, f) => (f.Attempts + 1, DateTime.UtcNow));
+                    }
+                    else _failures.TryRemove(person.Id, out _);
+                    double perPerson = (DateTime.UtcNow - started).TotalSeconds / done;
+                    int snapshotDone = done, snapshotFailed = failed;
+                    Report(p => p with { Done = snapshotDone, Failed = snapshotFailed, SecondsPerPerson = perPerson, Total = Math.Max(p.Total, snapshotDone) });
+                }
+                await db.SaveChangesAsync(ct);
+
+                foreach (var person in pending)
+                    await hub.Clients.All.SendAsync(VmsHubContract.AccessPersonSyncChanged, ToPersonDto(person), ct);
+
+                if (pending.Count < BatchSize) break;
             }
-            await db.SaveChangesAsync(ct);
-
-            foreach (var person in pending)
-                await hub.Clients.All.SendAsync(VmsHubContract.AccessPersonSyncChanged, ToPersonDto(person), ct);
-
-            if (pending.Count < BatchSize) break;
+        }
+        finally
+        {
+            Report(p => p with { Running = false, CurrentPerson = null, CurrentDevice = null, FinishedAt = DateTime.UtcNow });
         }
         return done;
     }
 
-    /// <summary>Personas con algo que escribir, con todo lo que hace falta para calcular su plan.</summary>
-    private static IQueryable<AccessPerson> PendingQuery(VmsDbContext db) =>
+    /// <summary>Cuántas personas va a tomar la pasada: las pendientes más las fallidas cuya espera venció.</summary>
+    private async Task<int> CountDueAsync(VmsDbContext db, bool retryFailedNow, CancellationToken ct)
+    {
+        int pending = await db.AccessPersons.CountAsync(p => p.SyncState == AccessSyncState.Pending, ct);
+        var failedIds = await db.AccessPersons.Where(p => p.SyncState == AccessSyncState.Failed).Select(p => p.Id).ToListAsync(ct);
+        var now = DateTime.UtcNow;
+        return pending + failedIds.Count(id => retryFailedNow || DueForRetry(id, now));
+    }
+
+    /// <summary>Siguiente tanda: primero las pendientes; si sobra lugar, las fallidas que ya toca reintentar.</summary>
+    private async Task<List<AccessPerson>> LoadBatchAsync(VmsDbContext db, bool retryFailedNow, List<int> seen, CancellationToken ct)
+    {
+        var batch = await PersonGraph(db)
+            .Where(p => p.SyncState == AccessSyncState.Pending && !seen.Contains(p.Id))
+            .OrderBy(p => p.Id).Take(BatchSize).ToListAsync(ct);
+        if (batch.Count < BatchSize)
+        {
+            var now = DateTime.UtcNow;
+            var failedIds = await db.AccessPersons
+                .Where(p => p.SyncState == AccessSyncState.Failed && !seen.Contains(p.Id))
+                .OrderBy(p => p.Id).Select(p => p.Id).ToListAsync(ct);
+            var due = failedIds.Where(id => retryFailedNow || DueForRetry(id, now)).Take(BatchSize - batch.Count).ToList();
+            if (due.Count > 0)
+                batch.AddRange(await PersonGraph(db).Where(p => due.Contains(p.Id)).OrderBy(p => p.Id).ToListAsync(ct));
+        }
+        return batch;
+    }
+
+    /// <summary>Personas con todo lo que hace falta para calcular su plan.</summary>
+    private static IQueryable<AccessPerson> PersonGraph(VmsDbContext db) =>
         db.AccessPersons
             .Include(p => p.Cards)
             .Include(p => p.Fingerprints)
@@ -299,8 +412,7 @@ public sealed class AccessSyncService(
             .Include(p => p.Levels).ThenInclude(x => x.AccessLevel).ThenInclude(l => l!.AccessSchedule)
                 .ThenInclude(s => s!.Segments)
             .Include(p => p.Levels).ThenInclude(x => x.AccessLevel).ThenInclude(l => l!.Doors)
-                .ThenInclude(d => d.AccessDoor).ThenInclude(d => d!.AccessDevice)
-            .Where(p => p.SyncState == AccessSyncState.Pending || p.SyncState == AccessSyncState.Failed);
+                .ThenInclude(d => d.AccessDoor).ThenInclude(d => d!.AccessDevice);
 
     /// <summary>
     /// Deja a una persona escrita donde corresponde y borrada donde ya no. Un
@@ -377,6 +489,7 @@ public sealed class AccessSyncService(
 
             try
             {
+                Report(p => p with { CurrentDevice = device.Name });
                 var driver = access.DriverOf(device);
                 var connection = access.ConnectionOf(device);
 

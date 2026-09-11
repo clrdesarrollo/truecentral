@@ -145,6 +145,9 @@ public static class VmsHubContract
     /// <summary>Cambió lo escrito en los equipos para una persona (payload: AccessPersonDto).</summary>
     public const string AccessPersonSyncChanged = nameof(AccessPersonSyncChanged);
 
+    /// <summary>Avanzó la pasada de escritura en los equipos (payload: AccessSyncProgressDto).</summary>
+    public const string AccessSyncProgress = nameof(AccessSyncProgress);
+
     /// <summary>Un servicio supervisado cambió de estado (payload: ManagedServiceDto).</summary>
     public const string ServiceStateChanged = nameof(ServiceStateChanged);
 }

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
 using TrueCentralVms.Client.ViewModels;
@@ -15,6 +16,9 @@ public partial class MainWindow : Window
         _vm = vm;
         DataContext = vm;
         InitializeComponent();
+        // El menú del usuario cuelga alineado a la DERECHA de su botón: es lo
+        // último del navbar y el menú es más ancho que el botón.
+        UserMenuPopup.CustomPopupPlacementCallback = PlaceUserMenu;
         Loaded += async (_, _) => await _vm.LoadTreeAsync();
         Closing += OnShellClosing;
         Closed += (_, _) => _vm.Shutdown();
@@ -32,6 +36,9 @@ public partial class MainWindow : Window
     // ------------------------------------------------------------------
     private void OnShellClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        // Cerrar sesión ya preguntó lo suyo y la aplicación no se va: sigue el login.
+        if (_loggingOut) return;
+
         bool downloading = _vm.Downloads.HasActiveJobs;
         string message;
         if (downloading)
@@ -60,6 +67,61 @@ public partial class MainWindow : Window
         // Mejor esfuerzo: cancelar la cola da la oportunidad de borrar los
         // parciales antes de que el proceso muera.
         if (downloading) _vm.Downloads.CancelAll();
+    }
+
+    // ------------------------------------------------------------------
+    // Menú del usuario (navbar) y cierre de sesión.
+    // ------------------------------------------------------------------
+
+    /// <summary>Cierre de sesión en curso: la ventana se cierra sin el
+    /// "¿Cerrar CLR TrueCentral VMS?" porque la aplicación sigue viva en el
+    /// login.</summary>
+    private bool _loggingOut;
+
+    /// <summary>Aire que el Border del menú deja para su sombra (su Margin en
+    /// el XAML): entra en el tamaño del popup y hay que descontarlo para que el
+    /// borde visible quede a ras del botón.</summary>
+    private const double UserMenuShadowMargin = 8;
+
+    /// <summary>Cuelga el menú del botón del usuario alineado por su borde
+    /// derecho (Placement="Bottom" lo alinearía por la izquierda y se saldría
+    /// de la ventana).</summary>
+    private static CustomPopupPlacement[] PlaceUserMenu(Size popupSize, Size targetSize, Point offset) =>
+        [new CustomPopupPlacement(
+            new Point(targetSize.Width - popupSize.Width + UserMenuShadowMargin, targetSize.Height - 2),
+            PopupPrimaryAxis.Horizontal)];
+
+    /// <summary>
+    /// Cerrar sesión: avisa al servidor (revoca el token y deja el registro en
+    /// la bitácora), suelta streams, hub y ventanas auxiliares, y vuelve al
+    /// login sin reiniciar la aplicación.
+    /// </summary>
+    private async void OnLogoutClick(object sender, RoutedEventArgs e)
+    {
+        UserMenuToggle.IsChecked = false;
+
+        if (_vm.Downloads.HasActiveJobs)
+        {
+            int active = _vm.Downloads.Jobs.Count(j => j.State == DownloadState.Downloading);
+            int queued = _vm.Downloads.Jobs.Count(j => j.State == DownloadState.Pending);
+            var answer = MessageBox.Show(this,
+                $"Hay {active} descarga(s) de grabaciones en curso" +
+                (queued > 0 ? $" y {queued} en cola" : "") +
+                ".\nCerrar sesión las cancelará y los archivos a medias quedarán incompletos.\n\n" +
+                "¿Cerrar sesión de todos modos?",
+                "Cerrar sesión", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (answer != MessageBoxResult.Yes) return;
+            _vm.Downloads.CancelAll();
+        }
+
+        _loggingOut = true;
+        // El login se abre ANTES de cerrar esta ventana: con la última ventana
+        // cerrada la aplicación terminaría (ShutdownMode por defecto).
+        var login = new LoginWindow(skipAutoLogin: true);
+        Application.Current.MainWindow = login;
+        login.Show();
+        Close(); // Closed → _vm.Shutdown(): cuadros, hub, timers y pantallas auxiliares
+        await _vm.Api.LogoutAsync();
     }
 
     // ------------------------------------------------------------------

@@ -87,6 +87,33 @@ public sealed class VideoLayout
         return new VideoLayout { Name = $"{bestCols}×{bestRows}", Columns = bestCols, Rows = bestRows, Cells = cells };
     }
 
+    /// <summary>Cuadrícula uniforme de columnas × filas, en orden de lectura.</summary>
+    public static VideoLayout Grid(int columns, int rows)
+    {
+        columns = Math.Clamp(columns, 1, 16);
+        rows = Math.Clamp(rows, 1, 16);
+        var cells = new List<LayoutCell>(columns * rows);
+        for (int row = 0; row < rows; row++)
+            for (int col = 0; col < columns; col++)
+                cells.Add(new LayoutCell(col, row));
+        return new VideoLayout
+        {
+            Name = $"{columns}×{rows}",
+            Columns = columns,
+            Rows = rows,
+            Cells = cells,
+        };
+    }
+
+    /// <summary>
+    /// Rearma la división guardada en una vista: si el nombre es una de las
+    /// estándar se usa esa (conserva las asimétricas 6/8/13), y si no —una
+    /// grilla a medida de las que produce <see cref="FitFor"/>— se reconstruye
+    /// del tamaño guardado.
+    /// </summary>
+    public static VideoLayout Restore(string? name, int columns, int rows) =>
+        Standard.FirstOrDefault(l => l.Name == name) ?? Grid(columns, rows);
+
     /// <summary>Divisiones estándar, en el orden del selector.</summary>
     public static readonly IReadOnlyList<VideoLayout> Standard =
     [

@@ -145,8 +145,15 @@ builder.Services.AddSingleton<IWorkflowActionExecutor, FtpAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, HttpAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, SpeakerAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, NotifyAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, DoorAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, PanelAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, TrueCentralVms.Server.Services.Workflows.Actions.PtzPresetAction>();
 builder.Services.AddSingleton<WorkflowEngine>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkflowEngine>());
+// Eventos de analítica de las cámaras (movimiento, cruce de línea, intrusión...):
+// el servicio se suscribe SOLO a los equipos que piden las automatizaciones.
+builder.Services.AddSingleton<VideoEventService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<VideoEventService>());
 
 // Plano de media: MediaMTX embebido + tokens de streaming + contabilidad.
 builder.Services.AddSingleton<StreamTokenService>();
@@ -301,6 +308,7 @@ app.MapSystemApi();
 app.MapLicenseApi();
 app.MapDecodersApi();
 app.MapWallsApi();
+app.MapLiveViewsApi();
 app.MapAnprApi();
 app.MapAuditApi();
 app.MapAlarmsApi();

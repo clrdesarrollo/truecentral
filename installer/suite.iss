@@ -51,16 +51,24 @@
 ; ISUP/OTAP (AX PRO, AX HYBRID PRO). Es un componente OBLIGATORIO del sistema,
 ; no un extra: sin ella esos paneles no se pueden conectar, por eso se instala
 ; siempre y sin preguntar. El VMS habla con ella por HTTP; su interfaz/API
-; viene en el 80,
-; que aqui se mueve al 8091 y se ata a 127.0.0.1: solo la usa el servidor de
-; este mismo equipo, nunca se expone a la red (los paneles no usan ese puerto,
-; se registran por 7660-7667/7091/8661).
+; viene en el 80 y aqui se mueve al 8091, que el firewall bloquea desde fuera:
+; solo la usa el servidor de este mismo equipo, nunca se expone a la red (los
+; paneles no usan ese puerto, se registran por 7660-7667/7091/8661).
+;
+; En una actualizacion NO se vuelve a ejecutar su instalador si ya esta la
+; misma version y este servidor la administra (ver IprpUpToDate): su base,
+; su activacion y sus equipos registrados quedan intactos. Solo se reinstala
+; encima cuando la version embebida es distinta (o falta / no es nuestra).
 #define IprpWebPort    "8091"
 #define IprpService    "DeviceGatewayService"
 #define IprpDir        "{autopf}\Hik IP Receiver Pro"
 #define IprpSetup      "..\tools\iprp\HikIpReceiverPro-Setup.exe"
+#define IprpUninstKey  "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Hik IP Receiver Pro"
 #if FileExists(IprpSetup)
   #define HasIprp
+  ; Version del setup embebido (FileVersion, p.ej. 2.5.0.6). Su instalador NSIS
+  ; deja la misma cadena en DisplayVersion de su clave de desinstalacion.
+  #define IprpVersion GetVersionNumbersString(IprpSetup)
 #else
   #error No existe el instalador del Hik IP Receiver Pro (tools\iprp\HikIpReceiverPro-Setup.exe). Es un componente obligatorio de la suite: obtengalo con build\setup-binaries.ps1.
 #endif
@@ -594,14 +602,26 @@ end;
 // Receptor de paneles de alarma (Hik IP Receiver Pro)
 //
 // Se instala en silencio y se le cambia el puerto de su web/API: viene en el
-// 80 escuchando en todas las interfaces, y aqui queda en 127.0.0.1:{#IprpWebPort}.
-// El unico cliente de esa API es el servidor del VMS, que corre en esta misma
-// maquina; los paneles NO usan ese puerto (se registran por ISUP/OTAP en
-// 7660-7667, 7091 y 8661, que si quedan abiertos).
+// 80 y aqui queda en el {#IprpWebPort}. El unico cliente de esa API es el
+// servidor del VMS, que corre en esta misma maquina; los paneles NO usan ese
+// puerto (se registran por ISUP/OTAP en 7660-7667, 7091 y 8661, que si quedan
+// abiertos).
 //
-// El puerto vive en dos archivos: nginx.conf (el que escucha de verdad) y
-// Config.xml (el que muestra la propia receptora). Se cambian los dos, y solo
-// si siguen en el valor de fabrica: si alguien ya los ajusto, se respetan.
+// El puerto vive en dos archivos: Config.xml (el que manda) y nginx.conf (el
+// que escucha). Se cambian los dos, y solo si siguen en el valor de fabrica:
+// si alguien ya los ajusto, se respetan. OJO: el servicio de la receptora
+// REGENERA la linea "listen" de nginx.conf en cada arranque a partir del
+// puerto de Config.xml, sin direccion (queda "listen 8091;", en todas las
+// interfaces). Por eso atarla a 127.0.0.1 en nginx.conf no dura, y lo que de
+// verdad la deja fuera de la red es la regla de firewall que bloquea el
+// {#IprpWebPort} (ConfigureIprpFirewall) mas el 403 de su raiz (HideIprpWebUi),
+// que si sobrevive a la regeneracion (comprobado en una reinstalacion real).
+//
+// Actualizaciones: si ya esta instalada la MISMA version embebida y este
+// servidor la administra, su instalador no se vuelve a ejecutar (IprpUpToDate):
+// se comprueba la configuracion y se deja corriendo. Ejecutarlo encima
+// funciona (conserva base, activacion y equipos: comprobado), pero es un
+// riesgo sin motivo y tarda minutos; queda reservado para cambio de version.
 // ---------------------------------------------------------------------------
 #ifdef HasIprp
 function IprpDir(): string;
@@ -679,7 +699,10 @@ begin
 end;
 
 // nginx.conf: "listen 80;" -> "listen 127.0.0.1:8091;". Solo se toca la linea
-// del puerto por defecto; si ya esta en otro valor, se deja como esta.
+// del puerto por defecto; si ya esta en otro valor (p.ej. el "listen 8091;"
+// que la propia receptora regenera en cada arranque), se deja como esta. Es
+// solo la semilla para el primer arranque tras instalar: el puerto que manda
+// es el de Config.xml (PatchIprpConfigXml).
 function PatchIprpNginx(): Boolean;
 var
   Path, Line, Trimmed: string;
@@ -814,17 +837,25 @@ begin
   Result := SaveStringsToFile(Path, Lines, False);
 end;
 
+// Las reglas de la receptora van aparte de DeleteFirewallRules(): esa se llama
+// tambien al instalar, DESPUES de InstallIprp(), y se llevaria por delante las
+// que acaba de poner ConfigureIprpFirewall().
+procedure DeleteIprpFirewallRules();
+begin
+  RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS IP Receiver Pro (solo local)"');
+  RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS paneles ISUP"');
+end;
+
 // Doble candado sobre el puerto de la receptora: aunque su instalador (o una
 // actualizacion suya) abra el puerto, una regla de bloqueo gana sobre las de
 // permiso. El trafico por loopback no pasa por el firewall, asi que el
 // servidor del VMS sigue llegando.
 procedure ConfigureIprpFirewall();
 begin
-  RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS IP Receiver Pro (solo local)"');
+  DeleteIprpFirewallRules();
   RunHidden(SysTool('netsh.exe'),
     'advfirewall firewall add rule name="CLR TrueCentral VMS IP Receiver Pro (solo local)" dir=in action=block protocol=TCP localport={#IprpWebPort} profile=any');
   // Puertos por los que los paneles se registran y reportan: esos si se abren.
-  RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS paneles ISUP"');
   RunHidden(SysTool('netsh.exe'),
     'advfirewall firewall add rule name="CLR TrueCentral VMS paneles ISUP" dir=in action=allow protocol=TCP localport=7091,7660-7667,8661 profile=any');
 end;
@@ -839,6 +870,70 @@ end;
 function IprpServiceExists(): Boolean;
 begin
   Result := RunHidden(SysTool('sc.exe'), 'query {#IprpService}') = 0;
+end;
+
+// Version que dejo su instalador NSIS en la clave de desinstalacion (es de 32
+// bits, asi que normalmente cae en WOW6432Node; se miran las dos vistas).
+function InstalledIprpVersion(): string;
+begin
+  Result := '';
+  if not RegQueryStringValue(HKLM32, '{#IprpUninstKey}', 'DisplayVersion', Result) then
+    if not RegQueryStringValue(HKLM64, '{#IprpUninstKey}', 'DisplayVersion', Result) then
+      Result := '';
+  Result := Trim(Result);
+end;
+
+// ¿La receptora instalada es exactamente la version embebida y la administra
+// este servidor? Entonces volver a ejecutar su instalador no aporta nada y
+// se salta: conserva base, activacion y equipos sin correr riesgos. Cualquier
+// duda (sin servicio, sin credencial nuestra, version distinta o ilegible)
+// devuelve False y se instala como siempre.
+function IprpUpToDate(): Boolean;
+begin
+  Result := IprpServiceExists() and IprpManagedByUs() and
+            (InstalledIprpVersion() = '{#IprpVersion}');
+end;
+
+// ¿Config.xml ya tiene el puerto de la web/API en {#IprpWebPort}?
+function IprpPortConfigured(): Boolean;
+var
+  Lines: TArrayOfString;
+  I: Integer;
+  InHttp: Boolean;
+begin
+  Result := False;
+  if not LoadStringsFromFile(IprpDir() + '\Config.xml', Lines) then
+    exit;
+  InHttp := False;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    if Trim(Lines[I]) = '<HTTP>' then
+      InHttp := True
+    else if Trim(Lines[I]) = '</HTTP>' then
+      InHttp := False
+    else if InHttp and (Squeeze(Trim(Lines[I])) = '<Port>{#IprpWebPort}</Port>') then
+    begin
+      Result := True;
+      exit;
+    end;
+  end;
+end;
+
+// ¿nginx.conf conserva el bloqueo de la interfaz web (HideIprpWebUi)?
+function IprpWebUiHidden(): Boolean;
+var
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  Result := False;
+  if not LoadStringsFromFile(IprpDir() + '\nginx\conf\nginx.conf', Lines) then
+    exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    if Pos('CLR TrueCentral VMS: interfaz web', Lines[I]) > 0 then
+    begin
+      Result := True;
+      exit;
+    end;
 end;
 
 // Caso incomodo: en el equipo ya habia una receptora instalada y activada a
@@ -891,6 +986,45 @@ begin
     Sleep(1000);
   end;
   Sleep(2000);
+  DelTree(IprpDir(), True, True, True);
+end;
+
+// Quita la receptora al desinstalar el VMS. Se hace SIEMPRE, sin preguntar: es
+// un componente obligatorio de la suite (la instala este mismo instalador, sin
+// preguntar tampoco), no un programa que el cliente eligiera tener. Dejarla
+// atras es dejar corriendo un servicio con su propio PostgreSQL, su nginx y el
+// historial de los paneles, que nadie va a administrar.
+//
+// Su desinstalador es NSIS: /S es silencioso y devuelve el control enseguida,
+// asi que hay que esperar a que el servicio desaparezca de verdad antes de
+// borrar la carpeta (si no, quedan binarios tomados y el DelTree no limpia).
+procedure UninstallIprp();
+var
+  Uninstaller: string;
+  ResultCode, I: Integer;
+begin
+  DeleteIprpFirewallRules();
+  if not IprpServiceExists() and not DirExists(IprpDir()) then
+    exit;
+
+  StopIprpService();
+  Uninstaller := IprpDir() + '\uninst.exe';
+  if FileExists(Uninstaller) then
+  begin
+    Exec(Uninstaller, '/S', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    for I := 1 to 60 do
+    begin
+      if not IprpServiceExists() then
+        break;
+      Sleep(1000);
+    end;
+    Sleep(2000);
+  end
+  else
+    // Sin desinstalador (instalacion rota o a medias) el servicio quedaria
+    // registrado apuntando a una carpeta que estamos por borrar.
+    RunHidden(SysTool('sc.exe'), 'delete {#IprpService}');
+
   DelTree(IprpDir(), True, True, True);
 end;
 
@@ -976,55 +1110,13 @@ begin
   DeleteFile(Path);
 end;
 
-procedure InstallIprp();
+// Configuracion posterior al setup del fabricante: puerto, interfaz web
+// oculta, firewall, arranque automatico y verificacion de que responde. Se
+// usa tambien cuando la receptora ya estaba y su configuracion se perdio.
+procedure ConfigureIprpAfterSetup();
 var
-  Setup: string;
-  ResultCode, I: Integer;
   Healthy: Boolean;
-  BrowserSince: string;
 begin
-  Setup := ExpandConstant('{tmp}\HikIpReceiverPro-Setup.exe');
-  if not FileExists(Setup) then
-    exit;
-
-  ResetOrphanIprp();
-
-  // Partir sin navegadores abiertos es lo que permite cerrar despues, sin
-  // riesgo, la ventana que abre su instalador.
-  // Solo se cerraran navegadores ARRANCADOS despues de este momento: si el
-  // usuario ya tenia uno abierto, su instalador le abre una pestaña dentro de
-  // ese proceso, que es mas viejo y no se toca.
-  BrowserSince := GetDateTimeString('yyyymmddhhnnss', '-', ':');
-
-  // Su instalador abre el navegador en su propia pagina al terminar (un
-  // ExecShell que hace incluso en modo silencioso, y que no se puede
-  // desactivar por parametro). Se avisa para que no confunda: esa ventana no
-  // hay que usarla, y quedara en blanco en cuanto le cambiemos el puerto.
-  WizardForm.StatusLabel.Caption := 'Instalando el receptor de paneles de alarma (puede abrirse una ventana del navegador: cierrela)...';
-  // Instalador NSIS: /S es silencioso y /D (sin comillas y al final) fija la carpeta.
-  if not Exec(Setup, '/S /D=' + IprpDir(), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
-  begin
-    if not WizardSilent() then
-      MsgBox('No se pudo instalar el receptor de paneles de alarma (codigo ' + IntToStr(ResultCode) + ').' #13#10#13#10 +
-             'Es un componente necesario: sin el, los paneles AX PRO y AX HYBRID PRO que reportan' #13#10 +
-             'por ISUP/OTAP no podran conectarse. El resto del sistema quedo instalado; vuelva a' #13#10 +
-             'ejecutar este instalador para reintentarlo.', mbError, MB_OK);
-    exit;
-  end;
-
-  CloseReceiverBrowser(BrowserSince);
-
-  // ANTES de tocar nada hay que dejar que la receptora termine su primer
-  // arranque: crea su propia base de datos (trae un PostgreSQL) y detener el
-  // servicio en mitad de eso deja el cluster a medio hacer y el servicio ya no
-  // vuelve a levantar. Se espera hasta 8 minutos a que su API conteste.
-  WizardForm.StatusLabel.Caption := 'Esperando a que el receptor termine de instalarse (crea su base de datos)...';
-  if WaitForIprpApi(480) = 0 then
-    if not WizardSilent() then
-      MsgBox('El receptor de paneles se instalo, pero no llego a arrancar dentro de 8 minutos.' #13#10#13#10 +
-             'Se continuara igual con su configuracion; si al terminar no responde, revise el' #13#10 +
-             'servicio {#IprpService} en Servicios de Windows.', mbInformation, MB_OK);
-
   WizardForm.StatusLabel.Caption := 'Dejando el receptor de paneles accesible solo desde este equipo...';
   StopIprpService();
   if not PatchIprpNginx() then
@@ -1070,6 +1162,80 @@ begin
              mbInformation, MB_OK);
   end;
 end;
+
+procedure InstallIprp();
+var
+  Setup: string;
+  ResultCode: Integer;
+  BrowserSince: string;
+begin
+  Setup := ExpandConstant('{tmp}\HikIpReceiverPro-Setup.exe');
+  if not FileExists(Setup) then
+    exit;
+
+  // Actualizacion con la misma receptora ya instalada y administrada por este
+  // servidor: no se vuelve a ejecutar su instalador. Se comprueba que la
+  // configuracion siga entera y que el servicio corra; si alguien la toco, se
+  // rehace la configuracion (sin reinstalar).
+  if IprpUpToDate() then
+  begin
+    Log('Receptora Hik IP Receiver Pro {#IprpVersion} ya instalada y administrada por el VMS: no se reinstala.');
+    if IprpPortConfigured() and IprpWebUiHidden() then
+    begin
+      WizardForm.StatusLabel.Caption := 'Comprobando el receptor de paneles de alarma ya instalado...';
+      ConfigureIprpFirewall();
+      RunHidden(SysTool('sc.exe'), 'config {#IprpService} start= auto');
+      if not StartIprpService() and not WizardSilent() then
+        MsgBox('El receptor de paneles ya estaba instalado, pero su servicio ({#IprpService})' #13#10 +
+               'no arranco despues de varios intentos.' #13#10#13#10 +
+               'Abralo a mano desde Servicios de Windows. El resto del sistema funciona.', mbError, MB_OK);
+      exit;
+    end;
+    Log('La configuracion de la receptora no esta completa: se rehace sin reinstalarla.');
+    ConfigureIprpAfterSetup();
+    exit;
+  end;
+
+  ResetOrphanIprp();
+
+  // Partir sin navegadores abiertos es lo que permite cerrar despues, sin
+  // riesgo, la ventana que abre su instalador.
+  // Solo se cerraran navegadores ARRANCADOS despues de este momento: si el
+  // usuario ya tenia uno abierto, su instalador le abre una pestaña dentro de
+  // ese proceso, que es mas viejo y no se toca.
+  BrowserSince := GetDateTimeString('yyyymmddhhnnss', '-', ':');
+
+  // Su instalador abre el navegador en su propia pagina al terminar (un
+  // ExecShell que hace incluso en modo silencioso, y que no se puede
+  // desactivar por parametro). Se avisa para que no confunda: esa ventana no
+  // hay que usarla, y quedara en blanco en cuanto le cambiemos el puerto.
+  WizardForm.StatusLabel.Caption := 'Instalando el receptor de paneles de alarma (puede abrirse una ventana del navegador: cierrela)...';
+  // Instalador NSIS: /S es silencioso y /D (sin comillas y al final) fija la carpeta.
+  if not Exec(Setup, '/S /D=' + IprpDir(), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  begin
+    if not WizardSilent() then
+      MsgBox('No se pudo instalar el receptor de paneles de alarma (codigo ' + IntToStr(ResultCode) + ').' #13#10#13#10 +
+             'Es un componente necesario: sin el, los paneles AX PRO y AX HYBRID PRO que reportan' #13#10 +
+             'por ISUP/OTAP no podran conectarse. El resto del sistema quedo instalado; vuelva a' #13#10 +
+             'ejecutar este instalador para reintentarlo.', mbError, MB_OK);
+    exit;
+  end;
+
+  CloseReceiverBrowser(BrowserSince);
+
+  // ANTES de tocar nada hay que dejar que la receptora termine su primer
+  // arranque: crea su propia base de datos (trae un PostgreSQL) y detener el
+  // servicio en mitad de eso deja el cluster a medio hacer y el servicio ya no
+  // vuelve a levantar. Se espera hasta 8 minutos a que su API conteste.
+  WizardForm.StatusLabel.Caption := 'Esperando a que el receptor termine de instalarse (crea su base de datos)...';
+  if WaitForIprpApi(480) = 0 then
+    if not WizardSilent() then
+      MsgBox('El receptor de paneles se instalo, pero no llego a arrancar dentro de 8 minutos.' #13#10#13#10 +
+             'Se continuara igual con su configuracion; si al terminar no responde, revise el' #13#10 +
+             'servicio {#IprpService} en Servicios de Windows.', mbInformation, MB_OK);
+
+  ConfigureIprpAfterSetup();
+end;
 #endif
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -1094,10 +1260,203 @@ end;
 // ---------------------------------------------------------------------------
 // Desinstalación
 // ---------------------------------------------------------------------------
+// CLR TrueCentral VMS es una solución cerrada: nada de lo que instala tiene
+// sentido sin el resto. Desinstalar significa BORRADO TOTAL — el servicio, la
+// base de datos, la receptora de paneles, el cliente, el complemento, las
+// reglas de firewall y las preferencias de los operadores. No se pregunta por
+// partes: se avisa UNA vez, al principio (InitializeUninstall), y a partir de
+// ahí no queda nada a medias.
+//
+// Actualizar NO pasa por acá: el instalador de la versión nueva se ejecuta
+// encima del anterior (mismo AppId) y conserva los datos. El único camino a
+// este código es que alguien decida quitar el producto.
+// ---------------------------------------------------------------------------
+
+// Barrido final, en dos partes, y en segundo plano.
+//
+// 1) Restos por usuario. Viven en el perfil de cada operador, así que ni el
+//    desinstalador del cliente ni el del complemento —que corren para UN
+//    usuario— alcanzan a limpiarlos todos. Se recorren los perfiles reales de
+//    la máquina (Win32_UserProfile, sin los del sistema) y se borran solo
+//    estas carpetas, por nombre exacto:
+//      Roaming\CLRTrueCentralVMS    client.json y web-control.json
+//      Local\CLRTrueCentral         registros de la proyección de pantalla
+//      Local\CLRobotics\TrueCentral migrador.json (puede guardar credenciales
+//                                   de HikCentral si se marcó recordarlas)
+//
+// 2) La carpeta del producto en Archivos de programa. No se puede borrar desde
+//    acá: adentro está el unins000.exe que en este momento se está ejecutando,
+//    y el del cliente, que corre en paralelo. Cada uno se borra a sí mismo al
+//    terminar, pero la carpeta PADRE que los contiene no la quita nadie. Por
+//    eso el script espera —hasta dos minutos— y va sacando únicamente
+//    carpetas VACÍAS: nunca borra un archivo, así que no puede llevarse por
+//    delante el unins000.dat que el desinstalador todavía está leyendo.
+//
+// Se lanza sin esperarlo (ewNoWait) y por eso NO puede vivir en {tmp}: esa
+// carpeta desaparece cuando el desinstalador termina, que es justo mientras el
+// script sigue corriendo. Va al temp del usuario y se borra a sí mismo.
+procedure LaunchFinalCleanup();
+var
+  Script: TArrayOfString;
+  Path: string;
+  ResultCode: Integer;
+begin
+  Path := AddBackslash(GetTempDir()) + 'clr-truecentral-limpieza-final.ps1';
+  SetArrayLength(Script, 27);
+  Script[0]  := '# Barrido final de CLR TrueCentral VMS: restos por usuario y la carpeta';
+  Script[1]  := '# del producto, cuando los desinstaladores terminen de soltarla.';
+  Script[2]  := '$rutas = ''AppData\Roaming\CLRTrueCentralVMS'',''AppData\Local\CLRTrueCentral'',''AppData\Local\CLRobotics\TrueCentral''';
+  Script[3]  := '$perfiles = Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |';
+  Script[4]  := '  Where-Object { -not $_.Special -and $_.LocalPath } | ForEach-Object { $_.LocalPath }';
+  Script[5]  := 'foreach ($perfil in $perfiles) {';
+  Script[6]  := '  foreach ($rel in $rutas) {';
+  Script[7]  := '    $ruta = Join-Path $perfil $rel';
+  Script[8]  := '    if (Test-Path -LiteralPath $ruta) {';
+  Script[9]  := '      Remove-Item -LiteralPath $ruta -Recurse -Force -ErrorAction SilentlyContinue';
+  Script[10] := '    }' + #13#10 + '  }';
+  // CLRobotics es la carpeta de la empresa, no del producto: solo se quita si
+  // quedo vacia (otro producto nuestro podria estar usandola).
+  Script[11] := '  $empresa = Join-Path $perfil ''AppData\Local\CLRobotics''';
+  Script[12] := '  if ((Test-Path -LiteralPath $empresa) -and';
+  Script[13] := '      -not (Get-ChildItem -LiteralPath $empresa -Force -ErrorAction SilentlyContinue)) {';
+  Script[14] := '    Remove-Item -LiteralPath $empresa -Force -ErrorAction SilentlyContinue';
+  Script[15] := '  }' + #13#10 + '}';
+  Script[16] := '$raiz = ''' + ExpandConstant('{autopf}\CLR TrueCentral VMS') + '''';
+  Script[17] := 'for ($i = 0; $i -lt 60; $i++) {';
+  Script[18] := '  Start-Sleep -Seconds 2';
+  Script[19] := '  if (-not (Test-Path -LiteralPath $raiz)) { break }';
+  Script[20] := '  # Solo carpetas VACIAS: los desinstaladores todavia pueden estar usando las suyas.';
+  Script[21] := '  Get-ChildItem -LiteralPath $raiz -Directory -Force -ErrorAction SilentlyContinue |';
+  Script[22] := '    Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue) } |';
+  Script[23] := '    Remove-Item -Force -ErrorAction SilentlyContinue';
+  Script[24] := '  if (-not (Get-ChildItem -LiteralPath $raiz -Force -ErrorAction SilentlyContinue)) {';
+  Script[25] := '    Remove-Item -LiteralPath $raiz -Force -ErrorAction SilentlyContinue; break';
+  Script[26] := '  }' + #13#10 + '}' + #13#10 +
+                'Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue';
+  if not SaveStringsToFile(Path, Script, False) then
+    exit;
+  Exec(PowerShellExe(), '-NoProfile -ExecutionPolicy Bypass -File "' + Path + '"',
+       '', SW_HIDE, ewNoWait, ResultCode);
+end;
+
+// Lee una propiedad de texto de un JSON escrito con indentación (una propiedad
+// por línea): «"clave": "valor",». No es un parser: alcanza para los archivos
+// que escribe el servidor, que salen siempre con ese formato.
+function JsonStringValue(const Path, Key: string): string;
+var
+  Lines: TArrayOfString;
+  Value: string;
+  I, P: Integer;
+begin
+  Result := '';
+  if not FileExists(Path) then
+    exit;
+  if not LoadStringsFromFile(Path, Lines) then
+    exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    P := Pos('"' + Key + '"', Lines[I]);
+    if P = 0 then
+      continue;
+    Value := Copy(Lines[I], P + Length(Key) + 2, Length(Lines[I]));
+    P := Pos(':', Value);
+    if P = 0 then
+      exit;
+    Value := Trim(Copy(Value, P + 1, Length(Value)));
+    // Sobran la coma de separación y las comillas del valor.
+    if (Length(Value) > 0) and (Value[Length(Value)] = ',') then
+      Value := Trim(Copy(Value, 1, Length(Value) - 1));
+    if (Length(Value) >= 2) and (Value[1] = '"') and (Value[Length(Value)] = '"') then
+      Result := Copy(Value, 2, Length(Value) - 2);
+    exit;
+  end;
+end;
+
+function LicenseDir(): string;
+begin
+  Result := DataDir() + '\license';
+end;
+
+// ¿Hay una licencia ACTIVADA en este equipo? Devuelve su código de activación,
+// o cadena vacía si no hay ninguna.
+//
+// La marca fiable es el código guardado en state.json: desactivar desde el
+// panel lo pone en null (y el .lic firmado puede quedar en disco si Windows lo
+// tenía tomado en ese momento — LicenseService ignora ese IOException y
+// reintenta en el próximo arranque). Solo cuando no hay state.json legible se
+// cae al archivo .lic como única pista.
+function ActivatedLicenseCode(): string;
+begin
+  Result := '';
+  if FileExists(LicenseDir() + '\state.json') then
+  begin
+    Result := JsonStringValue(LicenseDir() + '\state.json', 'activationCode');
+    exit;
+  end;
+  if FileExists(LicenseDir() + '\license.lic') then
+    Result := '(no se pudo leer el código)';
+end;
+
+// Aviso de licencia activa. Va PRIMERO y aparte del aviso general porque es lo
+// único que todavía tiene arreglo: en este punto el servicio sigue corriendo,
+// así que el panel web responde y la licencia se puede liberar. En cuanto
+// empiece la desinstalación esa puerta se cierra — el servidor de licencias
+// seguiría contando la activación como usada y el equipo nuevo no podría
+// tomarla. Devuelve False si el operador prefiere cancelar y liberarla.
+function ConfirmActiveLicense(): Boolean;
+var
+  Code: string;
+begin
+  Result := True;
+  Code := ActivatedLicenseCode();
+  if Code = '' then
+    exit;
+  Result := MsgBox('ATENCIÓN: este equipo tiene una LICENCIA ACTIVA.' #13#10#13#10 +
+                   '    Código de activación:  ' + Code + #13#10#13#10 +
+                   'Al desinstalar, la licencia se borra de este equipo, pero el servidor de' #13#10 +
+                   'licencias la va a seguir contando como usada: NO se va a poder activar' #13#10 +
+                   'en otro equipo hasta liberarla, y desde acá ya no hay forma de hacerlo.' #13#10#13#10 +
+                   'Para liberarla hay que desactivarla ANTES, con el sistema todavía' #13#10 +
+                   'funcionando:' #13#10#13#10 +
+                   '    1. Cancele esta desinstalación.' #13#10 +
+                   '    2. Abra http://localhost:{#WebPort} y entre a Sistema > Licencia.' #13#10 +
+                   '    3. Use "Desactivar en este equipo".' #13#10 +
+                   '    4. Vuelva a desinstalar.' #13#10#13#10 +
+                   '¿Desea desinstalar igual, SIN liberar la licencia?',
+                   mbCriticalError, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
+
+// Aviso único: es la última oportunidad de echarse atrás. En desinstalación
+// silenciosa no se pregunta nada (quien la lanza ya sabe lo que hace).
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  if UninstallSilent() then
+    exit;
+  if not ConfirmActiveLicense() then
+  begin
+    Result := False;
+    exit;
+  end;
+  Result := MsgBox('{#AppName} se va a eliminar POR COMPLETO de este equipo:' #13#10#13#10 +
+                   '  - el servidor y su servicio de Windows;' #13#10 +
+                   '  - la BASE DE DATOS con todo su contenido: personas, huellas, tarjetas,' #13#10 +
+                   '    permisos, eventos, grabaciones, configuración y la licencia;' #13#10 +
+                   '  - el receptor de paneles de alarma, con su historial y los paneles' #13#10 +
+                   '    que tenga registrados;' #13#10 +
+                   '  - el cliente de escritorio y el complemento de enrolamiento;' #13#10 +
+                   '  - las reglas de firewall y las preferencias de los operadores.' #13#10#13#10 +
+                   'NO se puede deshacer y NO queda copia de la base de datos.' #13#10#13#10 +
+                   'Si lo que quiere es ACTUALIZAR el sistema, cancele: ejecute el instalador' #13#10 +
+                   'de la versión nueva encima de esta, que conserva todos los datos.' #13#10#13#10 +
+                   '¿Desea continuar?',
+                   mbCriticalError, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   I, ResultCode: Integer;
-  ClientUninstaller: string;
+  Uninstaller: string;
 begin
   if CurUninstallStep = usUninstall then
   begin
@@ -1118,27 +1477,47 @@ begin
     StopOrphanPostgres();
     StopOrphanMediaMtx();
     DeleteFirewallRules();
+#ifdef HasIprp
+    // Antes de borrar archivos: su desinstalador tarda y conviene que termine
+    // mientras Inno todavía no empezó a vaciar {app}.
+    UninstallIprp();
+#endif
   end;
 
   if CurUninstallStep = usPostUninstall then
   begin
-    // El cliente es un programa aparte: se ofrece quitarlo también.
-    ClientUninstaller := ExpandConstant('{autopf}\CLR TrueCentral VMS\Client\unins000.exe');
-    if FileExists(ClientUninstaller) and not UninstallSilent() then
-      if MsgBox('¿Desea desinstalar también el cliente de escritorio de este equipo?',
-                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
-        Exec(ClientUninstaller, '/VERYSILENT /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // El cliente y el complemento son programas aparte, con su propio
+    // desinstalador: se lanzan en silencio para que también desaparezcan de
+    // "Aplicaciones instaladas".
+    Uninstaller := ExpandConstant('{autopf}\CLR TrueCentral VMS\Client\unins000.exe');
+    if FileExists(Uninstaller) then
+      Exec(Uninstaller, '/VERYSILENT /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    if DirExists(DataDir()) and not UninstallSilent() then
-      if MsgBox('¿Desea eliminar también los DATOS del sistema (base de datos, fotos, configuración y registros)?'#13#10#13#10 +
-                DataDir() + #13#10#13#10 +
-                'Si va a reinstalar o actualizar CLR TrueCentral VMS, elija "No".',
-                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
-      begin
-        DelTree(DataDir(), True, True, True);
-        DeleteFile(ExpandConstant('{app}\appsettings.Local.json'));
-        DeleteFile(ExpandConstant('{app}\mediamtx.runtime.yml'));
-        RemoveDir(ExpandConstant('{app}'));
-      end;
+    // El complemento se instala por usuario (PrivilegesRequired=lowest), así
+    // que vive bajo el perfil, no en Archivos de programa.
+    Uninstaller := ExpandConstant('{localappdata}\Programs\CLR TrueCentral VMS\Complemento\unins000.exe');
+    if FileExists(Uninstaller) then
+      Exec(Uninstaller, '/VERYSILENT /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // Datos del sistema: base de datos, fotos, matrículas, workflows, licencia
+    // y registros.
+    DelTree(DataDir(), True, True, True);
+
+    // Lo que queda en {app} después de que Inno borró los archivos del registro
+    // de instalación: los ajustes del equipo (marcados uninsneveruninstall), la
+    // configuración que MediaMTX genera en cada arranque y los certificados que
+    // MediaMTX se crea solo — nada de eso está en ese registro, así que hay que
+    // nombrarlo. OJO: no se puede hacer un DelTree de {app} entero, porque ahí
+    // adentro está el propio unins000.dat que el desinstalador todavía usa para
+    // terminar (él mismo se borra al final, y con él la carpeta si queda vacía).
+    DeleteFile(ExpandConstant('{app}\appsettings.Local.json'));
+    DeleteFile(ExpandConstant('{app}\mediamtx.runtime.yml'));
+    DelTree(ExpandConstant('{app}\tools'), True, True, True);
+    DelTree(ExpandConstant('{app}\wwwroot'), True, True, True);
+    DelTree(ExpandConstant('{app}\watchdog'), True, True, True);
+    DelTree(ExpandConstant('{app}\client-setup'), True, True, True);
+    DelTree(ExpandConstant('{app}\webcontrol'), True, True, True);
+
+    LaunchFinalCleanup();
   end;
 end;

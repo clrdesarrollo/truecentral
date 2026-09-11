@@ -29,6 +29,18 @@ public static class AlarmsApi
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
 
+    /// <summary>
+    /// Mensaje del choque de unicidad: un panel directo se identifica por
+    /// dirección y puerto; uno detrás de una pasarela, además por su equipo.
+    /// </summary>
+    private static string DuplicateMessage(string? deviceId, bool other = false) =>
+        $"Ya existe {(other ? "otro" : "un")} panel con " +
+        (deviceId is null ? "esa dirección y puerto." : "ese equipo en esa pasarela.");
+
+    /// <summary>¿La base rechazó la escritura por una clave única (PostgreSQL 23505)?</summary>
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is Npgsql.PostgresException { SqlState: "23505" };
+
     private static string? ValidateWrite(AlarmPanelWriteDto request, AlarmDriverRegistry drivers)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
@@ -134,6 +146,49 @@ public static class AlarmsApi
     private static string? DeviceIdOf(AlarmPanelWriteDto request) =>
         string.IsNullOrWhiteSpace(request.DeviceId) ? null : request.DeviceId.Trim();
 
+    private static string? DeviceKeyOf(AlarmPanelWriteDto request) =>
+        string.IsNullOrWhiteSpace(request.DeviceKey) ? null : request.DeviceKey.Trim();
+
+    private static string? DeviceProtocolOf(AlarmPanelWriteDto request) =>
+        request.DeviceProtocol?.Trim().ToLowerInvariant() is "otap" ? "otap"
+        : request.DeviceProtocol is { Length: > 0 } ? "isup" : null;
+
+    /// <summary>
+    /// Sincronización VMS → receptora al guardar o probar un panel de pasarela:
+    /// asegura que el equipo esté registrado (lo registra con la clave si
+    /// falta; con <paramref name="replaceIfPresent"/> lo vuelve a registrar con
+    /// la clave recién escrita). Devuelve el identificador estable (ID ISUP)
+    /// que conviene guardar, o el error de la receptora.
+    /// </summary>
+    private static async Task<(string? StableDeviceId, GatewayRegistration? Registration, string? Error)> EnsureGatewayAsync(
+        AlarmDriverRegistry drivers, string driverKey, AlarmConnectionInfo conn, string? deviceKey, string? protocol,
+        string? name, bool replaceIfPresent, CancellationToken ct)
+    {
+        if (drivers.Find(driverKey)?.Create() is not IAlarmGatewayDriver gateway || string.IsNullOrWhiteSpace(conn.DeviceId))
+            return (conn.DeviceId, null, null);
+        try
+        {
+            var registration = await gateway.EnsureRegisteredAsync(conn, conn.DeviceId, deviceKey, protocol,
+                replaceIfPresent, name, ct);
+            if (registration.Outcome == GatewayRegistrationOutcome.NotRegistered)
+                return (registration.StableDeviceId ?? conn.DeviceId, registration, registration.Message);
+            return (registration.StableDeviceId ?? conn.DeviceId, registration, null);
+        }
+        catch (DriverException ex)
+        {
+            return (conn.DeviceId, null, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return (conn.DeviceId, null, $"Error inesperado al sincronizar con la receptora: {ex.Message}");
+        }
+    }
+
+    /// <summary>¿Otro panel del VMS (distinto de <paramref name="exceptId"/>) usa ese equipo en esa pasarela?</summary>
+    private static Task<bool> DeviceInUseAsync(VmsDbContext db, string host, int port, string deviceId, int? exceptId, CancellationToken ct) =>
+        db.AlarmPanels.AnyAsync(p => p.Host == host && p.Port == port && p.GatewayDeviceId == deviceId &&
+                                     (exceptId == null || p.Id != exceptId), ct);
+
     public static void MapAlarmsApi(this WebApplication app)
     {
         // ------------------------------------------------------------------
@@ -187,10 +242,29 @@ public static class AlarmsApi
             // En una pasarela varios paneles comparten dirección y puerto: lo
             // que no puede repetirse es el equipo dentro de ella.
             if (await db.AlarmPanels.AnyAsync(p => p.Host == request.Host.Trim() && p.Port == request.Port && p.GatewayDeviceId == deviceId, ct))
-                return Error(deviceId is null ? "Ya existe un panel con esa dirección y puerto." : "Ya existe un panel con ese equipo en esa pasarela.",
-                    StatusCodes.Status409Conflict);
+                return Error(DuplicateMessage(deviceId), StatusCodes.Status409Conflict);
 
             var conn = new AlarmConnectionInfo(request.Host.Trim(), request.Port, request.UseHttps, request.Username, request.Password, deviceId);
+            string? deviceKey = DeviceKeyOf(request);
+            // Pasarela: el equipo se registra en la receptora aquí mismo (la
+            // receptora es invisible para el operador). Si ya estaba, se
+            // reutiliza; con clave escrita se vuelve a registrar con ella.
+            var (stableId, registration, gatewayError) = await EnsureGatewayAsync(drivers, request.DriverKey, conn, deviceKey,
+                DeviceProtocolOf(request), request.Name.Trim(), replaceIfPresent: deviceKey is not null, ct);
+            if (gatewayError is not null)
+            {
+                await audit.LogAsync(ctx, "alarms", "panel-created",
+                    targetType: "alarm-panel", targetName: request.Name.Trim(),
+                    detail: $"Alta de panel rechazada por la receptora {request.Host}:{request.Port}: {gatewayError}", success: false);
+                return Error(gatewayError);
+            }
+            if (stableId is not null && stableId != deviceId)
+            {
+                deviceId = stableId;
+                conn = conn with { DeviceId = stableId };
+                if (await db.AlarmPanels.AnyAsync(p => p.Host == conn.Host && p.Port == conn.Port && p.GatewayDeviceId == deviceId, ct))
+                    return Error(DuplicateMessage(deviceId), StatusCodes.Status409Conflict);
+            }
             var (info, state, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             if (info is null)
             {
@@ -210,6 +284,8 @@ public static class AlarmsApi
                 Username = request.Username,
                 PasswordCiphertext = protector.Protect(request.Password),
                 GatewayDeviceId = deviceId,
+                GatewayKeyCiphertext = deviceKey is null ? null : protector.Protect(deviceKey),
+                GatewayProtocol = deviceId is null ? null : DeviceProtocolOf(request) ?? "isup",
                 Enabled = request.Enabled,
                 Model = info.Model,
                 SerialNumber = info.SerialNumber,
@@ -219,12 +295,31 @@ public static class AlarmsApi
             };
             if (state is not null) SeedState(panel, state);
             db.AlarmPanels.Add(panel);
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            // Carrera con otro administrador, o base con un índice más viejo:
+            // antes llegaba al navegador como un «Error 500» pelado.
+            catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+            {
+                await audit.LogAsync(ctx, "alarms", "panel-created",
+                    targetType: "alarm-panel", targetName: request.Name.Trim(),
+                    detail: $"Alta de panel rechazada: ya existe otro panel en {request.Host.Trim()}:{request.Port}" +
+                            (deviceId is null ? "." : $" con el equipo '{deviceId}'."), success: false);
+                return Error(DuplicateMessage(deviceId), StatusCodes.Status409Conflict);
+            }
 
             await audit.LogAsync(ctx, "alarms", "panel-created",
                 targetType: "alarm-panel", targetId: panel.Id.ToString(), targetName: panel.Name,
                 detail: $"Agregó el panel de alarma '{panel.Name}' ({panel.DriverKey}, {panel.Host}:{panel.Port}" +
                         (panel.GatewayDeviceId is null ? "" : $", equipo '{panel.GatewayDeviceId}' en la pasarela") +
+                        (registration?.Outcome switch
+                        {
+                            GatewayRegistrationOutcome.ReRegistered => ", registrado en la receptora",
+                            GatewayRegistrationOutcome.Registered or GatewayRegistrationOutcome.RegisteredOffline => ", ya registrado en la receptora",
+                            _ => "",
+                        }) +
                         $", {panel.Areas.Count} áreas, {panel.Zones.Count} zonas).",
                 data: new { panel.Host, panel.Port, panel.UseHttps, panel.DriverKey, panel.GatewayDeviceId, panel.Model, panel.SerialNumber });
             service.RequestReconcile();
@@ -244,19 +339,34 @@ public static class AlarmsApi
             if (panel is null) return Results.NotFound();
             string? deviceId = DeviceIdOf(request);
             if (await db.AlarmPanels.AnyAsync(p => p.Id != id && p.Host == request.Host.Trim() && p.Port == request.Port && p.GatewayDeviceId == deviceId, ct))
-                return Error(deviceId is null ? "Ya existe otro panel con esa dirección y puerto." : "Ya existe otro panel con ese equipo en esa pasarela.",
-                    StatusCodes.Status409Conflict);
+                return Error(DuplicateMessage(deviceId, other: true), StatusCodes.Status409Conflict);
 
             string password = string.IsNullOrEmpty(request.Password)
                 ? protector.Unprotect(panel.PasswordCiphertext)
                 : request.Password;
+            string? deviceKey = DeviceKeyOf(request);
+            string? deviceProtocol = deviceId is null ? null : DeviceProtocolOf(request) ?? panel.GatewayProtocol ?? "isup";
             bool connectionChanged =
                 panel.Host != request.Host.Trim() || panel.Port != request.Port || panel.UseHttps != request.UseHttps ||
                 panel.Username != request.Username || panel.DriverKey != request.DriverKey ||
-                panel.GatewayDeviceId != deviceId || !string.IsNullOrEmpty(request.Password);
+                panel.GatewayDeviceId != deviceId || !string.IsNullOrEmpty(request.Password) ||
+                deviceKey is not null || panel.GatewayProtocol != deviceProtocol;
             if (connectionChanged)
             {
                 var conn = new AlarmConnectionInfo(request.Host.Trim(), request.Port, request.UseHttps, request.Username, password, deviceId);
+                // Pasarela: con clave nueva se vuelve a registrar; sin clave se
+                // usa la guardada solo si el equipo falta en la receptora.
+                var (stableId, _, gatewayError) = await EnsureGatewayAsync(drivers, request.DriverKey, conn,
+                    deviceKey ?? (panel.GatewayKeyCiphertext is { Length: > 0 } k ? protector.Unprotect(k) : null),
+                    deviceProtocol, request.Name.Trim(), replaceIfPresent: deviceKey is not null, ct);
+                if (gatewayError is not null) return Error(gatewayError);
+                if (stableId is not null && stableId != deviceId)
+                {
+                    deviceId = stableId;
+                    conn = conn with { DeviceId = stableId };
+                    if (await DeviceInUseAsync(db, conn.Host, conn.Port, deviceId, id, ct))
+                        return Error(DuplicateMessage(deviceId, other: true), StatusCodes.Status409Conflict);
+                }
                 var (info, state, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
                 if (info is null) return Error(probeError!);
                 panel.Model = info.Model;
@@ -275,6 +385,8 @@ public static class AlarmsApi
             if (panel.Username != request.Username) changes.Add($"usuario '{panel.Username}' → '{request.Username}'");
             if (panel.GatewayDeviceId != deviceId) changes.Add($"equipo en la pasarela '{panel.GatewayDeviceId}' → '{deviceId}'");
             if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
+            if (deviceKey is not null) changes.Add("clave del equipo cambiada (re-registrado en la receptora)");
+            if (panel.GatewayProtocol != deviceProtocol) changes.Add($"protocolo del equipo '{panel.GatewayProtocol}' → '{deviceProtocol}'");
             if (panel.Enabled != request.Enabled) changes.Add(request.Enabled ? "monitoreo activado" : "monitoreo desactivado");
 
             panel.Name = request.Name.Trim();
@@ -285,13 +397,30 @@ public static class AlarmsApi
             panel.Username = request.Username;
             panel.PasswordCiphertext = protector.Protect(password);
             panel.GatewayDeviceId = deviceId;
+            if (deviceId is null) { panel.GatewayKeyCiphertext = null; panel.GatewayProtocol = null; }
+            else
+            {
+                if (deviceKey is not null) panel.GatewayKeyCiphertext = protector.Protect(deviceKey);
+                panel.GatewayProtocol = deviceProtocol;
+            }
             if (!panel.Enabled && request.Enabled
                 && license.Deny(LicenseFeatures.ModuleAlarms, LicenseFeatures.AlarmPanels,
                     await db.AlarmPanels.CountAsync(p => p.Enabled && p.Id != id, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "alarm-panel", panel.Name);
             panel.Enabled = request.Enabled;
             panel.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+            {
+                await audit.LogAsync(ctx, "alarms", "panel-updated",
+                    targetType: "alarm-panel", targetId: panel.Id.ToString(), targetName: request.Name.Trim(),
+                    detail: $"Modificación rechazada: ya existe otro panel en {request.Host.Trim()}:{request.Port}" +
+                            (deviceId is null ? "." : $" con el equipo '{deviceId}'."), success: false);
+                return Error(DuplicateMessage(deviceId, other: true), StatusCodes.Status409Conflict);
+            }
 
             await audit.LogAsync(ctx, "alarms", "panel-updated",
                 targetType: "alarm-panel", targetId: panel.Id.ToString(), targetName: panel.Name,
@@ -305,7 +434,7 @@ public static class AlarmsApi
 
         app.MapDelete("/api/alarms/panels/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             CredentialProtector protector, IHubContext<VmsHub> hub, AlarmPanelService service, AuditService audit,
-            CancellationToken ct) =>
+            AlarmDriverRegistry drivers, LocalIpReceiverService local, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var panel = await db.AlarmPanels.FindAsync([id], ct);
@@ -313,6 +442,29 @@ public static class AlarmsApi
 
             await service.DetachAsync(id);
             HikvisionSessionForget(panel, protector);
+
+            // Receptora de este servidor: el equipo también se quita de ella.
+            // Eliminar el panel es dejar de comunicarse con él; dejarlo
+            // registrado solo produciría un "huérfano" que nadie pidió. En
+            // una receptora ajena no se toca nada.
+            if (panel.GatewayDeviceId is { Length: > 0 } gatewayId && IsLocalReceiver(local, panel.Host, panel.Port) &&
+                drivers.Find(panel.DriverKey)?.Create() is IAlarmGatewayDriver gateway)
+            {
+                try
+                {
+                    await gateway.UnregisterAsync(ConnectionOf(panel, protector), gatewayId, ct);
+                    await audit.LogAsync(ctx, "alarms", "receiver-device-removed",
+                        targetType: "alarm-receiver", targetName: $"{panel.Host}:{panel.Port}",
+                        detail: $"Quitó de la receptora el equipo {gatewayId} al eliminar el panel '{panel.Name}'.");
+                }
+                catch (Exception ex)
+                {
+                    await audit.LogAsync(ctx, "alarms", "receiver-device-removed",
+                        targetType: "alarm-receiver", targetName: $"{panel.Host}:{panel.Port}",
+                        detail: $"No se pudo quitar de la receptora el equipo {gatewayId} al eliminar el panel '{panel.Name}': {ex.Message}",
+                        success: false);
+                }
+            }
             db.AlarmPanels.Remove(panel); // áreas y zonas caen por cascada; el historial se conserva
             await db.SaveChangesAsync(ct);
             await audit.LogAsync(ctx, "alarms", "panel-deleted",
@@ -341,6 +493,19 @@ public static class AlarmsApi
                 return Error("La contraseña del panel es obligatoria.");
 
             var conn = new AlarmConnectionInfo(request.Host.Trim(), request.Port, request.UseHttps, request.Username, password, DeviceIdOf(request));
+            // Pasarela: para probar hay que estar registrado. Con clave escrita
+            // se (re)registra, salvo que otro panel del VMS ya use ese equipo.
+            string? deviceKey = DeviceKeyOf(request);
+            if (deviceKey is null && panelId is int keyOwner &&
+                await db.AlarmPanels.FindAsync([keyOwner], ct) is { GatewayKeyCiphertext: { Length: > 0 } stored })
+                deviceKey = protector.Unprotect(stored);
+            bool replace = DeviceKeyOf(request) is not null && conn.DeviceId is not null &&
+                           !await DeviceInUseAsync(db, conn.Host, conn.Port, conn.DeviceId, panelId, ct);
+            var (stableId, _, gatewayError) = await EnsureGatewayAsync(drivers, request.DriverKey, conn, deviceKey,
+                DeviceProtocolOf(request), request.Name.Trim(), replace, ct);
+            if (gatewayError is not null)
+                return Results.Ok(new AlarmPanelProbeResultDto(false, gatewayError, null, null, null, [], []));
+            if (stableId is not null) conn = conn with { DeviceId = stableId };
             var (info, state, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             await audit.LogAsync(ctx, "alarms", "panel-probed",
                 targetType: "alarm-panel", targetName: request.Name.Trim(),
@@ -372,6 +537,40 @@ public static class AlarmsApi
             // La contraseña NO se expone nunca: solo si el servidor la tiene.
             return Results.Ok(new AlarmLocalReceiverDto(state.Present, state.Ready && local.HasCredentials,
                 local.Host, local.Port, LocalIpReceiverService.AdminUser, state.Message));
+        });
+
+        // Equipos registrados en la receptora de este servidor que ningún panel
+        // del VMS usa: altas a medias o hechas por fuera. La web los muestra sola
+        // (sin botón de "sincronizar": la receptora no existe para el operador)
+        // para adoptarlos como panel o quitarlos.
+        app.MapGet("/api/alarms/receiver/local/orphans", async (HttpContext ctx, VmsDbContext db, AlarmDriverRegistry drivers,
+            LocalIpReceiverService local, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (!local.Enabled || local.GetPassword() is not { Length: > 0 } password)
+                return Results.Ok(new AlarmReceiverOrphansDto([], null));
+            if (drivers.All.Select(f => f.Create()).OfType<IAlarmGatewayDriver>().FirstOrDefault() is not { } gateway)
+                return Results.Ok(new AlarmReceiverOrphansDto([], null));
+
+            var conn = new AlarmConnectionInfo(local.Host, local.Port, false, LocalIpReceiverService.AdminUser, password);
+            var used = (await db.AlarmPanels.AsNoTracking()
+                    .Where(p => p.Host == local.Host && p.Port == local.Port && p.GatewayDeviceId != null)
+                    .Select(p => p.GatewayDeviceId!).ToListAsync(ct))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var registered = await gateway.ListRegisteredAsync(conn, ct);
+                var orphans = registered
+                    .Where(d => !used.Contains(d.DevIndex) && (d.StableDeviceId is null || !used.Contains(d.StableDeviceId)))
+                    .Select(d => new AlarmReceiverDeviceDto(d.DevIndex, d.Name, null, null, d.StableDeviceId, null, null, d.Status))
+                    .ToList();
+                return Results.Ok(new AlarmReceiverOrphansDto(orphans, null));
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new AlarmReceiverOrphansDto([], ex is DriverException ? ex.Message
+                    : $"No se pudo consultar la receptora: {ex.Message}"));
+            }
         });
 
         // La credencial de la receptora propia la genera y guarda el sistema, y no
@@ -430,9 +629,38 @@ public static class AlarmsApi
             if (conn is null) return Error(error!);
 
             string name = string.IsNullOrWhiteSpace(request.Name) ? request.DeviceId.Trim() : request.Name.Trim();
+            string deviceId = request.DeviceId.Trim();
             string target = $"{conn.Host}:{conn.Port}";
             try
             {
+                // Sincronización con la receptora: si ese ID ya está registrado
+                // (un alta anterior que quedó a medias, o hecho a mano), no se
+                // vuelve a intentar —la pasarela lo rechazaría como
+                // «addDeviceFailed»— sino que se reutiliza. Si además vienen
+                // con una clave nueva y ningún panel del VMS lo usa, se vuelve
+                // a registrar con esa clave, que es la única que no se puede
+                // leer de la receptora para comprobarla.
+                var existing = await HikvisionIpReceiverDriver.FindGatewayDeviceAsync(conn, deviceId, ct);
+                if (existing is not null)
+                {
+                    bool inUse = await db.AlarmPanels.AnyAsync(p => p.Host == conn.Host && p.Port == conn.Port &&
+                        (p.GatewayDeviceId == existing.DevIndex || p.GatewayDeviceId == deviceId), ct);
+                    if (string.IsNullOrWhiteSpace(request.DeviceKey) || inUse)
+                    {
+                        await audit.LogAsync(ctx, "alarms", "receiver-device-added",
+                            targetType: "alarm-receiver", targetName: target,
+                            detail: $"El equipo «{existing.Name}» (ID {deviceId}) ya estaba registrado en la receptora {target} " +
+                                    $"(uuid {existing.DevIndex}); se reutiliza tal cual.");
+                        return Results.Ok(new AlarmReceiverDeviceDto(existing.DevIndex, existing.Name, existing.Serial,
+                            existing.AccountId, existing.IsupId, existing.Model, existing.Version, existing.Status));
+                    }
+                    await HikvisionIpReceiverDriver.DeleteGatewayDeviceAsync(conn, existing.DevIndex, ct);
+                    await audit.LogAsync(ctx, "alarms", "receiver-device-removed",
+                        targetType: "alarm-receiver", targetName: target,
+                        detail: $"El equipo «{existing.Name}» (ID {deviceId}) ya estaba en la receptora {target} sin ningún panel " +
+                                $"del VMS que lo usara: se quitó (uuid {existing.DevIndex}) para registrarlo de nuevo con la clave indicada.");
+                }
+
                 string devIndex = await HikvisionIpReceiverDriver.AddGatewayDeviceAsync(conn,
                     new HikvisionIpReceiverDriver.GatewayDeviceSpec(request.Protocol, request.DeviceId, request.DeviceKey,
                         name, request.DeviceType, request.AccountId, request.Remark), ct);

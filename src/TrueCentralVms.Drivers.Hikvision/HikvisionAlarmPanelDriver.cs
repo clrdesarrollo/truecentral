@@ -134,7 +134,7 @@ public sealed class HikvisionAlarmPanelDriver : IAlarmPanelDriver
                 "arming" or "exitdelay" or "entrydelay" => AlarmArmState.Arming,
                 _ => AlarmArmState.Unknown,
             };
-            string name = names.GetValueOrDefault(id) ?? GetString(item, "name") ?? $"Área {id}";
+            string name = CleanName(names.GetValueOrDefault(id)) ?? CleanName(GetString(item, "name")) ?? $"Área {id}";
             int exitDelay = GetInt(item, "delayTime") ?? 0;
             result.Add(new AlarmAreaState(id, name, enabled, state, GetBool(item, "alarm") ?? false, exitDelay));
         }
@@ -240,7 +240,8 @@ public sealed class HikvisionAlarmPanelDriver : IAlarmPanelDriver
             int? charge = GetInt(item, "chargeValue");
             bool lowBattery = (GetBool(item, "lowBattery") ?? GetBool(item, "batteryLow") ?? false) || charge is > 0 and <= 20;
             int? area = GetInt(item, "subSystemNo") ?? cfg.Area;
-            string name = cfg.Name ?? GetString(item, "name") ?? GetString(item, "zoneName") ?? $"Zona {id + 1}";
+            string name = CleanName(cfg.Name) ?? CleanName(GetString(item, "name"))
+                          ?? CleanName(GetString(item, "zoneName")) ?? $"Zona {id + 1}";
             result.Add(new AlarmZoneState(
                 id, area, name,
                 cfg.ZoneType ?? GetString(item, "zoneType"),
@@ -261,7 +262,8 @@ public sealed class HikvisionAlarmPanelDriver : IAlarmPanelDriver
         foreach (var item in EnumerateList(doc.RootElement, "SubSysList", "SubSys")
                      .Concat(EnumerateList(doc.RootElement, "List", "SubSys")))
         {
-            if (GetInt(item, "id") is { } id && (GetString(item, "name") ?? GetString(item, "subSysName")) is { Length: > 0 } name)
+            if (GetInt(item, "id") is { } id &&
+                (CleanName(GetString(item, "name")) ?? CleanName(GetString(item, "subSysName"))) is { } name)
                 names[id] = name;
         }
     }
@@ -274,7 +276,7 @@ public sealed class HikvisionAlarmPanelDriver : IAlarmPanelDriver
         {
             if (GetInt(item, "id") is not { } id) continue;
             config[id] = (
-                GetString(item, "zoneName") ?? GetString(item, "name"),
+                CleanName(GetString(item, "zoneName")) ?? CleanName(GetString(item, "name")),
                 GetString(item, "zoneType"),
                 GetString(item, "detectorType"),
                 GetInt(item, "subSystemNo"));
@@ -310,6 +312,25 @@ public sealed class HikvisionAlarmPanelDriver : IAlarmPanelDriver
         }
         value = default;
         return false;
+    }
+
+    /// <summary>
+    /// Nombre utilizable venido del panel, o null si no lo es. Aunque el
+    /// cuerpo ya se decodifica con la cadena UTF-8 / Latin-1 / GB18030, un
+    /// panel puede tener el nombre guardado en bytes que no son texto en
+    /// ninguna de las tres: ahí aparecen el carácter de reemplazo (U+FFFD) o
+    /// caracteres de control. Ese nombre NO se usa —se cae al genérico "Área
+    /// 7" / "Zona 3"— porque, además de ilegible, se copia dentro de cada
+    /// evento del historial, donde ya no hay forma de corregirlo.
+    /// </summary>
+    internal static string? CleanName(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        string name = raw.Trim();
+        foreach (char c in name)
+            if (c == '\uFFFD' || (char.IsControl(c) && c is not ('\t' or '\n' or '\r')))
+                return null;
+        return name;
     }
 
     internal static string? GetString(JsonElement obj, string name)

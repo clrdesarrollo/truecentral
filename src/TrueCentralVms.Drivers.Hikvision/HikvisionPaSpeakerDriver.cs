@@ -80,7 +80,7 @@ public sealed class HikvisionPaSpeakerDriver : ISpeakerDriver
         { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
         using var response = await SendAsync(info, request, ct);
-        string text = await response.Content.ReadAsStringAsync(ct);
+        string text = await HikvisionIsapiClient.ReadTextAsync(response, ct);
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
             throw new DriverException("El parlante rechazó las credenciales (usuario o contraseña incorrectos).");
@@ -127,7 +127,7 @@ public sealed class HikvisionPaSpeakerDriver : ISpeakerDriver
             if (json is not null) request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
             using var response = await SendAsync(info, request, ct);
-            string text = await response.Content.ReadAsStringAsync(ct);
+            string text = await HikvisionIsapiClient.ReadTextAsync(response, ct);
 
             if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0)
             {

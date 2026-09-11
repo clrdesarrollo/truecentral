@@ -1,4 +1,5 @@
 using TrueCentralVms.Server.Services.Licensing;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -16,11 +17,12 @@ namespace TrueCentralVms.Server.Api;
 /// <summary>
 /// API del módulo Automatizaciones: mantenedor de workflows (administrador),
 /// historial de ejecuciones (cualquier usuario con sesión), configuración del
-/// correo saliente y sonidos para los parlantes IP.
+/// correo saliente, sonidos para los parlantes IP y la entrada de llamadas
+/// externas (webhook).
 ///
-/// El editor del panel se arma con /api/workflows/catalog: los disparadores,
-/// las acciones y las marcas de plantilla salen del servidor, así una acción
-/// nueva aparece sin tocar el JavaScript.
+/// El editor visual del panel se arma con /api/workflows/catalog: los
+/// disparadores (con sus marcas), las acciones y las marcas comunes salen del
+/// servidor, así una acción nueva aparece sin tocar el JavaScript.
 /// </summary>
 public static class WorkflowsApi
 {
@@ -31,35 +33,103 @@ public static class WorkflowsApi
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
 
-    /// <summary>Marcas que se pueden usar en los textos de las acciones.</summary>
+    /// <summary>Marcas comunes a todos los disparadores.</summary>
     private static readonly WorkflowPlaceholderDto[] Placeholders =
     [
         new("workflow", "Nombre de la automatización"),
-        new("panel", "Nombre del panel"),
         new("evento", "Descripción del evento"),
-        new("tipo", "Naturaleza (Alarma, Falla, Armado...)"),
+        new("tipo", "Naturaleza del evento"),
         new("severidad", "Severidad (Crítica, Advertencia, Informativa)"),
-        new("codigo", "Código del evento (ej. 1130)"),
-        new("area", "Nombre del área"),
-        new("areanumero", "Número del área"),
-        new("zona", "Nombre de la zona"),
-        new("zonanumero", "Número de la zona"),
-        new("operador", "Usuario que operó el panel"),
-        new("origen", "Cómo se supo (panel, sondeo, VMS)"),
-        new("estado", "Estado de conexión del panel"),
+        new("equipo", "Nombre del equipo (panel, cámara, terminal, parlante)"),
+        new("origen", "Cómo se supo"),
         new("fecha", "Fecha (dd-mm-aaaa)"),
         new("hora", "Hora (hh:mm:ss)"),
         new("fechahora", "Fecha y hora"),
         new("servidor", "Nombre del servidor"),
     ];
 
+    private static readonly WorkflowPlaceholderDto[] PanelPlaceholders =
+    [
+        new("panel", "Nombre del panel"),
+        new("codigo", "Código del evento (ej. 1130)"),
+        new("area", "Nombre del área"),
+        new("areanumero", "Número del área"),
+        new("zona", "Nombre de la zona"),
+        new("zonanumero", "Número de la zona"),
+        new("operador", "Usuario que operó el panel"),
+        new("estado", "Estado de conexión del panel"),
+    ];
+
     private static readonly WorkflowTriggerInfoDto[] Triggers =
     [
         new(WorkflowTriggerTypes.AlarmEvent, "Evento de panel de alarma",
-            "Cuando un panel informa una alarma, un armado, una anulación o una falla."),
+            "Cuando un panel informa una alarma, un sensor interrumpido, un armado, una anulación o una falla.",
+            PanelPlaceholders, "Paneles de alarma"),
         new(WorkflowTriggerTypes.PanelStatus, "Conexión con un panel",
-            "Cuando el servidor pierde o recupera la conexión con un panel de alarma."),
+            "Cuando el servidor pierde o recupera la conexión con un panel de alarma.",
+            PanelPlaceholders, "Paneles de alarma"),
+        new(WorkflowTriggerTypes.VideoEvent, "Evento de cámara (analítica)",
+            "Cuando una cámara o grabador informa movimiento, cruce de línea, intrusión, pérdida de video, entrada de alarma, etc. Las reglas se configuran en el equipo.",
+            [
+                new("camara", "Nombre de la cámara (canal)"),
+                new("canal", "Número del canal"),
+                new("regla", "Nombre de la regla de analítica"),
+                new("entrada", "Número de la entrada de alarma"),
+                new("horaequipo", "Hora según el equipo"),
+            ], "Video"),
+        new(WorkflowTriggerTypes.PlateRecognized, "Lectura de patente",
+            "Cuando una cámara ANPR lee una patente (lista blanca/negra, confianza mínima).",
+            [
+                new("patente", "Patente leída"),
+                new("confianza", "Confianza de la lectura (0–100)"),
+                new("camara", "Nombre de la cámara"),
+                new("tipovehiculo", "Tipo de vehículo"),
+                new("colorvehiculo", "Color del vehículo"),
+                new("marca", "Marca del vehículo"),
+                new("colorpatente", "Color de la placa"),
+                new("velocidad", "Velocidad (km/h)"),
+                new("carril", "Carril"),
+                new("direccion", "Sentido (entrada/salida)"),
+                new("infraccion", "Infracción informada"),
+                new("horaequipo", "Hora según la cámara"),
+            ], "Video"),
+        new(WorkflowTriggerTypes.AccessEvent, "Evento de control de acceso",
+            "Cuando alguien pasa (o lo rechazan) por una puerta, o la puerta informa forzada, mantenida abierta o sabotaje.",
+            [
+                new("puerta", "Nombre de la puerta"),
+                new("puertanumero", "Número de la puerta en el equipo"),
+                new("persona", "Nombre de la persona"),
+                new("personaid", "Identificador de la persona"),
+                new("tarjeta", "Número de tarjeta"),
+                new("credencial", "Credencial usada (tarjeta, huella, rostro...)"),
+                new("resultado", "Resultado (concedido, denegado, alarma...)"),
+            ], "Control de acceso"),
+        new(WorkflowTriggerTypes.DeviceStatus, "Conexión de un equipo",
+            "Cuando una cámara/grabador, un terminal de acceso o un parlante IP pierde o recupera la conexión.",
+            [
+                new("equipotipo", "Clase de equipo"),
+                new("direccion", "Dirección IP del equipo"),
+                new("modelo", "Modelo"),
+                new("estado", "Estado de conexión"),
+            ], "Sistema"),
+        new(WorkflowTriggerTypes.Schedule, "Horario programado",
+            "A las horas indicadas, los días de la semana marcados (armar a las 22:00, abrir el portón a las 07:30…).",
+            [], "Sistema"),
+        new(WorkflowTriggerTypes.Webhook, "Llamada externa (HTTP)",
+            "Cuando otro sistema llama a la URL de esta automatización (POST /api/workflows/hook/{clave}). Los campos del cuerpo JSON quedan como marcas.",
+            [
+                new("cuerpo", "Cuerpo JSON completo de la llamada"),
+                new("ip", "Dirección IP que llamó"),
+            ], "Sistema"),
     ];
+
+    private static string ActionGroup(string type) => type switch
+    {
+        WorkflowActionTypes.Snapshot => "Capturar",
+        WorkflowActionTypes.Notify or WorkflowActionTypes.Email or WorkflowActionTypes.Speaker => "Avisar",
+        WorkflowActionTypes.Door or WorkflowActionTypes.Panel or WorkflowActionTypes.PtzPreset => "Equipos",
+        _ => "Integración",
+    };
 
     public static void MapWorkflowsApi(this WebApplication app)
     {
@@ -73,14 +143,15 @@ public static class WorkflowsApi
             var settings = await smtp.LoadAsync(ct);
             return Results.Ok(new WorkflowCatalogDto(
                 Triggers,
-                engine.Executors.Select(e => new WorkflowActionInfoDto(e.Type, e.Label, e.Description, e.UsesSecret)).ToList(),
+                engine.Executors.Select(e => new WorkflowActionInfoDto(e.Type, e.Label, e.Description, e.UsesSecret, ActionGroup(e.Type))).ToList(),
                 Placeholders,
                 settings is { Enabled: true, Host.Length: > 0 },
                 MediaMtxManager.LocateFfmpeg() is not null));
         });
 
-        // Cámaras elegibles en la acción "capturar foto" (lista plana: el
-        // editor no debería pedir los canales equipo por equipo).
+        // Cámaras elegibles en la acción "capturar foto" y en los filtros por
+        // canal (lista plana: el editor no debería pedir los canales equipo
+        // por equipo).
         app.MapGet("/api/workflows/cameras", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers,
             CancellationToken ct) =>
         {
@@ -88,10 +159,41 @@ public static class WorkflowsApi
             var channels = await db.Channels.AsNoTracking().Include(c => c.Device)
                 .Where(c => c.Enabled)
                 .OrderBy(c => c.Device.Name).ThenBy(c => c.ChannelNumber)
-                .Select(c => new { c.Id, c.DeviceId, DeviceName = c.Device.Name, c.Name, c.Device.DriverKey })
+                .Select(c => new { c.Id, c.DeviceId, DeviceName = c.Device.Name, c.Name, c.Device.DriverKey, c.SupportsPtz })
                 .ToListAsync(ct);
-            return Results.Ok(channels.Select(c => new WorkflowCameraDto(c.Id, c.DeviceId, c.DeviceName, c.Name,
-                drivers.Find(c.DriverKey)?.Capabilities.SupportsSnapshot ?? false)));
+            return Results.Ok(channels.Select(c => new
+            {
+                channelId = c.Id,
+                deviceId = c.DeviceId,
+                deviceName = c.DeviceName,
+                channelName = c.Name,
+                supportsSnapshot = drivers.Find(c.DriverKey)?.Capabilities.SupportsSnapshot ?? false,
+                supportsPtz = c.SupportsPtz,
+            }));
+        });
+
+        // Equipos de video (cámaras/grabadores) para los disparadores de
+        // conexión, analítica y patentes.
+        app.MapGet("/api/workflows/devices", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers,
+            CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            var devices = await db.Devices.AsNoTracking().OrderBy(d => d.Name).ToListAsync(ct);
+            return Results.Ok(devices.Select(d =>
+            {
+                var caps = drivers.Find(d.DriverKey)?.Capabilities;
+                return new WorkflowDeviceDto(d.Id, d.Name, d.DriverKey, caps?.SupportsEvents ?? false,
+                    caps?.SupportsAnpr ?? false, d.AnprEnabled);
+            }));
+        });
+
+        // Puertas del control de acceso (acción "orden a una puerta" y filtros).
+        app.MapGet("/api/workflows/doors", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            var doors = await db.AccessDoors.AsNoTracking().Include(d => d.AccessDevice)
+                .OrderBy(d => d.AccessDevice!.Name).ThenBy(d => d.Number).ToListAsync(ct);
+            return Results.Ok(doors.Select(d => new WorkflowDoorDto(d.Id, d.AccessDeviceId, d.AccessDevice!.Name, d.Number, d.Name, d.Enabled)));
         });
 
         // Parlantes elegibles en la acción "sonar parlante IP" (inventario del módulo Parlantes).
@@ -139,11 +241,11 @@ public static class WorkflowsApi
                 Description = Clean(request.Description),
                 Enabled = request.Enabled,
                 TriggerType = request.TriggerType,
-                ConditionsJson = WorkflowJson.Serialize(request.Conditions ?? new WorkflowConditionsDto()),
+                ConditionsJson = WorkflowJson.Serialize(NormalizeConditions(request)),
                 CooldownSeconds = Math.Clamp(request.CooldownSeconds, 0, 86_400),
                 CreatedBy = session.Username,
             };
-            ApplyActions(workflow, request, [], protector);
+            Apply(workflow, request, [], protector);
             db.Workflows.Add(workflow);
             await db.SaveChangesAsync(ct);
             engine.Invalidate();
@@ -151,7 +253,8 @@ public static class WorkflowsApi
             await audit.LogAsync(ctx, "workflows", "workflow-created",
                 targetType: "workflow", targetId: workflow.Id.ToString(), targetName: workflow.Name,
                 detail: $"Creó la automatización '{workflow.Name}' ({TriggerLabel(workflow.TriggerType)}) con " +
-                        $"{workflow.Actions.Count} acción(es): {ActionSummary(workflow, engine)}.",
+                        $"{workflow.Actions.Count} acción(es): {ActionSummary(workflow, engine)}" +
+                        (request.Graph is not null ? $"; diagrama de {request.Graph.Nodes.Count} pasos." : "."),
                 data: new { workflow.TriggerType, workflow.Enabled, Conditions = request.Conditions });
             return Results.Created($"/api/workflows/{workflow.Id}", WorkflowMapper.ToDto(workflow));
         });
@@ -178,7 +281,7 @@ public static class WorkflowsApi
                 return await license.DenyAsync(ctx, denied, "workflow", workflow.Name);
             workflow.Enabled = request.Enabled;
             workflow.TriggerType = request.TriggerType;
-            workflow.ConditionsJson = WorkflowJson.Serialize(request.Conditions ?? new WorkflowConditionsDto());
+            workflow.ConditionsJson = WorkflowJson.Serialize(NormalizeConditions(request, WorkflowJson.Conditions(workflow.ConditionsJson)));
             workflow.CooldownSeconds = Math.Clamp(request.CooldownSeconds, 0, 86_400);
             workflow.UpdatedAt = DateTime.UtcNow;
 
@@ -186,7 +289,7 @@ public static class WorkflowsApi
             // panel no reenvía (nunca las recibe) se arrastran por Id.
             db.WorkflowActions.RemoveRange(previous);
             workflow.Actions.Clear();
-            ApplyActions(workflow, request, previous, protector);
+            Apply(workflow, request, previous, protector);
 
             await db.SaveChangesAsync(ct);
             engine.Invalidate();
@@ -195,7 +298,8 @@ public static class WorkflowsApi
                 targetType: "workflow", targetId: workflow.Id.ToString(), targetName: workflow.Name,
                 detail: $"Modificó la automatización '{workflow.Name}': antes {before}; ahora " +
                         $"{(workflow.Enabled ? "activa" : "pausada")}, {workflow.Actions.Count} acción(es) " +
-                        $"({ActionSummary(workflow, engine)}), disparador {TriggerLabel(workflow.TriggerType)}.",
+                        $"({ActionSummary(workflow, engine)}), disparador {TriggerLabel(workflow.TriggerType)}" +
+                        (request.Graph is not null ? $", diagrama de {request.Graph.Nodes.Count} pasos." : "."),
                 data: new { workflow.TriggerType, workflow.Enabled, Conditions = request.Conditions });
             return Results.Ok(WorkflowMapper.ToDto(workflow));
         });
@@ -228,10 +332,64 @@ public static class WorkflowsApi
             await audit.LogAsync(ctx, "workflows", "workflow-tested",
                 targetType: "workflow", targetId: id.ToString(), targetName: run.WorkflowName,
                 detail: $"Probó a mano la automatización '{run.WorkflowName}': " +
-                        (run.Success ? "todas las acciones se ejecutaron." : $"falló — {run.Error}"),
+                        (run.Success ? "todos los pasos se ejecutaron." : $"falló — {run.Error}"),
                 success: run.Success, data: new { run.Steps });
             return Results.Ok(run);
         });
+
+        // Clave nueva para una automatización de llamada externa (el editor la
+        // pide al elegir ese disparador; se guarda con las condiciones).
+        app.MapPost("/api/workflows/hook-key", (HttpContext ctx) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            return Results.Ok(new { key = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(20)) });
+        });
+
+        // ------------------------------------------------------------------
+        // Llamada externa (webhook): otro sistema dispara la automatización.
+        // Sin sesión: la clave de la URL es la credencial (40 hex, generada
+        // por el servidor). El cuerpo JSON, si viene, aporta marcas.
+        // ------------------------------------------------------------------
+        app.MapPost("/api/workflows/hook/{key}", async (HttpContext ctx, string key, WorkflowEngine engine,
+            AuditService audit, CancellationToken ct) =>
+        {
+            string ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "";
+            var workflow = key.Length is >= 20 and <= 64 && key.All(Uri.IsHexDigit)
+                ? await engine.FindByHookKeyAsync(key, ct)
+                : null;
+            if (workflow is null)
+            {
+                // Se registra (acelerado por IP) para que un escaneo de claves
+                // quede en la bitácora sin inundarla.
+                if (audit.ShouldLog($"wf-hook-bad:{ip}", TimeSpan.FromMinutes(1)))
+                    await audit.LogSystemAsync("workflows", "workflow-webhook-rejected",
+                        detail: $"Llamada externa rechazada desde {ip}: clave desconocida o automatización pausada.",
+                        success: false, clientIp: ip, origin: "server");
+                return Results.NotFound();
+            }
+
+            JsonElement? body = null;
+            if (ctx.Request.ContentLength is > 0 and <= 64 * 1024)
+            {
+                try
+                {
+                    using var doc = await JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: ct);
+                    body = doc.RootElement.Clone();
+                }
+                catch (JsonException) { return Error("El cuerpo de la llamada no es JSON válido."); }
+            }
+            else if (ctx.Request.ContentLength > 64 * 1024)
+            {
+                return Error("El cuerpo de la llamada no puede superar los 64 kB.");
+            }
+
+            engine.Publish(WorkflowTrigger.FromWebhook(workflow, body, ip));
+            await audit.LogSystemAsync("workflows", "workflow-webhook",
+                targetType: "workflow", targetId: workflow.Id.ToString(), targetName: workflow.Name,
+                detail: $"Llamada externa desde {ip} disparó la automatización '{workflow.Name}'.",
+                clientIp: ip, origin: "server");
+            return Results.Accepted(value: new { ok = true, workflow = workflow.Name });
+        }).DisableAntiforgery();
 
         // ------------------------------------------------------------------
         // Historial de ejecuciones
@@ -479,7 +637,7 @@ public static class WorkflowsApi
     }
 
     // ------------------------------------------------------------------
-    // Validación y volcado de acciones
+    // Validación y volcado
     // ------------------------------------------------------------------
 
     private static string? Validate(WorkflowWriteDto request, WorkflowEngine engine)
@@ -488,45 +646,71 @@ public static class WorkflowsApi
             return "El nombre es obligatorio (máximo 128 caracteres).";
         if (!WorkflowTriggerTypes.All.Contains(request.TriggerType))
             return $"Disparador desconocido: '{request.TriggerType}'.";
-        if (request.Actions is null || request.Actions.Count == 0)
-            return "Agregue al menos una acción.";
-        if (request.Actions.Count > MaxActions)
-            return $"Una automatización admite hasta {MaxActions} acciones.";
 
-        foreach (var action in request.Actions)
+        if (request.Graph is not null)
         {
-            var executor = engine.FindExecutor(action.Type);
-            if (executor is null) return $"Acción desconocida: '{action.Type}'.";
-            if (action.DelaySeconds is < 0 or > 600) return "La espera de una acción debe estar entre 0 y 600 segundos.";
-            if (action.Config.ValueKind != JsonValueKind.Object) return $"La configuración de la acción «{executor.Label}» no es válida.";
-            if (executor.Validate(action.Config) is { } invalid) return $"«{executor.Label}»: {invalid}";
+            if (WorkflowGraph.Validate(request.Graph, engine) is { } bad) return bad;
+        }
+        else
+        {
+            if (request.Actions is null || request.Actions.Count == 0)
+                return "Agregue al menos una acción.";
+            if (request.Actions.Count > MaxActions)
+                return $"Una automatización admite hasta {MaxActions} acciones.";
+
+            foreach (var action in request.Actions)
+            {
+                var executor = engine.FindExecutor(action.Type);
+                if (executor is null) return $"Acción desconocida: '{action.Type}'.";
+                if (action.DelaySeconds is < 0 or > 600) return "La espera de una acción debe estar entre 0 y 600 segundos.";
+                if (action.Config.ValueKind != JsonValueKind.Object) return $"La configuración de la acción «{executor.Label}» no es válida.";
+                if (executor.Validate(action.Config) is { } invalid) return $"«{executor.Label}»: {invalid}";
+            }
         }
 
         var conditions = request.Conditions;
-        if (conditions is not null)
-        {
-            if (conditions.FromTime is { Length: > 0 } from && !TimeSpan.TryParse(from, out _))
-                return "La hora de inicio de la ventana horaria no es válida (use hh:mm).";
-            if (conditions.ToTime is { Length: > 0 } to && !TimeSpan.TryParse(to, out _))
-                return "La hora de término de la ventana horaria no es válida (use hh:mm).";
-            if (conditions.DaysOfWeek is { Count: > 0 } days && days.Any(d => d is < 0 or > 6))
-                return "Los días de la semana deben ir de 0 (domingo) a 6 (sábado).";
-            if (conditions.SustainedSeconds is < 0 or > 600)
-                return "La condición sostenida debe estar entre 0 y 600 segundos.";
-        }
+        if (conditions is not null && WorkflowGraph.ValidateConditions(conditions) is { } invalidCondition)
+            return char.ToUpperInvariant(invalidCondition[0]) + invalidCondition[1..];
+
+        if (request.TriggerType == WorkflowTriggerTypes.Schedule &&
+            (conditions?.ScheduleTimes is not { Count: > 0 }))
+            return "Indique al menos una hora en que debe ejecutarse.";
         return null;
     }
 
     /// <summary>
-    /// Vuelca las acciones del formulario sobre la entidad. Las contraseñas
-    /// que el panel no reenvía se toman de la acción anterior con el mismo Id:
-    /// editar un workflow no debe obligar a retipear la clave del FTP.
+    /// Condiciones a guardar. En las automatizaciones de llamada externa la
+    /// clave se conserva si el editor no la manda (nunca se reescribe sola).
     /// </summary>
-    private static void ApplyActions(Workflow workflow, WorkflowWriteDto request,
+    private static WorkflowConditionsDto NormalizeConditions(WorkflowWriteDto request, WorkflowConditionsDto? current = null)
+    {
+        var conditions = request.Conditions ?? new WorkflowConditionsDto();
+        if (request.TriggerType == WorkflowTriggerTypes.Webhook)
+        {
+            string? key = string.IsNullOrWhiteSpace(conditions.HookKey) ? current?.HookKey : conditions.HookKey.Trim();
+            if (string.IsNullOrWhiteSpace(key)) key = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(20));
+            conditions = conditions with { HookKey = key };
+        }
+        else if (conditions.HookKey is not null)
+        {
+            conditions = conditions with { HookKey = null };
+        }
+        return conditions;
+    }
+
+    /// <summary>Vuelca las acciones: desde el diagrama si viene, o la lista lineal (clientes antiguos).</summary>
+    private static void Apply(Workflow workflow, WorkflowWriteDto request,
         IReadOnlyList<WorkflowAction> previous, CredentialProtector protector)
     {
+        if (request.Graph is not null)
+        {
+            WorkflowGraph.Apply(workflow, request.Graph, previous, protector);
+            return;
+        }
+
+        workflow.GraphJson = null;
         int order = 1;
-        foreach (var action in request.Actions)
+        foreach (var action in request.Actions ?? [])
         {
             byte[]? secret = null;
             if (!string.IsNullOrEmpty(action.Secret))

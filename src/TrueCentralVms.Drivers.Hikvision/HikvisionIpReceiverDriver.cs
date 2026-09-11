@@ -26,7 +26,10 @@ namespace TrueCentralVms.Drivers.Hikvision;
 ///    pero sin nombres (la pasarela no los expone).
 ///  - Los eventos llegan por UNA suscripción multipart
 ///    (<c>subscribeDeviceMgmt</c>) que trae los de TODOS los equipos con su
-///    devIndex: se filtran los de este panel. Formato CIDAlarm
+///    devIndex. La pasarela admite <b>una sola a la vez</b> (a la segunda le
+///    contesta <c>noMoreTasksCanBeAdded</c>), así que el driver abre una por
+///    pasarela y le cuelga todos sus paneles, repartiendo cada evento a su
+///    dueño. Formato CIDAlarm
 ///    (CIDCode/subSys/zoneNo/CIDParam) + devStatusChanged (en línea/fuera
 ///    de línea respecto de la pasarela) + heartBeat cada 10 s.
 ///  - Requisitos en la pasarela: Automation Output → Protocol con tipo
@@ -734,46 +737,194 @@ public sealed class HikvisionIpReceiverDriver : IAlarmGatewayDriver
     private static string AreaId(int areaNumber) => areaNumber <= 0 ? AllAreas : areaNumber.ToString(CultureInfo.InvariantCulture);
 
     // ------------------------------------------------------------------
-    // Eventos: suscripción multipart de la pasarela, filtrada por devIndex
+    // Eventos: UNA suscripción por pasarela, repartida entre sus paneles
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Suscripción compartida por todos los paneles de una misma pasarela. La
+    /// pasarela admite <b>una sola a la vez</b>: a la segunda le contesta
+    /// «No more task can be added» (<c>noMoreTasksCanBeAdded</c>) y ese panel se
+    /// queda sin eventos, solo con el sondeo —hasta 30 s de atraso y sin el
+    /// usuario que armó o desarmó—. Como el flujo ya trae los eventos de TODOS
+    /// sus equipos, se abre una y cada panel se cuelga de ella; el último en
+    /// soltarla la cierra.
+    /// </summary>
+    private sealed class GatewayStream(string key)
+    {
+        private readonly List<Subscriber> _subscribers = [];
+        private bool _closing;
+
+        public readonly string Key = key;
+        public IAlarmSubscription? Inner;
+
+        public bool IsAlive => Inner is { IsAlive: true };
+
+        /// <summary>Cuelga un panel; null si esta suscripción ya se está cerrando y hay que abrir otra.</summary>
+        public Subscriber? Attach(string devIndex, Action<AlarmPanelEvent> onEvent, Action? onActivity)
+        {
+            lock (_subscribers)
+            {
+                if (_closing) return null;
+                var subscriber = new Subscriber(this, devIndex, onEvent, onActivity);
+                _subscribers.Add(subscriber);
+                return subscriber;
+            }
+        }
+
+        /// <summary>Suelta un panel; true si era el último y hay que cerrar el flujo.</summary>
+        public bool Detach(Subscriber subscriber)
+        {
+            lock (_subscribers)
+            {
+                _subscribers.Remove(subscriber);
+                if (_subscribers.Count > 0) return false;
+                _closing = true;
+                return true;
+            }
+        }
+
+        private Subscriber[] Snapshot()
+        {
+            lock (_subscribers) return [.. _subscribers];
+        }
+
+        public void Activity()
+        {
+            foreach (var subscriber in Snapshot()) subscriber.OnActivity?.Invoke();
+        }
+
+        /// <summary>
+        /// Reparte una parte del flujo. Se traduce una vez por panel colgado
+        /// —el traductor ya descarta lo que no es de su devIndex—: son dos o
+        /// tres paneles por pasarela y unos pocos eventos por minuto, más
+        /// barato que llevar el dueño por fuera del traductor.
+        /// </summary>
+        public void Dispatch(string contentType, byte[] body)
+        {
+            foreach (var subscriber in Snapshot())
+                if (ParseGatewayEvent(contentType, body, subscriber.DevIndex) is { } evt)
+                    subscriber.OnEvent(evt);
+        }
+    }
+
+    /// <summary>Lo que ve un panel: vive mientras viva la suscripción compartida.</summary>
+    private sealed class Subscriber(GatewayStream stream, string devIndex, Action<AlarmPanelEvent> onEvent, Action? onActivity)
+        : IAlarmSubscription
+    {
+        public readonly string DevIndex = devIndex;
+        public readonly Action<AlarmPanelEvent> OnEvent = onEvent;
+        public readonly Action? OnActivity = onActivity;
+
+        public bool IsAlive => stream.IsAlive;
+
+        public ValueTask DisposeAsync() => DetachAsync(stream, this);
+    }
+
+    /// <summary>Suscripción viva por pasarela (estático: hay un driver nuevo por llamada).</summary>
+    private static readonly ConcurrentDictionary<string, GatewayStream> Streams = new();
+
+    /// <summary>
+    /// Serializa <b>abrir</b> la compartida, para que dos paneles de la misma
+    /// pasarela no abran dos. Soltarla no pasa por acá —se saca del mapa con un
+    /// quite atómico— ni el reparto, que corre en el hilo del flujo: así
+    /// eliminar un panel nunca queda esperando a que otro termine de abrir.
+    /// </summary>
+    private static readonly SemaphoreSlim StreamsGate = new(1, 1);
+
+    private static string GatewayKey(AlarmConnectionInfo info) =>
+        $"{(info.UseHttps ? "https" : "http")}://{info.Username}:{info.Password}@{info.Host}:{info.Port}";
 
     public async Task<IAlarmSubscription> SubscribeEventsAsync(AlarmConnectionInfo info, Action<AlarmPanelEvent> onEvent,
         Action? onActivity = null, CancellationToken ct = default)
     {
         var (client, devIndex) = await ConnectAsync(info, ct);
-        HttpResponseMessage response;
+        string key = GatewayKey(info);
+
+        await StreamsGate.WaitAsync(ct);
         try
         {
-            response = await OpenSubscriptionAsync(client, ct);
+            // Otro panel de esta misma pasarela ya la tiene abierta.
+            if (Streams.TryGetValue(key, out var open) && open.IsAlive &&
+                open.Attach(devIndex, onEvent, onActivity) is { } shared)
+                return shared;
+
+            HttpResponseMessage response;
+            try
+            {
+                response = await OpenSubscriptionAsync(client, ct);
+            }
+            catch (DriverException ex) when (IsSubscriptionTaken(ex))
+            {
+                throw SubscriptionTaken(ex);
+            }
+            catch (DriverException ex) when (IsProtocolDisabled(ex))
+            {
+                // La pasarela tiene apagada su salida de automatización: es su
+                // único requisito para entregar eventos y se enciende con la misma
+                // cuenta con la que ya estamos hablando. Una receptora recién
+                // instalada —o una que alguien apagó desde su web— entra por acá
+                // una vez y sigue de largo; si aun así no se puede, se explica.
+                try { await EnablePrivateProtocolAsync(client, ct, force: false); }
+                catch (AutomationOutputBusyException) { throw; }
+                catch (Exception inner) { throw ProtocolDisabled(inner); }
+                try { response = await OpenSubscriptionAsync(client, ct); }
+                catch (DriverException retry) when (IsSubscriptionTaken(retry)) { throw SubscriptionTaken(retry); }
+                catch (DriverException retry) when (IsProtocolDisabled(retry)) { throw ProtocolDisabled(retry); }
+            }
+
+            string? boundary = response.Content.Headers.ContentType?.Parameters
+                .FirstOrDefault(p => string.Equals(p.Name, "boundary", StringComparison.OrdinalIgnoreCase))?.Value?.Trim('"');
+            var body = await response.Content.ReadAsStreamAsync(ct);
+
+            var stream = new GatewayStream(key);
+            var subscriber = stream.Attach(devIndex, onEvent, onActivity)!;
+            // El reparto se hace al traducir, que es donde se ve de qué equipo
+            // es cada parte; por eso el manejador de evento propio va vacío.
+            stream.Inner = new HikvisionAlarmPanelDriver.AlertStreamSubscription(response, body, boundary ?? "boundary",
+                _ => { }, stream.Activity,
+                (contentType, part) => { stream.Dispatch(contentType, part); return null; });
+            Streams[key] = stream;
+            return subscriber;
         }
-        catch (DriverException ex) when (IsProtocolDisabled(ex))
+        finally
         {
-            // La pasarela tiene apagada su salida de automatización: es su
-            // único requisito para entregar eventos y se enciende con la misma
-            // cuenta con la que ya estamos hablando. Una receptora recién
-            // instalada —o una que alguien apagó desde su web— entra por acá
-            // una vez y sigue de largo; si aun así no se puede, se explica.
-            try { await EnablePrivateProtocolAsync(client, ct, force: false); }
-            catch (AutomationOutputBusyException) { throw; }
-            catch (Exception inner) { throw ProtocolDisabled(inner); }
-            try { response = await OpenSubscriptionAsync(client, ct); }
-            catch (DriverException retry) when (IsProtocolDisabled(retry)) { throw ProtocolDisabled(retry); }
+            StreamsGate.Release();
         }
-        string? boundary = response.Content.Headers.ContentType?.Parameters
-            .FirstOrDefault(p => string.Equals(p.Name, "boundary", StringComparison.OrdinalIgnoreCase))?.Value?.Trim('"');
-        var stream = await response.Content.ReadAsStreamAsync(ct);
-        return new HikvisionAlarmPanelDriver.AlertStreamSubscription(response, stream, boundary ?? "boundary", onEvent, onActivity,
-            (contentType, body) => ParseGatewayEvent(contentType, body, devIndex));
+    }
+
+    private static async ValueTask DetachAsync(GatewayStream stream, Subscriber subscriber)
+    {
+        if (!stream.Detach(subscriber)) return; // quedan paneles escuchando
+
+        // Puede haber sido reemplazada ya por otra (el flujo se cayó y el primer
+        // panel la rehizo): el quite atómico solo la saca si sigue siendo la vigente.
+        Streams.TryRemove(new KeyValuePair<string, GatewayStream>(stream.Key, stream));
+        if (stream.Inner is { } inner) await inner.DisposeAsync();
     }
 
     private static Task<HttpResponseMessage> OpenSubscriptionAsync(HikvisionIsapiClient client, CancellationToken ct) =>
         client.OpenStreamAsync("/ISAPI/Event/notification/subscribeDeviceMgmt?format=json", ct, HttpMethod.Post,
             "{\"SubscribeDeviceMgmt\":{\"eventMode\":\"all\",\"defenceMode\":\"all\"}}");
 
-    /// <summary>La pasarela contestó 403 "Invalid operation": su salida de automatización está apagada.</summary>
+    /// <summary>
+    /// «No more task can be added»: la pasarela ya tiene tomada su única
+    /// suscripción. Comparte el <c>statusString</c> "Invalid Operation" con el
+    /// protocolo apagado, así que se distingue por el <c>subStatusCode</c>:
+    /// confundirlos hace que el panel pida habilitar algo que ya está puesto.
+    /// </summary>
+    private static bool IsSubscriptionTaken(Exception ex) =>
+        ex.Message.Contains("noMoreTasksCanBeAdded", StringComparison.OrdinalIgnoreCase) ||
+        ex.Message.Contains("No more task", StringComparison.OrdinalIgnoreCase);
+
+    private static DriverException SubscriptionTaken(Exception inner) =>
+        new("El IP Receiver Pro ya tiene tomada su única suscripción de eventos: la está usando otro programa, o una " +
+            "sesión anterior de este servidor que la pasarela todavía no dio por cerrada. Se reintenta solo.", inner);
+
+    /// <summary>La pasarela contestó "Invalid Operation" por tener apagada su salida de automatización.</summary>
     private static bool IsProtocolDisabled(Exception ex) =>
-        ex.Message.Contains("Invalid Operation", StringComparison.OrdinalIgnoreCase) ||
-        ex.Message.Contains("invalidOperation", StringComparison.OrdinalIgnoreCase);
+        !IsSubscriptionTaken(ex) &&
+        (ex.Message.Contains("Invalid Operation", StringComparison.OrdinalIgnoreCase) ||
+         ex.Message.Contains("invalidOperation", StringComparison.OrdinalIgnoreCase));
 
     private static DriverException ProtocolDisabled(Exception inner) =>
         new("El IP Receiver Pro rechazó la suscripción de eventos: habilite en la pasarela Automation Output → " +

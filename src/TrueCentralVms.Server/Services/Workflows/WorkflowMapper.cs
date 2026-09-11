@@ -10,11 +10,12 @@ public static class WorkflowMapper
         workflow.Id, workflow.Name, workflow.Description, workflow.Enabled, workflow.TriggerType,
         WorkflowJson.Conditions(workflow.ConditionsJson), workflow.CooldownSeconds,
         workflow.LastRunAt, workflow.RunCount, workflow.CreatedAt, workflow.CreatedBy,
-        workflow.Actions.OrderBy(a => a.Order).Select(ToDto).ToList());
+        workflow.Actions.OrderBy(a => a.Order).Select(ToDto).ToList(),
+        WorkflowGraph.ToDto(workflow));
 
     public static WorkflowActionDto ToDto(WorkflowAction action) => new(
         action.Id, action.Order, action.Type, action.Enabled, action.ContinueOnError, action.DelaySeconds,
-        WorkflowJson.ParseConfig(action.ConfigJson), action.SecretCiphertext is { Length: > 0 });
+        WorkflowJson.ParseConfig(action.ConfigJson), action.SecretCiphertext is { Length: > 0 }, action.NodeId);
 
     public static WorkflowRunDto ToDto(WorkflowRun run, IReadOnlyList<WorkflowRunStepDto>? steps = null) => new(
         run.Id, run.WorkflowId, run.WorkflowName, run.StartedAt, run.FinishedAt, run.Success,

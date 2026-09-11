@@ -152,7 +152,7 @@ public sealed partial class HikvisionIsapiClient
         using var response = await SendAsync(method, path, body, contentType, ct);
         if (response.StatusCode == HttpStatusCode.NotFound && allowNotFound)
             return null;
-        string text = await response.Content.ReadAsStringAsync(ct);
+        string text = await ReadTextAsync(response, ct);
         if (!response.IsSuccessStatusCode)
             throw new DriverException(DescribeFailure(response.StatusCode, text, _noun));
         return text;
@@ -188,7 +188,7 @@ public sealed partial class HikvisionIsapiClient
         }
 
         using var response = await SendAsync(HttpMethod.Post, path, null, "application/json", ct, content: Build);
-        string text = await response.Content.ReadAsStringAsync(ct);
+        string text = await ReadTextAsync(response, ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         if (!response.IsSuccessStatusCode)
             throw new DriverException(DescribeFailure(response.StatusCode, text, _noun));
@@ -201,7 +201,7 @@ public sealed partial class HikvisionIsapiClient
         var response = await SendAsync(method ?? HttpMethod.Get, path, body, "application/json", ct, streaming: true);
         if (!response.IsSuccessStatusCode)
         {
-            string text = await response.Content.ReadAsStringAsync(ct);
+            string text = await ReadTextAsync(response, ct);
             response.Dispose();
             throw new DriverException(DescribeFailure(response.StatusCode, text, _noun));
         }
@@ -230,7 +230,7 @@ public sealed partial class HikvisionIsapiClient
             return response;
 
         // 401: o el digest no sirve en este equipo, o la sesión web caducó.
-        string text = await response.Content.ReadAsStringAsync(ct);
+        string text = await ReadTextAsync(response, ct);
         response.Dispose();
         ThrowIfLocked(text);
 
@@ -239,7 +239,7 @@ public sealed partial class HikvisionIsapiClient
         if (response.StatusCode != HttpStatusCode.Unauthorized)
             return response;
 
-        text = await response.Content.ReadAsStringAsync(ct);
+        text = await ReadTextAsync(response, ct);
         response.Dispose();
         ThrowIfLocked(text);
         throw new DriverException(BadCredentials(text));
@@ -300,7 +300,7 @@ public sealed partial class HikvisionIsapiClient
             try
             {
                 using var response = await _entry.LoginHttp.GetAsync(capUrl, ct);
-                cap = response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync(ct) : null;
+                cap = response.IsSuccessStatusCode ? await ReadTextAsync(response, ct) : null;
             }
             catch (HttpRequestException ex)
             {
@@ -418,7 +418,10 @@ public sealed partial class HikvisionIsapiClient
         {
             // Si ya se pidió el reto (lo hace ProbeAuthAsync para decidir el
             // modo), se usa ESE: pedirlo otra vez lo invalida.
-            cap = capabilities ?? await _entry.LoginHttp.GetStringAsync(capUrl, ct);
+            // El reto viene en ASCII, pero se lee con el mismo decodificador
+            // que el resto: un firmware raro no puede tumbar el login.
+            cap = capabilities ?? HikvisionIsapiClient.DecodeBody(
+                await _entry.LoginHttp.GetByteArrayAsync(capUrl, ct));
         }
         catch (HttpRequestException ex)
         {
@@ -486,7 +489,7 @@ public sealed partial class HikvisionIsapiClient
         }
 
         using var response = await _entry.LoginHttp.SendAsync(request, ct);
-        string text = await response.Content.ReadAsStringAsync(ct);
+        string text = await ReadTextAsync(response, ct);
         if (!response.IsSuccessStatusCode) return (false, response.StatusCode, text);
 
         string? newSession = null;
@@ -638,4 +641,119 @@ public sealed partial class HikvisionIsapiClient
             }
         }
     }
+
+    // ------------------------------------------------------------------
+    // Texto de las respuestas
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Convierte el cuerpo a texto sin creerle del todo al <c>charset</c> que
+    /// declara el equipo. Estos paneles mienten: hay firmwares que anuncian
+    /// UTF-8 y mandan los nombres en la codificación local, y así los nombres
+    /// con tilde llegaban rotos ("Port??????roveedores" por "Portón
+    /// Proveedores") y se guardaban en el inventario y en cada evento del
+    /// historial, donde ya no hay cómo corregirlos.
+    /// </summary>
+    internal static async Task<string> ReadTextAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        byte[] body = await response.Content.ReadAsByteArrayAsync(ct);
+        return DecodeBody(body, response.Content.Headers.ContentType?.CharSet);
+    }
+
+    /// <summary>Proveedor de páginas de código (GB18030 y compañía): .NET no las trae de fábrica.</summary>
+    private static readonly bool CodePagesReady = RegisterCodePages();
+
+    private static bool RegisterCodePages()
+    {
+        try
+        {
+            Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            return true;
+        }
+        catch
+        {
+            return false; // sin páginas de código: queda UTF-8 / Latin-1
+        }
+    }
+
+    /// <summary>UTF-8 que LANZA ante bytes inválidos (el de fábrica los reemplaza en silencio).</summary>
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
+    /// <summary>
+    /// Elige la codificación del cuerpo en este orden:
+    /// <list type="number">
+    /// <item>BOM, si viene: no hay nada que adivinar.</item>
+    /// <item>El <c>charset</c> declarado SOLO si es una página china
+    /// (gb2312/gbk/gb18030). Que un firmware chino lo declare es información
+    /// real; que uno declare UTF-8 no prueba nada, porque es justo lo que
+    /// hacen los que mandan otra cosa.</item>
+    /// <item>UTF-8 estricto: lo correcto y lo que usan los firmwares nuevos.</item>
+    /// <item>Latin-1, si no deja caracteres de control: cubre a los paneles
+    /// occidentales que mandan un solo byte por tilde (el caso que rompía los
+    /// nombres en español).</item>
+    /// <item>GB18030 como último recurso, cuando Latin-1 sí deja caracteres de
+    /// control: esa es la firma de un texto de dos bytes leído de a uno.</item>
+    /// </list>
+    /// Aviso: un texto chino de dos bytes que NO declare su charset se lee como
+    /// Latin-1, porque a esa altura es indistinguible de un nombre occidental
+    /// acentuado. Se prefiere acertarle al español, que es lo que instalan
+    /// estos equipos acá, y por eso el charset declarado tiene prioridad.
+    /// </summary>
+    internal static string DecodeBody(byte[] body, string? declaredCharset = null)
+    {
+        if (body.Length == 0) return "";
+        if (body.Length >= 3 && body[0] == 0xEF && body[1] == 0xBB && body[2] == 0xBF)
+            return Encoding.UTF8.GetString(body, 3, body.Length - 3);
+
+        if (IsChineseCharset(declaredCharset) && TryChinese(body) is { } declared)
+            return declared;
+
+        try { return StrictUtf8.GetString(body); }
+        catch (DecoderFallbackException) { /* no era UTF-8: sigue la cadena */ }
+
+        string latin1 = Encoding.Latin1.GetString(body);
+        if (!HasControlCharacters(latin1)) return latin1;
+
+        return TryChinese(body) ?? latin1;
+    }
+
+    private static bool IsChineseCharset(string? charset)
+    {
+        if (string.IsNullOrWhiteSpace(charset)) return false;
+        string name = charset.Trim().Trim('"').ToLowerInvariant();
+        return name is "gb2312" or "gbk" or "gb18030" or "gb_2312" or "gb-2312" or "euc-cn" or "x-cp936" or "cp936";
+    }
+
+    /// <summary>Lectura GB18030 (superconjunto de GBK/GB2312), o null si no cuadra.</summary>
+    private static string? TryChinese(byte[] body)
+    {
+        if (!CodePagesReady) return null;
+        try
+        {
+            var gb = Encoding.GetEncoding("GB18030", EncoderFallback.ExceptionFallback,
+                DecoderFallback.ExceptionFallback);
+            string text = gb.GetString(body);
+            return HasControlCharacters(text) ? null : text;
+        }
+        // DecoderFallbackException hereda de ArgumentException: va primero.
+        catch (DecoderFallbackException) { return null; }
+        catch (ArgumentException) { return null; }  // sin esa página de código
+    }
+
+    /// <summary>
+    /// Caracteres de control fuera de los que un JSON o XML puede traer
+    /// legítimamente (tab, salto de línea y retorno). Su presencia delata que
+    /// el texto se leyó con la codificación equivocada.
+    /// </summary>
+    private static bool HasControlCharacters(string text)
+    {
+        foreach (char c in text)
+        {
+            if (c is '\t' or '\n' or '\r') continue;
+            if (char.IsControl(c)) return true;
+        }
+        return false;
+    }
+
 }

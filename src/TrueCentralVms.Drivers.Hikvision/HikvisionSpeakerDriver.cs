@@ -139,7 +139,7 @@ public sealed class HikvisionSpeakerDriver : ISpeakerDriver
     {
         using var response = await SendAsync(info, method, path, content, timeout ?? RequestTimeout, ct);
         string body;
-        try { body = await response.Content.ReadAsStringAsync(ct); }
+        try { body = await HikvisionIsapiClient.ReadTextAsync(response, ct); }
         catch (Exception) { body = ""; }
         if (response.StatusCode == HttpStatusCode.Unauthorized)
             throw new DriverException("El parlante rechazó las credenciales (usuario o contraseña incorrectos).");
@@ -451,7 +451,7 @@ public sealed class HikvisionSpeakerDriver : ISpeakerDriver
         if (!response.IsSuccessStatusCode)
         {
             string body;
-            try { body = await response.Content.ReadAsStringAsync(ct); } catch (Exception) { body = ""; }
+            try { body = await HikvisionIsapiClient.ReadTextAsync(response, ct); } catch (Exception) { body = ""; }
             throw new DriverException($"El parlante no entregó el audio '{item.Name}': {Describe(response.StatusCode, body)}.");
         }
         byte[] content = await response.Content.ReadAsByteArrayAsync(ct);

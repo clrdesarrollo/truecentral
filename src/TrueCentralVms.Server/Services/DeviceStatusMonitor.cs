@@ -57,7 +57,7 @@ public sealed class DeviceStatusMonitor(
         var results = await Task.WhenAll(devices.Select(async x =>
             (x.Device, x.ChannelCount, Reachable: await IsReachableAsync(x.Device.Host, x.Device.SdkPort, ct))));
 
-        var changed = new List<DeviceDto>();
+        var changed = new List<(DeviceDto Dto, DeviceStatus Previous)>();
         foreach (var (device, channelCount, reachable) in results)
         {
             var newStatus = reachable ? DeviceStatus.Online : DeviceStatus.Offline;
@@ -65,20 +65,29 @@ public sealed class DeviceStatusMonitor(
                 device.LastSeenAt = DateTime.UtcNow;
             if (device.Status != newStatus)
             {
+                var previous = device.Status;
                 device.Status = newStatus;
-                changed.Add(new DeviceDto(
+                changed.Add((new DeviceDto(
                     device.Id, device.Name, device.DeviceType, device.DriverKey, device.Host,
                     device.SdkPort, device.RtspPort, device.Username, device.Model, device.SerialNumber,
                     device.FirmwareVersion, channelCount, device.Status, device.LastSeenAt, device.CreatedAt,
-                    device.AnprEnabled));
+                    device.AnprEnabled), previous));
             }
         }
         await db.SaveChangesAsync(ct);
 
-        foreach (var dto in changed)
+        // Resuelto al vuelo: el motor de automatizaciones contiene acciones
+        // que a su vez dependen de otros servicios; por constructor sería un ciclo.
+        var workflows = scope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>();
+        foreach (var (dto, previous) in changed)
         {
             logger.LogInformation("Dispositivo '{Name}' ({Host}) ahora está {Status}.", dto.Name, dto.Host, dto.Status);
             await hub.Clients.All.SendAsync(VmsHubContract.DeviceStatusChanged, dto, ct);
+            // La primera lectura tras arrancar (Desconocido → En línea) no es
+            // una recuperación: no dispara automatizaciones.
+            if (previous != DeviceStatus.Unknown || dto.Status != DeviceStatus.Online)
+                workflows.Publish(Workflows.WorkflowTrigger.FromDeviceStatus("video", dto.Id, dto.Name, dto.Host, dto.Model,
+                    dto.Status.ToString(), dto.Status == DeviceStatus.Online ? null : "el equipo no responde en su puerto de gestión"));
         }
     }
 

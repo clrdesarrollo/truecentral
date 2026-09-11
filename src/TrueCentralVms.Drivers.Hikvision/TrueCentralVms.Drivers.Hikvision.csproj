@@ -2,6 +2,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TrueCentralVms.Core\TrueCentralVms.Core.csproj" />
+    <!-- GB18030: los paneles con firmware chino mandan los nombres en esa
+         codificación y .NET no trae las páginas de código heredadas. -->
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="7.0.0" />
   </ItemGroup>
 
   <PropertyGroup>

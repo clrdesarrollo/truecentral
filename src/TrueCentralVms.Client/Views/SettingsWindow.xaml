@@ -101,6 +101,8 @@
                              Checked="OnSectionChanged"/>
                 <RadioButton x:Name="NavRed" Content="Red" Style="{StaticResource SectionRadio}"
                              Checked="OnSectionChanged"/>
+                <RadioButton x:Name="NavSistema" Content="Sistema" Style="{StaticResource SectionRadio}"
+                             Checked="OnSectionChanged"/>
                 <RadioButton x:Name="NavLicencia" Content="Licencia" Style="{StaticResource SectionRadio}"
                              Checked="OnSectionChanged"/>
             </StackPanel>
@@ -200,6 +202,18 @@
                          HorizontalAlignment="Left"/>
                 <TextBlock Style="{StaticResource SettingHint}"
                            Text="Entre 5 y 120 segundos. Se aplica al reiniciar la aplicación. El transporte de video es siempre RTSP sobre TCP."/>
+            </StackPanel>
+
+            <!-- ============ SISTEMA ============ -->
+            <StackPanel x:Name="SectionSistema" Visibility="Collapsed">
+                <TextBlock Text="Sistema" Style="{StaticResource SectionTitle}"/>
+
+                <TextBlock Text="Inicio de sesión" Style="{StaticResource FieldLabel}"/>
+                <CheckBox x:Name="AutoLoginCheck" Style="{StaticResource DarkCheckBox}" Margin="0,8,0,0"
+                          Content="Iniciar sesión automáticamente al abrir el cliente"/>
+                <TextBlock Style="{StaticResource SettingHint}"
+                           Text="Apagado, el cliente pide siempre usuario y contraseña. Es lo recomendado en puestos compartidos: con el auto-login encendido, cualquiera que encienda el equipo entra con la cuenta recordada."/>
+                <TextBlock x:Name="AutoLoginAccountText" Style="{StaticResource SettingHint}"/>
             </StackPanel>
 
             <!-- ============ LICENCIA (solo lectura; se administra en el panel web) ============ -->

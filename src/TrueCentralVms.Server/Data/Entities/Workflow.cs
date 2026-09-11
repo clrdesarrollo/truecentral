@@ -24,6 +24,16 @@ public class Workflow
     public string? ConditionsJson { get; set; }
 
     /// <summary>
+    /// El diagrama de flujo serializado (<c>WorkflowGraphDto</c>): nodos con
+    /// su posición y conexiones. La configuración de cada acción NO va aquí
+    /// (vive en <see cref="WorkflowAction"/>, con su contraseña cifrada); el
+    /// nodo de acción solo apunta a su fila por <see cref="WorkflowAction.NodeId"/>.
+    /// Null = automatización anterior al editor visual: el motor la ejecuta
+    /// como una línea recta de acciones en orden.
+    /// </summary>
+    public string? GraphJson { get; set; }
+
+    /// <summary>
     /// Tiempo mínimo entre dos ejecuciones. Es la defensa contra paneles
     /// "parlanchines": una zona que rebota 40 veces no manda 40 correos.
     /// 0 = sin límite.
@@ -52,8 +62,11 @@ public class WorkflowAction
     public int WorkflowId { get; set; }
     public Workflow Workflow { get; set; } = null!;
 
-    /// <summary>Orden de ejecución (1..N).</summary>
+    /// <summary>Orden de ejecución (1..N) en las automatizaciones lineales; en las de diagrama, orden de aparición.</summary>
     public int Order { get; set; }
+
+    /// <summary>Nodo del diagrama al que pertenece (null en las automatizaciones lineales antiguas).</summary>
+    public string? NodeId { get; set; }
 
     /// <summary>Clave estable del tipo (ver <see cref="WorkflowActionTypes"/>).</summary>
     public string Type { get; set; } = "";

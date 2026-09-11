@@ -21,7 +21,7 @@ namespace TrueCentralVms.Server.Services.Licensing;
 public static class LicensingConstants
 {
     /// <summary>Clave pública Ed25519 (base64, 32 bytes) del producto en el servidor de licencias.</summary>
-    public const string ProductPublicKey = "5hLQ1i/BDE9TedHERGAeeivqb+eNiUFT/1o2tLDMH/M=";
+    public const string ProductPublicKey = "ffn1G8fb7oYwqlL9qmQRhdektXThw52i+DLxfr/1VR8=";
 
     /// <summary>Esquema de archivo .lic que este VMS entiende (v2 = con signed_payload).</summary>
     public const int SupportedLicenseSchema = 2;

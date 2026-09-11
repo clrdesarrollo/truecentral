@@ -150,6 +150,50 @@ public interface IDeviceDriver
     Task<IPlateSubscription> SubscribePlatesAsync(DeviceConnectionInfo info, Action<PlateRecognition> onPlate,
         CancellationToken ct = default) =>
         throw new DriverException("Este driver no entrega reconocimientos de patentes.");
+
+    // ------------------------------------------------------------------
+    // Eventos del equipo (analíticas y alarmas): detección de movimiento,
+    // cruce de línea, intrusión, pérdida de video, entradas de alarma...
+    // El equipo los EMPUJA; el VMS no analiza video. Las analíticas se
+    // configuran en el propio equipo: el VMS solo las escucha.
+    // ------------------------------------------------------------------
+
+    /// <summary>true si el driver sabe recibir los eventos de analítica/alarma del equipo.</summary>
+    bool SupportsEvents => false;
+
+    /// <summary>
+    /// Abre el canal de eventos del equipo. Cada evento llega por
+    /// <paramref name="onEvent"/> (en un hilo del SDK: el manejador debe
+    /// encolar y volver rápido). Liberar la suscripción cierra el canal.
+    /// </summary>
+    Task<IDeviceEventSubscription> SubscribeEventsAsync(DeviceConnectionInfo info, Action<DeviceEvent> onEvent,
+        CancellationToken ct = default) =>
+        throw new DriverException("Este driver no entrega eventos del equipo.");
+}
+
+/// <summary>
+/// Un evento empujado por una cámara o grabador. <paramref name="ChannelNumber"/>
+/// es el número interno del SDK (0 = el equipo completo, sin canal);
+/// <paramref name="At"/> viene en hora local del equipo.
+/// </summary>
+public sealed record DeviceEvent(
+    int ChannelNumber,
+    Contracts.VideoEventKind Kind,
+    /// <summary>Descripción legible ("Cruce de línea (regla 'Portón')").</summary>
+    string Description,
+    DateTime At,
+    /// <summary>Nombre de la regla de analítica en el equipo, si la informa.</summary>
+    string? RuleName = null,
+    /// <summary>Número de entrada de alarma (contacto seco), cuando corresponde.</summary>
+    int? AlarmInput = null,
+    /// <summary>Foto adjunta al evento (JPEG), si el equipo la envía.</summary>
+    byte[]? Image = null);
+
+/// <summary>Suscripción viva a los eventos de un equipo. Liberarla cierra el canal.</summary>
+public interface IDeviceEventSubscription : IAsyncDisposable
+{
+    /// <summary>false cuando la suscripción se cayó y hay que rehacerla.</summary>
+    bool IsAlive { get; }
 }
 
 /// <summary>Tramo grabado en el equipo (horas locales del equipo).</summary>
@@ -162,7 +206,9 @@ public enum RecordingKind { Continuous, Motion, Alarm, Manual, Other }
 public sealed record DriverCapabilities(bool SupportsSnapshot, bool SupportsDiscovery, int DefaultSdkPort,
     int DefaultRtspPort,
     /// <summary>El driver puede recibir reconocimientos de patentes (módulo Aplicaciones).</summary>
-    bool SupportsAnpr = false);
+    bool SupportsAnpr = false,
+    /// <summary>El driver puede recibir eventos de analítica/alarma del equipo (automatizaciones).</summary>
+    bool SupportsEvents = false);
 
 /// <summary>
 /// Fábrica de un driver, identificada por una clave estable que se guarda en

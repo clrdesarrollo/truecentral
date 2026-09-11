@@ -15,6 +15,8 @@
 
 let accessDoorsTimer = null;
 let accessEventsTimer = null;
+let accessSyncTimer = null;
+let accessSyncLastDone = null;
 
 const ACCESS_DAYS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const ACCESS_DAYS_SHORT = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
@@ -738,6 +740,7 @@ async function renderAccessPersons() {
         <button class="btn" id="btn-person-new">Agregar persona</button>` : ""}
       </div>
     </div>
+    <div id="access-sync-progress" class="hidden"></div>
     <div class="filter-bar">
       <div class="field"><label>Buscar</label>
         <input id="pf-q" placeholder="nombre, identificador o tarjeta…" value="${esc(accessPersonState.q)}"></div>
@@ -793,6 +796,82 @@ async function renderAccessPersons() {
   });
 
   await loadAccessPersons(levels);
+
+  // La barra de avance se sondea cada 3 s mientras la página esté a la vista;
+  // cuando la pasada avanzó, la tabla se repinta sola (sin modal abierto).
+  accessSyncLastDone = null;
+  await refreshAccessSyncProgress(levels);
+  clearInterval(accessSyncTimer);
+  accessSyncTimer = setInterval(() => {
+    if (!accessPollGuard("#/access-persons", accessSyncTimer)) return;
+    refreshAccessSyncProgress(levels);
+  }, 3000);
+}
+
+function accessDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "";
+  if (seconds < 60) return `${Math.round(seconds)} s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+/** Franja con el avance de la escritura en los equipos. Se oculta cuando no hay nada pendiente ni fallido. */
+async function refreshAccessSyncProgress(levels) {
+  const box = $("#access-sync-progress");
+  if (!box) return;
+  let s;
+  try { s = await Api.get("/api/access/sync/status"); } catch { return; }
+  const p = s.progress;
+  const busy = p.running;
+  const show = busy || s.pending > 0 || s.failed > 0;
+
+  if (!show) {
+    box.classList.add("hidden");
+    box.innerHTML = "";
+  } else {
+    const total = Math.max(p.total, 1);
+    const pct = busy ? Math.round((100 * p.done) / total) : (s.pending > 0 ? 0 : 100);
+    const eta = busy && p.secondsPerPerson ? accessDuration((p.total - p.done) * p.secondsPerPerson) : "";
+    const title = busy ? "Escribiendo en los equipos"
+      : s.pending > 0 ? "Pendiente de escribir en los equipos"
+      : "Escritura terminada";
+    const detail = busy
+      ? `${p.done} de ${p.total} persona${p.total === 1 ? "" : "s"}${eta ? ` · faltan ${eta}` : ""}`
+      : `${s.pending} pendiente${s.pending === 1 ? "" : "s"}`;
+    const failed = s.failed
+      ? ` · <a href="#" id="sync-show-failed" title="Ver solo las personas con error">${s.failed} con error</a>` : "";
+    box.classList.remove("hidden");
+    box.innerHTML = `
+      <div class="sync-strip${busy ? " running" : ""}">
+        <div class="sync-head"><strong>${title}</strong><span class="muted">${detail}${failed}</span></div>
+        <div class="sync-bar"><div class="sync-fill" style="width:${pct}%"></div></div>
+        ${busy && p.currentPerson
+          ? `<div class="muted sync-now">Ahora: ${esc(p.currentPerson)}${p.currentDevice ? ` → ${esc(p.currentDevice)}` : ""}</div>`
+          : (!busy && s.pending > 0
+            ? `<div class="muted sync-now">Se escriben solas en la próxima pasada (o pulse «Escribir pendientes»).</div>` : "")}
+      </div>`;
+    $("#sync-show-failed")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      accessPersonState.state = "Failed";
+      accessPersonState.page = 1;
+      const select = $("#pf-state");
+      if (select) select.value = "Failed";
+      loadAccessPersons(levels);
+    });
+  }
+
+  // Los botones de escritura esperan a que termine la pasada en curso.
+  const syncButton = $("#btn-person-sync");
+  const resendButton = $("#btn-person-resend");
+  if (syncButton) syncButton.disabled = busy;
+  if (resendButton) resendButton.disabled = busy;
+
+  // Repintar la tabla solo cuando la pasada avanzó (y no bajo un modal).
+  const mark = `${p.done}/${p.running}/${s.pending}`;
+  if (accessSyncLastDone !== null && mark !== accessSyncLastDone &&
+      $("#modal-backdrop").classList.contains("hidden")) loadAccessPersons(levels);
+  accessSyncLastDone = mark;
 }
 
 /**

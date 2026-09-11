@@ -91,21 +91,17 @@
                     </DockPanel>
                 </Button>
 
-                <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
-                        CommandParameter="Centro de eventos">
-                    <Grid>
-                        <DockPanel Margin="16,0">
-                            <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33F87171">
-                                <TextBlock Text="&#xE7BA;" Foreground="#F87171" Style="{StaticResource CardIcon}"/>
-                            </Border>
-                            <StackPanel Style="{StaticResource CardBody}">
-                                <TextBlock Text="Centro de eventos" Style="{StaticResource CardTitle}"/>
-                                <TextBlock Text="Alarmas y eventos del sistema en tiempo real, con historial y filtros."
-                                           Style="{StaticResource CardDescription}"/>
-                            </StackPanel>
-                        </DockPanel>
-                        <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
-                    </Grid>
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenEventCenterCommand}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33F87171">
+                            <TextBlock Text="&#xE7BA;" Foreground="#F87171" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Centro de eventos" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Alarmas y eventos del sistema en tiempo real, con historial y filtros."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
                 </Button>
 
                 <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"

@@ -15,6 +15,7 @@
        dist\CLRTrueCentralVMS-Client-Setup-<versión>.exe
        dist\CLRTrueCentralVMS-Complemento-Setup-<versión>.exe  (lector de huellas)
        dist\CLRTrueCentralVMS-Suite-Setup-<versión>.exe   (incluye los dos anteriores)
+       dist\CLRTrueCentralVMS-Migrador-<versión>.zip       (migrador desde HikCentral, sin instalador)
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File installer\build-installers.ps1
@@ -26,7 +27,7 @@ param(
     # Versión x.y.z; por defecto se lee del archivo VERSION en la raíz del repo.
     [string]$Version,
     # Compilar solo uno de los instaladores ('Ambos' = suite y cliente).
-    [ValidateSet('Suite', 'Client', 'Complemento', 'Ambos')]
+    [ValidateSet('Suite', 'Client', 'Complemento', 'Migrador', 'Ambos')]
     [string]$Solo = 'Ambos',
     # Reutilizar build\publish existente (no vuelve a publicar los proyectos).
     [switch]$SkipPublish
@@ -49,6 +50,9 @@ $buildClient = ($Solo -eq 'Ambos' -or $Solo -eq 'Client')
 # El complemento de enrolamiento (lector de huellas USB) va con la suite: es
 # ella la que lo publica para que el panel lo ofrezca en descarga.
 $buildAgent  = ($Solo -eq 'Ambos' -or $Solo -eq 'Suite' -or $Solo -eq 'Complemento')
+# El migrador desde HikCentral es una herramienta de puesta en marcha: se
+# entrega como carpeta comprimida (se ejecuta donde haga falta, sin instalar).
+$buildMigrador = ($Solo -eq 'Ambos' -or $Solo -eq 'Migrador')
 $publish = Join-Path $repo 'build\publish'
 $dist = Join-Path $repo 'dist'
 
@@ -89,6 +93,9 @@ if (-not $SkipPublish) {
     }
     if ($buildAgent) {
         Invoke-Publish 'src\TrueCentralVms.WebControl\TrueCentralVms.WebControl.csproj' (Join-Path $publish 'complemento')
+    }
+    if ($buildMigrador) {
+        Invoke-Publish 'src\TrueCentralVms.Migrator\TrueCentralVms.Migrator.csproj' (Join-Path $publish 'migrador')
     }
 }
 
@@ -138,6 +145,24 @@ if ($buildClient) {
 # ---------------------------------------------------------------------------
 # 3) Compilar instaladores
 # ---------------------------------------------------------------------------
+New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+if ($buildMigrador) {
+    Assert-File (Join-Path $publish 'migrador\TrueCentralMigrador.exe') 'Publique primero (quite -SkipPublish).'
+    $zip = Join-Path $dist "CLRTrueCentralVMS-Migrador-$Version.zip"
+    Write-Host ""
+    Write-Host "== Comprimir migrador -> $zip ==" -ForegroundColor Cyan
+    if (Test-Path $zip) { Remove-Item -Force $zip }
+    Compress-Archive -Path (Join-Path $publish 'migrador\*') -DestinationPath $zip -CompressionLevel Optimal
+}
+
+if (-not ($buildSuite -or $buildClient -or $buildAgent)) {
+    Write-Host ""
+    Write-Host "Generado en $dist :" -ForegroundColor Green
+    Get-ChildItem $dist -Filter "*-$Version.zip" | ForEach-Object { Write-Host ("  {0}  ({1:N1} MB)" -f $_.Name, ($_.Length / 1MB)) }
+    return
+}
+
 $isccCandidates = @(
     (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
     (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
@@ -212,6 +237,6 @@ if ($buildSuite) {
 # ---------------------------------------------------------------------------
 Write-Host ""
 Write-Host "Instaladores generados en $dist :" -ForegroundColor Green
-Get-ChildItem $dist -Filter "*-$Version.exe" | ForEach-Object {
+Get-ChildItem $dist -Include "*-$Version.exe", "*-$Version.zip" -Recurse -Depth 0 | ForEach-Object {
     Write-Host ("  {0}  ({1:N1} MB)" -f $_.Name, ($_.Length / 1MB))
 }

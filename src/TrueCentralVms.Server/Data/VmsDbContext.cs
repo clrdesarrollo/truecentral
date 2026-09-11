@@ -63,6 +63,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<WallFloatingWindow> WallFloatingWindows => Set<WallFloatingWindow>();
     public DbSet<WallLayoutPreset> WallLayouts => Set<WallLayoutPreset>();
 
+    // Vistas guardadas del monitoreo en vivo (Custom View de iVMS-4200)
+    public DbSet<LiveView> LiveViews => Set<LiveView>();
+    public DbSet<LiveViewItem> LiveViewItems => Set<LiveViewItem>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<User>(e =>
@@ -379,12 +383,19 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(p => p.Host).HasMaxLength(255);
             e.Property(p => p.Username).HasMaxLength(64);
             e.Property(p => p.GatewayDeviceId).HasMaxLength(128);
+            e.Property(p => p.GatewayProtocol).HasMaxLength(8);
             e.Property(p => p.Model).HasMaxLength(64);
             e.Property(p => p.SerialNumber).HasMaxLength(64);
             e.Property(p => p.FirmwareVersion).HasMaxLength(64);
             e.Property(p => p.LastError).HasMaxLength(512);
             e.Property(p => p.Status).HasConversion<string>().HasMaxLength(16);
-            e.HasIndex(p => new { p.Host, p.Port }).IsUnique();
+            // Unicidad = dirección + puerto + equipo: detrás de una pasarela
+            // (IP Receiver Pro) varios paneles comparten dirección y puerto y
+            // se distinguen por el equipo. Un panel directo (sin equipo) sigue
+            // siendo único por dirección y puerto: en PostgreSQL los NULL no
+            // chocan entre sí, por eso va un segundo índice filtrado.
+            e.HasIndex(p => new { p.Host, p.Port, p.GatewayDeviceId }).IsUnique();
+            e.HasIndex(p => new { p.Host, p.Port }).IsUnique().HasFilter("\"GatewayDeviceId\" IS NULL");
         });
 
         modelBuilder.Entity<AlarmArea>(e =>
@@ -448,6 +459,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         modelBuilder.Entity<WorkflowAction>(e =>
         {
             e.Property(a => a.Type).HasMaxLength(32);
+            e.Property(a => a.NodeId).HasMaxLength(32);
             e.HasOne(a => a.Workflow)
                 .WithMany(w => w.Actions)
                 .HasForeignKey(a => a.WorkflowId)
@@ -592,6 +604,40 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(i => i.ChannelId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LiveView>(e =>
+        {
+            e.Property(v => v.Name).HasMaxLength(128);
+            e.Property(v => v.OwnerName).HasMaxLength(64);
+            e.Property(v => v.LayoutName).HasMaxLength(32);
+            // La vista sobrevive a la cuenta que la creó (queda el nombre
+            // congelado en OwnerName): borrar un usuario no puede llevarse las
+            // vistas compartidas del turno.
+            e.HasOne(v => v.OwnerUser)
+                .WithMany()
+                .HasForeignKey(v => v.OwnerUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+            // Nombre único por dueño: dos operadores pueden tener cada uno su
+            // "Turno noche" sin pisarse.
+            e.HasIndex(v => new { v.OwnerUserId, v.Name }).IsUnique();
+            e.HasIndex(v => v.Shared);
+        });
+
+        modelBuilder.Entity<LiveViewItem>(e =>
+        {
+            e.ToTable("LiveViewItems");
+            e.HasOne(i => i.View)
+                .WithMany(v => v.Items)
+                .HasForeignKey(i => i.LiveViewId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Un cuadro sin canal no tiene sentido: si el canal desaparece del
+            // inventario, el cuadro se va con él y la vista abre con ese hueco.
+            e.HasOne(i => i.Channel)
+                .WithMany()
+                .HasForeignKey(i => i.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(i => new { i.LiveViewId, i.CellIndex }).IsUnique();
         });
     }
 }

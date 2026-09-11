@@ -25,6 +25,15 @@ public class AlarmPanel
     /// serie, cuenta o ID ISUP. Null para los drivers directos.
     /// </summary>
     public string? GatewayDeviceId { get; set; }
+    /// <summary>
+    /// Clave ISUP/OTAP con la que el panel reporta a la receptora, cifrada
+    /// como la contraseña. Es la "intención" del VMS: con ella el servicio
+    /// vuelve a registrar el equipo si desaparece de la receptora. Null si el
+    /// panel se adoptó ya registrado y nadie escribió la clave.
+    /// </summary>
+    public byte[]? GatewayKeyCiphertext { get; set; }
+    /// <summary>"isup" u "otap" (drivers de pasarela).</summary>
+    public string? GatewayProtocol { get; set; }
 
     // Datos obtenidos del panel al validar credenciales.
     public string? Model { get; set; }

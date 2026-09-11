@@ -216,6 +216,13 @@ public sealed class AccessControlService(
                     detail: $"El equipo de control de acceso '{device.Name}' ({device.Host}) no responde: {result.Error}",
                     success: false);
             await hub.Clients.All.SendAsync(VmsHubContract.AccessDeviceStatusChanged, ToDto(device), ct);
+
+            // Automatizaciones ("terminal sin conexión → avisar"). Resuelto al
+            // vuelo: el motor contiene la acción de puertas, que usa este servicio.
+            if (previous != AccessDeviceStatus.Unknown || result.Status != AccessDeviceStatus.Online)
+                writeScope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>().Publish(
+                    Workflows.WorkflowTrigger.FromDeviceStatus("access", device.Id, device.Name, device.Host, device.Model,
+                        result.Status.ToString(), result.Error));
         }
         await writeDb.SaveChangesAsync(ct);
     }

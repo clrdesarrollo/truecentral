@@ -663,7 +663,15 @@ public partial class MainViewModel : ObservableObject
     private const string WallHintMessage =
         "Muro de video: arrastre un canal a una ventana; doble clic para pantalla completa.";
 
-    public string UserLabel => $"{_api.Username} ({(_api.Role == "Admin" ? "Administrador" : "Operador")}) — {_api.BaseUrl}";
+    /// <summary>Nombre del usuario en el navbar: es el botón que despliega el
+    /// menú de la sesión (el rol y el servidor viven dentro de ese menú).</summary>
+    public string UserLabel => _api.Username ?? "";
+
+    /// <summary>Rol de la sesión, para el menú del usuario.</summary>
+    public string RoleLabel => _api.Role == "Admin" ? "Administrador" : "Operador";
+
+    /// <summary>Servidor al que está conectada esta sesión (menú del usuario).</summary>
+    public string ServerLabel => _api.BaseUrl ?? "";
 
     public string WelcomeTitle => $"Bienvenido, {_api.Username}";
 
@@ -787,7 +795,13 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isTreeCollapsed;
 
     [RelayCommand]
-    private void EnterGridFullscreen() => IsGridFullscreen = true;
+    private void EnterGridFullscreen()
+    {
+        // La barra de herramientas se oculta: su desplegable de vistas no
+        // puede quedar flotando sobre el video.
+        IsViewsPopupOpen = false;
+        IsGridFullscreen = true;
+    }
 
     /// <summary>Cuadro promovido a stream principal por estar maximizado (y el
     /// canal que tenía): al restaurar vuelve al secundario, pero SOLO si nadie

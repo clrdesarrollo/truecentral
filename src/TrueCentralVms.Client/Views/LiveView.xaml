@@ -52,6 +52,64 @@
             <Border BorderBrush="{StaticResource MutedBrush}" BorderThickness="0.8" Margin="0.8"/>
         </DataTemplate>
 
+        <!-- Fila de una vista guardada dentro del desplegable -->
+        <Style x:Key="SavedViewRow" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                                BorderBrush="Transparent" BorderThickness="1"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Left"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Acciones de una vista (actualizar / eliminar): glifo sin marco -->
+        <Style x:Key="SavedViewIconButton" TargetType="Button">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Padding="6,5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2A3646"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Eliminar: igual, pero el hover avisa en rojo -->
+        <Style x:Key="SavedViewDeleteButton" TargetType="Button" BasedOn="{StaticResource SavedViewIconButton}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- Chevron para minimizar/restaurar el panel PTZ -->
         <Style x:Key="PtzCollapseToggle" TargetType="ToggleButton">
             <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
@@ -511,20 +569,14 @@
         <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,6"
                 Visibility="{Binding IsGridFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
-            <DockPanel>
-            <!-- Pantalla completa del área de la grilla (Esc para salir) -->
-            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="10,5"
-                    Command="{Binding EnterGridFullscreenCommand}"
-                    ToolTip="Pantalla completa de la grilla — presione Esc para salir">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE740;" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                               VerticalAlignment="Center" Margin="0,0,7,0"/>
-                    <TextBlock Text="Pantalla completa" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Button>
+            <Grid>
+            <!-- Los tres grupos comparten la misma celda: el de la izquierda y
+                 el de la derecha se anclan a su borde y "Vistas" queda centrado
+                 respecto de la barra completa, sobre la grilla de cámaras. -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <!-- Pantalla auxiliar (estilo iVMS-4200): otra ventana de vista en
                  vivo, con grilla propia, para llevar a otro monitor (hasta 3) -->
-            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="10,5" Margin="0,0,6,0"
+            <Button Style="{StaticResource GhostButton}" Padding="10,5"
                     Command="{Binding OpenAuxScreenCommand}"
                     ToolTip="Abrir una pantalla auxiliar (hasta 3): otra ventana de vista en vivo para ver cámaras en otro monitor">
                 <StackPanel Orientation="Horizontal">
@@ -533,7 +585,18 @@
                     <TextBlock Text="Pantalla auxiliar" VerticalAlignment="Center"/>
                 </StackPanel>
             </Button>
-            <StackPanel Orientation="Horizontal">
+            <!-- Pantalla completa del área de la grilla (Esc para salir) -->
+            <Button Style="{StaticResource GhostButton}" Padding="10,5" Margin="6,0,0,0"
+                    Command="{Binding EnterGridFullscreenCommand}"
+                    ToolTip="Pantalla completa de la grilla — presione Esc para salir">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE740;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                               VerticalAlignment="Center" Margin="0,0,7,0"/>
+                    <TextBlock Text="Pantalla completa" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
                 <TextBlock Text="División:" VerticalAlignment="Center" Margin="0,0,8,0"
                            Foreground="{StaticResource MutedBrush}"/>
                 <!-- Selector de división estilo iVMS-4200: botón con la
@@ -618,7 +681,124 @@
                                Foreground="{StaticResource AccentBrush}" FontSize="11.5"/>
                 </StackPanel>
             </StackPanel>
-            </DockPanel>
+
+            <!-- Vistas guardadas (las "Custom View" de iVMS-4200): al centro de
+                 la barra, porque es a lo que más se vuelve en un turno. Cada
+                 vista recuerda la división y qué cámara había en cada cuadro. -->
+            <Grid>
+                <ToggleButton x:Name="ViewsToggle" Style="{StaticResource GhostToggle}" Padding="14,5"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                              IsChecked="{Binding IsViewsPopupOpen, Mode=TwoWay}"
+                              ToolTip="Vistas guardadas: deje la grilla como la armó y vuelva a ella con un clic">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8A9;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="Vistas" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                        <!-- Última vista cargada: el operador sabe en qué está parado -->
+                        <TextBlock Text="{Binding ActiveViewName}" Margin="6,0,0,0" VerticalAlignment="Center"
+                                   MaxWidth="180" TextTrimming="CharacterEllipsis"
+                                   Foreground="{StaticResource AccentBrush}"
+                                   Visibility="{Binding ActiveViewName,
+                                                Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+                        <TextBlock Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="8" Margin="8,0,0,0"
+                                   Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </ToggleButton>
+                <Popup PlacementTarget="{Binding ElementName=ViewsToggle}" Placement="Bottom"
+                       IsOpen="{Binding IsViewsPopupOpen, Mode=TwoWay}" StaysOpen="False"
+                       AllowsTransparency="True" Focusable="True">
+                    <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4,8,8" Width="380">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="VISTAS GUARDADAS" FontSize="11"
+                                       FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"
+                                       Margin="2,0,0,8"/>
+
+                            <!-- Guardar la grilla que hay ahora -->
+                            <StackPanel DockPanel.Dock="Bottom">
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,10,0,10"/>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="Guardar" Padding="12,5" Margin="8,0,0,0"
+                                            Style="{StaticResource PrimaryButton}"
+                                            Command="{Binding SaveCurrentViewCommand}"
+                                            ToolTip="Guarda la división y las cámaras que hay ahora en la grilla"/>
+                                    <Grid>
+                                        <TextBox x:Name="ViewNameBox" Style="{StaticResource DarkTextBox}"
+                                                 Padding="9,6" FontSize="12"
+                                                 Text="{Binding NewViewName, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <TextBlock Text="Nombre de la vista…" IsHitTestVisible="False"
+                                                   Margin="11,0,0,0" VerticalAlignment="Center" FontSize="12"
+                                                   Foreground="{StaticResource MutedBrush}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Text, ElementName=ViewNameBox}" Value="">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Grid>
+                                </DockPanel>
+                                <CheckBox Content="Compartir con todos los puestos" Margin="2,8,0,0" FontSize="12"
+                                          Style="{StaticResource DarkCheckBox}"
+                                          IsChecked="{Binding NewViewShared, Mode=TwoWay}"/>
+                                <TextBlock Text="{Binding SavedViewsStatus}" Margin="2,8,0,0" FontSize="11.5"
+                                           TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                                           Visibility="{Binding SavedViewsStatus,
+                                                        Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+                            </StackPanel>
+
+                            <!-- Lista de vistas: el clic en la fila la carga en la grilla -->
+                            <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding SavedViews}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,0,0,4">
+                                                <Button Style="{StaticResource SavedViewRow}"
+                                                        Command="{Binding DataContext.ApplySavedViewCommand,
+                                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip="Cargar esta vista en la grilla">
+                                                    <StackPanel Margin="0,0,60,0">
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Detail}" FontSize="11" Margin="0,2,0,0"
+                                                                   Foreground="{StaticResource MutedBrush}"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                </Button>
+                                                <!-- Actualizar / eliminar: solo en las vistas propias
+                                                     (o para el administrador) -->
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                                            VerticalAlignment="Center" Margin="0,0,8,0"
+                                                            Visibility="{Binding CanEdit,
+                                                                         Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                                    <Button Style="{StaticResource SavedViewIconButton}"
+                                                            Content="&#xE74E;"
+                                                            Command="{Binding DataContext.UpdateSavedViewCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTip="Actualizar esta vista con la grilla actual"/>
+                                                    <Button Style="{StaticResource SavedViewDeleteButton}"
+                                                            Content="&#xE74D;" Margin="2,0,0,0"
+                                                            Command="{Binding DataContext.DeleteSavedViewCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTip="Eliminar esta vista"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </DockPanel>
+                    </Border>
+                </Popup>
+            </Grid>
+            </Grid>
         </Border>
 
         <!-- Grilla de video -->

@@ -825,6 +825,13 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<byte[]>("GatewayKeyCiphertext")
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("GatewayProtocol")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
                     b.Property<string>("Host")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -882,6 +889,10 @@ namespace TrueCentralVms.Server.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Host", "Port")
+                        .IsUnique()
+                        .HasFilter("\"GatewayDeviceId\" IS NULL");
+
+                    b.HasIndex("Host", "Port", "GatewayDeviceId")
                         .IsUnique();
 
                     b.ToTable("AlarmPanels");
@@ -1218,6 +1229,87 @@ namespace TrueCentralVms.Server.Migrations
                         .IsUnique();
 
                     b.ToTable("Devices");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveView", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Columns")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LayoutName")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("OwnerName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Rows")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Shared")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Shared");
+
+                    b.HasIndex("OwnerUserId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("LiveViews");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveViewItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CellIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ChannelId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LiveViewId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("StreamType")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChannelId");
+
+                    b.HasIndex("LiveViewId", "CellIndex")
+                        .IsUnique();
+
+                    b.ToTable("LiveViewItems", (string)null);
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PasswordHistory", b =>
@@ -1913,6 +2005,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("GraphJson")
+                        .HasColumnType("text");
+
                     b.Property<DateTime?>("LastRunAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1962,6 +2057,10 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("NodeId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<int>("Order")
                         .HasColumnType("integer");
@@ -2297,6 +2396,35 @@ namespace TrueCentralVms.Server.Migrations
                     b.Navigation("Device");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveView", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("OwnerUser");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveViewItem", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Channel", "Channel")
+                        .WithMany()
+                        .HasForeignKey("ChannelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.LiveView", "View")
+                        .WithMany("Items")
+                        .HasForeignKey("LiveViewId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Channel");
+
+                    b.Navigation("View");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PasswordHistory", b =>
                 {
                     b.HasOne("TrueCentralVms.Server.Data.Entities.User", "User")
@@ -2481,6 +2609,11 @@ namespace TrueCentralVms.Server.Migrations
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Device", b =>
                 {
                     b.Navigation("Channels");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveView", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.User", b =>
