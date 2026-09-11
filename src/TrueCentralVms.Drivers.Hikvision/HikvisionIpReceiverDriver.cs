@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Core.Drivers;
 
@@ -30,9 +31,12 @@ namespace TrueCentralVms.Drivers.Hikvision;
 ///    de línea respecto de la pasarela) + heartBeat cada 10 s.
 ///  - Requisitos en la pasarela: Automation Output → Protocol con tipo
 ///    <b>Private</b> habilitado (sin eso el API contesta 403 "Invalid
-///    operation"), y una cuenta con permisos (admin).
+///    operation"), y una cuenta con permisos (admin). Ese interruptor lo deja
+///    puesto el propio driver (<see cref="EnsureEventsEnabledAsync"/>, que
+///    además se dispara solo si la suscripción es rechazada), así que una
+///    receptora recién instalada no necesita que nadie entre a su web.
 /// </summary>
-public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
+public sealed class HikvisionIpReceiverDriver : IAlarmGatewayDriver
 {
     private const string AllAreas = "0xffffffff";
     private static readonly TimeSpan ResolveTtl = TimeSpan.FromMinutes(5);
@@ -277,6 +281,109 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
     }
 
     /// <summary>
+    /// Busca en la pasarela un equipo por su ID ISUP/OTAP exacto (el que el
+    /// panel usa para reportar). Null si no está. Sirve para reconocer un alta
+    /// que ya se hizo: la pasarela responde «addDeviceFailed» (no
+    /// «deviceExist») cuando se repite un ID, así que no se puede distinguir
+    /// por el error del alta.
+    /// </summary>
+    public static async Task<GatewayDeviceSummary?> FindGatewayDeviceAsync(AlarmConnectionInfo info, string deviceId,
+        CancellationToken ct = default)
+    {
+        string wanted = (deviceId ?? "").Trim();
+        if (wanted.Length == 0) return null;
+        var devices = await ListDevicesAsync(ClientOf(info), wanted, ct);
+        return devices
+            .Where(d => string.Equals(d.IsupId, wanted, StringComparison.OrdinalIgnoreCase))
+            .Select(d => new GatewayDeviceSummary(d.DevIndex, d.Name, d.Serial, d.AccountId, d.IsupId, d.Model, d.Version, d.Status))
+            .FirstOrDefault();
+    }
+
+    // ------------------------------------------------------------------
+    // Sincronización VMS ↔ receptora (IAlarmGatewayDriver)
+    //
+    // La receptora es la verdad de lo que funciona: si el equipo no está
+    // registrado en ella, el panel no se comunica. El VMS guarda ID y clave y
+    // con esto los hace cumplir: falta → se registra; está → se respeta (o se
+    // reemplaza si un administrador escribió una clave nueva, porque la
+    // registrada no se puede leer para compararla).
+    // ------------------------------------------------------------------
+
+    private static bool GatewaySaysOffline(string? status) =>
+        status is not null && status.Contains("offline", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Busca por ID ISUP/OTAP exacto o, si es un uuid, por devIndex.</summary>
+    private static async Task<GatewayDevice?> LookupAsync(HikvisionIsapiClient client, string wanted, CancellationToken ct)
+    {
+        if (Guid.TryParse(wanted, out _))
+            return (await ListDevicesAsync(client, null, ct))
+                .FirstOrDefault(d => string.Equals(d.DevIndex, wanted, StringComparison.OrdinalIgnoreCase));
+        return (await ListDevicesAsync(client, wanted, ct))
+            .FirstOrDefault(d => string.Equals(d.IsupId, wanted, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public async Task<GatewayRegistration> EnsureRegisteredAsync(AlarmConnectionInfo info, string deviceId, string? deviceKey,
+        string? protocol, bool replaceIfPresent = false, string? name = null, CancellationToken ct = default)
+    {
+        string wanted = (deviceId ?? "").Trim();
+        if (wanted.Length == 0)
+            throw new DriverException("Falta el ID del equipo con el que el panel reporta a la receptora.");
+        string? key = string.IsNullOrWhiteSpace(deviceKey) ? null : deviceKey.Trim();
+        var existing = await LookupAsync(ClientOf(info), wanted, ct);
+        string? stable = existing?.IsupId ?? (Guid.TryParse(wanted, out _) ? null : wanted);
+
+        if (existing is not null && !(replaceIfPresent && key is not null))
+        {
+            bool offline = GatewaySaysOffline(existing.Status);
+            return new GatewayRegistration(
+                offline ? GatewayRegistrationOutcome.RegisteredOffline : GatewayRegistrationOutcome.Registered,
+                existing.DevIndex, stable ?? existing.DevIndex,
+                offline ? "Registrado en la receptora, pero el panel no reporta: revise en el panel el ID, la clave ISUP/OTAP " +
+                          "y que llegue por red a este servidor." : null);
+        }
+
+        if (stable is null)
+            return new GatewayRegistration(GatewayRegistrationOutcome.NotRegistered, null, null,
+                $"El equipo '{wanted}' ya no está en la receptora y el panel se identificaba por ese uuid: edite el panel " +
+                "e indique el ID ISUP/OTAP y la clave que tiene configurados.");
+        if (key is null)
+            return new GatewayRegistration(GatewayRegistrationOutcome.NotRegistered, null, stable,
+                "El equipo no está registrado en la receptora y el sistema no tiene su clave: edite el panel y escriba la " +
+                "clave ISUP/OTAP que tiene configurada para volver a registrarlo.");
+
+        if (existing is not null)
+            await DeleteGatewayDeviceAsync(info, existing.DevIndex, ct);
+        string devIndex = await AddGatewayDeviceAsync(info,
+            new GatewayDeviceSpec(protocol ?? "isup", stable, key, name ?? existing?.Name ?? stable, null, null, null), ct);
+        ForgetResolved(info);
+        return new GatewayRegistration(GatewayRegistrationOutcome.ReRegistered, devIndex, stable,
+            existing is null ? "El equipo no estaba en la receptora: se registró de nuevo con la clave guardada."
+                             : "Se volvió a registrar en la receptora con la clave indicada.");
+    }
+
+    public async Task UnregisterAsync(AlarmConnectionInfo info, string deviceId, CancellationToken ct = default)
+    {
+        string wanted = (deviceId ?? "").Trim();
+        if (wanted.Length == 0) return;
+        var existing = await LookupAsync(ClientOf(info), wanted, ct);
+        if (existing is null) return;
+        await DeleteGatewayDeviceAsync(info, existing.DevIndex, ct);
+    }
+
+    public async Task<IReadOnlyList<(string DevIndex, string? StableDeviceId, string Name, string? Status)>> ListRegisteredAsync(
+        AlarmConnectionInfo info, CancellationToken ct = default)
+    {
+        var devices = await ListDevicesAsync(ClientOf(info), null, ct);
+        return devices.Select(d => (d.DevIndex, d.IsupId, d.Name, d.Status)).ToList();
+    }
+
+    private static void ForgetResolved(AlarmConnectionInfo info)
+    {
+        foreach (var cached in Resolved.Keys.Where(k => k.StartsWith($"{info.Host}|{info.Port}|", StringComparison.Ordinal)).ToList())
+            Resolved.TryRemove(cached, out _);
+    }
+
+    /// <summary>
     /// Agrega un panel a la pasarela por ISUP 5.0 (EHome) u OTAP y devuelve el
     /// uuid (devIndex) que la pasarela le asignó, que es el identificador con
     /// el que después se opera el panel desde el VMS.
@@ -297,6 +404,13 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         // menos, la pasarela rechaza el alta sin decir por qué.
         if (key is { Length: < 8 })
             throw new DriverException("La clave del equipo debe tener al menos 8 caracteres (es la que está configurada en el panel).");
+        // Probado contra la receptora (V2.5.0.6, 2026-09-10): cualquier símbolo
+        // o espacio en la clave hace que responda badParameters/addDeviceFailed,
+        // tanto en claro como cifrada. Solo letras y números pasan.
+        if (key is not null && !key.All(char.IsAsciiLetterOrDigit))
+            throw new DriverException("La clave del equipo solo admite letras y números, sin espacios ni símbolos: la " +
+                                      "receptora rechaza cualquier otra. Cambie la clave ISUP en el panel (en el AX PRO: " +
+                                      "Comunicación → ISUP) por una de 8 a 32 letras y números, y use esa misma aquí.");
         string name = string.IsNullOrWhiteSpace(spec.Name) ? deviceId : spec.Name.Trim();
         // "SecurityCP" (panel de alarma) o "encodingDev" (equipo de video).
         string devType = string.Equals(spec.DeviceType, "encodingDev", StringComparison.OrdinalIgnoreCase)
@@ -352,8 +466,20 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
             ["DeviceInList"] = new[] { new Dictionary<string, object?> { ["Device"] = device } },
         });
 
-        string json = await ManageAsync(info, "/ISAPI/ContentMgmt/DeviceMgmt/addDevice?format=json" + extraQuery,
-            body, ct, "el alta de equipos");
+        string json;
+        try
+        {
+            json = await ManageAsync(info, "/ISAPI/ContentMgmt/DeviceMgmt/addDevice?format=json" + extraQuery,
+                body, ct, "el alta de equipos");
+        }
+        catch (DriverException ex) when (AddFailureCode(ex.Message) is { } code)
+        {
+            // La pasarela también rechaza el alta con un código HTTP, y ahí el
+            // mensaje genérico —«no tiene permiso»— despista: lo que explica qué
+            // revisar es su subStatusCode, que viene en el cuerpo de la respuesta.
+            throw new DriverException(DescribeAddFailure(code) +
+                $" [clave {(extraQuery.Length > 0 ? "cifrada" : "en claro")}; respuesta: {ReceiverWords(ex.Message)}]", ex);
+        }
 
         // La pasarela puede contestar algo que no es JSON (una pagina de error de
         // su nginx, por ejemplo). Sin esto reventaba con un 500 sin explicacion.
@@ -437,13 +563,35 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         _ => throw new DriverException($"Protocolo '{protocol}' no admitido por la pasarela: use ISUP 5.0 (ehomeV5) u OTAP."),
     };
 
+    /// <summary>
+    /// Se queda con lo que dijo la pasarela y descarta la explicación genérica
+    /// del cliente HTTP, que para este caso es engañosa («no tiene permiso»).
+    /// </summary>
+    private static string ReceiverWords(string message)
+    {
+        int a = message.LastIndexOf('(');
+        int b = message.LastIndexOf(')');
+        return Shorten(b > a && a >= 0 ? message[(a + 1)..b] : message);
+    }
+
+    /// <summary>
+    /// Busca en un mensaje de error el subStatusCode con el que la pasarela
+    /// explica por qué rechazó el alta. Devuelve null si el fallo es de otra
+    /// naturaleza (red, credenciales), que ya se explica solo.
+    /// </summary>
+    private static string? AddFailureCode(string message) =>
+        new[] { "deviceExist", "monitorNodeOverLimit", "badParameters", "addDeviceFailed", "noMemory" }
+            .FirstOrDefault(c => message.Contains(c, StringComparison.OrdinalIgnoreCase));
+
     private static string DescribeAddFailure(string? subStatusCode) => subStatusCode switch
     {
         "deviceExist" => "Ese equipo ya está agregado en la pasarela.",
         "monitorNodeOverLimit" => "La pasarela llegó al límite de equipos de su licencia.",
-        "badParameters" => "La pasarela rechazó los datos del equipo (revise el ID y la clave).",
+        "badParameters" => "La pasarela rechazó los datos del equipo: el ID admite hasta 31 letras y números y la clave " +
+                           "de 8 a 32 letras y números (sin símbolos ni espacios).",
         "addDeviceFailed" => "La pasarela no pudo agregar el equipo: revise que el ID y la clave sean los que tiene " +
-                             "configurados el panel (en el AX PRO: Comunicación → ISUP) y que la clave tenga al menos 8 caracteres.",
+                             "configurados el panel (en el AX PRO: Comunicación → ISUP) y que la clave tenga de 8 a 32 " +
+                             "caracteres, solo letras y números (la receptora rechaza símbolos y espacios).",
         "noMemory" => "La pasarela no tiene memoria disponible para agregar el equipo.",
         var other => $"La pasarela no pudo agregar el equipo{(other is null ? "" : $" ({other})")}.",
     };
@@ -596,14 +744,20 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         HttpResponseMessage response;
         try
         {
-            response = await client.OpenStreamAsync("/ISAPI/Event/notification/subscribeDeviceMgmt?format=json", ct, HttpMethod.Post,
-                "{\"SubscribeDeviceMgmt\":{\"eventMode\":\"all\",\"defenceMode\":\"all\"}}");
+            response = await OpenSubscriptionAsync(client, ct);
         }
-        catch (DriverException ex) when (ex.Message.Contains("Invalid Operation", StringComparison.OrdinalIgnoreCase) ||
-                                         ex.Message.Contains("invalidOperation", StringComparison.OrdinalIgnoreCase))
+        catch (DriverException ex) when (IsProtocolDisabled(ex))
         {
-            throw new DriverException("El IP Receiver Pro rechazó la suscripción de eventos: habilite en la pasarela Automation Output → " +
-                                      "Protocol con tipo «Private».", ex);
+            // La pasarela tiene apagada su salida de automatización: es su
+            // único requisito para entregar eventos y se enciende con la misma
+            // cuenta con la que ya estamos hablando. Una receptora recién
+            // instalada —o una que alguien apagó desde su web— entra por acá
+            // una vez y sigue de largo; si aun así no se puede, se explica.
+            try { await EnablePrivateProtocolAsync(client, ct, force: false); }
+            catch (AutomationOutputBusyException) { throw; }
+            catch (Exception inner) { throw ProtocolDisabled(inner); }
+            try { response = await OpenSubscriptionAsync(client, ct); }
+            catch (DriverException retry) when (IsProtocolDisabled(retry)) { throw ProtocolDisabled(retry); }
         }
         string? boundary = response.Content.Headers.ContentType?.Parameters
             .FirstOrDefault(p => string.Equals(p.Name, "boundary", StringComparison.OrdinalIgnoreCase))?.Value?.Trim('"');
@@ -611,6 +765,101 @@ public sealed class HikvisionIpReceiverDriver : IAlarmPanelDriver
         return new HikvisionAlarmPanelDriver.AlertStreamSubscription(response, stream, boundary ?? "boundary", onEvent, onActivity,
             (contentType, body) => ParseGatewayEvent(contentType, body, devIndex));
     }
+
+    private static Task<HttpResponseMessage> OpenSubscriptionAsync(HikvisionIsapiClient client, CancellationToken ct) =>
+        client.OpenStreamAsync("/ISAPI/Event/notification/subscribeDeviceMgmt?format=json", ct, HttpMethod.Post,
+            "{\"SubscribeDeviceMgmt\":{\"eventMode\":\"all\",\"defenceMode\":\"all\"}}");
+
+    /// <summary>La pasarela contestó 403 "Invalid operation": su salida de automatización está apagada.</summary>
+    private static bool IsProtocolDisabled(Exception ex) =>
+        ex.Message.Contains("Invalid Operation", StringComparison.OrdinalIgnoreCase) ||
+        ex.Message.Contains("invalidOperation", StringComparison.OrdinalIgnoreCase);
+
+    private static DriverException ProtocolDisabled(Exception inner) =>
+        new("El IP Receiver Pro rechazó la suscripción de eventos: habilite en la pasarela Automation Output → " +
+            "Protocol con tipo «Private».", inner);
+
+    // ------------------------------------------------------------------
+    // Lo único que hay que dejar puesto en la pasarela
+    // ------------------------------------------------------------------
+
+    /// <summary>Ruta de «Automation Output → Protocol». El typo «Mangement» es del fabricante.</summary>
+    private const string ProtocolParamsPath = "/ISAPI/System/ProtocolMangement/ProtocolParams?format=json";
+
+    /// <inheritdoc />
+    public Task EnsureEventsEnabledAsync(AlarmConnectionInfo info, CancellationToken ct = default) =>
+        EnablePrivateProtocolAsync(ClientOf(info), ct, force: true);
+
+    /// <summary>La salida de automatización está encendida con otro protocolo: no se pisa sola.</summary>
+    private sealed class AutomationOutputBusyException(string message) : DriverException(message);
+
+    /// <summary>
+    /// Habilita la salida de automatización con protocolo «Private», que es lo
+    /// que destraba la suscripción de eventos. Lee primero y solo escribe si
+    /// hace falta, devolviendo el mismo documento con el resto de los
+    /// parámetros intactos: la pasarela rechaza un PUT al que le falten campos
+    /// que ella misma declaró. Verificado contra la V2.5.0.6: de fábrica
+    /// contesta <c>{"ProtocolParams":{"deviceHeartbeatInterval":30,"enabled":false,"protocolType":"Sur-Gard"}}</c>
+    /// y acepta ese mismo documento de vuelta, como <c>application/json</c>,
+    /// con los dos campos cambiados (<c>statusCode 1</c>).
+    /// </summary>
+    /// <param name="force">
+    /// true para la receptora de este servidor, que es nuestra y se configura
+    /// sin preguntar. false para una pasarela ajena: si su salida ya está
+    /// encendida con otro protocolo puede estar reportando a la central del
+    /// cliente, así que no se le pisa y se explica qué hay que cambiar.
+    /// </param>
+    private static async Task EnablePrivateProtocolAsync(HikvisionIsapiClient client, CancellationToken ct, bool force)
+    {
+        string? current = await client.RequestAsync(HttpMethod.Get, ProtocolParamsPath, ct: ct);
+        var root = current is { Length: > 0 } ? JsonNode.Parse(current) as JsonObject : null;
+        var node = ProtocolNode(root);
+        if (node is not null && IsTrue(node["enabled"]) &&
+            string.Equals(AsText(node["protocolType"]), "Private", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!force && node is not null && IsTrue(node["enabled"]) && AsText(node["protocolType"]) is { Length: > 0 } inUse)
+            throw new AutomationOutputBusyException(
+                $"El IP Receiver Pro tiene su salida de automatización en uso con el protocolo «{inUse}», que puede estar " +
+                "reportando a otra central: para recibir eventos acá debe quedar en «Private» (Automation Output → Protocol).");
+
+        if (node is null)
+        {
+            // No entregó el recurso (404 o cuerpo inesperado): se manda la
+            // forma que documenta la guía de la API.
+            node = new JsonObject();
+            root = new JsonObject { ["ProtocolParams"] = node };
+        }
+        node["enabled"] = true;
+        node["protocolType"] = "Private";
+
+        string? body = await client.RequestAsync(HttpMethod.Put, ProtocolParamsPath, root!.ToJsonString(),
+            ct: ct, allowNotFound: false);
+        HikvisionAlarmPanelDriver.EnsureOk(body, "habilitar su salida de automatización «Private»");
+    }
+
+    /// <summary>El objeto con los parámetros: la raíz, o el nodo que la envuelve.</summary>
+    private static JsonObject? ProtocolNode(JsonObject? root)
+    {
+        if (root is null) return null;
+        if (root.ContainsKey("protocolType") || root.ContainsKey("enabled")) return root;
+        foreach (var (_, value) in root)
+            if (value is JsonObject inner && (inner.ContainsKey("protocolType") || inner.ContainsKey("enabled")))
+                return inner;
+        return null;
+    }
+
+    /// <summary>true, "true" o 1: los firmwares mezclan las tres formas.</summary>
+    private static bool IsTrue(JsonNode? node) => node?.GetValueKind() switch
+    {
+        JsonValueKind.True => true,
+        JsonValueKind.String => string.Equals(node!.GetValue<string>(), "true", StringComparison.OrdinalIgnoreCase),
+        JsonValueKind.Number => node!.GetValue<double>() != 0,
+        _ => false,
+    };
+
+    private static string? AsText(JsonNode? node) =>
+        node?.GetValueKind() == JsonValueKind.String ? node.GetValue<string>() : node?.ToString();
 
     /// <summary>
     /// Traduce una parte de la suscripción. Solo cuentan las de este equipo

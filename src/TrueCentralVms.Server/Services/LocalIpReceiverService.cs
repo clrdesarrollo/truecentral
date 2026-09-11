@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 
 namespace TrueCentralVms.Server.Services;
@@ -31,17 +32,28 @@ namespace TrueCentralVms.Server.Services;
 /// Si la receptora ya estaba activada por fuera (responde
 /// <c>hasActivated</c>) no se puede adivinar su contraseña: queda anotado en el
 /// registro para que un administrador la escriba a mano una sola vez.
+///
+/// Con la credencial en la mano queda un segundo paso, igual de invisible:
+/// dejarle habilitada la salida «Automation Output → Protocol» con tipo
+/// <c>Private</c>. Sin ella su API rechaza la suscripción de eventos ("Invalid
+/// operation") y los paneles funcionan solo por sondeo —hasta 30 s de atraso y
+/// sin el usuario que armó o desarmó—. No lo puede hacer el instalador:
+/// recién acá existe la contraseña que la receptora exige para configurarse.
 /// </summary>
 public sealed class LocalIpReceiverService(
     IConfiguration config,
     EmbeddedPostgres postgres,
     CredentialProtector protector,
+    AlarmDriverRegistry drivers,
     ILogger<LocalIpReceiverService> logger)
 {
     /// <summary>Nombre de la cuenta que crea la activación (la receptora no admite otro).</summary>
     public const string AdminUser = "admin";
 
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>La salida de eventos ya quedó habilitada en esta ejecución (no hay que volver a preguntar).</summary>
+    private bool _eventsEnabled;
 
     public string Host => config["Alarms:LocalReceiver:Host"] is { Length: > 0 } h ? h : "127.0.0.1";
     public int Port => int.TryParse(config["Alarms:LocalReceiver:Port"], out int p) && p is > 0 and < 65536 ? p : 8091;
@@ -89,7 +101,7 @@ public sealed class LocalIpReceiverService(
         try
         {
             if (HasCredentials)
-                return new LocalReceiverState(true, true, null, Final: true);
+                return await ReadyAsync(ct);
 
             using var http = CreateClient();
             if (!await IsReachableAsync(http, ct))
@@ -136,7 +148,7 @@ public sealed class LocalIpReceiverService(
                         "Receptora de paneles activada automáticamente en {Host}:{Port} (formato {ContentType}); su " +
                         "credencial queda cifrada en {Path} y la administra el servidor (nadie necesita conocerla).",
                         Host, Port, contentType, SecretPath);
-                    return new LocalReceiverState(true, true, null, Final: true);
+                    return await ReadyAsync(ct);
                 }
 
                 if (body.Contains("hasActivated", StringComparison.OrdinalIgnoreCase))
@@ -166,6 +178,50 @@ public sealed class LocalIpReceiverService(
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// La receptora ya tiene credencial; queda dejarle habilitada la salida de
+    /// eventos. Si eso todavía no se logra (recién arrancando, por ejemplo) el
+    /// estado no es final y el arranque vuelve a intentarlo: un panel sin
+    /// canal de eventos funciona, pero a medias.
+    /// </summary>
+    private async Task<LocalReceiverState> ReadyAsync(CancellationToken ct)
+    {
+        if (_eventsEnabled) return new LocalReceiverState(true, true, null, Final: true);
+        if (await EnableEventsAsync(ct) is { } problem)
+            return new LocalReceiverState(true, true, problem);
+        _eventsEnabled = true;
+        return new LocalReceiverState(true, true, null, Final: true);
+    }
+
+    /// <summary>
+    /// Habilita en la receptora la salida de automatización «Private», sin la
+    /// cual su API rechaza la suscripción de eventos de los paneles. Es
+    /// idempotente (el driver lee antes de escribir). Devuelve null si quedó
+    /// lista o si no hay nada que hacer, o el motivo por el que hay que
+    /// reintentar.
+    /// </summary>
+    private async Task<string?> EnableEventsAsync(CancellationToken ct)
+    {
+        // Activada por fuera (sin contraseña conocida) o sin driver de
+        // pasarela: no hay con qué configurarla, y el estado ya lo explica.
+        if (GetPassword() is not { Length: > 0 } password) return null;
+        if (drivers.All.Select(f => f.Create()).OfType<IAlarmGatewayDriver>().FirstOrDefault() is not { } gateway) return null;
+
+        try
+        {
+            await gateway.EnsureEventsEnabledAsync(new AlarmConnectionInfo(Host, Port, false, AdminUser, password), ct);
+            logger.LogInformation("Receptora de {Host}:{Port}: salida de eventos «Private» habilitada; los paneles reciben " +
+                                  "sus eventos en el momento y no solo por sondeo.", Host, Port);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "No se pudo habilitar la salida de eventos «Private» en la receptora de {Host}:{Port}: " +
+                                  "los paneles quedan solo con el sondeo hasta lograrlo.", Host, Port);
+            return "La receptora todavía no acepta habilitar su salida de eventos «Private»: los paneles funcionan por sondeo.";
         }
     }
 

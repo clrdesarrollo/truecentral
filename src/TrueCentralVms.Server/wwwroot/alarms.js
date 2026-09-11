@@ -5,6 +5,22 @@
 "use strict";
 
 let alarmDriversCache = null;
+// Dirección que se muestra de un panel. Con una receptora de por medio, la
+// dirección guardada es la de la RECEPTORA: el panel reporta hacia ella y el
+// sistema nunca ve su IP. Mostrarla pelada hacía creer que era la del panel.
+function alarmAddress(p) {
+  const addr = `${p.useHttps ? "https://" : ""}${esc(p.host)}:${p.port}`;
+  return p.deviceId ? `Receptora ${addr} · panel ${esc(p.deviceId)}` : addr;
+}
+
+function alarmAddressHint(p) {
+  const addr = `${p.useHttps ? "https://" : ""}${p.host}:${p.port}`;
+  return p.deviceId
+    ? `El panel "${p.deviceId}" reporta a la receptora ${addr}. Esa es la dirección de la receptora: `
+      + "la del panel no la conoce el sistema, porque es el panel el que llama."
+    : `Dirección del panel: ${addr}`;
+}
+
 async function getAlarmDrivers() {
   alarmDriversCache ??= await Api.get("/api/alarms/drivers");
   return alarmDriversCache;
@@ -76,7 +92,7 @@ async function renderAlarmPanels() {
           ${panels.map((p) => `
             <tr data-id="${p.id}">
               <td>${esc(p.name)}${p.enabled ? "" : ` <span class="tag operator" title="Monitoreo desactivado">pausado</span>`}</td>
-              <td class="muted">${p.useHttps ? "https://" : ""}${esc(p.host)}:${p.port}${p.deviceId ? ` · ${esc(p.deviceId)}` : ""}</td>
+              <td class="muted" title="${esc(alarmAddressHint(p))}">${alarmAddress(p)}</td>
               <td>${esc(p.model ?? "—")}</td>
               <td class="muted">${esc(p.serialNumber ?? "—")}</td>
               <td class="muted">${esc(p.firmwareVersion ?? "—")}</td>
@@ -93,7 +109,14 @@ async function renderAlarmPanels() {
             </tr>
             <tr class="hidden" data-detail="${p.id}"><td colspan="11"></td></tr>`).join("")}
         </tbody>
-      </table></div>`}`;
+      </table></div>`}
+    <div id="alarm-orphans"></div>`;
+
+  // Equipos que están en la receptora de este servidor sin panel en el
+  // sistema (un alta a medias, o algo agregado por fuera). Se muestran solos
+  // y se refrescan con la tabla: la receptora no existe para el operador, así
+  // que no hay nada que "sincronizar" a mano.
+  if (isAdmin) renderAlarmOrphans();
 
   // Diagnóstico: mostrar la credencial que el sistema le puso a la receptora.
   // Queda en la bitácora; para operar no hace falta conocerla.
@@ -127,6 +150,7 @@ async function renderAlarmPanels() {
     try {
       await Api.delete(`/api/alarms/panels/${id}`);
       toast("Panel eliminado.");
+      alarmOrphansCache = null;
       renderAlarmPanels();
     } catch (err) { toast(err.error, true); }
   }));
@@ -156,6 +180,60 @@ async function renderAlarmPanels() {
       try { renderAlarmDetail(await Api.get(`/api/alarms/panels/${id}`)); } catch { /* se reintenta en el próximo ciclo */ }
     }
   }, 10000);
+}
+
+let alarmOrphansCache = null;   // { at, data } — la lista de la receptora se pide como mucho cada 30 s
+
+async function renderAlarmOrphans(force = false) {
+  const box = $("#alarm-orphans");
+  if (!box) return;
+  if (force || !alarmOrphansCache || Date.now() - alarmOrphansCache.at > 30000) {
+    try { alarmOrphansCache = { at: Date.now(), data: await Api.get("/api/alarms/receiver/local/orphans") }; }
+    catch { alarmOrphansCache = { at: Date.now(), data: { devices: [], error: null } }; }
+  }
+  const { devices, error } = alarmOrphansCache.data;
+  if (error) {
+    box.innerHTML = `<div class="error-box" style="margin-top:12px">Receptora de este servidor: ${esc(error)}</div>`;
+    return;
+  }
+  if (!devices.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `
+    <div class="info-box" style="margin-top:14px">
+      <b>Equipos registrados en la receptora sin panel en el sistema</b> (${devices.length}): quedaron de un alta a
+      medias o se agregaron por fuera. <b>Adoptar</b> crea el panel reutilizando el registro (no hace falta la clave);
+      <b>Quitar</b> lo saca de la receptora.
+      <div class="table-scroll" style="margin-top:8px"><table class="grid">
+        <thead><tr><th>Nombre</th><th>ID (ISUP/OTAP)</th><th>Estado en la receptora</th><th></th></tr></thead>
+        <tbody>${devices.map((d) => `
+          <tr data-dev="${esc(d.devIndex)}" data-isup="${esc(d.isupId ?? "")}" data-name="${esc(d.name)}">
+            <td>${esc(d.name)}</td>
+            <td class="muted">${esc(d.isupId ?? d.devIndex)}</td>
+            <td>${/offline/i.test(d.status ?? "") ? `<span class="tag off">Fuera de línea</span>` : /online/i.test(d.status ?? "") ? `<span class="tag on">En línea</span>` : `<span class="muted">${esc(d.status ?? "—")}</span>`}</td>
+            <td class="row-actions">
+              <button class="btn ghost btn-orphan-adopt">Adoptar</button>
+              <button class="btn danger btn-orphan-remove">Quitar</button>
+            </td>
+          </tr>`).join("")}
+        </tbody>
+      </table></div>
+    </div>`;
+  $$("#alarm-orphans .btn-orphan-adopt").forEach((b) => b.addEventListener("click", (e) => {
+    const tr = e.target.closest("tr");
+    alarmPanelModal(null, { name: tr.dataset.name, deviceId: tr.dataset.isup || tr.dataset.dev, registered: true });
+  }));
+  $$("#alarm-orphans .btn-orphan-remove").forEach((b) => b.addEventListener("click", async (e) => {
+    const tr = e.target.closest("tr");
+    if (!confirm(`¿Quitar "${tr.dataset.name}" de la receptora? El panel dejará de poder reportar hasta que se registre de nuevo.`)) return;
+    try {
+      const local = await Api.get("/api/alarms/receiver/local");
+      await Api.post("/api/alarms/receiver/devices/delete", {
+        receiver: { host: local.host, port: local.port, useHttps: false, username: local.username, password: null },
+        devIndex: tr.dataset.dev,
+      });
+      toast("Equipo quitado de la receptora.");
+      renderAlarmOrphans(true);
+    } catch (err) { toast(err.error ?? String(err), true); }
+  }));
 }
 
 /** Detalle desplegable: áreas con sus botones y zonas con su estado. */
@@ -245,7 +323,7 @@ function renderAlarmDetail(panel) {
   });
 }
 
-async function alarmPanelModal(panel) {
+async function alarmPanelModal(panel, prefill = null) {
   const isNew = !panel;
   const drivers = await getAlarmDrivers();
   const driver0 = drivers.find((d) => d.key === panel?.driverKey) ?? drivers[0];
@@ -257,7 +335,7 @@ async function alarmPanelModal(panel) {
     <form id="alarm-form">
       <div class="field">
         <label>Nombre</label>
-        <input id="al-name" required maxlength="128" value="${esc(panel?.name ?? "")}" placeholder="Panel bodega, Central oficina...">
+        <input id="al-name" required maxlength="128" value="${esc(panel?.name ?? prefill?.name ?? "")}" placeholder="Panel bodega, Central oficina...">
       </div>
       <div class="field">
         <label>Marca / protocolo</label>
@@ -270,7 +348,7 @@ async function alarmPanelModal(panel) {
       </label>
       <div class="form-grid" id="al-conn-box">
         <div class="field">
-          <label>Dirección (IP o hostname)</label>
+          <label id="al-host-label">${driver0?.needsDeviceId ? "Dirección del IP Receiver Pro (IP o hostname)" : "Dirección del panel (IP o hostname)"}</label>
           <input id="al-host" required value="${esc(panel?.host ?? "")}" placeholder="192.168.1.50">
         </div>
         <div class="field">
@@ -294,23 +372,31 @@ async function alarmPanelModal(panel) {
         <div class="form-grid">
           <div class="field">
             <label>ID del panel (ISUP)</label>
-            <input id="al-isup-id" maxlength="31" placeholder="1001" value="${esc(panel?.deviceId ?? "")}">
+            <input id="al-isup-id" maxlength="31" placeholder="1001" value="${esc(prefill?.deviceId ?? panel?.deviceId ?? "")}">
           </div>
           <div class="field">
-            <label>Clave del panel${isNew ? "" : " (vacío = no cambiar)"}</label>
-            <input id="al-isup-key" type="password" autocomplete="new-password" maxlength="32">
+            <label>Clave del panel${isNew ? (prefill?.registered ? " (opcional: ya está registrado)" : "")
+              : (panel?.hasDeviceKey ? " (vacío = no cambiar)" : " (no guardada: escríbala)")}</label>
+            <input id="al-isup-key" type="password" autocomplete="new-password" maxlength="32"
+                   placeholder="8 a 32 letras y números" title="Solo letras y números, sin símbolos ni espacios">
           </div>
         </div>
         <div class="field">
           <label>Protocolo del panel</label>
           <select id="al-isup-proto">
-            <option value="isup">Hikvision ISUP</option>
-            <option value="otap">Hikvision OTAP</option>
+            <option value="isup" ${(panel?.deviceProtocol ?? "isup") === "isup" ? "selected" : ""}>Hikvision ISUP</option>
+            <option value="otap" ${panel?.deviceProtocol === "otap" ? "selected" : ""}>Hikvision OTAP</option>
           </select>
         </div>
         <div class="info-box">El ID y la clave son los que están configurados <b>en el panel</b> para reportar
-          a la receptora (en el AX PRO: Comunicación → ISUP). Al guardar, el sistema lo da de alta en la
-          receptora de este servidor: no hay que configurar nada más.</div>
+          a la receptora (en el AX PRO: Comunicación → ISUP). La clave debe ser de 8 a 32 <b>letras y números</b>:
+          la receptora rechaza las claves con símbolos o espacios. Al guardar, el sistema lo registra en la
+          receptora de este servidor y lo mantiene registrado: si el equipo desaparece de ella, lo vuelve a
+          registrar solo con la clave guardada.${prefill?.registered
+            ? " <b>Este equipo ya está registrado</b>: la clave es opcional; si la escribe, se vuelve a registrar con ella."
+            : (!isNew && !panel?.hasDeviceKey)
+              ? " <b>El sistema no tiene guardada la clave de este panel</b>: escríbala para que pueda re-registrarlo si hace falta."
+              : ""}</div>
       </div>
       <div class="form-grid" id="al-creds-box">
         <div class="field">
@@ -325,7 +411,7 @@ async function alarmPanelModal(panel) {
       <label class="checkbox-row" id="al-https-row"><input type="checkbox" id="al-https" ${(panel ? panel.useHttps : driver0?.defaultHttps) ? "checked" : ""}> Usar HTTPS (certificado autofirmado aceptado)</label>
       <label class="checkbox-row"><input type="checkbox" id="al-enabled" ${panel ? (panel.enabled ? "checked" : "") : "checked"}> Monitoreo activo (sondeo de estado y recepción de eventos)</label>
       <div class="info-box" style="margin-top:10px" id="al-cred-help">${driver0?.needsDeviceId
-        ? "Estas credenciales son las del <b>IP Receiver Pro</b> (la pasarela), no las del panel. El panel se identifica por su equipo dentro de la pasarela (arriba) y se comunica con ella por su clave EHome/ISUP, configurada en el propio panel. Requiere que en la pasarela esté habilitado <b>Automation Output → Protocol → Private</b>. Si la receptora se instaló con el instalador de TrueCentral, está en <b>127.0.0.1:8091</b> y solo se puede usar desde el servidor."
+        ? "Estas credenciales son las del <b>IP Receiver Pro</b> (la pasarela), no las del panel. El panel se identifica por su equipo dentro de la pasarela (arriba) y se comunica con ella por su clave EHome/ISUP, configurada en el propio panel. El sistema deja habilitado solo en la pasarela <b>Automation Output → Protocol → Private</b>, que es lo que hace falta para recibir sus eventos; si esta cuenta no tiene permiso para cambiarlo, habilítelo a mano. Si la receptora se instaló con el instalador de TrueCentral, está en <b>127.0.0.1:8091</b> y solo se puede usar desde el servidor."
         : "Use un usuario <b>local</b> del panel (el creado al activarlo, normalmente <b>admin</b>), no la cuenta de la nube Hik-Connect. Tras varios intentos fallidos el panel bloquea el acceso por 30 minutos."}</div>
       <div id="al-probe-result"></div>
       <div class="modal-actions">
@@ -336,15 +422,20 @@ async function alarmPanelModal(panel) {
     </form>`, true);
 
   $("#al-cancel").addEventListener("click", closeModal);
+  alphanumericOnly($("#al-isup-id"));
+  alphanumericOnly($("#al-isup-key"));
   $("#al-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#al-driver").value);
     if (dr && isNew) { $("#al-port").value = dr.defaultPort; $("#al-https").checked = dr.defaultHttps; }
     const gw = !!dr?.needsDeviceId;
     $("#al-device-field").hidden = !gw;
+    $("#al-host-label").textContent = gw
+      ? "Dirección del IP Receiver Pro (IP o hostname)"
+      : "Dirección del panel (IP o hostname)";
     $("#al-username-label").textContent = gw ? "Usuario del IP Receiver Pro" : "Usuario del panel";
     $("#al-password-label").textContent = (gw ? "Contraseña del IP Receiver Pro" : "Contraseña del panel") + (isNew ? "" : " (vacío = no cambiar)");
     $("#al-cred-help").innerHTML = gw
-      ? "Estas credenciales son las del <b>IP Receiver Pro</b> (la pasarela), no las del panel. El panel se identifica por su equipo dentro de la pasarela (arriba) y se comunica con ella por su clave EHome/ISUP, configurada en el propio panel. Requiere que en la pasarela esté habilitado <b>Automation Output → Protocol → Private</b>. Si la receptora se instaló con el instalador de TrueCentral, está en <b>127.0.0.1:8091</b> y solo se puede usar desde el servidor."
+      ? "Estas credenciales son las del <b>IP Receiver Pro</b> (la pasarela), no las del panel. El panel se identifica por su equipo dentro de la pasarela (arriba) y se comunica con ella por su clave EHome/ISUP, configurada en el propio panel. El sistema deja habilitado solo en la pasarela <b>Automation Output → Protocol → Private</b>, que es lo que hace falta para recibir sus eventos; si esta cuenta no tiene permiso para cambiarlo, habilítelo a mano. Si la receptora se instaló con el instalador de TrueCentral, está en <b>127.0.0.1:8091</b> y solo se puede usar desde el servidor."
       : "Use un usuario <b>local</b> del panel (el creado al activarlo, normalmente <b>admin</b>), no la cuenta de la nube Hik-Connect. Tras varios intentos fallidos el panel bloquea el acceso por 30 minutos.";
   });
 
@@ -365,28 +456,51 @@ async function alarmPanelModal(panel) {
     // único que el usuario copia del panel; el driver lo resuelve dentro de la
     // pasarela sin necesidad del uuid.
     deviceId: (usingLocalReceiver() ? $("#al-isup-id").value.trim() : $("#al-device").value.trim()) || null,
+    // La clave y el protocolo con que el panel reporta a la receptora: el
+    // servidor registra el equipo en ella y guarda la clave cifrada para
+    // poder re-registrarlo solo si desaparece.
+    deviceKey: usingLocalReceiver() ? ($("#al-isup-key").value || null) : null,
+    deviceProtocol: usingLocalReceiver() ? $("#al-isup-proto").value : null,
   });
 
   const usingLocalReceiver = () => !!($("#al-local")?.checked && localReceiver);
 
   /// Da de alta el panel en la receptora propia si todavía no está. Silencioso
   /// cuando ya existe: lo importante es que después se pueda resolver por su ID.
-  async function ensureRegisteredInLocalReceiver() {
+  // La receptora solo acepta claves ISUP/OTAP de letras y números: se avisa
+  // antes de mandar nada, con el mismo criterio que aplica el servidor.
+  const DEVICE_KEY_ERROR = "La clave del panel debe tener de 8 a 32 caracteres, solo letras y números (sin símbolos " +
+    "ni espacios): la receptora rechaza cualquier otra. Cámbiela en el panel y use esa misma aquí.";
+  function checkDeviceKey(key) {
+    if (key && !/^[A-Za-z0-9]{8,32}$/.test(key)) throw { error: DEVICE_KEY_ERROR };
+  }
+
+  // El ID y la clave ISUP/OTAP solo admiten letras y números: lo que no cumple
+  // no entra al campo, ni escribiendo ni pegando (queda solo la parte válida).
+  function alphanumericOnly(el) {
+    if (!el) return;
+    el.addEventListener("beforeinput", (ev) => {
+      if (!ev.data || !/[^A-Za-z0-9]/.test(ev.data)) return;
+      ev.preventDefault();
+      const clean = ev.data.replace(/[^A-Za-z0-9]/g, "");
+      if (clean) document.execCommand("insertText", false, clean);
+    });
+    el.addEventListener("input", () => {
+      const clean = el.value.replace(/[^A-Za-z0-9]/g, "");
+      if (clean === el.value) return;
+      const caret = Math.max(0, (el.selectionStart ?? clean.length) - (el.value.length - clean.length));
+      el.value = clean;
+      el.setSelectionRange(caret, caret);
+    });
+  }
+
+  // Validación previa de lo que va a la receptora: el registro en ella lo
+  // hace el servidor al probar y al guardar (y lo mantiene después).
+  function checkLocalReceiverForm() {
     if (!usingLocalReceiver()) return;
-    const deviceId = $("#al-isup-id").value.trim();
-    if (!deviceId) throw { error: "Indique el ID del panel (el que tiene configurado para reportar a la receptora)." };
-    try {
-      await Api.post("/api/alarms/receiver/devices", {
-        receiver: receiverConn(),
-        protocol: $("#al-isup-proto").value,
-        deviceId,
-        deviceKey: $("#al-isup-key").value || null,
-        name: $("#al-name").value.trim() || deviceId,
-      });
-    } catch (err) {
-      const message = String(err?.error ?? err ?? "");
-      if (!/ya está agregado|ya esta agregado|deviceExist/i.test(message)) throw err;
-    }
+    if (!$("#al-isup-id").value.trim())
+      throw { error: "Indique el ID del panel (el que tiene configurado para reportar a la receptora)." };
+    checkDeviceKey($("#al-isup-key").value);
   }
 
   // ------------------------------------------------------------------
@@ -475,7 +589,7 @@ async function alarmPanelModal(panel) {
     try {
       devices = await Api.post("/api/alarms/receiver/devices/list", receiverConn());
     } catch (err) {
-      box.innerHTML = `<div class="error-box">${esc(err.message || String(err))}</div>` + gatewayAddFormHtml();
+      box.innerHTML = `<div class="error-box">${esc(err.error || err.message || String(err))}</div>` + gatewayAddFormHtml();
       wireGatewayAddForm();
       return;
     }
@@ -509,7 +623,7 @@ async function alarmPanelModal(panel) {
         await Api.post("/api/alarms/receiver/devices/delete", { receiver: receiverConn(), devIndex });
         await loadGatewayDevices();
       } catch (err) {
-        $("#al-modal-error").innerHTML = `<div class="error-box">${esc(err.message || String(err))}</div>`;
+        $("#al-modal-error").innerHTML = `<div class="error-box">${esc(err.error || err.message || String(err))}</div>`;
         b.disabled = false;
       }
     }));
@@ -527,7 +641,8 @@ async function alarmPanelModal(panel) {
           </div>
           <div class="field">
             <label>Clave del equipo</label>
-            <input id="al-gw-key" type="password" autocomplete="new-password" maxlength="32">
+            <input id="al-gw-key" type="password" autocomplete="new-password" maxlength="32"
+                   placeholder="8 a 32 letras y números" title="Solo letras y números, sin símbolos ni espacios">
           </div>
         </div>
         <div class="form-grid">
@@ -544,7 +659,8 @@ async function alarmPanelModal(panel) {
           </div>
         </div>
         <div class="info-box">El ID y la clave son los que están configurados <b>en el panel</b> para reportar a la receptora
-          (en el AX PRO: Comunicación → ISUP). Al agregarlo, la receptora devuelve su uuid y queda cargado arriba.</div>
+          (en el AX PRO: Comunicación → ISUP). La clave debe ser de 8 a 32 <b>letras y números</b> (la receptora
+          rechaza símbolos y espacios). Al agregarlo, la receptora devuelve su uuid y queda cargado arriba.</div>
         <div style="margin-top:8px">
           <button class="btn" type="button" id="al-gw-add">Agregar a la receptora</button>
         </div>
@@ -554,11 +670,14 @@ async function alarmPanelModal(panel) {
   function wireGatewayAddForm() {
     const addButton = $("#al-gw-add");
     if (!addButton) return;
+    alphanumericOnly($("#al-gw-id"));
+    alphanumericOnly($("#al-gw-key"));
     addButton.addEventListener("click", async () => {
       const errorBox = $("#al-modal-error");
       errorBox.innerHTML = "";
       addButton.disabled = true;
       try {
+        checkDeviceKey($("#al-gw-key").value);
         const created = await Api.post("/api/alarms/receiver/devices", {
           receiver: receiverConn(),
           protocol: $("#al-gw-proto").value,
@@ -571,7 +690,7 @@ async function alarmPanelModal(panel) {
           $("#al-name").value = $("#al-gw-name").value.trim();
         await loadGatewayDevices();
       } catch (err) {
-        errorBox.innerHTML = `<div class="error-box">${esc(err.message || String(err))}</div>`;
+        errorBox.innerHTML = `<div class="error-box">${esc(err.error || err.message || String(err))}</div>`;
       } finally {
         addButton.disabled = false;
       }
@@ -595,9 +714,9 @@ async function alarmPanelModal(panel) {
     const probeButton = $("#al-probe");
     probeButton.disabled = true;
     try {
-      // Para probar hay que estar dado de alta en la receptora: se hace aquí
-      // mismo, igual que al guardar.
-      if (usingLocalReceiver()) await ensureRegisteredInLocalReceiver();
+      // Para probar hay que estar registrado en la receptora: lo hace el
+      // servidor con el ID y la clave del formulario.
+      checkLocalReceiverForm();
       const query = !isNew ? `?panelId=${panel.id}` : "";
       const r = await Api.post(`/api/alarms/panels/probe${query}`, readForm());
       if (!r.success) {
@@ -635,18 +754,15 @@ async function alarmPanelModal(panel) {
     saveButton.disabled = true;
     saveButton.textContent = "Validando…";
     try {
-      // Con la receptora propia, darlo de alta en ella es parte de guardar: el
-      // usuario no tiene que pasar por su inventario.
-      if (usingLocalReceiver()) {
-        saveButton.textContent = "Agregando a la receptora…";
-        await ensureRegisteredInLocalReceiver();
-        saveButton.textContent = "Validando…";
-      }
+      // Con la receptora propia, registrarlo en ella es parte de guardar: lo
+      // hace el servidor con el ID y la clave del formulario.
+      checkLocalReceiverForm();
       const body = readForm();
       if (isNew) await Api.post("/api/alarms/panels", body);
       else await Api.put(`/api/alarms/panels/${panel.id}`, body);
       closeModal();
       toast(isNew ? "Panel agregado y validado." : "Panel actualizado.");
+      alarmOrphansCache = null;
       renderAlarmPanels();
     } catch (err) {
       errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;

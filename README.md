@@ -134,8 +134,9 @@ Qué hace la suite en el equipo, además de copiar archivos:
   vez del puerto 80 abierto a la red, así que su web y su API las usa solo el
   servidor del VMS desde este mismo equipo. Los paneles no usan ese puerto: se
   registran por TCP 7091, 7660-7667 y 8661, que sí quedan abiertos en el
-  firewall. Es un programa aparte en «Programas y características»:
-  desinstalar el VMS no lo quita, y su base de eventos sobrevive.
+  firewall. Aparece como un programa aparte en «Programas y características»,
+  pero no es opcional ni independiente: desinstalar el VMS la quita también
+  (ver «Desinstalación»).
   Durante la instalación, el instalador del fabricante abre el navegador en la
   página del receptor: es un paso suyo que hace incluso en modo silencioso y no
   se puede desactivar. El instalador de la suite pide cerrar el navegador antes
@@ -158,6 +159,56 @@ Qué hace la suite en el equipo, además de copiar archivos:
   un servicio interno que no se ve, como PostgreSQL o MediaMTX. Al agregar un
   panel basta marcar «Usar la receptora instalada en este servidor» y el
   formulario deja de pedir dirección y credenciales.
+
+### Desinstalación
+
+CLR TrueCentral VMS es una solución cerrada: nada de lo que instala sirve por
+separado. Por eso **desinstalar es un borrado total**, sin preguntas por
+partes. Se avisa una sola vez, al principio, con un cuadro que hay que
+confirmar (no aparece en desinstalación silenciosa), y a partir de ahí se
+elimina:
+
+- el servicio `CLRTrueCentralVMS` y todo `%ProgramFiles%\CLR TrueCentral VMS`
+  (incluidos los certificados que MediaMTX se genera solo, que no están en el
+  registro de instalación);
+- **la base de datos completa** y el resto de `%ProgramData%\CLRTrueCentralVMS`:
+  personas, huellas, tarjetas, permisos, eventos, matrículas, workflows,
+  registros y la licencia activada;
+- el **Hik IP Receiver Pro**, con su servicio `DeviceGatewayService`, su propio
+  PostgreSQL, su historial de eventos y los paneles que tenga registrados;
+- el **cliente de escritorio** y el **complemento de enrolamiento** instalados
+  en ese equipo (se lanzan sus desinstaladores en silencio);
+- las reglas de firewall de los cuatro programas;
+- las preferencias y registros por usuario, en todos los perfiles de la
+  máquina: `%AppData%\CLRTrueCentralVMS` (cliente y complemento),
+  `%LocalAppData%\CLRTrueCentral` (proyección de pantalla) y
+  `%LocalAppData%\CLRobotics\TrueCentral` (migrador desde HikCentral, que puede
+  guardar credenciales de HCP).
+
+No queda copia de la base de datos: **si hace falta conservarla, hay que
+respaldarla antes**.
+
+> **La licencia hay que desactivarla antes.** El desinstalador borra el
+> `license.lic` local, pero no avisa al servidor de licencias: para el servidor
+> esa activación sigue ocupada y el equipo nuevo no podrá tomarla. Si la
+> licencia se va a reutilizar, hay que desactivarla **con el servidor todavía
+> funcionando**, desde Sistema → Licencia («Desactivar en este equipo»).
+>
+> El desinstalador lo detecta y avisa: si encuentra una licencia activa
+> (`activationCode` en `%ProgramData%\CLRTrueCentralVMS\license\state.json`),
+> antes de cualquier otra cosa muestra el código de activación, explica que la
+> licencia va a quedar contada como usada y ofrece cancelar para liberarla —
+> con los pasos, y con «No» por defecto. En ese momento el servicio todavía
+> está corriendo, así que el panel web responde y la desactivación es posible;
+> una vez empezada la desinstalación, ya no.
+
+> **Actualizar no pasa por acá.** Para pasar a una versión nueva se ejecuta su
+> instalador **encima** de la anterior (mismo `AppId`): eso conserva los datos,
+> `appsettings.Local.json` y la receptora. Desinstalar para «reinstalar limpio»
+> borra todo.
+
+Los desinstaladores del cliente y del complemento, ejecutados por su cuenta en
+un puesto de operación, también se llevan sus propios ajustes de ese usuario.
 
 Compilar los instaladores (requiere Inno Setup 6, `winget install -e --id
 JRSoftware.InnoSetup`, y los binarios de `build\setup-binaries.ps1`):
@@ -187,6 +238,23 @@ La versión sale del archivo `VERSION`. Instalación desatendida:
   audio por cuadro (exclusivo), y **reconexión automática** de cada cuadro
   ante cortes de red, reinicios del equipo o expulsiones (pide una concesión
   nueva cada vez).
+- Botón **Vistas** al centro de la barra, sobre la grilla: guarda y recupera
+  *vistas* — la división de pantalla más qué cámara estaba en cada cuadro —
+  como las *Custom View* de iVMS-4200. El desplegable lista las vistas
+  (nombre, cuántas cámaras y qué división), el clic en una la **carga** en la
+  grilla (por tandas, con el mismo aviso bloqueante de la apertura masiva) y
+  cada fila propia trae **actualizar** (la reescribe con lo que hay ahora) y
+  **eliminar**, ambos con confirmación. Abajo, el recuadro para guardar la
+  grilla actual con un nombre; la casilla **Compartir con todos los puestos**
+  la deja visible para todo el mundo (si no, es privada de su dueño). El
+  rótulo del botón muestra la última vista cargada.
+- Las vistas viven **en el servidor**, no en el puesto: el operador recupera su
+  pantalla de siempre desde cualquier estación, y los nombres no chocan entre
+  usuarios (cada uno puede tener su "Turno noche"). Modificarlas o borrarlas
+  solo puede su dueño o un administrador. Las cámaras que ya no estén en el
+  inventario se descartan al guardar y su cuadro queda libre al cargar, con
+  aviso en la barra de estado. Guardar, actualizar, eliminar y cargar una
+  vista quedan en la **bitácora de auditoría** (categoría *Video en vivo*).
 - Doble clic sobre un video: el cuadro se **maximiza** dentro de la grilla
   (los demás siguen corriendo ocultos); doble clic de nuevo restaura la
   división anterior. Botón **Pantalla completa**: el área de la grilla ocupa
@@ -262,7 +330,12 @@ La versión sale del archivo `VERSION`. Instalación desatendida:
   una alarma avisa con un aviso flotante y enciende el icono del riel aunque
   la viñeta esté cerrada.
 - Credenciales recordadas cifradas con DPAPI, inicio de sesión automático
-  opcional, lista de usuarios recientes.
+  opcional (se apaga en **Configuración → Sistema**), lista de usuarios
+  recientes.
+- El nombre del usuario en el navbar abre el **menú de la sesión**: a qué
+  servidor está conectado (informativo) y **Cerrar sesión**, que revoca el
+  token en el servidor (queda en la bitácora, categoría `auth`) y devuelve al
+  login sin reiniciar la aplicación.
 
 ## Muro de video
 
@@ -330,6 +403,14 @@ el estado real del equipo. Hay dos drivers Hikvision:
 > receptora ajena (en otro equipo) el formulario sigue pidiendo su dirección y
 > credenciales, y ofrece «Equipos de la receptora…» para ver y administrar su
 > inventario. Todo queda en la bitácora ISO 27001.
+>
+> **La clave ISUP/OTAP del panel debe ser de 8 a 32 letras y números.** La
+> receptora (Hik IP Receiver Pro V2.5.0.6) rechaza por API cualquier clave con
+> símbolos o espacios —responde `badParameters` / `addDeviceFailed`, tanto en
+> claro como cifrada—, así que una clave como `Clr$2023!` hace fallar el alta.
+> Si el panel tiene una clave con símbolos, hay que cambiarla en el panel
+> (Comunicación → ISUP) y usar esa misma en el VMS; el formulario lo valida
+> antes de enviar.
 
 > Los paneles se dan de alta **en la receptora desde el propio VMS**: en el
 > formulario del panel, «Equipos de la receptora…» lista los equipos que tiene
@@ -342,9 +423,14 @@ el estado real del equipo. Hay dos drivers Hikvision:
   el VMS consume su API con la cuenta de la pasarela. En el mantenedor se
   indica la dirección del IP Receiver Pro y el **equipo dentro de ella**
   (uuid, serie, cuenta o ID ISUP; con el campo vacío, "Probar conexión"
-  lista los equipos disponibles). Requisito en la pasarela: *Automation
-  Output → Protocol* habilitado con tipo **Private**; sin eso su API
-  contesta "Invalid operation". Estado, armado, desarmado y bypass van por
+  lista los equipos disponibles). Para entregar eventos la pasarela necesita
+  *Automation Output → Protocol* habilitado con tipo **Private** —sin eso su
+  API contesta "Invalid operation" y el panel queda con el canal de eventos
+  cerrado, funcionando solo por sondeo—, pero **eso lo deja puesto el propio
+  sistema**: al activar la receptora de este servidor, y en cualquier
+  pasarela apenas una suscripción es rechazada. Solo hay que habilitarlo a
+  mano si la cuenta configurada no tiene permiso para cambiarlo. Estado,
+  armado, desarmado y bypass van por
   la pasarela, y los eventos llegan por su suscripción (CIDAlarm con el
   usuario que armó/desarmó, y la conexión/desconexión del panel respecto de
   la pasarela). Además el VMS actúa como **centro receptor de
@@ -354,6 +440,27 @@ con la IP del servidor y ese puerto, y el equipo reporta con confirmación
 todo lo que ocurre (alarmas, armados con el usuario que los hizo,
 anulaciones, fallas y pruebas periódicas). Solo se aceptan reportes desde la
 dirección de un panel habilitado; el resto se rechaza y queda en la bitácora.
+
+- **La dirección que se muestra dice de quién es.** Un panel que llega por
+  receptora aparece como `Receptora 127.0.0.1:8091 · panel 2001`, en el
+  cliente y en el panel web: esa IP es la de la **receptora**, no la del
+  panel. El panel es el que llama hacia ella (ISUP/OTAP), así que el sistema
+  nunca ve su dirección de red. En el formulario, el campo se rotula
+  «Dirección del IP Receiver Pro» cuando el driver es el de la pasarela.
+- **Nombres del panel: la codificación no se da por buena.** Varios firmwares
+  declaran UTF-8 y mandan los nombres en otra codificación, y así un área
+  «Portón Proveedores» llegaba ilegible y se guardaba rota en el inventario y
+  dentro de **cada evento del historial**, donde ya no hay cómo corregirla.
+  Ahora el cuerpo de cada respuesta se decodifica probando, en orden: BOM si
+  lo trae; el `charset` declarado solo cuando es una página china
+  (gb2312/gbk/gb18030, que es información real); UTF-8 estricto; Latin-1 si no
+  deja caracteres de control; y GB18030 como último recurso cuando Latin-1 sí
+  los deja, que es la firma de un texto de dos bytes leído de a uno. Un nombre
+  que aun así quede con caracteres de reemplazo o de control **se descarta**:
+  el área o la zona muestra su nombre genérico («Área 7», «Zona 3») en vez de
+  basura. Un texto chino que no declare su charset se lee como Latin-1: a esa
+  altura es indistinguible de un nombre occidental acentuado y se prefiere
+  acertarle al español.
 
 - **Mantenedor** en `#/alarm-panels` (Dispositivos → Paneles de alarma, rol
   Admin): dirección, puerto, HTTPS opcional (certificado autofirmado
@@ -576,6 +683,25 @@ siempre la misma:
   personas a medio crear. El identificador con el que los equipos la reconocen
   se asigna al crearla y no cambia nunca.
 
+### Avance de la escritura en los equipos
+
+La página **Personas** muestra, mientras haya algo pendiente o fallido, una
+franja con el avance de la pasada del sincronizador: cuántas personas van de
+cuántas, a quién está escribiendo y en qué equipo, el tiempo estimado que falta
+y un enlace a las que tienen error. La tabla se repinta sola cuando la pasada
+avanza (no bajo un modal) y los botones «Escribir pendientes» y «Reenviar todo»
+se deshabilitan mientras corre una pasada. Sale de `GET /api/access/sync/status`
+(avance + conteo por estado) y se publica por el hub como `AccessSyncProgress`.
+
+Dos reglas del sincronizador que nacieron de una migración de 114 personas:
+
+- **Cada persona se toma una vez por pasada.** Antes, si cincuenta personas
+  fallaban (fotos rechazadas), la misma pasada volvía a tomarlas y giraba sobre
+  sí misma sin llegar nunca a las demás.
+- **Las que fallan se reintentan con espera creciente**: 5, 10, 20… minutos
+  hasta una hora, por persona y en memoria (tras reiniciar se reintenta
+  enseguida). Los botones del panel y «Reintentar» las reintentan al instante.
+
 ### Huellas: el complemento de enrolamiento
 
 El panel web no puede hablar con el lector USB del puesto —ningún navegador
@@ -669,6 +795,71 @@ remota: esos modos se configuran en el equipo.
 > castellano y no en números. Lo que aun así no figure se guarda como «Otro»
 > con su código y su respuesta cruda a la vista, en vez de adivinarse: mostrar
 > un rechazo como si fuera un acceso concedido sería peor que no traducirlo.
+
+### Migración desde HikCentral
+
+Para reemplazar un HikCentral Professional sin citar a nadie a reenrolarse
+hay un **migrador de escritorio** (`src\TrueCentralVms.Migrator`, ejecutable
+`TrueCentralMigrador.exe`, se entrega como `dist\CLRTrueCentralVMS-Migrador-<versión>.zip`;
+no necesita instalación ni .NET en el equipo). Es una ventana con cuatro pasos,
+barra de avance y registro del proceso, y trae al padrón de TrueCentral las
+personas, fotos, tarjetas y huellas.
+
+1. **HikCentral**: dirección del servidor y clave/secreto del socio de
+   integración (HikCentral → Sistema → Integración de terceros → OpenAPI).
+   Al conectar lista los departamentos —se puede migrar solo algunos— y
+   completa sola la lista de terminales registrados en HCP.
+2. **Terminales (huellas)**: HikCentral **no entrega las plantillas de huella
+   por su OpenAPI** (en 3.1 el campo llega vacío y no existe ruta de lectura),
+   pero los terminales sí las devuelven por ISAPI (`FingerPrintUpload`). El
+   migrador lee de cada terminal sus personas, tarjetas y plantillas, y las
+   cruza con HikCentral por legajo, tarjeta o nombre. Hace falta estar en la
+   red de los terminales (en sitio o por VPN) y la clave admin de cada uno.
+3. **TrueCentral**: servidor destino y usuario administrador. Se puede elegir
+   un **nivel de acceso** para las personas importadas: con él, el
+   sincronizador las baja a los equipos de ese nivel apenas se crean (es la
+   forma de «cargar la base de HikCentral en los controles» de una vez). Se
+   elige también qué identificador de empleado conservar: el **legajo que ya usan los
+   terminales** (recomendado si los equipos Hikvision siguen en uso: así el
+   sincronizador no duplica personas), el código de persona de HCP, o uno
+   nuevo. Las personas que ya existan se omiten; una tarjeta que ya sea de
+   otra persona se deja fuera y se avisa.
+4. **Migrar**: guarda un **paquete** (`paquete.json` + carpeta `fotos`) como
+   respaldo —sirve para importar más tarde con «Importar un paquete guardado»—
+   y da de alta a las personas por la API normal, así que cada alta queda en
+   la bitácora. Al terminar escribe `registro.txt` en la misma carpeta.
+
+Lo que NO se recupera: las **claves de teclado** (ni HCP ni los terminales las
+devuelven) y los **niveles de acceso** (el modelo es distinto: se asignan en
+TrueCentral después de importar; hasta entonces las personas no bajan a los
+equipos). Las plantillas son del formato Hikvision: sirven para terminales
+Hikvision, no para ZKTeco ni Dahua. El paquete contiene datos personales y
+biométricos: hay que borrarlo al terminar.
+
+Verificado contra un HCP 3.1.0 real: 114 personas, 12 departamentos, 36
+tarjetas y 107 fotos (la foto llega como `data:image/jpeg;base64,…` crudo, sin
+el sobre JSON habitual). Dos cosas que costaron:
+
+- **Las fotos de la OpenAPI son miniaturas de 135x189 px** y los DS-K1T
+  rechazan el rostro por debajo de ~300 px («no pudo reconocer una cara»: 70 %
+  de fallas en la prueba). El migrador amplía las fotos chicas a 400 px de lado
+  corto con interpolación bicúbica antes de mandarlas: con eso el mismo
+  terminal aceptó **107 de 107** rostros (padrón completo bajado a un
+  DS-K1T321MFWX y un DS-K1T804AMF en unos 7 minutos).
+- **HikCentral inventa tarjetas virtuales** (números cercanos a
+  18446744073709551615) para enlazar las huellas de quien no tiene tarjeta, y
+  las lista tanto en su OpenAPI como en los terminales. No existen físicamente:
+  el migrador las descarta. En la instalación de prueba, de 36 «tarjetas» solo
+  11 eran reales.
+- **Los firmware viejos no informan cuántas huellas tiene la persona**: un
+  DS-K1T804AMF (V1.4.0) no trae `numOfFP`, `numOfCard` ni `numOfFace` en la
+  ficha. Sin ese dato el migrador consulta igual los diez dedos (los que no
+  existen contestan `NoFP`), en vez de dar por hecho que no hay huellas.
+- **Las huellas se piden dedo por dedo**: un DS-K1T321MFWX (V3.9.20) contesta
+  solo el primer dedo si `FingerPrintUpload` va sin `fingerPrintID`, aunque la
+  ficha declare cuatro. Se consulta 1..10 hasta juntar los que declara
+  `numOfFP` (validado con hardware: dedos 1, 2, 6 y 7 de 512 bytes cada uno).
+
 
 ## Aplicaciones → Reconocimiento de patentes
 

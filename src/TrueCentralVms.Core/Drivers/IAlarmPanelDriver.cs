@@ -115,6 +115,64 @@ public interface IAlarmPanelDriver
     AlarmPanelEvent? ParsePushedEvent(string contentType, byte[] body) => null;
 }
 
+/// <summary>Resultado de asegurar el registro de un panel en su pasarela.</summary>
+public enum GatewayRegistrationOutcome
+{
+    /// <summary>Ya estaba registrado y la pasarela lo ve en línea.</summary>
+    Registered,
+    /// <summary>Ya estaba registrado, pero la pasarela lo ve fuera de línea (el panel no reporta).</summary>
+    RegisteredOffline,
+    /// <summary>No estaba y se registró ahora con la clave indicada.</summary>
+    ReRegistered,
+    /// <summary>No está y no hay clave con que registrarlo.</summary>
+    NotRegistered,
+}
+
+/// <summary>
+/// Estado del registro. <paramref name="StableDeviceId"/> es el identificador
+/// que conviene guardar (el ID ISUP/OTAP, que no cambia aunque el equipo se
+/// vuelva a registrar; el uuid de la pasarela sí cambia).
+/// </summary>
+public sealed record GatewayRegistration(GatewayRegistrationOutcome Outcome, string? DevIndex, string? StableDeviceId, string? Message);
+
+/// <summary>
+/// Driver que no habla con el panel sino con una pasarela (receptora) en la
+/// que el panel tiene que estar registrado para comunicarse. La pasarela es la
+/// verdad de lo que funciona; el VMS guarda la intención (ID y clave) y con
+/// esto la hace cumplir.
+/// </summary>
+public interface IAlarmGatewayDriver : IAlarmPanelDriver
+{
+    /// <summary>
+    /// Comprueba que el equipo <paramref name="deviceId"/> esté registrado en la
+    /// pasarela de <paramref name="info"/>; si falta y hay clave, lo registra.
+    /// Con <paramref name="replaceIfPresent"/> (clave recién escrita por un
+    /// administrador) se quita y se vuelve a registrar con esa clave, porque la
+    /// registrada no se puede leer para compararla. Lanza <see cref="DriverException"/>
+    /// solo si la pasarela no responde o rechaza el alta.
+    /// </summary>
+    Task<GatewayRegistration> EnsureRegisteredAsync(AlarmConnectionInfo info, string deviceId, string? deviceKey,
+        string? protocol, bool replaceIfPresent = false, string? name = null, CancellationToken ct = default);
+
+    /// <summary>Quita el equipo de la pasarela (por uuid o por ID estable). No falla si ya no está.</summary>
+    Task UnregisterAsync(AlarmConnectionInfo info, string deviceId, CancellationToken ct = default);
+
+    /// <summary>Equipos registrados en la pasarela: (uuid, ID estable, nombre, estado según la pasarela).</summary>
+    Task<IReadOnlyList<(string DevIndex, string? StableDeviceId, string Name, string? Status)>> ListRegisteredAsync(
+        AlarmConnectionInfo info, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deja la pasarela en condiciones de entregar eventos. Algunas traen esa
+    /// salida apagada de fábrica y rechazan la suscripción hasta habilitarla
+    /// (el IP Receiver Pro pide «Automation Output → Protocol» con tipo
+    /// «Private»), y sin eventos los paneles quedan solo con el sondeo. Es
+    /// idempotente: no escribe nada si ya estaba. Lanza
+    /// <see cref="DriverException"/> si la pasarela no responde o no deja
+    /// cambiarlo. Por omisión no hay nada que preparar.
+    /// </summary>
+    Task EnsureEventsEnabledAsync(AlarmConnectionInfo info, CancellationToken ct = default) => Task.CompletedTask;
+}
+
 /// <summary>
 /// Fábrica de un driver de paneles de alarma, con clave estable que se guarda
 /// en la base. Para soportar otra marca basta con implementarla y registrarla
