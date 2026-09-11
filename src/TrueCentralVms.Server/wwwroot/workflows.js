@@ -259,6 +259,7 @@ async function renderWorkflows() {
               <td class="row-actions">
                 ${isAdmin ? `<button class="btn ghost btn-wf-test" title="Ejecuta las acciones de verdad con un evento de ejemplo">Probar</button>
                 <button class="btn ghost btn-wf-edit">Abrir</button>
+                <button class="btn ghost btn-wf-duplicate" title="Crea una copia pausada y la abre en el editor para cambiar lo que haga falta">Duplicar</button>
                 <button class="btn danger btn-wf-delete">Eliminar</button>` : `<button class="btn ghost btn-wf-edit">Ver</button>`}
               </td>
             </tr>`).join("")}
@@ -275,6 +276,19 @@ async function renderWorkflows() {
   $$("#view .btn-wf-edit").forEach((b) => b.addEventListener("click", (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
     location.hash = `#/workflows/edit?id=${id}`;
+  }));
+  $$("#view .btn-wf-duplicate").forEach((b) => b.addEventListener("click", async (e) => {
+    const button = e.target;
+    const id = Number(button.closest("tr").dataset.id);
+    button.disabled = true;
+    try {
+      const copy = await Api.post(`/api/workflows/${id}/duplicate`);
+      toast(`Copia creada (pausada): «${copy.name}». Cambie lo que necesite, actívela y guarde.`);
+      location.hash = `#/workflows/edit?id=${copy.id}`;
+    } catch (err) {
+      toast(err.error, true);
+      button.disabled = false;
+    }
   }));
   $$("#view .btn-wf-delete").forEach((b) => b.addEventListener("click", async (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
@@ -513,8 +527,10 @@ function wfFieldHtml(action, field, lists) {
       const selected = (current || []).map(String);
       return `<div class="field"><label>${esc(field.label)}</label>
         ${cameras.length === 0 ? `<div class="muted">No hay cámaras configuradas.</div>` : `
+          <input type="text" class="wf-filter" placeholder="Filtrar cámaras por nombre…" autocomplete="off"
+                 title="Escriba parte del nombre del equipo o de la cámara; las marcadas siempre se muestran">
           <div class="wf-check-grid" ${attributes}>
-            ${cameras.map((c) => `<label class="checkbox-row" ${c.supportsSnapshot ? "" : 'title="El driver de este equipo no captura imágenes"'}>
+            ${cameras.map((c) => `<label class="checkbox-row" ${wfPreviewAttr(c)} ${c.supportsSnapshot ? "" : 'title="El driver de este equipo no captura imágenes"'}>
               <input type="checkbox" data-camera="${c.channelId}" ${selected.includes(String(c.channelId)) ? "checked" : ""} ${c.supportsSnapshot ? "" : "disabled"}>
               ${esc(c.deviceName)} · ${esc(c.channelName)}</label>`).join("")}
           </div>`}${help}</div>`;
@@ -586,6 +602,91 @@ function wfFieldHtml(action, field, lists) {
       return `<div class="field"><label>${esc(field.label)}</label>
         <input type="text" ${attributes} value="${esc(current ?? "")}" placeholder="${esc(field.placeholder || "")}">${help}</div>`;
   }
+}
+
+// --- Listas de cámaras: filtro y vista previa al pasar el mouse -------------
+// Con decenas de canales, marcar la cámara correcta a ojo es lento: el filtro
+// esconde las que no calzan con el texto (las marcadas siguen a la vista) y
+// al dejar el mouse un momento sobre un nombre aparece una miniatura viva del
+// canal (misma captura que usa el mantenedor de dispositivos).
+
+/// Cuánto hay que dejar el mouse sobre el nombre para que aparezca la vista previa.
+const WF_PREVIEW_DELAY_MS = 1500;
+
+/// Atributos de vista previa de una cámara de /api/workflows/cameras.
+function wfPreviewAttr(camera) {
+  if (!camera.supportsSnapshot || camera.channelNumber === undefined) return "";
+  return `data-preview="${camera.deviceId}/${camera.channelNumber}" data-preview-name="${esc(camera.deviceName)} · ${esc(camera.channelName)}"`;
+}
+
+/// Activa el filtro y la vista previa en todas las listas de cámaras dentro de `root`.
+function wfBindCameraLists(root) {
+  $$(".wf-filter", root).forEach((input) => {
+    const grid = input.nextElementSibling;
+    if (!grid || !grid.classList.contains("wf-check-grid")) return;
+    input.addEventListener("input", () => {
+      const text = input.value.trim().toLowerCase();
+      let visible = 0;
+      $$("label", grid).forEach((label) => {
+        const checked = label.querySelector("input")?.checked;
+        const show = !text || checked || label.textContent.toLowerCase().includes(text);
+        label.hidden = !show;
+        if (show) visible++;
+      });
+      grid.querySelector(".wf-filter-empty")?.remove();
+      if (visible === 0) grid.insertAdjacentHTML("beforeend", `<div class="muted wf-filter-empty" style="font-size:12px">Ninguna cámara coincide con «${esc(input.value.trim())}».</div>`);
+    });
+  });
+
+  $$("[data-preview]", root).forEach((label) => {
+    let timer = null;
+    label.addEventListener("mouseenter", () => {
+      timer = setTimeout(() => wfShowPreview(label), WF_PREVIEW_DELAY_MS);
+    });
+    label.addEventListener("mouseleave", () => {
+      clearTimeout(timer);
+      wfHidePreview();
+    });
+  });
+}
+
+function wfShowPreview(label) {
+  wfHidePreview();
+  const [deviceId, channelNumber] = label.dataset.preview.split("/");
+  const box = document.createElement("div");
+  box.id = "wf-preview";
+  box.innerHTML = `
+    <div class="wf-preview-name">${esc(label.dataset.previewName || "")}</div>
+    <div class="wf-preview-body"><span class="muted">Capturando…</span></div>`;
+  document.body.appendChild(box);
+
+  // A la derecha del nombre si cabe; si no, a la izquierda. Nunca fuera de la ventana.
+  const rect = label.getBoundingClientRect();
+  const width = 336, height = 230;
+  let left = rect.right + 10;
+  if (left + width > window.innerWidth - 8) left = rect.left - width - 10;
+  if (left < 8) left = 8;
+  let top = rect.top - 20;
+  if (top + height > window.innerHeight - 8) top = window.innerHeight - height - 8;
+  if (top < 8) top = 8;
+  box.style.left = left + "px";
+  box.style.top = top + "px";
+
+  const img = new Image();
+  img.alt = "";
+  img.addEventListener("load", () => {
+    if (!box.isConnected) return;
+    box.querySelector(".wf-preview-body").replaceChildren(img);
+  });
+  img.addEventListener("error", () => {
+    if (!box.isConnected) return;
+    box.querySelector(".wf-preview-body").innerHTML = `<span class="muted">El equipo no entregó imagen.</span>`;
+  });
+  img.src = `/api/devices/${encodeURIComponent(deviceId)}/snapshot/${encodeURIComponent(channelNumber)}?access_token=${encodeURIComponent(Api.token || "")}&t=${Date.now()}`;
+}
+
+function wfHidePreview() {
+  $("#wf-preview")?.remove();
 }
 
 /// Lee un campo de la pantalla y lo guarda en la acción.

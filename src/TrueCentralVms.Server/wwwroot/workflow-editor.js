@@ -804,6 +804,7 @@ function wfeProps() {
       }));
       $("#wfe-adelay").addEventListener("change", (e) => { node.delaySeconds = Number(e.target.value) || 0; });
       $("#wfe-aenabled").addEventListener("change", (e) => { node.enabled = e.target.checked; wfeDrawKeepProps(); });
+      wfBindCameraLists($("#wfe-fields"));
       break;
     }
   }
@@ -819,8 +820,8 @@ function wfeDrawKeepProps() { wfeDraw(); }
 function wfeCheckList(items, selected, prefix, emptyText) {
   if (items.length === 0) return `<div class="muted" style="font-size:12px">${esc(emptyText || "Sin elementos.")}</div>`;
   const marked = (selected || []).map(String);
-  return `<div class="wf-check-grid">${items.map(([value, label, title]) => `
-    <label class="checkbox-row" ${title ? `title="${esc(title)}"` : ""}><input type="checkbox" data-${prefix}="${esc(String(value))}"
+  return `<div class="wf-check-grid">${items.map(([value, label, title, extra]) => `
+    <label class="checkbox-row" ${title ? `title="${esc(title)}"` : ""} ${extra || ""}><input type="checkbox" data-${prefix}="${esc(String(value))}"
       ${marked.includes(String(value)) ? "checked" : ""}> ${esc(label)}</label>`).join("")}</div>`;
 }
 
@@ -828,7 +829,9 @@ function wfeCheckList(items, selected, prefix, emptyText) {
 function wfeConditionsForm(container, node, isTrigger) {
   const L = wfEd.lists;
   const t = wfEd.triggerType;
-  const c = node.conditions || (node.conditions = {});
+  // OJO: read() reemplaza node.conditions por un objeto nuevo; cada redibujo
+  // debe leer el actual, no una referencia capturada al armar el formulario.
+  node.conditions ||= {};
   const marked = (prefix) => $$(`[data-${prefix}]`, container).filter((i) => i.checked).map((i) => i.dataset[prefix]);
   const strings = (id) => ($(`#${id}`, container)?.value || "").split(/[,\n;]/).map((v) => v.trim()).filter((v) => v.length > 0);
 
@@ -837,13 +840,35 @@ function wfeConditionsForm(container, node, isTrigger) {
     const ids = marked("panel").map(Number);
     return L.panels.filter((p) => ids.length === 0 || ids.includes(p.id));
   };
-  const itemsOf = (pick, saved) => {
-    const map = new Map();
-    panelsChosen().forEach((p) => (pick(p) || []).forEach((item) => {
-      if (!map.has(item.number)) map.set(item.number, `${item.number} · ${item.name}`);
+  // Zonas y áreas se identifican por PANEL + número ("panelId:n"): el número
+  // 2 de un panel no es el 2 de otro. Con más de un panel a la vista, el
+  // nombre del panel va delante para distinguirlas.
+  const itemsOf = (pick, savedKeys, savedNumbers) => {
+    const chosen = panelsChosen();
+    const multi = chosen.length > 1;
+    const items = [];
+    chosen.forEach((p) => (pick(p) || []).forEach((item) => {
+      items.push([`${p.id}:${item.number}`, `${multi ? p.name + " · " : ""}${item.number} · ${item.name}`]);
     }));
-    (saved || []).forEach((n) => { if (!map.has(n)) map.set(n, `${n} · (ya no existe en el panel)`); });
-    return [...map.entries()].sort((a, b) => a[0] - b[0]);
+    // Lo guardado que no está a la vista (su panel quedó sin marcar, o la
+    // zona ya no existe) se conserva para no perderlo al editar.
+    (savedKeys || []).forEach((k) => {
+      if (items.some(([key]) => key === k)) return;
+      const [pid, n] = k.split(":");
+      const panel = L.panels.find((p) => String(p.id) === pid);
+      const item = panel && (pick(panel) || []).find((z) => String(z.number) === n);
+      items.push([k, item
+        ? `${panel.name} · ${n} · ${item.name} (panel sin marcar)`
+        : `${panel ? panel.name + " · " : ""}${n} · (ya no existe en el panel)`]);
+    });
+    return items;
+  };
+  // Automatizaciones guardadas antes de las claves por panel: solo traen
+  // números, que se marcan en todos los paneles a la vista.
+  const selectedKeys = (savedKeys, savedNumbers) => {
+    if (savedKeys?.length) return savedKeys;
+    if (!savedNumbers?.length) return [];
+    return panelsChosen().flatMap((p) => savedNumbers.map((n) => `${p.id}:${n}`));
   };
   const devicesChosen = () => {
     const ids = marked("device").map(Number);
@@ -855,6 +880,7 @@ function wfeConditionsForm(container, node, isTrigger) {
   };
 
   const draw = () => {
+    const c = node.conditions;
     const parts = [];
     const field = (label, inner, help) => parts.push(`<div class="field"><label>${label}</label>${inner}${help ? `<div class="muted" style="font-size:11.5px;margin-top:3px">${help}</div>` : ""}</div>`);
 
@@ -864,9 +890,11 @@ function wfeConditionsForm(container, node, isTrigger) {
         field("Paneles", wfeCheckList(L.panels.map((p) => [p.id, p.name]), c.panelIds, "panel", "No hay paneles de alarma configurados."));
         if (t === "alarm-event") {
           field("Tipo de evento", wfeCheckList(WF_KINDS, c.kinds, "kind"));
-          field("Severidad", wfeCheckList(WF_SEVERITIES, c.severities, "severity"));
-          field("Zonas / sensores", wfeCheckList(itemsOf((p) => p.zones, c.zoneNumbers), c.zoneNumbers, "zone", "El panel elegido todavía no informa zonas."));
-          field("Áreas", wfeCheckList(itemsOf((p) => p.areas, c.areaNumbers), c.areaNumbers, "area", "El panel elegido todavía no informa áreas."));
+          field("Severidad", wfeCheckList(WF_SEVERITIES, c.severities, "severity"),
+            "«Sensor interrumpido» no tiene severidad propia (se detecta por sondeo con el área desarmada): este filtro no lo afecta.");
+          field("Zonas / sensores", wfeCheckList(itemsOf((p) => p.zones, c.zoneKeys), selectedKeys(c.zoneKeys, c.zoneNumbers), "zone", "El panel elegido todavía no informa zonas."),
+            "Cada zona es de un panel concreto: marcar una zona ya acota el panel.");
+          field("Áreas", wfeCheckList(itemsOf((p) => p.areas, c.areaKeys), selectedKeys(c.areaKeys, c.areaNumbers), "area", "El panel elegido todavía no informa áreas."));
           parts.push(`<div class="form-grid">
             <div class="field"><label>Códigos del evento (coma)</label><input id="wfe-codes" value="${esc((c.codes || []).join(", "))}" placeholder="1130, 1120"></div>
             <div class="field"><label>La descripción contiene</label><input id="wfe-text" value="${esc(c.textContains || "")}" placeholder="intrusión"></div>
@@ -894,7 +922,8 @@ function wfeConditionsForm(container, node, isTrigger) {
         field("Tipo de evento", wfeCheckList(WFE_VIDEO_KINDS, c.videoEventKinds, "vkind"));
         field("Equipos (cámaras / grabadores)", wfeCheckList(L.devices.map((d) =>
           [d.id, d.name + (d.supportsEvents ? "" : " (el driver no recibe eventos)")]), c.deviceIds, "device", "No hay fuentes de video."));
-        field("Cámaras (canales)", wfeCheckList(devicesChosen().map((cam) => [cam.channelId, `${cam.deviceName} · ${cam.channelName}`]), c.channelIds, "channel", "No hay canales."),
+        field("Cámaras (canales)", `<input type="text" class="wf-filter" placeholder="Filtrar cámaras por nombre…" autocomplete="off">` +
+          wfeCheckList(devicesChosen().map((cam) => [cam.channelId, `${cam.deviceName} · ${cam.channelName}`, null, wfPreviewAttr(cam)]), c.channelIds, "channel", "No hay canales."),
           "El servidor se suscribe solo a los eventos de los equipos que pida alguna automatización. Las reglas (movimiento, cruce de línea…) se configuran en la web del propio equipo. Hoy reciben eventos los equipos Hikvision por SDK.");
         break;
 
@@ -955,14 +984,15 @@ function wfeConditionsForm(container, node, isTrigger) {
 
     // Cambiar un panel o equipo cambia sus zonas/canales/puertas: se redibuja conservando lo marcado.
     $$("[data-panel], [data-device], [data-adevice]", container).forEach((box) => box.addEventListener("change", () => { read(); draw(); }));
-    $$("input, select, textarea", container).forEach((el) => el.addEventListener("change", () => { read(); wfeDraw(); }));
+    $$("input:not(.wf-filter), select, textarea", container).forEach((el) => el.addEventListener("change", () => { read(); wfeDraw(); }));
+    wfBindCameraLists(container);
     $("#wfe-hookcopy", container)?.addEventListener("click", () => {
       navigator.clipboard?.writeText($("#wfe-hookurl", container).value).then(() => toast("URL copiada."), () => toast("No se pudo copiar.", true));
     });
     $("#wfe-hooknew", container)?.addEventListener("click", async () => {
       try {
         const { key } = await Api.post("/api/workflows/hook-key");
-        c.hookKey = key;
+        node.conditions.hookKey = key;
         draw();
         toast("Clave nueva generada: regirá al guardar.");
       } catch (err) { toast(err.error, true); }
@@ -977,14 +1007,17 @@ function wfeConditionsForm(container, node, isTrigger) {
       toTime: $("#wfe-to", container)?.value || null,
     };
     switch (t) {
-      case "alarm-event":
+      case "alarm-event": {
+        const zoneKeys = marked("zone"), areaKeys = marked("area");
+        const numbersOf = (keys) => [...new Set(keys.map((k) => Number(k.split(":")[1])))];
         Object.assign(next, {
           panelIds: marked("panel").map(Number), kinds: marked("kind"), severities: marked("severity"),
-          zoneNumbers: marked("zone").map(Number), areaNumbers: marked("area").map(Number),
+          zoneKeys, areaKeys, zoneNumbers: numbersOf(zoneKeys), areaNumbers: numbersOf(areaKeys),
           codes: strings("wfe-codes"), textContains: $("#wfe-text", container)?.value.trim() || null,
           sources: marked("source"), sustainedSeconds: isTrigger ? (number("wfe-sustained") || 0) : 0,
         });
         break;
+      }
       case "panel-status":
         Object.assign(next, { panelIds: marked("panel").map(Number), statuses: marked("status") });
         break;
@@ -1016,7 +1049,7 @@ function wfeConditionsForm(container, node, isTrigger) {
         if (isTrigger) next.scheduleTimes = strings("wfe-times");
         break;
       case "webhook":
-        if (isTrigger) next.hookKey = c.hookKey || null;
+        if (isTrigger) next.hookKey = node.conditions.hookKey || null;
         break;
     }
     node.conditions = next;
@@ -1037,8 +1070,23 @@ function wfeConditionsSummary(c, triggerType) {
   if (c.kinds?.length) push(names(c.kinds, WF_KINDS));
   if (c.severities?.length) push(names(c.severities, WF_SEVERITIES));
   if (c.statuses?.length) push(names(c.statuses, WF_STATUSES));
-  if (c.areaNumbers?.length) push(`áreas ${c.areaNumbers.join(", ")}`);
-  if (c.zoneNumbers?.length) push(`zonas ${c.zoneNumbers.join(", ")}`);
+  // Zonas y áreas con su nombre (y el panel, si hay varios) cuando el editor
+  // tiene las listas a mano; si no, los números.
+  const nameOf = (keys, pick, word) => {
+    if (!keys?.length) return null;
+    const panels = L?.panels || [];
+    const names = keys.map((k) => {
+      const [pid, n] = k.split(":");
+      const panel = panels.find((p) => String(p.id) === pid);
+      const item = panel && (pick(panel) || []).find((z) => String(z.number) === n);
+      return item ? (panels.length > 1 ? `${panel.name} · ${item.name}` : item.name) : `${word} ${n}`;
+    });
+    return names.length > 2 ? `${names.slice(0, 2).join(", ")} y ${names.length - 2} más` : names.join(", ");
+  };
+  if (c.areaKeys?.length) push(nameOf(c.areaKeys, (p) => p.areas, "área"));
+  else if (c.areaNumbers?.length) push(`áreas ${c.areaNumbers.join(", ")}`);
+  if (c.zoneKeys?.length) push(nameOf(c.zoneKeys, (p) => p.zones, "zona"));
+  else if (c.zoneNumbers?.length) push(`zonas ${c.zoneNumbers.join(", ")}`);
   if (c.codes?.length) push(`códigos ${c.codes.join(", ")}`);
   if (c.sources?.length) push(names(c.sources, WF_SOURCES));
   if (c.textContains) push(`contiene «${c.textContains}»`);

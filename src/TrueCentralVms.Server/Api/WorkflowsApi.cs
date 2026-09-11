@@ -159,7 +159,7 @@ public static class WorkflowsApi
             var channels = await db.Channels.AsNoTracking().Include(c => c.Device)
                 .Where(c => c.Enabled)
                 .OrderBy(c => c.Device.Name).ThenBy(c => c.ChannelNumber)
-                .Select(c => new { c.Id, c.DeviceId, DeviceName = c.Device.Name, c.Name, c.Device.DriverKey, c.SupportsPtz })
+                .Select(c => new { c.Id, c.DeviceId, DeviceName = c.Device.Name, c.Name, c.Device.DriverKey, c.SupportsPtz, c.ChannelNumber })
                 .ToListAsync(ct);
             return Results.Ok(channels.Select(c => new
             {
@@ -167,6 +167,8 @@ public static class WorkflowsApi
                 deviceId = c.DeviceId,
                 deviceName = c.DeviceName,
                 channelName = c.Name,
+                // Para la vista previa del editor (GET /api/devices/{id}/snapshot/{channelNumber}).
+                channelNumber = c.ChannelNumber,
                 supportsSnapshot = drivers.Find(c.DriverKey)?.Capabilities.SupportsSnapshot ?? false,
                 supportsPtz = c.SupportsPtz,
             }));
@@ -319,6 +321,62 @@ public static class WorkflowsApi
                 targetType: "workflow", targetId: id.ToString(), targetName: workflow.Name,
                 detail: $"Eliminó la automatización '{workflow.Name}'. El historial de ejecuciones se conserva.");
             return Results.NoContent();
+        });
+
+        // Duplicar: una copia completa (diagrama, filtro, acciones y sus
+        // contraseñas) que nace PAUSADA con "(copia)" en el nombre, para
+        // armar una automatización parecida cambiando solo la zona o la cámara.
+        app.MapPost("/api/workflows/{id:int}/duplicate", async (HttpContext ctx, int id, VmsDbContext db, LicenseService license,
+            WorkflowEngine engine, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            var source = await db.Workflows.AsNoTracking().Include(w => w.Actions).FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (source is null) return Results.NotFound();
+            if (license.Deny(LicenseFeatures.ModuleAutomation, null, 0) is { } denied)
+                return await license.DenyAsync(ctx, denied, "workflow", source.Name);
+
+            string baseName = $"{source.Name} (copia)";
+            string name = baseName;
+            for (int n = 2; await db.Workflows.AnyAsync(w => w.Name == name, ct); n++)
+                name = $"{baseName} {n}";
+            if (name.Length > 128) return Error("El nombre de la copia supera los 128 caracteres: acorte el original.");
+
+            // La clave de llamada externa es una credencial: la copia recibe una propia.
+            var conditions = WorkflowJson.Conditions(source.ConditionsJson);
+            if (source.TriggerType == WorkflowTriggerTypes.Webhook)
+                conditions = conditions with { HookKey = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(20)) };
+
+            var copy = new Workflow
+            {
+                Name = name,
+                Description = source.Description,
+                Enabled = false,
+                TriggerType = source.TriggerType,
+                ConditionsJson = WorkflowJson.Serialize(conditions),
+                GraphJson = source.GraphJson,
+                CooldownSeconds = source.CooldownSeconds,
+                CreatedBy = session.Username,
+            };
+            foreach (var action in source.Actions.OrderBy(a => a.Order))
+                copy.Actions.Add(new WorkflowAction
+                {
+                    Order = action.Order,
+                    NodeId = action.NodeId,
+                    Type = action.Type,
+                    Enabled = action.Enabled,
+                    ContinueOnError = action.ContinueOnError,
+                    DelaySeconds = action.DelaySeconds,
+                    ConfigJson = action.ConfigJson,
+                    SecretCiphertext = action.SecretCiphertext,
+                });
+            db.Workflows.Add(copy);
+            await db.SaveChangesAsync(ct);
+
+            await audit.LogAsync(ctx, "workflows", "workflow-duplicated",
+                targetType: "workflow", targetId: copy.Id.ToString(), targetName: copy.Name,
+                detail: $"Duplicó la automatización '{source.Name}' como '{copy.Name}' (pausada, {copy.Actions.Count} acción(es)).",
+                data: new { SourceId = source.Id, source.TriggerType });
+            return Results.Created($"/api/workflows/{copy.Id}", WorkflowMapper.ToDto(copy));
         });
 
         // Prueba manual: ejecuta las acciones DE VERDAD con un evento de ejemplo.

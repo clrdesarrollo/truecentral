@@ -1,0 +1,62 @@
+<Window x:Class="TrueCentralVms.Client.Views.ImageViewerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Foto" WindowStyle="None" WindowState="Maximized" ResizeMode="NoResize"
+        ShowInTaskbar="False" Background="Black" Foreground="White"
+        Icon="/TrueCentralVms.Client;component/Assets/logo.png"
+        KeyDown="OnKeyDown">
+    <!-- Visor a pantalla completa con zoom digital: rueda del mouse acerca
+         sobre el punto del cursor, arrastrar desplaza, doble clic alterna entre
+         ajustar y 1:1. Flechas cambian de foto, Esc cierra. -->
+    <Grid>
+        <Grid x:Name="Viewport" Background="Black" ClipToBounds="True"
+              MouseWheel="OnWheel" MouseLeftButtonDown="OnMouseDown" MouseLeftButtonUp="OnMouseUp"
+              MouseMove="OnMouseMove" Cursor="Hand">
+            <Image x:Name="Picture" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top"
+                   RenderOptions.BitmapScalingMode="HighQuality" RenderTransformOrigin="0,0">
+                <Image.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform x:Name="Scale"/>
+                        <TranslateTransform x:Name="Offset"/>
+                    </TransformGroup>
+                </Image.RenderTransform>
+            </Image>
+        </Grid>
+
+        <!-- Barra superior: título, contador y cierre -->
+        <Border VerticalAlignment="Top" Background="#B3000000" Padding="16,8">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource TitleBarCloseButton}" Click="OnClose"
+                        Content="&#xE8BB;" ToolTip="Cerrar (Esc)" Foreground="White"/>
+                <TextBlock x:Name="CounterText" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="0,0,16,0"
+                           FontSize="12" Foreground="#CCFFFFFF"/>
+                <TextBlock x:Name="TitleText" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="13"/>
+            </DockPanel>
+        </Border>
+
+        <!-- Barra inferior: navegación y zoom -->
+        <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Background="#B3000000"
+                CornerRadius="8" Padding="8,6" Margin="0,0,0,18">
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="PrevButton" Style="{StaticResource TitleBarButton}" Click="OnPrev"
+                        Content="&#xE76B;" ToolTip="Foto anterior (←)" Foreground="White"/>
+                <Button x:Name="NextButton" Style="{StaticResource TitleBarButton}" Click="OnNext"
+                        Content="&#xE76C;" ToolTip="Foto siguiente (→)" Foreground="White"/>
+                <Rectangle Width="1" Margin="6,6" Fill="#55FFFFFF"/>
+                <Button Style="{StaticResource TitleBarButton}" Click="OnZoomOut"
+                        Content="&#xE71F;" ToolTip="Alejar (−)" Foreground="White"/>
+                <TextBlock x:Name="ZoomText" VerticalAlignment="Center" MinWidth="52" TextAlignment="Center"
+                           FontSize="12" Foreground="White"/>
+                <Button Style="{StaticResource TitleBarButton}" Click="OnZoomIn"
+                        Content="&#xE8A3;" ToolTip="Acercar (+)" Foreground="White"/>
+                <Button Style="{StaticResource TitleBarButton}" Click="OnFit"
+                        Content="&#xE9A6;" ToolTip="Ajustar a la pantalla (0)" Foreground="White"/>
+                <Button Style="{StaticResource TitleBarButton}" Click="OnActualSize"
+                        Content="&#xE8B3;" ToolTip="Tamaño real 1:1 (1)" Foreground="White"/>
+                <Rectangle Width="1" Margin="6,6" Fill="#55FFFFFF"/>
+                <TextBlock VerticalAlignment="Center" Margin="6,0" FontSize="11" Foreground="#99FFFFFF"
+                           Text="Rueda = zoom · arrastrar = mover · doble clic = 1:1 / ajustar"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

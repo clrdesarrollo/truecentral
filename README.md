@@ -508,7 +508,10 @@ motor recorre el diagrama tal cual está dibujado; las ramas que salen de un
 mismo punto corren una tras otra, de izquierda a derecha. El botón **Probar**
 guarda, ejecuta las acciones de verdad con un evento de ejemplo y pinta en el
 diagrama qué paso salió bien y cuál no. Las automatizaciones anteriores al
-editor se muestran como una línea recta.
+editor se muestran como una línea recta. **Duplicar** (en el listado) crea
+una copia completa —diagrama, filtro, acciones y contraseñas— que nace
+pausada con "(copia)" en el nombre y se abre en el editor: es la forma rápida
+de hacer una automatización parecida cambiando solo la zona o la cámara.
 
 **Disparadores** (`WorkflowTriggerTypes`):
 

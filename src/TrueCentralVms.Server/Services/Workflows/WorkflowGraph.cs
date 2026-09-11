@@ -240,6 +240,12 @@ public sealed class WorkflowGraph
             return "las horas programadas deben tener el formato hh:mm.";
         if (conditions.PlateMatch is { Length: > 0 } match && match is not ("any" or "listed" or "unlisted"))
             return "el modo de comparación de patentes no es válido.";
+        static bool ValidKey(string? key) =>
+            key is not null && key.Split(':') is [var a, var b] && int.TryParse(a, out _) && int.TryParse(b, out _);
+        if (conditions.ZoneKeys is { Count: > 0 } zones && zones.Any(k => !ValidKey(k)))
+            return "una zona no tiene el formato panel:zona.";
+        if (conditions.AreaKeys is { Count: > 0 } areas && areas.Any(k => !ValidKey(k)))
+            return "un área no tiene el formato panel:área.";
         return null;
     }
 

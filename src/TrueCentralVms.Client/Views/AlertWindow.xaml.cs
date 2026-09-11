@@ -394,6 +394,33 @@ public partial class AlertWindow : Window
         }
     }
 
+    private void OnFullscreenClick(object sender, RoutedEventArgs e) => _ = OpenViewerAsync();
+
+    private void OnMainImageClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2) _ = OpenViewerAsync();
+    }
+
+    /// <summary>
+    /// Abre todas las fotos de la alerta en el visor a pantalla completa
+    /// (zoom digital con la rueda, arrastre para mover), partiendo por la que
+    /// se está mirando. Las fotos ya están descargadas y cacheadas.
+    /// </summary>
+    private async Task OpenViewerAsync()
+    {
+        if (_photos.Count == 0) return;
+        var images = new List<BitmapSource?>(_photos.Count);
+        var captions = new List<string>(_photos.Count);
+        var alert = _alerts.Count > 0 ? _alerts[Math.Clamp(_index, 0, _alerts.Count - 1)] : null;
+        for (int i = 0; i < _photos.Count; i++)
+        {
+            images.Add(await LoadAsync(_photos[i]));
+            string name = Path.GetFileNameWithoutExtension(_photos[i]);
+            captions.Add(alert is null ? name : $"{alert.Title} · {alert.RaisedAt.ToLocalTime():dd-MM-yyyy HH:mm:ss} · {name}");
+        }
+        ImageViewerWindow.Open(images, captions, _photo, this);
+    }
+
     /// <summary>Descarga (y cachea) una foto de la alerta.</summary>
     private async Task<BitmapImage?> LoadAsync(string path)
     {

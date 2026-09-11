@@ -292,13 +292,26 @@ public sealed class WorkflowEngine : BackgroundService
             return false;
         if (Has(conditions.Kinds) && (trigger.Kind is null || !conditions.Kinds!.Contains(trigger.Kind.Value)))
             return false;
-        if (Has(conditions.Severities) && (trigger.Severity is null || !conditions.Severities!.Contains(trigger.Severity.Value)))
+        // «Sensor interrumpido» (y su restauración) nacen por diferencia de
+        // estado con el área desarmada y no tienen severidad propia: el
+        // filtro de severidad no los afecta, si no una automatización con
+        // "Advertencia" marcada nunca dispararía con el sensor.
+        bool stateDiff = trigger.Kind is AlarmEventKind.ZoneTriggered;
+        if (!stateDiff && Has(conditions.Severities) &&
+            (trigger.Severity is null || !conditions.Severities!.Contains(trigger.Severity.Value)))
             return false;
         if (Has(conditions.Statuses) && (trigger.PanelStatus is null || !conditions.Statuses!.Contains(trigger.PanelStatus.Value)))
             return false;
         if (Has(conditions.AreaNumbers) && (trigger.AreaNumber is null || !conditions.AreaNumbers!.Contains(trigger.AreaNumber.Value)))
             return false;
         if (Has(conditions.ZoneNumbers) && (trigger.ZoneNumber is null || !conditions.ZoneNumbers!.Contains(trigger.ZoneNumber.Value)))
+            return false;
+        // Zonas y áreas por panel: el número 2 de un panel no es el 2 de otro.
+        if (Has(conditions.ZoneKeys) &&
+            (trigger.PanelId is null || trigger.ZoneNumber is null || !conditions.ZoneKeys!.Contains($"{trigger.PanelId}:{trigger.ZoneNumber}")))
+            return false;
+        if (Has(conditions.AreaKeys) &&
+            (trigger.PanelId is null || trigger.AreaNumber is null || !conditions.AreaKeys!.Contains($"{trigger.PanelId}:{trigger.AreaNumber}")))
             return false;
         if (Has(conditions.Codes) &&
             !conditions.Codes!.Any(c => string.Equals(c?.Trim(), trigger.Code, StringComparison.OrdinalIgnoreCase)))
@@ -500,6 +513,8 @@ public sealed class WorkflowEngine : BackgroundService
             var conditions = WorkflowJson.Conditions(workflow.ConditionsJson);
             if (conditions.SustainedSeconds is not > 0) continue;
             if (conditions.PanelIds is { Count: > 0 } ids) panels.UnionWith(ids);
+            else if (conditions.ZoneKeys is { Count: > 0 } keys)
+                panels.UnionWith(keys.Select(k => int.TryParse(k.Split(':')[0], out int p) ? p : -1).Where(p => p > 0));
             else all = true;
         }
         try { _services.GetRequiredService<AlarmPanelService>().SetFastPoll(all, panels); }

@@ -189,6 +189,7 @@ public static class AuditCatalog
             new("workflow-created", "Automatización creada"),
             new("workflow-updated", "Automatización modificada"),
             new("workflow-deleted", "Automatización eliminada"),
+            new("workflow-duplicated", "Automatización duplicada"),
             new("workflow-tested", "Automatización probada a mano"),
             new("workflow-executed", "Automatización ejecutada"),
             new("workflow-failed", "Automatización con acciones fallidas"),

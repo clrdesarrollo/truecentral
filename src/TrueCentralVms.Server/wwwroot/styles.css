@@ -338,6 +338,21 @@ pre.diag { white-space: pre-wrap; font-size: 12px; margin: 0; color: var(--muted
   gap: 2px 12px; max-height: 190px; overflow-y: auto;
 }
 .wf-check-grid .checkbox-row { margin: 0; }
+/* Filtro de una lista de cámaras (va justo encima de su grilla) */
+.wf-filter {
+  width: 100%; padding: 6px 9px; margin-bottom: 6px; font: inherit; font-size: 12.5px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; outline: none;
+}
+.wf-filter:focus { border-color: var(--accent); }
+/* Vista previa flotante de un canal (aparece al dejar el mouse sobre el nombre) */
+#wf-preview {
+  position: fixed; z-index: 90; width: 336px; pointer-events: none;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.55); overflow: hidden;
+}
+#wf-preview .wf-preview-name { padding: 6px 10px; font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--border); }
+#wf-preview .wf-preview-body { height: 190px; background: #000; display: flex; align-items: center; justify-content: center; }
+#wf-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .wf-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
 .wf-thumbs img {
   width: 190px; border: 1px solid var(--border); border-radius: 8px; display: block;

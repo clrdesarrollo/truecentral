@@ -176,13 +176,23 @@
                             </Grid.RowDefinitions>
                             <Border Grid.Row="0" Background="Black" CornerRadius="6">
                                 <Grid>
-                                    <Image x:Name="MainImage" Stretch="Uniform"/>
+                                    <!-- Doble clic (o el botón de la esquina) abre la foto a pantalla
+                                         completa con zoom digital. -->
+                                    <Image x:Name="MainImage" Stretch="Uniform" Cursor="Hand"
+                                           ToolTip="Doble clic: pantalla completa con zoom"
+                                           MouseLeftButtonDown="OnMainImageClick"/>
                                     <TextBlock x:Name="NoImageText" Text="Esta alerta no tiene fotos."
                                                Foreground="{StaticResource MutedBrush}" FontSize="12.5"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                                     <Border Background="#99000000" CornerRadius="4" Padding="7,2"
                                             HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8">
                                         <TextBlock x:Name="ImageCounter" FontSize="11" Foreground="White"/>
+                                    </Border>
+                                    <Border x:Name="FullscreenBox" Background="#99000000" CornerRadius="4"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,8,0">
+                                        <Button Style="{StaticResource TitleBarButton}" Click="OnFullscreenClick"
+                                                Foreground="White" Width="36" Height="30" FontSize="12"
+                                                Content="&#xE740;" ToolTip="Pantalla completa con zoom digital"/>
                                     </Border>
                                 </Grid>
                             </Border>

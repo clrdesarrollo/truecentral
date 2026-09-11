@@ -145,6 +145,15 @@ public sealed record WorkflowConditionsDto(
     IReadOnlyList<int>? AreaNumbers = null,
     /// <summary>Identificadores de zona tal como los usa la API del panel.</summary>
     IReadOnlyList<int>? ZoneNumbers = null,
+    /// <summary>
+    /// Zonas identificadas por panel ("panelId:zona"). Los números de zona se
+    /// repiten entre paneles, así que sin esto una automatización sin panel
+    /// marcado dispararía con la zona 2 de CUALQUIER panel. El editor guarda
+    /// ambas listas; el motor exige estas cuando existen.
+    /// </summary>
+    IReadOnlyList<string>? ZoneKeys = null,
+    /// <summary>Áreas identificadas por panel ("panelId:área").</summary>
+    IReadOnlyList<string>? AreaKeys = null,
     /// <summary>Códigos del evento (Contact-ID o del fabricante), ej. "1130".</summary>
     IReadOnlyList<string>? Codes = null,
     /// <summary>Origen del evento: "panel" | "poll" | "vms".</summary>
