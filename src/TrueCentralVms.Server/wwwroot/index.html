@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=21">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -34,6 +34,13 @@
         <a href="#/" data-route="dashboard">Panel</a>
         <a href="#/workflows" data-route="workflows">Automatizaciones</a>
         <a href="#/sounds" data-route="sounds">Biblioteca de sonidos</a>
+
+        <div class="nav-divider">Aplicaciones</div>
+        <a href="#/alarms" data-route="alarms">Alarmas</a>
+        <a href="#/event-center" data-route="event-center">Centro de eventos</a>
+        <a href="#/videowall" data-route="videowall">Videowall</a>
+        <a href="#/intercom-console" data-route="intercom-console">Citofonía</a>
+        <a href="#/anpr" data-route="anpr">ANPR</a>
 
         <div class="nav-divider">Configuración</div>
 
@@ -134,7 +141,7 @@
 
   <script src="api.js?v=1"></script>
   <!-- walls.js va ANTES: app.js referencia sus funciones al armar las rutas. -->
-  <script src="walls.js?v=2"></script>
+  <script src="walls.js?v=3"></script>
   <script src="alarms.js?v=9"></script>
   <script src="speakers.js?v=7"></script>
   <script src="intercoms.js?v=2"></script>
@@ -145,6 +152,11 @@
   <script src="workflow-editor.js?v=5"></script>
   <script src="services.js?v=1"></script>
   <script src="license.js?v=1"></script>
-  <script src="app.js?v=22"></script>
+  <script src="anpr.js?v=1"></script>
+  <script src="alarm-monitor.js?v=1"></script>
+  <script src="event-center.js?v=1"></script>
+  <script src="videowall.js?v=1"></script>
+  <script src="intercom-console.js?v=1"></script>
+  <script src="app.js?v=27"></script>
 </body>
 </html>

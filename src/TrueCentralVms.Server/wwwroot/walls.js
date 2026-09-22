@@ -483,8 +483,9 @@ async function assignModal(wall, screen, win) {
   });
 }
 
-/** Layouts guardados de un muro (foto del estado: divisiones + cámaras). */
-async function layoutsModal(wall) {
+/** Layouts guardados de un muro (foto del estado: divisiones + cámaras).
+ *  `onApplied` redibuja la página que la abrió (por defecto, Muro de video). */
+async function layoutsModal(wall, onApplied = renderWalls) {
   let layouts;
   try { layouts = await Api.get(`/api/walls/${wall.id}/layouts`); }
   catch (err) { toast(err.error, true); return; }
@@ -517,7 +518,7 @@ async function layoutsModal(wall) {
     try {
       await Api.post(`/api/walls/${wall.id}/layouts`, { name, screens: null, items: null });
       toast("Layout guardado.");
-      layoutsModal(wall);
+      layoutsModal(wall, onApplied);
     } catch (err) { toast(err.error, true); }
   });
 
@@ -530,7 +531,7 @@ async function layoutsModal(wall) {
       const failed = Object.values(results).filter((x) => !x.success).length;
       closeModal();
       toast(failed === 0 ? "Layout aplicado." : `Layout aplicado con ${failed} error(es).`, failed > 0);
-      renderWalls();
+      onApplied();
     } catch (err) {
       toast(err.error, true);
       e.target.disabled = false;
@@ -541,7 +542,7 @@ async function layoutsModal(wall) {
   $$("#modal .btn-del").forEach((b) => b.addEventListener("click", async (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
     if (!confirm("¿Eliminar este layout?")) return;
-    try { await Api.delete(`/api/walls/${wall.id}/layouts/${id}`); layoutsModal(wall); }
+    try { await Api.delete(`/api/walls/${wall.id}/layouts/${id}`); layoutsModal(wall, onApplied); }
     catch (err) { toast(err.error, true); }
   }));
 }
