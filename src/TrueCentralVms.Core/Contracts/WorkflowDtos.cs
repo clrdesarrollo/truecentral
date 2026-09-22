@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace TrueCentralVms.Core.Contracts;
 
@@ -176,6 +176,13 @@ public sealed record WorkflowConditionsDto(
     string? FromTime = null,
     /// <summary>Hora local de fin ("06:00"); si es menor que la de inicio, la ventana cruza la medianoche.</summary>
     string? ToTime = null,
+    /// <summary>
+    /// Franjas horarias ADICIONALES a la formada por DaysOfWeek/FromTime/ToTime.
+    /// La automatización está activa si se cumple cualquiera de las franjas
+    /// (la principal o una de estas); así "lunes a viernes de 18:00 a 06:00 y
+    /// sábado y domingo todo el día" cabe en una sola automatización.
+    /// </summary>
+    IReadOnlyList<WorkflowTimeBandDto>? TimeBands = null,
 
     // --- Conexión de equipos (disparador device-status) ---
     /// <summary>Clase de equipo: "video" (cámara/grabador), "access" (terminal de acceso), "speaker" (parlante). Vacío = todas.</summary>
@@ -217,6 +224,17 @@ public sealed record WorkflowConditionsDto(
     // --- Llamada externa (disparador webhook) ---
     /// <summary>Clave secreta de la URL: POST /api/workflows/hook/{clave}.</summary>
     string? HookKey = null);
+
+/// <summary>
+/// Franja horaria semanal: días de la semana (0 = domingo; vacío = todos) y
+/// ventana de horas locales (vacías = todo el día). Si la hora de fin es menor
+/// que la de inicio la franja cruza la medianoche y el día que se compara es
+/// el del comienzo (la noche del viernes pertenece al viernes).
+/// </summary>
+public sealed record WorkflowTimeBandDto(
+    IReadOnlyList<int>? DaysOfWeek = null,
+    string? FromTime = null,
+    string? ToTime = null);
 
 /// <summary>
 /// Nodo del diagrama. <paramref name="Kind"/> dice qué es; los demás campos
@@ -386,7 +404,12 @@ public sealed record WorkflowCatalogDto(
     /// <summary>Hay un servidor de correo configurado y habilitado.</summary>
     bool SmtpConfigured,
     /// <summary>El servidor tiene FFmpeg (necesario para convertir sonidos de parlante).</summary>
-    bool FfmpegAvailable);
+    bool FfmpegAvailable,
+    /// <summary>Usuarios del sistema, para elegir los destinatarios de un aviso.</summary>
+    IReadOnlyList<WorkflowUserDto>? Users = null);
+
+/// <summary>Usuario elegible como destinatario de un aviso.</summary>
+public sealed record WorkflowUserDto(int Id, string Username, string Role, bool Enabled);
 
 /// <summary>Seguridad del canal SMTP.</summary>
 public enum SmtpSecurity
@@ -478,7 +501,9 @@ public sealed record WorkflowAlertDto(
     /// <summary>"client" (escritorio) o "web" (panel).</summary>
     string? AcknowledgedFrom,
     /// <summary>Segundos entre el aviso y la confirmación.</summary>
-    int? ResponseSeconds)
+    int? ResponseSeconds,
+    /// <summary>A quién se dirigió ("admin, guardia"); null = a todos los operadores.</summary>
+    string? Recipients = null)
 {
     public bool Pending => RequiresAck && AcknowledgedAt is null;
 }

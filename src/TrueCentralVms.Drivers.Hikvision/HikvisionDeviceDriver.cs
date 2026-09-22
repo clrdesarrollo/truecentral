@@ -426,7 +426,7 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
     }
 
     /// <summary>Lee NET_DVR_GET_IPPARACFG_V40; null si el equipo no lo soporta (ej. DVR analógico antiguo).</summary>
-    private static CHCNetSDK.NET_DVR_IPPARACFG_V40? TryGetIpParaCfg(int userId)
+    internal static CHCNetSDK.NET_DVR_IPPARACFG_V40? TryGetIpParaCfg(int userId)
     {
         int size = Marshal.SizeOf<CHCNetSDK.NET_DVR_IPPARACFG_V40>();
         IntPtr buffer = Marshal.AllocHGlobal(size);

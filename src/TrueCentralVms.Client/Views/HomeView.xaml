@@ -1,4 +1,4 @@
-<UserControl x:Class="TrueCentralVms.Client.Views.HomeView"
+﻿<UserControl x:Class="TrueCentralVms.Client.Views.HomeView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Background="{StaticResource BgBrush}">
@@ -144,6 +144,19 @@
                         <StackPanel Style="{StaticResource CardBody}">
                             <TextBlock Text="Paneles de alarma" Style="{StaticResource CardTitle}"/>
                             <TextBlock Text="Estado de áreas y zonas de las centrales de intrusión, armado, desarmado y eventos en vivo."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Button>
+
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenIntercomCommand}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#3334D399">
+                            <TextBlock Text="&#xE717;" Foreground="#34D399" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Citofonía" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Llamadas de los frentes de videoportero: contestar con video y voz, abrir la puerta e historial."
                                        Style="{StaticResource CardDescription}"/>
                         </StackPanel>
                     </DockPanel>

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
@@ -223,15 +223,43 @@ public sealed class WorkflowGraph
         _ => node.Kind,
     };
 
+    /// <summary>
+    /// Hora local "hh:mm" de una ventana horaria. Admite "24:00" como fin del
+    /// día (00:00 → 24:00 = el día completo), que TimeSpan.TryParse rechaza.
+    /// </summary>
+    public static bool TryParseWindowTime(string? value, out TimeSpan time)
+    {
+        time = default;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (value.Trim() == "24:00") { time = TimeSpan.FromDays(1); return true; }
+        return TimeSpan.TryParse(value, out time) && time >= TimeSpan.Zero && time < TimeSpan.FromDays(1);
+    }
+
     /// <summary>Reglas comunes a las condiciones del disparador y de los nodos de condición.</summary>
     public static string? ValidateConditions(WorkflowConditionsDto conditions)
     {
-        if (conditions.FromTime is { Length: > 0 } from && !TimeSpan.TryParse(from, out _))
+        if (conditions.FromTime is { Length: > 0 } from && !TryParseWindowTime(from, out _))
             return "la hora de inicio de la ventana horaria no es válida (use hh:mm).";
-        if (conditions.ToTime is { Length: > 0 } to && !TimeSpan.TryParse(to, out _))
+        if (conditions.ToTime is { Length: > 0 } to && !TryParseWindowTime(to, out _))
             return "la hora de término de la ventana horaria no es válida (use hh:mm).";
+        if (conditions.FromTime?.Trim() == "24:00")
+            return "la hora de inicio no puede ser 24:00; para todo el día deje las horas vacías o use 00:00 a 24:00.";
         if (conditions.DaysOfWeek is { Count: > 0 } days && days.Any(d => d is < 0 or > 6))
             return "los días de la semana deben ir de 0 (domingo) a 6 (sábado).";
+        foreach (var band in conditions.TimeBands ?? [])
+        {
+            if (band is null) return "hay una franja horaria vacía.";
+            if (band.FromTime is { Length: > 0 } bf && !TryParseWindowTime(bf, out _))
+                return "la hora de inicio de una franja horaria no es válida (use hh:mm).";
+            if (band.ToTime is { Length: > 0 } bt && !TryParseWindowTime(bt, out _))
+                return "la hora de término de una franja horaria no es válida (use hh:mm).";
+            if (band.FromTime?.Trim() == "24:00")
+                return "la hora de inicio de una franja no puede ser 24:00; para todo el día deje las horas vacías o use 00:00 a 24:00.";
+            if (band.DaysOfWeek is { Count: > 0 } bd && bd.Any(d => d is < 0 or > 6))
+                return "los días de una franja horaria deben ir de 0 (domingo) a 6 (sábado).";
+            if (!(band.DaysOfWeek is { Count: > 0 }) && string.IsNullOrWhiteSpace(band.FromTime) && string.IsNullOrWhiteSpace(band.ToTime))
+                return "hay una franja horaria sin días ni horas: quítela o complétela.";
+        }
         if (conditions.SustainedSeconds is < 0 or > 600)
             return "la condición sostenida debe estar entre 0 y 600 segundos.";
         if (conditions.MinConfidence is < 0 or > 100)

@@ -97,6 +97,42 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Parlantes IP (panel de la Vista en Vivo: hablar, sonidos, biblioteca, texto a voz).</summary>
     public SpeakersViewModel Speakers { get; }
 
+    /// <summary>
+    /// Citofonía. Vive desde el arranque: la llamada de un frente tiene que
+    /// sonar y abrir su ventana aunque la viñeta del módulo esté cerrada.
+    /// </summary>
+    public IntercomsViewModel Intercom { get; }
+
+    [ObservableProperty] private bool _isIntercomOpen;
+
+    [RelayCommand]
+    private void OpenIntercom()
+    {
+        IsIntercomOpen = true;
+        ActiveSection = "Intercom";
+        StatusMessage = "Citofonía: las llamadas suenan y se abren solas; desde aquí puede ver y hablarle a un frente o abrir su puerta.";
+        _ = Intercom.LoadHistoryCommand.ExecuteAsync(null);
+    }
+
+    /// <summary>Cerrar la viñeta no apaga nada: las llamadas siguen sonando en este puesto.</summary>
+    [RelayCommand]
+    private void CloseIntercom()
+    {
+        IsIntercomOpen = false;
+        ActiveSection = "Home";
+        StatusMessage = ReadyMessage;
+    }
+
+    /// <summary>Abre la ventana de un frente (con la llamada que suena, si la hay).</summary>
+    private void ShowIntercomWindow(Core.Contracts.IntercomDto intercom, Core.Contracts.IntercomCallDto? call) =>
+        Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var owner = Application.Current.MainWindow is { IsLoaded: true } main ? main : null;
+            Views.IntercomCallWindow.Show(owner, _api, _settings, Intercom,
+                id => Devices.SelectMany(d => d.Channels).FirstOrDefault(c => c.Channel.Id == id),
+                intercom, call);
+        });
+
     [RelayCommand]
     private void OpenAlarms()
     {
@@ -732,6 +768,15 @@ public partial class MainViewModel : ObservableObject
 
         Speakers = new SpeakersViewModel(api, hub, _settings);
         _ = Speakers.InitializeAsync();
+
+        Intercom = new IntercomsViewModel(api, hub);
+        Intercom.CallRinging += call =>
+        {
+            StatusMessage = $"Llamada de citofonía: {call.IntercomName}";
+            if (Intercom.Find(call.IntercomId) is { } intercom) ShowIntercomWindow(intercom, call);
+        };
+        Intercom.WindowRequested += intercom => ShowIntercomWindow(intercom, intercom.ActiveCall);
+        _ = Intercom.InitializeAsync();
         _ = Alarms.InitializeAsync();
 
         // Alertas que quedaron pendientes mientras este puesto estaba cerrado.
@@ -770,6 +815,7 @@ public partial class MainViewModel : ObservableObject
                 Devices.Add(node);
             }
             ApplySearchFilter(); // el árbol nuevo debe respetar el filtro vigente
+            RefreshLiveChannels(); // y marcar lo que ya está en pantalla
             StatusMessage = IsLiveViewOpen ? HintMessage : ReadyMessage;
         }
         catch (ApiException ex)
@@ -844,8 +890,19 @@ public partial class MainViewModel : ObservableObject
         {
             _autoPromotedCell = cell;
             _autoPromotedChannel = node;
-            _ = cell.SwitchToProfileAsync(StreamProfile.Main);
+            // El secundario queda estacionado: restaurar es instantáneo.
+            _ = cell.SwitchToProfileAsync(StreamProfile.Main, keepCurrentForRestore: true);
         }
+    }
+
+    /// <summary>Cambiar de división deshace el "maximizado" sin restaurar el
+    /// stream (el cuadro sigue en principal): el secundario estacionado ya no
+    /// tiene a qué volver y se libera para no gastar una sesión de más.</summary>
+    private void ForgetPromotion()
+    {
+        _autoPromotedCell?.ReleaseParked();
+        _autoPromotedCell = null;
+        _autoPromotedChannel = null;
     }
 
     /// <summary>División activa de la grilla (el panel de video la dibuja).</summary>
@@ -879,6 +936,7 @@ public partial class MainViewModel : ObservableObject
     public async Task ApplyLayoutAsync(VideoLayout layout)
     {
         MaximizedIndex = -1; // los índices cambian con la división
+        ForgetPromotion();
         CurrentLayout = layout;
         int count = layout.CellCount;
         // Cediendo un ciclo por CADA celda: liberar un player con video andando
@@ -890,6 +948,7 @@ public partial class MainViewModel : ObservableObject
             Cells.RemoveAt(Cells.Count - 1);
             cell.AudioActivated -= OnCellAudioActivated;
             cell.MediaSaved -= OnCellMediaSaved;
+            cell.AssignedChannelChanged -= RefreshLiveChannels;
             cell.Dispose();
             await BreatheAsync();
         }
@@ -898,6 +957,7 @@ public partial class MainViewModel : ObservableObject
             var cell = new VideoCellViewModel(_api, _settings);
             cell.AudioActivated += OnCellAudioActivated;
             cell.MediaSaved += OnCellMediaSaved;
+            cell.AssignedChannelChanged += RefreshLiveChannels;
             Cells.Add(cell);
             await BreatheAsync();
         }
@@ -905,6 +965,7 @@ public partial class MainViewModel : ObservableObject
             Cells[i].Index = i + 1;
         if (SelectedCell is not null && !Cells.Contains(SelectedCell))
             SelectedCell = null;
+        RefreshLiveChannels(); // cuadros liberados y números de cuadro nuevos
     }
 
     /// <summary>Tope de la pausa entre celda y celda (ver BreatheAsync).</summary>
@@ -1115,6 +1176,38 @@ public partial class MainViewModel : ObservableObject
                 cell.IsAudioOn = false;
     }
 
+    /// <summary>
+    /// Marca en el árbol los canales que están en algún cuadro de la vista en
+    /// vivo — grilla principal y pantallas auxiliares, que comparten el árbol —
+    /// y deja en el tooltip en qué cuadro(s). Se compara por Id de canal y no
+    /// por nodo: recargar el árbol crea nodos nuevos mientras los cuadros
+    /// siguen mostrando los anteriores.
+    /// </summary>
+    internal void RefreshLiveChannels()
+    {
+        var locations = new Dictionary<int, List<string>>();
+        void Collect(IEnumerable<VideoCellViewModel> cells, string screen)
+        {
+            foreach (var cell in cells)
+            {
+                if (cell.AssignedChannel is not { } node) continue;
+                if (!locations.TryGetValue(node.Channel.Id, out var list))
+                    locations[node.Channel.Id] = list = [];
+                list.Add($"cuadro {cell.Index}{screen}");
+            }
+        }
+        Collect(Cells, "");
+        foreach (var window in _auxWindows)
+            Collect(window.Vm.Cells, $" (pantalla auxiliar {window.Vm.SlotNumber})");
+
+        foreach (var channel in Devices.SelectMany(d => d.Channels))
+        {
+            bool live = locations.TryGetValue(channel.Channel.Id, out var where);
+            channel.IsLive = live;
+            channel.LiveLocation = live ? "En vivo en " + string.Join(", ", where!) : "";
+        }
+    }
+
     // ---------- Pantallas auxiliares (estilo iVMS-4200, máximo 3) ----------
 
     /// <summary>Pantallas auxiliares abiertas: ventanas independientes con su
@@ -1134,7 +1227,11 @@ public partial class MainViewModel : ObservableObject
         // El número más bajo libre: cerrar la 2 y abrir otra vuelve a dar la 2.
         int slot = Enumerable.Range(1, MaxAuxScreens).First(n => _auxWindows.All(w => w.Vm.SlotNumber != n));
         var window = new Views.AuxLiveWindow(new AuxScreenViewModel(this, slot));
-        window.Closed += (_, _) => _auxWindows.Remove(window);
+        window.Closed += (_, _) =>
+        {
+            _auxWindows.Remove(window);
+            RefreshLiveChannels(); // lo que mostraba deja de estar en vivo
+        };
         _auxWindows.Add(window);
 
         // Parte en el primer monitor sin ventanas de la aplicación (si lo hay).

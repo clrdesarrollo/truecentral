@@ -14,7 +14,7 @@ namespace TrueCentralVms.Client.ViewModels;
 ///
 /// La miniatura se carga en cuanto el elemento entra a la lista; la escena
 /// completa, recién al seleccionarlo (pesa cientos de kB y no se justifica
-/// bajarla para las 300 lecturas de la lista).
+/// bajarla para las 50 lecturas de la lista).
 /// </summary>
 public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto) : ObservableObject
 {
@@ -142,7 +142,10 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
         try
         {
             var bytes = await api.GetPlateImageAsync(Event.Id, kind, ct);
-            if (Decode(bytes) is { } image)
+            // Decodificada al ancho de la miniatura: si el equipo no manda el
+            // recorte de la placa, la miniatura es la escena completa, y cincuenta
+            // escenas 1080p decodificadas enteras son unos 400 MB.
+            if (Decode(bytes, ThumbnailWidth) is { } image)
                 Thumbnail = image;
         }
         finally
@@ -158,11 +161,13 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
         IsLoadingDetail = true;
         try
         {
-            if (Event.HasSceneImage)
-                SceneImage = Decode(await api.GetPlateImageAsync(Event.Id, "scene", ct));
-            PlateImage = Event.HasPlateImage
-                ? Decode(await api.GetPlateImageAsync(Event.Id, "plate", ct))
-                : Thumbnail;
+            // Si la selección cambió mientras bajaba, no se guarda nada: la
+            // ficha ya soltó sus imágenes y volverían a quedar retenidas.
+            var scene = Event.HasSceneImage ? Decode(await api.GetPlateImageAsync(Event.Id, "scene", ct)) : null;
+            var plate = Event.HasPlateImage ? Decode(await api.GetPlateImageAsync(Event.Id, "plate", ct)) : null;
+            if (ct.IsCancellationRequested) return;
+            SceneImage = scene;
+            PlateImage = plate ?? scene ?? Thumbnail;
         }
         finally
         {
@@ -171,10 +176,27 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
     }
 
     /// <summary>
-    /// JPEG → imagen congelada: <c>Freeze</c> la hace compartible entre hilos
-    /// y evita que WPF mantenga vivo el stream de cada lectura.
+    /// Suelta las imágenes grandes de la ficha (al dejar de estar
+    /// seleccionada). La miniatura se queda; el detalle se vuelve a bajar si
+    /// se selecciona otra vez. Sin esto, recorrer la lista dejaba una escena
+    /// completa en memoria por cada lectura visitada.
     /// </summary>
-    private static ImageSource? Decode(byte[]? bytes)
+    public void ReleaseDetail()
+    {
+        SceneImage = null;
+        PlateImage = null;
+    }
+
+    /// <summary>Ancho al que se decodifica la miniatura de la lista.</summary>
+    private const int ThumbnailWidth = 240;
+
+    /// <summary>
+    /// JPEG → imagen congelada: <c>Freeze</c> la hace compartible entre hilos
+    /// y evita que WPF mantenga vivo el stream de cada lectura. Con
+    /// <paramref name="maxWidth"/> el decodificador entrega la imagen ya
+    /// reducida (no se materializa la grande).
+    /// </summary>
+    private static ImageSource? Decode(byte[]? bytes, int maxWidth = 0)
     {
         if (bytes is null || bytes.Length == 0) return null;
         try
@@ -182,6 +204,7 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
+            if (maxWidth > 0) image.DecodePixelWidth = maxWidth;
             image.StreamSource = new MemoryStream(bytes);
             image.EndInit();
             image.Freeze();

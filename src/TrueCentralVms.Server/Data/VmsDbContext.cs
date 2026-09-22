@@ -30,6 +30,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     // Parlantes IP
     public DbSet<Speaker> Speakers => Set<Speaker>();
 
+    // Citofonía (frentes de videoportero y su historial de llamadas)
+    public DbSet<Intercom> Intercoms => Set<Intercom>();
+    public DbSet<IntercomCall> IntercomCalls => Set<IntercomCall>();
+
     // Control de acceso (terminales y controladoras de puertas)
     public DbSet<AccessDevice> AccessDevices => Set<AccessDevice>();
     public DbSet<AccessDoor> AccessDoors => Set<AccessDoor>();
@@ -189,6 +193,38 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(s => s.LastError).HasMaxLength(512);
             e.Property(s => s.Status).HasConversion<string>().HasMaxLength(16);
             e.HasIndex(s => new { s.Host, s.Port }).IsUnique();
+        });
+
+        // -------------------------------------------------------------------
+        // Citofonía
+        // -------------------------------------------------------------------
+        modelBuilder.Entity<Intercom>(e =>
+        {
+            e.Property(i => i.Name).HasMaxLength(128);
+            e.Property(i => i.DriverKey).HasMaxLength(32);
+            e.Property(i => i.Host).HasMaxLength(255);
+            e.Property(i => i.Username).HasMaxLength(64);
+            e.Property(i => i.GroupName).HasMaxLength(64);
+            e.Property(i => i.Model).HasMaxLength(64);
+            e.Property(i => i.SerialNumber).HasMaxLength(64);
+            e.Property(i => i.FirmwareVersion).HasMaxLength(64);
+            e.Property(i => i.LastError).HasMaxLength(512);
+            e.Property(i => i.Status).HasConversion<string>().HasMaxLength(16);
+            e.HasIndex(i => new { i.Host, i.Port }).IsUnique();
+            // Borrar el dispositivo de video deja el frente sin cámara, no lo borra.
+            e.HasOne(i => i.Channel).WithMany().HasForeignKey(i => i.ChannelId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<IntercomCall>(e =>
+        {
+            e.Property(c => c.IntercomName).HasMaxLength(128);
+            e.Property(c => c.AnsweredBy).HasMaxLength(64);
+            e.Property(c => c.DoorOpenedBy).HasMaxLength(64);
+            e.Property(c => c.Origin).HasMaxLength(128);
+            e.Property(c => c.EndReason).HasMaxLength(128);
+            e.Property(c => c.State).HasConversion<string>().HasMaxLength(16);
+            // Sin FK al frente: el historial sobrevive a su borrado (lo pide la auditoría).
+            e.HasIndex(c => c.StartedAt);
+            e.HasIndex(c => new { c.IntercomId, c.StartedAt });
         });
 
         // -------------------------------------------------------------------
@@ -492,6 +528,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(a => a.AcknowledgedBy).HasMaxLength(64);
             e.Property(a => a.AcknowledgedFrom).HasMaxLength(16);
             e.Property(a => a.AcknowledgedIp).HasMaxLength(64);
+            e.Property(a => a.RecipientUserIds).HasMaxLength(512);
+            e.Property(a => a.Recipients).HasMaxLength(512);
             // Las pendientes se consultan en cada arranque de cliente; el
             // registro se lee por fecha descendente.
             e.HasIndex(a => a.RaisedAt);

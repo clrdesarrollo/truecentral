@@ -62,6 +62,41 @@ public static class G711
         return result;
     }
 
+    public static short MuLawToLinear(byte mulaw)
+    {
+        int value = ~mulaw & 0xFF;
+        int sign = value & 0x80;
+        int exponent = (value >> 4) & 0x07;
+        int mantissa = value & 0x0F;
+        int sample = (((mantissa << 3) + 0x84) << exponent) - 0x84;
+        return (short)(sign != 0 ? -sample : sample);
+    }
+
+    public static short ALawToLinear(byte alaw)
+    {
+        int value = alaw ^ 0x55;
+        int sign = value & 0x80;
+        int exponent = (value >> 4) & 0x07;
+        int mantissa = value & 0x0F;
+        int sample = exponent == 0
+            ? (mantissa << 4) + 8
+            : ((mantissa << 4) + 0x108) << (exponent - 1);
+        return (short)(sign != 0 ? sample : -sample);
+    }
+
+    /// <summary>Convierte G.711 a PCM 16 bits little-endian mono (dos bytes por muestra).</summary>
+    public static byte[] Decode(ReadOnlySpan<byte> g711, bool aLaw)
+    {
+        var result = new byte[g711.Length * 2];
+        for (int i = 0; i < g711.Length; i++)
+        {
+            short sample = aLaw ? ALawToLinear(g711[i]) : MuLawToLinear(g711[i]);
+            result[2 * i] = (byte)(sample & 0xFF);
+            result[2 * i + 1] = (byte)((sample >> 8) & 0xFF);
+        }
+        return result;
+    }
+
     /// <summary>Reduce el volumen o lo amplifica (ganancia lineal) sobre PCM 16 bits, con recorte.</summary>
     public static void ApplyGain(Span<byte> pcm16, float gain)
     {

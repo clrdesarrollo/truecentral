@@ -55,6 +55,10 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     /// <summary>Se encendió el audio de este cuadro (el dueño silencia el resto).</summary>
     public event Action<VideoCellViewModel>? AudioActivated;
 
+    /// <summary>El cuadro cambió de canal (o quedó libre): el shell actualiza
+    /// la marca de "en vivo" del árbol.</summary>
+    public event Action? AssignedChannelChanged;
+
     /// <summary>Se guardó un archivo local (título, glifo MDL2, ruta completa):
     /// el shell muestra la notificación con el link a la ubicación.</summary>
     public event Action<string, string, string>? MediaSaved;
@@ -118,12 +122,17 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         // RTSP por TCP y con la menor latencia posible para vigilancia en vivo.
         config.Demuxer.FormatOpt["rtsp_transport"] = "tcp";
         config.Demuxer.FormatOpt["fflags"] = "nobuffer";
-        // Arranque rápido: sin estos límites, FFmpeg puede pasar varios
-        // segundos "analizando" el stream antes del primer cuadro. El SDP de
-        // MediaMTX ya anuncia los parámetros del códec (sprop), así que un
-        // análisis corto basta; la imagen aparece con el primer keyframe.
-        config.Demuxer.FormatOpt["analyzeduration"] = "500000"; // 0,5 s (µs)
-        config.Demuxer.FormatOpt["probesize"] = "524288";       // 512 KB
+        // Arranque rápido: se omite avformat_find_stream_info. Ese análisis
+        // lee el stream hasta juntar "analyzeduration" de TIEMPO DEL STREAM
+        // (no de reloj) y estimar la tasa de cuadros, y con streams lentos se
+        // hace eterno: medido contra MediaMTX, un secundario HEVC de 7 fps
+        // tardaba 3,6 s en abrir (y el principal 1,3 s) aun con el análisis
+        // acotado a 0,5 s; sin análisis abre en 0,3-0,5 s y la imagen aparece
+        // en ~1 s. No se pierde nada útil: el SDP ya trae los parámetros del
+        // códec (sprop-sps/pps/vps), el decodificador completa el resto con el
+        // primer keyframe, y en vivo no hay duración que calcular. Los
+        // cuadros de reproducción (PlaybackCellViewModel) SÍ lo necesitan.
+        config.Demuxer.AllowFindStreamInfo = false;
         // Latencia en régimen: por omisión Flyleaf acumula 500 ms antes de
         // mostrar, nunca vuelve al borde vivo (MaxLatency 0) y encola 4
         // cuadros decodificados; el retraso frente a iVMS-4200 crecía con la
@@ -177,6 +186,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         int sequence = ++_openSequence;
         StopClipRecording(notify: true);
         ResetDigitalZoom();
+        ReleaseParked(); // era del canal anterior
         EnsurePlayer(); // el cuadro deja de estar libre: recién aquí necesita player
         _assigned = node;
         Profile = profile;
@@ -203,6 +213,50 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     /// descarta solo al despertar (ve la secuencia vencida).</summary>
     public void CancelPendingSwitch() => _openSequence++;
 
+    /// <summary>
+    /// Player "estacionado": el stream que el cuadro mostraba antes de una
+    /// promoción (maximizar sub→main) sigue reproduciendo sin superficie, así
+    /// que volver a él (restaurar) es un intercambio instantáneo en lugar de
+    /// una apertura nueva. Cuesta una sesión de secundario extra mientras el
+    /// cuadro está maximizado (liviana) y ahorra el arranque + espera de
+    /// keyframe al restaurar, que era lo que se sentía lento. Se libera al
+    /// usarlo, al cambiar de canal, al limpiar, al cambiar de división o si
+    /// otro cambio de stream aterriza antes.
+    /// </summary>
+    private Player? _parked;
+    private StreamProfile _parkedProfile;
+
+    /// <summary>Descarta el player estacionado (si lo hay).</summary>
+    public void ReleaseParked()
+    {
+        var parked = _parked;
+        _parked = null;
+        parked?.Dispose();
+    }
+
+    /// <summary>Si el destino es justo el stream estacionado y sigue vivo, lo
+    /// pone en pantalla al tiro y descarta el actual. true = listo.</summary>
+    private bool TryUseParked(StreamProfile target)
+    {
+        if (_parked is not { } parked || _parkedProfile != target) return false;
+        _parked = null;
+        if (parked.Status != FlyleafLib.MediaPlayer.Status.Playing)
+        {
+            parked.Dispose(); // murió esperando: cambio normal
+            return false;
+        }
+        _openSequence++; // un reintento en vuelo del stream saliente ya no aplica
+        _pendingSwitchSequence = -1;
+        StopClipRecording(notify: true);
+        var outgoing = Player;
+        Profile = target;
+        parked.Config.Audio.Enabled = IsAudioOn;
+        Player = parked; // FlyleafHost reengancha la superficie: sin corte
+        Status = "";
+        outgoing?.Dispose();
+        return true;
+    }
+
     /// <summary>Destino del cambio suave en vuelo, atado a la secuencia que lo
     /// lanzó: cualquier bump (reasignación, Clear, intercambio, cancelación)
     /// lo invalida solo, sin limpieza explícita en cada camino.</summary>
@@ -217,8 +271,13 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     /// imagen (primer keyframe decodificado) se intercambian — el corte pasa de
     /// varios segundos en negro a un parpadeo. Si el nuevo no logra imagen en
     /// 20 s (2 intentos), se descarta y el cuadro sigue con el stream que tenía.
+    /// Con <paramref name="keepCurrentForRestore"/> el stream saliente no se
+    /// descarta sino que queda estacionado (ver <see cref="_parked"/>) para
+    /// volver a él sin espera; si el destino ya está estacionado, el cambio es
+    /// inmediato.
     /// </summary>
-    public async Task SwitchToProfileAsync(StreamProfile target, bool hardFallbackOnFailure = false)
+    public async Task SwitchToProfileAsync(StreamProfile target, bool hardFallbackOnFailure = false,
+        bool keepCurrentForRestore = false)
     {
         if (_assigned is not { } node) return;
         // Clics rápidos: un cambio ya en camino hacia ese destino se deja
@@ -232,6 +291,8 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
             Status = "";
             return;
         }
+        if (TryUseParked(target)) return;
+        var outgoingProfile = Profile;
         int sequence = ++_openSequence; // invalida reintentos del stream visible
         _pendingSwitchSequence = sequence;
         _pendingSwitchTarget = target;
@@ -244,6 +305,9 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         // enganchar de inmediato. Todo ocurre detrás del video vigente.
         for (int attempt = 1; attempt <= 2; attempt++)
         {
+            if (attempt > 1)
+                Status = (target == StreamProfile.Main ? "Cambiando a principal…" : "Cambiando a secundario…")
+                    + " (segundo intento)";
             var fresh = CreatePlayer();
             try
             {
@@ -285,7 +349,17 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
                     fresh.Config.Audio.Enabled = IsAudioOn;
                     Player = fresh; // FlyleafHost reengancha la superficie: corte mínimo
                     Status = "";
-                    retired?.Dispose();
+                    ReleaseParked(); // una reserva anterior (muerta o ajena) ya no sirve
+                    if (keepCurrentForRestore && retired is not null)
+                    {
+                        // Sigue reproduciendo sin superficie y en silencio: el
+                        // audio es exclusivo del stream visible.
+                        retired.Config.Audio.Enabled = false;
+                        _parked = retired;
+                        _parkedProfile = outgoingProfile;
+                    }
+                    else
+                        retired?.Dispose();
                     return;
                 }
                 fresh.Dispose(); // sin imagen: reintentar o rendirse
@@ -296,6 +370,19 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
                 if (sequence != _openSequence) return;
                 _pendingSwitchSequence = -1;
                 FlashStatus("No se pudo cambiar el stream: " + ex.Message);
+                return;
+            }
+            catch (Exception ex)
+            {
+                // Falla del motor de video (driver, GPU, FFmpeg). Nadie espera
+                // esta tarea (se lanza con "_ ="): sin este catch la excepción
+                // se perdía y el cuadro quedaba clavado en "Cambiando…" con el
+                // cambio marcado en vuelo, ignorando los clics siguientes.
+                try { fresh.Dispose(); } catch { }
+                if (sequence != _openSequence) return;
+                _pendingSwitchSequence = -1;
+                FlashStatus("No se pudo cambiar el stream: " + ex.Message);
+                ScheduleRetry(sequence);
                 return;
             }
         }
@@ -579,6 +666,11 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         // Un cuadro libre puede no tener player todavía (se crea al primer uso).
         if (playerB is not null) PlayerOwners.AddOrUpdate(playerB, a);
         if (playerA is not null) PlayerOwners.AddOrUpdate(playerA, b);
+        // El stream estacionado viaja con su canal.
+        (a._parked, b._parked) = (b._parked, a._parked);
+        (a._parkedProfile, b._parkedProfile) = (b._parkedProfile, a._parkedProfile);
+        if (a._parked is not null) PlayerOwners.AddOrUpdate(a._parked, a);
+        if (b._parked is not null) PlayerOwners.AddOrUpdate(b._parked, b);
 
         (a._assigned, b._assigned) = (b._assigned, a._assigned);
         (a.AssignedChannel, b.AssignedChannel) = (b.AssignedChannel, a.AssignedChannel);
@@ -618,6 +710,8 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         _ = ConnectAsync(_openSequence);
     }
 
+    partial void OnAssignedChannelChanged(ChannelNode? value) => AssignedChannelChanged?.Invoke();
+
     [RelayCommand]
     private void ToggleAudio() => IsAudioOn = !IsAudioOn;
 
@@ -635,6 +729,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         _openSequence++;
         StopClipRecording(notify: true);
         ResetDigitalZoom();
+        ReleaseParked();
         _assigned = null;
         AssignedChannel = null;
         IsAudioOn = false;
@@ -652,6 +747,8 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         // la cápsula igual queda guardada, pero sin ventana que lo anuncie.
         StopClipRecording(notify: false);
         _assigned = null;
+        AssignedChannel = null; // el árbol deja de marcarlo en vivo
+        ReleaseParked();
         Player?.Dispose();
     }
 }

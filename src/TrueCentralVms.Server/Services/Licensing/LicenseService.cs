@@ -289,6 +289,7 @@ public sealed class LicenseService : BackgroundService
 
         _logger.LogInformation("Licencia {Key} {How} ({Mode}).", payload.LicenseKey, how, payload.Validation?.Mode);
         await _hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "license", cancellationToken: ct);
+        await RestoreChannelsDisabledByLicenseAsync(ct);
         return LicenseOperationResult.Ok($"Licencia {payload.LicenseKey} {how}.");
     }
 
@@ -320,6 +321,7 @@ public sealed class LicenseService : BackgroundService
         if (!Server.IsConfigured)
             return LicenseOperationResult.Fail("El servidor de licencias no está configurado; importe el .lic actualizado que le entregue soporte.");
         var outcome = await HeartbeatAsync(ct);
+        await RestoreChannelsDisabledByLicenseAsync(ct);
         return outcome;
     }
 
@@ -432,6 +434,60 @@ public sealed class LicenseService : BackgroundService
         {
             await _audit.LogSystemAsync("license", "license-warning", targetType: "license",
                 targetId: after.Payload?.LicenseKey, detail: after.Warning);
+        }
+        await RestoreChannelsDisabledByLicenseAsync(ct);
+    }
+
+    /// <summary>
+    /// Canales que el cupo de la licencia dejó deshabilitados
+    /// (<see cref="Data.Entities.Channel.DisabledByLicense"/>): si ahora caben
+    /// (licencia nueva, expansión, fin del modo restringido) se habilitan solos,
+    /// en orden de equipo y número de canal. Los que siguen sin caber conservan
+    /// la marca para la próxima vez. Nunca hace fallar la operación que lo invoca.
+    /// </summary>
+    private async Task RestoreChannelsDisabledByLicenseAsync(CancellationToken ct)
+    {
+        if (!IsModuleEnabled(LicenseFeatures.ModuleVideo)) return;
+        try
+        {
+            await using var scope = _scopes.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var pending = await db.Channels.Include(c => c.Device)
+                .Where(c => c.DisabledByLicense && !c.Enabled)
+                .OrderBy(c => c.DeviceId).ThenBy(c => c.ChannelNumber)
+                .ToListAsync(ct);
+            if (pending.Count == 0) return;
+
+            int quota = Quota(LicenseFeatures.VideoChannels);
+            int available = quota - await db.Channels.CountAsync(c => c.Enabled, ct);
+            if (available <= 0) return;
+
+            var restored = pending.Take(available).ToList();
+            foreach (var channel in restored)
+            {
+                channel.Enabled = true;
+                channel.DisabledByLicense = false;
+            }
+            await db.SaveChangesAsync(ct);
+
+            int still = pending.Count - restored.Count;
+            string perDevice = string.Join(", ", restored.GroupBy(c => c.Device.Name)
+                .Select(g => $"'{g.Key}' ({string.Join(", ", g.Select(c => c.ChannelNumber))})"));
+            _logger.LogInformation("Licencia: {Count} canal(es) deshabilitados por cupo vuelven a estar habilitados.", restored.Count);
+            await _audit.LogSystemAsync("license", "license-channels-restored", targetType: "license",
+                targetId: Snapshot.Payload?.LicenseKey,
+                detail: $"Habilitó {restored.Count} canal(es) que el cupo de la licencia había dejado deshabilitados " +
+                        $"(cupo {quota} canales): {perDevice}." + (still > 0 ? $" {still} siguen esperando cupo." : ""));
+            await scope.ServiceProvider.GetRequiredService<MediaMtxManager>().RefreshPathsAsync(ct);
+            await _hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "channels", cancellationToken: ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "No se pudieron habilitar los canales que esperaban cupo de la licencia.");
         }
     }
 

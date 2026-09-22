@@ -51,6 +51,15 @@ public sealed partial class ChannelNode(DeviceNode deviceNode, ChannelDto channe
     /// su canal.</summary>
     [ObservableProperty] private bool _isSelected;
 
+    /// <summary>El canal está en un cuadro de la vista en vivo (grilla
+    /// principal o pantalla auxiliar): el árbol lo marca con ▶. Lo mantiene
+    /// el shell (MainViewModel.RefreshLiveChannels).</summary>
+    [ObservableProperty] private bool _isLive;
+
+    /// <summary>Dónde se está viendo ("En vivo en: cuadro 2, …"); vacío si no
+    /// está en ningún cuadro. Es el tooltip del nodo mientras IsLive.</summary>
+    [ObservableProperty] private string _liveLocation = "";
+
     /// <summary>El canal está en línea solo si además su equipo lo está.</summary>
     public bool IsOnline => _deviceNode.IsOnline && Channel.IsOnline;
 

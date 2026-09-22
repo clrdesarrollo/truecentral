@@ -1,4 +1,4 @@
-namespace TrueCentralVms.Core.Contracts;
+﻿namespace TrueCentralVms.Core.Contracts;
 
 // ---------------------------------------------------------------------------
 // Licenciamiento
@@ -45,6 +45,10 @@ public static class LicenseFeatures
     public const string ModuleSpeakers = "module_speakers";
     public const string SpeakerChannels = "speaker_channels";
 
+    // Citofonía
+    public const string ModuleIntercom = "module_intercom";
+    public const string IntercomDevices = "intercom_devices";
+
     // Automatización
     public const string ModuleAutomation = "module_automation";
     public const string AutomationRules = "automation_rules";
@@ -64,6 +68,7 @@ public static class LicenseFeatures
         new(ModuleVideowall, "Muro de video", Videowalls, "muros"),
         new(ModuleVideowall, "Decodificadores de muro", VideowallDecoders, "decodificadores"),
         new(ModuleSpeakers, "Parlantes IP", SpeakerChannels, "parlantes"),
+        new(ModuleIntercom, "Citofonía", IntercomDevices, "frentes"),
         new(ModuleAutomation, "Automatizaciones", AutomationRules, "reglas"),
     ];
 

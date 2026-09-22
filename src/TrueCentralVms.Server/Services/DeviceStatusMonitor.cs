@@ -50,15 +50,15 @@ public sealed class DeviceStatusMonitor(
         var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
 
         var devices = await db.Devices
-            .Select(d => new { Device = d, ChannelCount = d.Channels.Count })
+            .Select(d => new { Device = d, ChannelCount = d.Channels.Count, EnabledCount = d.Channels.Count(c => c.Enabled) })
             .ToListAsync(ct);
         if (devices.Count == 0) return;
 
         var results = await Task.WhenAll(devices.Select(async x =>
-            (x.Device, x.ChannelCount, Reachable: await IsReachableAsync(x.Device.Host, x.Device.SdkPort, ct))));
+            (x.Device, x.ChannelCount, x.EnabledCount, Reachable: await IsReachableAsync(x.Device.Host, x.Device.SdkPort, ct))));
 
         var changed = new List<(DeviceDto Dto, DeviceStatus Previous)>();
-        foreach (var (device, channelCount, reachable) in results)
+        foreach (var (device, channelCount, enabledCount, reachable) in results)
         {
             var newStatus = reachable ? DeviceStatus.Online : DeviceStatus.Offline;
             if (reachable)
@@ -71,7 +71,7 @@ public sealed class DeviceStatusMonitor(
                     device.Id, device.Name, device.DeviceType, device.DriverKey, device.Host,
                     device.SdkPort, device.RtspPort, device.Username, device.Model, device.SerialNumber,
                     device.FirmwareVersion, channelCount, device.Status, device.LastSeenAt, device.CreatedAt,
-                    device.AnprEnabled), previous));
+                    device.AnprEnabled, enabledCount), previous));
             }
         }
         await db.SaveChangesAsync(ct);

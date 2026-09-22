@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.SignalR.Client;
+﻿using Microsoft.AspNetCore.SignalR.Client;
 using TrueCentralVms.Core.Contracts;
 
 namespace TrueCentralVms.Client.Services;
@@ -45,6 +45,12 @@ public sealed class VmsHubClient : IAsyncDisposable
     /// <summary>Un parlante IP cambió de estado de conexión.</summary>
     public event Action<SpeakerDto>? SpeakerStatusChanged;
 
+    /// <summary>Un frente de citofonía cambió de estado de conexión.</summary>
+    public event Action<IntercomDto>? IntercomStatusChanged;
+
+    /// <summary>Una llamada de citofonía empezó a sonar, fue contestada o terminó.</summary>
+    public event Action<IntercomCallDto>? IntercomCallChanged;
+
     /// <summary>true = conectado al hub; false = reconectando/caído.</summary>
     public event Action<bool>? ConnectionStateChanged;
 
@@ -69,6 +75,8 @@ public sealed class VmsHubClient : IAsyncDisposable
         _connection.On<WorkflowNotificationDto>(VmsHubContract.WorkflowNotification, dto => WorkflowNotification?.Invoke(dto));
         _connection.On<WorkflowAlertDto>(VmsHubContract.WorkflowAlertAcknowledged, dto => WorkflowAlertAcknowledged?.Invoke(dto));
         _connection.On<SpeakerDto>(VmsHubContract.SpeakerStatusChanged, dto => SpeakerStatusChanged?.Invoke(dto));
+        _connection.On<IntercomDto>(VmsHubContract.IntercomStatusChanged, dto => IntercomStatusChanged?.Invoke(dto));
+        _connection.On<IntercomCallDto>(VmsHubContract.IntercomCallChanged, dto => IntercomCallChanged?.Invoke(dto));
 
         _connection.Reconnecting += _ => { ConnectionStateChanged?.Invoke(false); return Task.CompletedTask; };
         _connection.Reconnected += _ => { ConnectionStateChanged?.Invoke(true); return Task.CompletedTask; };

@@ -1,4 +1,4 @@
-// CLR TrueCentral VMS — panel: editor visual de automatizaciones.
+﻿// CLR TrueCentral VMS — panel: editor visual de automatizaciones.
 //
 // Un diagrama de flujo, como en Bizagi o Lucid: un punto de partida (el
 // disparador), y desde ahí se van agregando pasos —condiciones sí/no,
@@ -348,7 +348,10 @@ function wfeSubtitle(node) {
       if (mode === "inventory") return `${n(c.speakerIds)} parlante(s)${c.group ? " + grupo " + c.group : ""} · ${{ server: c.audio || "sonido", library: c.libraryName || "biblioteca", tts: "voz" }[c.source || "server"]}`;
       return `${mode} · ${c.host || c.url || ""}`;
     }
-    case "notify": return c.title || "aviso";
+    case "notify": {
+      const who = (c.userIds || []).map((id) => (L.catalog?.users || []).find((u) => u.id === id)?.username || id);
+      return `${c.title || "aviso"} → ${who.length ? who.join(", ") : "todos los operadores"}`;
+    }
     case "door": {
       const verbs = { Open: "Abrir", Close: "Cerrar", RemainOpen: "Mantener abierta", RemainLocked: "Bloquear" };
       const names = (c.doorIds || []).map((id) => L.doors.find((d) => d.doorId === id)?.name || id);
@@ -835,66 +838,34 @@ function wfeConditionsForm(container, node, isTrigger) {
   const marked = (prefix) => $$(`[data-${prefix}]`, container).filter((i) => i.checked).map((i) => i.dataset[prefix]);
   const strings = (id) => ($(`#${id}`, container)?.value || "").split(/[,\n;]/).map((v) => v.trim()).filter((v) => v.length > 0);
 
-  // Zonas y áreas: las de los paneles marcados (o de todos). Con su nombre.
-  const panelsChosen = () => {
-    const ids = marked("panel").map(Number);
-    return L.panels.filter((p) => ids.length === 0 || ids.includes(p.id));
-  };
-  // Zonas y áreas se identifican por PANEL + número ("panelId:n"): el número
-  // 2 de un panel no es el 2 de otro. Con más de un panel a la vista, el
-  // nombre del panel va delante para distinguirlas.
-  const itemsOf = (pick, savedKeys, savedNumbers) => {
-    const chosen = panelsChosen();
-    const multi = chosen.length > 1;
-    const items = [];
-    chosen.forEach((p) => (pick(p) || []).forEach((item) => {
-      items.push([`${p.id}:${item.number}`, `${multi ? p.name + " · " : ""}${item.number} · ${item.name}`]);
-    }));
-    // Lo guardado que no está a la vista (su panel quedó sin marcar, o la
-    // zona ya no existe) se conserva para no perderlo al editar.
-    (savedKeys || []).forEach((k) => {
-      if (items.some(([key]) => key === k)) return;
-      const [pid, n] = k.split(":");
-      const panel = L.panels.find((p) => String(p.id) === pid);
-      const item = panel && (pick(panel) || []).find((z) => String(z.number) === n);
-      items.push([k, item
-        ? `${panel.name} · ${n} · ${item.name} (panel sin marcar)`
-        : `${panel ? panel.name + " · " : ""}${n} · (ya no existe en el panel)`]);
-    });
-    return items;
-  };
-  // Automatizaciones guardadas antes de las claves por panel: solo traen
-  // números, que se marcan en todos los paneles a la vista.
-  const selectedKeys = (savedKeys, savedNumbers) => {
-    if (savedKeys?.length) return savedKeys;
-    if (!savedNumbers?.length) return [];
-    return panelsChosen().flatMap((p) => savedNumbers.map((n) => `${p.id}:${n}`));
-  };
-  const devicesChosen = () => {
-    const ids = marked("device").map(Number);
-    return L.cameras.filter((cam) => ids.length === 0 || ids.includes(cam.deviceId));
-  };
-  const doorsChosen = () => {
-    const ids = marked("adevice").map(Number);
-    return L.doors.filter((d) => ids.length === 0 || ids.includes(d.deviceId));
-  };
-
   const draw = () => {
     const c = node.conditions;
     const parts = [];
     const field = (label, inner, help) => parts.push(`<div class="field"><label>${label}</label>${inner}${help ? `<div class="muted" style="font-size:11.5px;margin-top:3px">${help}</div>` : ""}</div>`);
 
+    // Equipos que disparan: chips de lo elegido + árbol para elegir. Lo
+    // guardado por número (automatizaciones viejas, sin clave por panel) se
+    // pasa a claves "panel:número" sobre los paneles marcados o todos.
+    const sources = (help) => { const spec = WFE_SOURCE_FIELDS[t]; if (spec) field(spec.title, wfeSourcesHtml(t, c), help); };
+    if (t === "alarm-event") {
+      const legacy = (keys, numbers, pick) => keys?.length || !numbers?.length
+        ? (keys || [])
+        : (c.panelIds?.length ? L.panels.filter((p) => c.panelIds.includes(p.id)) : L.panels)
+          .flatMap((p) => numbers.filter((n) => (pick(p) || []).some((x) => x.number === n)).map((n) => `${p.id}:${n}`));
+      c.zoneKeys = legacy(c.zoneKeys, c.zoneNumbers, (p) => p.zones);
+      c.areaKeys = legacy(c.areaKeys, c.areaNumbers, (p) => p.areas);
+    }
+
     switch (t) {
       case "alarm-event":
       case "panel-status":
-        field("Paneles", wfeCheckList(L.panels.map((p) => [p.id, p.name]), c.panelIds, "panel", "No hay paneles de alarma configurados."));
+        sources(t === "alarm-event"
+          ? "Un panel completo, o solo algunas de sus zonas o áreas. Marcar una zona ya acota el panel."
+          : null);
         if (t === "alarm-event") {
           field("Tipo de evento", wfeCheckList(WF_KINDS, c.kinds, "kind"));
           field("Severidad", wfeCheckList(WF_SEVERITIES, c.severities, "severity"),
-            "«Sensor interrumpido» no tiene severidad propia (se detecta por sondeo con el área desarmada): este filtro no lo afecta.");
-          field("Zonas / sensores", wfeCheckList(itemsOf((p) => p.zones, c.zoneKeys), selectedKeys(c.zoneKeys, c.zoneNumbers), "zone", "El panel elegido todavía no informa zonas."),
-            "Cada zona es de un panel concreto: marcar una zona ya acota el panel.");
-          field("Áreas", wfeCheckList(itemsOf((p) => p.areas, c.areaKeys), selectedKeys(c.areaKeys, c.areaNumbers), "area", "El panel elegido todavía no informa áreas."));
+            "«Sensor interrumpido» y «Sensor restablecido» no tienen severidad propia (se detectan por sondeo con el área desarmada): este filtro no los afecta.");
           parts.push(`<div class="form-grid">
             <div class="field"><label>Códigos del evento (coma)</label><input id="wfe-codes" value="${esc((c.codes || []).join(", "))}" placeholder="1130, 1120"></div>
             <div class="field"><label>La descripción contiene</label><input id="wfe-text" value="${esc(c.textContains || "")}" placeholder="intrusión"></div>
@@ -912,24 +883,16 @@ function wfeConditionsForm(container, node, isTrigger) {
       case "device-status":
         field("Clase de equipo", wfeCheckList(WFE_DEVICE_KINDS, c.deviceKinds, "dkind"));
         field("Estado que dispara", wfeCheckList(WFE_DEVICE_STATUSES, c.deviceStatuses, "dstatus"));
-        field("Cámaras y grabadores", wfeCheckList(L.devices.map((d) => [d.id, d.name]), c.deviceIds, "device", "No hay fuentes de video."));
-        field("Terminales de acceso", wfeCheckList(L.accessDevices.map((d) => [d.id, d.name]), c.accessDeviceIds, "adevice", "No hay equipos de control de acceso."));
-        field("Parlantes IP", wfeCheckList(L.speakers.map((s) => [s.id, s.name]), c.speakerIds, "speaker", "No hay parlantes IP."));
-        parts.push(`<div class="muted" style="font-size:11.5px;margin-bottom:10px">Con equipos marcados, solo esos disparan; sin ninguno marcado, cualquiera de la clase elegida.</div>`);
+        sources("Con equipos marcados, solo esos disparan; sin ninguno marcado, cualquiera de la clase elegida.");
         break;
 
       case "video-event":
         field("Tipo de evento", wfeCheckList(WFE_VIDEO_KINDS, c.videoEventKinds, "vkind"));
-        field("Equipos (cámaras / grabadores)", wfeCheckList(L.devices.map((d) =>
-          [d.id, d.name + (d.supportsEvents ? "" : " (el driver no recibe eventos)")]), c.deviceIds, "device", "No hay fuentes de video."));
-        field("Cámaras (canales)", `<input type="text" class="wf-filter" placeholder="Filtrar cámaras por nombre…" autocomplete="off">` +
-          wfeCheckList(devicesChosen().map((cam) => [cam.channelId, `${cam.deviceName} · ${cam.channelName}`, null, wfPreviewAttr(cam)]), c.channelIds, "channel", "No hay canales."),
-          "El servidor se suscribe solo a los eventos de los equipos que pida alguna automatización. Las reglas (movimiento, cruce de línea…) se configuran en la web del propio equipo. Hoy reciben eventos los equipos Hikvision por SDK.");
+        sources("Un grabador completo o solo algunas de sus cámaras. El servidor se suscribe solo a los eventos de los equipos que pida alguna automatización; las reglas (movimiento, cruce de línea…) se configuran en la web del propio equipo. Hoy reciben eventos los equipos Hikvision por SDK.");
         break;
 
       case "plate-recognized":
-        field("Cámaras ANPR", wfeCheckList(L.devices.filter((d) => d.supportsAnpr).map((d) =>
-          [d.id, d.name + (d.anprEnabled ? "" : " (no está marcada como fuente de patentes)")]), c.deviceIds, "device", "No hay cámaras con reconocimiento de patentes."));
+        sources();
         field("Patentes", `<select id="wfe-platematch" style="margin-bottom:6px">
             <option value="any" ${(c.plateMatch || (c.plates?.length ? "listed" : "any")) === "any" ? "selected" : ""}>Cualquier patente</option>
             <option value="listed" ${(c.plateMatch || (c.plates?.length ? "listed" : "any")) === "listed" ? "selected" : ""}>Solo las de la lista (lista blanca)</option>
@@ -943,9 +906,7 @@ function wfeConditionsForm(container, node, isTrigger) {
       case "access-event":
         field("Resultado", wfeCheckList(WFE_ACCESS_KINDS, c.accessKinds, "akind"));
         field("Credencial usada", wfeCheckList(WFE_CREDENTIALS, c.credentials, "cred"));
-        field("Equipos de control de acceso", wfeCheckList(L.accessDevices.map((d) => [d.id, d.name]), c.accessDeviceIds, "adevice", "No hay equipos de control de acceso."));
-        field("Puertas", wfeCheckList(doorsChosen().map((d) => [d.number, `${d.deviceName} · ${d.name} (n.º ${d.number})`]), c.doorNumbers, "door", "El equipo elegido no tiene puertas."),
-          "Se filtra por el número de puerta en el equipo.");
+        sources("Un terminal completo o solo algunas de sus puertas (se filtra por el número de puerta en el equipo).");
         parts.push(`<div class="form-grid">
           <div class="field"><label>Identificadores de persona (coma)</label><input id="wfe-employees" value="${esc((c.employeeNos || []).join(", "))}" placeholder="1001, 1002"></div>
           <div class="field"><label>La descripción contiene</label><input id="wfe-text" value="${esc(c.textContains || "")}" placeholder="forzada"></div>
@@ -972,20 +933,54 @@ function wfeConditionsForm(container, node, isTrigger) {
         break;
     }
 
-    // Ventana horaria: sirve en todos los disparadores.
-    field(t === "schedule" ? "Días de la semana" : "Solo estos días de la semana", wfeCheckList(WF_DAYS.map((d, i) => [i, d]), c.daysOfWeek, "day"));
-    if (t !== "schedule")
-      parts.push(`<div class="form-grid">
-        <div class="field"><label>Desde (hora local)</label><input id="wfe-from" type="time" value="${esc(c.fromTime || "")}"></div>
-        <div class="field"><label>Hasta (si es menor, cruza la medianoche)</label><input id="wfe-to" type="time" value="${esc(c.toTime || "")}"></div>
-      </div>`);
+    // Ventana horaria: sirve en todos los disparadores. Fuera del disparador
+    // de horario admite varias franjas (basta que una se cumpla): la principal
+    // va en daysOfWeek/fromTime/toTime y las demás en timeBands.
+    if (t === "schedule") {
+      field("Días de la semana", wfeCheckList(WF_DAY_ITEMS(), c.daysOfWeek, "day"));
+    } else {
+      // Cada franja va en su propia tarjeta; la principal es la 1 y no se quita.
+      const bandCard = (title, action, checklist, fromId, fromValue, toId, toValue, attrs) => `<div class="wfe-band" ${attrs || ""}>
+        <div class="wfe-band-head"><span>${title}</span>${action || ""}</div>
+        <div class="field"><label>Solo estos días de la semana</label>${checklist}</div>
+        <div class="form-grid">
+          <div class="field"><label>Desde (hora local)</label>${wfTimeInput(fromId, fromValue)}</div>
+          <div class="field"><label>Hasta (si es menor, cruza la medianoche)</label>${wfTimeInput(toId, toValue)}</div>
+        </div>
+      </div>`;
+      parts.push(bandCard("Franja horaria 1", "", wfeCheckList(WF_DAY_ITEMS(), c.daysOfWeek, "day"), "wfe-from", c.fromTime, "wfe-to", c.toTime));
+      (c.timeBands || []).forEach((b, i) => parts.push(bandCard(`Franja horaria ${i + 2}`,
+        `<button class="btn ghost" type="button" data-band-remove="${i}" title="Quitar esta franja">Quitar</button>`,
+        wfeCheckList(WF_DAY_ITEMS(), b.daysOfWeek, `band${i}day`), `wfe-band-from-${i}`, b.fromTime, `wfe-band-to-${i}`, b.toTime, `data-band="${i}"`)));
+      parts.push(`<div class="field"><button class="btn ghost" type="button" id="wfe-band-add">+ Agregar franja horaria</button>
+        <div class="muted" style="font-size:11.5px;margin-top:3px">La automatización rige si se cumple cualquiera de las franjas. Horas en formato 24 h; sin horas (o de 00:00 a 24:00) la franja vale todo el día. Ejemplo: lunes a viernes de 18:00 a 06:00 en la primera y sábado y domingo sin horas (todo el día) en la segunda. Una ventana que cruza la medianoche pertenece al día en que empieza: para que la noche del domingo siga hasta el lunes a las 06:00, marque también el domingo en la primera franja.</div></div>`);
+    }
 
     container.innerHTML = parts.join("");
 
-    // Cambiar un panel o equipo cambia sus zonas/canales/puertas: se redibuja conservando lo marcado.
-    $$("[data-panel], [data-device], [data-adevice]", container).forEach((box) => box.addEventListener("change", () => { read(); draw(); }));
+    $("#wfe-band-add", container)?.addEventListener("click", () => {
+      read();
+      node.conditions.timeBands = [...(node.conditions.timeBands || []), { daysOfWeek: [], fromTime: null, toTime: null }];
+      draw(); wfeDraw();
+    });
+    $$("[data-band-remove]", container).forEach((x) => x.addEventListener("click", () => {
+      read();
+      node.conditions.timeBands = (node.conditions.timeBands || []).filter((_, i) => i !== Number(x.dataset.bandRemove));
+      draw(); wfeDraw();
+    }));
+
     $$("input:not(.wf-filter), select, textarea", container).forEach((el) => el.addEventListener("change", () => { read(); wfeDraw(); }));
-    wfBindCameraLists(container);
+    // Selector de equipos: el árbol escribe en node.conditions; después se redibuja el filtro y el diagrama.
+    $("#wfe-pick-sources", container)?.addEventListener("click", () => {
+      read();
+      wfeOpenSourcePicker(t, node.conditions, () => { draw(); wfeDraw(); });
+    });
+    $$("[data-unpick]", container).forEach((x) => x.addEventListener("click", () => {
+      read();
+      const [field, value] = wfeSourceKeyParts(x.dataset.unpick);
+      node.conditions[field] = (node.conditions[field] || []).filter((v) => String(v) !== value);
+      draw(); wfeDraw();
+    }));
     $("#wfe-hookcopy", container)?.addEventListener("click", () => {
       navigator.clipboard?.writeText($("#wfe-hookurl", container).value).then(() => toast("URL copiada."), () => toast("No se pudo copiar.", true));
     });
@@ -1001,38 +996,50 @@ function wfeConditionsForm(container, node, isTrigger) {
 
   const read = () => {
     const number = (id) => { const v = $(`#${id}`, container)?.value; return v === "" || v === undefined ? null : Number(v); };
+    // Horas en 24 h: se normalizan y se reescriben en el campo ("6" → "06:00").
+    const time = (id) => {
+      const el = $(`#${id}`, container);
+      if (!el) return null;
+      el.value = wfNormalizeTime(el.value);
+      return el.value || null;
+    };
     const next = {
       daysOfWeek: marked("day").map(Number),
-      fromTime: $("#wfe-from", container)?.value || null,
-      toTime: $("#wfe-to", container)?.value || null,
+      fromTime: time("wfe-from"),
+      toTime: time("wfe-to"),
+      timeBands: $$("[data-band]", container).map((el) => {
+        const i = el.dataset.band;
+        return {
+          daysOfWeek: marked(`band${i}day`).map(Number),
+          fromTime: time(`wfe-band-from-${i}`),
+          toTime: time(`wfe-band-to-${i}`),
+        };
+      }),
     };
+    // Los equipos no están en el formulario: los mantiene el selector en node.conditions.
+    (WFE_SOURCE_FIELDS[t]?.fields || []).forEach((f) => { next[f] = node.conditions[f] || []; });
     switch (t) {
       case "alarm-event": {
-        const zoneKeys = marked("zone"), areaKeys = marked("area");
         const numbersOf = (keys) => [...new Set(keys.map((k) => Number(k.split(":")[1])))];
         Object.assign(next, {
-          panelIds: marked("panel").map(Number), kinds: marked("kind"), severities: marked("severity"),
-          zoneKeys, areaKeys, zoneNumbers: numbersOf(zoneKeys), areaNumbers: numbersOf(areaKeys),
+          kinds: marked("kind"), severities: marked("severity"),
+          zoneNumbers: numbersOf(next.zoneKeys), areaNumbers: numbersOf(next.areaKeys),
           codes: strings("wfe-codes"), textContains: $("#wfe-text", container)?.value.trim() || null,
           sources: marked("source"), sustainedSeconds: isTrigger ? (number("wfe-sustained") || 0) : 0,
         });
         break;
       }
       case "panel-status":
-        Object.assign(next, { panelIds: marked("panel").map(Number), statuses: marked("status") });
+        Object.assign(next, { statuses: marked("status") });
         break;
       case "device-status":
-        Object.assign(next, {
-          deviceKinds: marked("dkind"), deviceStatuses: marked("dstatus"), deviceIds: marked("device").map(Number),
-          accessDeviceIds: marked("adevice").map(Number), speakerIds: marked("speaker").map(Number),
-        });
+        Object.assign(next, { deviceKinds: marked("dkind"), deviceStatuses: marked("dstatus") });
         break;
       case "video-event":
-        Object.assign(next, { videoEventKinds: marked("vkind"), deviceIds: marked("device").map(Number), channelIds: marked("channel").map(Number) });
+        Object.assign(next, { videoEventKinds: marked("vkind") });
         break;
       case "plate-recognized":
         Object.assign(next, {
-          deviceIds: marked("device").map(Number),
           plates: strings("wfe-plates").map((p) => p.toUpperCase()),
           plateMatch: $("#wfe-platematch", container)?.value || "any",
           minConfidence: number("wfe-confidence"),
@@ -1040,8 +1047,7 @@ function wfeConditionsForm(container, node, isTrigger) {
         break;
       case "access-event":
         Object.assign(next, {
-          accessKinds: marked("akind"), credentials: marked("cred"), accessDeviceIds: marked("adevice").map(Number),
-          doorNumbers: marked("door").map(Number), employeeNos: strings("wfe-employees"),
+          accessKinds: marked("akind"), credentials: marked("cred"), employeeNos: strings("wfe-employees"),
           textContains: $("#wfe-text", container)?.value.trim() || null,
         });
         break;
@@ -1056,6 +1062,211 @@ function wfeConditionsForm(container, node, isTrigger) {
   };
 
   draw();
+}
+
+// ---------------------------------------------------------------------------
+// Selector de equipos del disparador (árbol con búsqueda)
+// ---------------------------------------------------------------------------
+// En vez de una lista plana de casillas por tipo de equipo, el filtro muestra
+// chips con lo elegido y un botón que abre un árbol: equipo → sus zonas,
+// áreas, cámaras o puertas. Se marca el equipo completo o solo algunos hijos.
+
+/// Campos del filtro que son "equipos" en cada disparador.
+const WFE_SOURCE_FIELDS = {
+  "alarm-event": { title: "Paneles, zonas y áreas", fields: ["panelIds", "zoneKeys", "areaKeys"], any: "Cualquier panel, zona o área", button: "Elegir paneles y zonas…" },
+  "panel-status": { title: "Paneles", fields: ["panelIds"], any: "Cualquier panel", button: "Elegir paneles…" },
+  "device-status": { title: "Equipos", fields: ["deviceIds", "accessDeviceIds", "speakerIds"], any: "Cualquier equipo de la clase marcada", button: "Elegir equipos…" },
+  "video-event": { title: "Cámaras", fields: ["deviceIds", "channelIds"], any: "Cualquier cámara", button: "Elegir cámaras…" },
+  "plate-recognized": { title: "Cámaras ANPR", fields: ["deviceIds"], any: "Cualquier cámara con reconocimiento de patentes", button: "Elegir cámaras…" },
+  "access-event": { title: "Terminales y puertas", fields: ["accessDeviceIds", "doorNumbers"], any: "Cualquier terminal o puerta", button: "Elegir terminales y puertas…" },
+};
+/// Nombre de cada campo para las chips y el resumen: [singular, plural].
+const WFE_SOURCE_WORDS = {
+  panelIds: ["panel", "paneles"], zoneKeys: ["zona", "zonas"], areaKeys: ["área", "áreas"],
+  deviceIds: ["equipo", "equipos"], channelIds: ["cámara", "cámaras"], accessDeviceIds: ["terminal", "terminales"],
+  speakerIds: ["parlante", "parlantes"], doorNumbers: ["puerta", "puertas"],
+};
+
+const wfeSourceKey = (field, value) => `${field}|${value}`;
+const wfeSourceKeyParts = (key) => { const i = key.indexOf("|"); return [key.slice(0, i), key.slice(i + 1)]; };
+
+/// Árbol de equipos del disparador: { field, value, label, hint, children }.
+/// Los nodos sin `field` solo agrupan (no se marcan).
+function wfeSourceTree(triggerType) {
+  const L = wfEd.lists;
+  const leaf = (field, value, label, hint) => ({ field, value, label, hint: hint || "", children: [] });
+  const group = (label, children) => ({ label, children });
+  switch (triggerType) {
+    case "alarm-event":
+      return L.panels.map((p) => ({
+        field: "panelIds", value: p.id, label: p.name, hint: "todo el panel",
+        children: [
+          group("Zonas / sensores", (p.zones || []).map((z) => leaf("zoneKeys", `${p.id}:${z.number}`, `${z.number} · ${z.name}`))),
+          group("Áreas", (p.areas || []).map((a) => leaf("areaKeys", `${p.id}:${a.number}`, `${a.number} · ${a.name}`))),
+        ].filter((g) => g.children.length > 0),
+      }));
+    case "panel-status":
+      return L.panels.map((p) => leaf("panelIds", p.id, p.name));
+    case "device-status":
+      return [
+        group("Cámaras y grabadores", L.devices.map((d) => leaf("deviceIds", d.id, d.name))),
+        group("Terminales de acceso", L.accessDevices.map((d) => leaf("accessDeviceIds", d.id, d.name))),
+        group("Parlantes IP", L.speakers.map((s) => leaf("speakerIds", s.id, s.name))),
+      ].filter((g) => g.children.length > 0);
+    case "video-event":
+      return L.devices.map((d) => ({
+        field: "deviceIds", value: d.id, label: d.name, hint: d.supportsEvents ? "todas sus cámaras" : "el driver no recibe eventos",
+        children: L.cameras.filter((c) => c.deviceId === d.id).map((c) => leaf("channelIds", c.channelId, c.channelName)),
+      }));
+    case "plate-recognized":
+      return L.devices.filter((d) => d.supportsAnpr).map((d) =>
+        leaf("deviceIds", d.id, d.name, d.anprEnabled ? "" : "no está marcada como fuente de patentes"));
+    case "access-event":
+      return L.accessDevices.map((d) => ({
+        field: "accessDeviceIds", value: d.id, label: d.name, hint: "todas sus puertas",
+        children: L.doors.filter((x) => x.deviceId === d.id).map((x) => leaf("doorNumbers", x.number, `${x.name} (n.º ${x.number})`)),
+      }));
+    default:
+      return [];
+  }
+}
+
+/// Etiqueta de un elemento elegido con su equipo delante ("Panel Caseta · 0 · Recepción").
+function wfeSourceLabel(tree, field, value) {
+  const walk = (nodes, path) => {
+    for (const n of nodes) {
+      const here = n.field ? path.concat(n.label) : path;
+      if (n.field === field && String(n.value) === String(value)) return here.join(" · ");
+      const found = walk(n.children, here);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(tree, []);
+}
+
+/// Chips de los equipos elegidos + botón del árbol (va dentro del formulario del filtro).
+function wfeSourcesHtml(triggerType, conditions) {
+  const spec = WFE_SOURCE_FIELDS[triggerType];
+  if (!spec) return "";
+  const tree = wfeSourceTree(triggerType);
+  const chips = [];
+  spec.fields.forEach((f) => (conditions[f] || []).forEach((v) => chips.push({
+    field: f, value: v, label: wfeSourceLabel(tree, f, v) ?? `${v} (ya no existe)`,
+  })));
+  return `<div class="wfe-sources">
+    ${chips.length === 0
+      ? `<div class="wfe-sources-any">${esc(spec.any)}</div>`
+      : `<div class="wfe-sources-chips">${chips.map((ch) => `<span class="chip" title="${esc(ch.label)}">
+          <span class="chip-kind">${esc(WFE_SOURCE_WORDS[ch.field][0])}</span>${esc(ch.label)}
+          <button type="button" data-unpick="${esc(wfeSourceKey(ch.field, ch.value))}" title="Quitar" aria-label="Quitar">×</button></span>`).join("")}</div>`}
+    <button type="button" class="btn ghost" id="wfe-pick-sources">${esc(spec.button)}</button>
+  </div>`;
+}
+
+/// Resumen "1 panel · 3 zonas" de un conjunto de claves campo|valor.
+function wfeSourceSummary(set, fields) {
+  const counts = {};
+  set.forEach((key) => { const [f] = wfeSourceKeyParts(key); counts[f] = (counts[f] || 0) + 1; });
+  const parts = fields.filter((f) => counts[f]).map((f) => `${counts[f]} ${WFE_SOURCE_WORDS[f][counts[f] === 1 ? 0 : 1]}`);
+  return parts.length ? `Marcado: ${parts.join(" · ")}.` : "Nada marcado: dispara cualquiera.";
+}
+
+/// Abre el árbol de equipos; al aceptar escribe los campos en `conditions` y llama a `onDone`.
+function wfeOpenSourcePicker(triggerType, conditions, onDone) {
+  const spec = WFE_SOURCE_FIELDS[triggerType];
+  const tree = wfeSourceTree(triggerType);
+  const set = new Set();
+  spec.fields.forEach((f) => (conditions[f] || []).forEach((v) => set.add(wfeSourceKey(f, v))));
+
+  // Identificador por nodo para desplegar/plegar; los agrupadores parten
+  // abiertos, los equipos solo si tienen algo marcado adentro (o son pocos).
+  let seq = 0;
+  const open = new Set();
+  const countLeaves = (nodes) => nodes.reduce((n, x) => n + (x.field ? 1 : 0) + countLeaves(x.children), 0);
+  const few = countLeaves(tree) <= 40;
+  const hasPicked = (n) => (n.field && set.has(wfeSourceKey(n.field, n.value))) || n.children.some(hasPicked);
+  const prepare = (nodes) => nodes.forEach((n) => {
+    n._id = `n${seq++}`;
+    if (n.children.length && (!n.field || few || hasPicked(n))) open.add(n._id);
+    prepare(n.children);
+  });
+  prepare(tree);
+  const allIds = [];
+  const collect = (nodes) => nodes.forEach((n) => { if (n.children.length) allIds.push(n._id); collect(n.children); });
+  collect(tree);
+
+  openModal(`
+    <h3>${esc(spec.title)}</h3>
+    <div class="muted" style="font-size:12.5px;margin-bottom:10px">Marque un equipo completo o solo algunos de sus elementos. Sin nada marcado, dispara cualquiera.</div>
+    <div class="wfe-tree-search">
+      <input id="wfe-tree-q" type="text" placeholder="Buscar por nombre…" autocomplete="off">
+      <button type="button" class="btn ghost" id="wfe-tree-expand">Desplegar todo</button>
+      <button type="button" class="btn ghost" id="wfe-tree-clear">Desmarcar todo</button>
+    </div>
+    <div class="wfe-tree" id="wfe-tree"></div>
+    <div class="wfe-tree-summary" id="wfe-tree-summary"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" id="wfe-tree-cancel">Cancelar</button>
+      <button class="btn" type="button" id="wfe-tree-ok">Aceptar</button>
+    </div>`, true);
+
+  const box = $("#wfe-tree");
+  const summary = () => { $("#wfe-tree-summary").textContent = wfeSourceSummary(set, spec.fields); };
+  const paint = () => {
+    const q = $("#wfe-tree-q").value.trim().toLowerCase();
+    const matches = (n) => !q || n.label.toLowerCase().includes(q);
+    const visible = (n) => matches(n) || n.children.some(visible);
+    const rows = [];
+    const row = (n, level) => {
+      if (!visible(n)) return;
+      const expandable = n.children.length > 0;
+      const isOpen = q ? true : open.has(n._id);
+      const caret = `<span class="caret ${expandable ? (isOpen ? "open" : "") : "leaf"}" data-toggle="${n._id}">▶</span>`;
+      if (!n.field) {
+        rows.push(`<div class="wfe-tree-row group level-${level}">${caret}<span class="tree-title">${esc(n.label)}</span></div>`);
+      } else {
+        const key = wfeSourceKey(n.field, n.value);
+        rows.push(`<div class="wfe-tree-row level-${level} ${set.has(key) ? "picked" : ""}">${caret}
+          <label><input type="checkbox" data-pick="${esc(key)}" ${set.has(key) ? "checked" : ""}>
+          <span class="tree-name">${esc(n.label)}</span>${n.hint ? `<span class="tree-hint">· ${esc(n.hint)}</span>` : ""}</label></div>`);
+      }
+      if (expandable && isOpen) n.children.forEach((ch) => row(ch, Math.min(level + 1, 3)));
+    };
+    tree.forEach((n) => row(n, 0));
+    box.innerHTML = rows.length ? rows.join("") : `<div class="wfe-tree-empty">${q ? `Nada coincide con «${esc(q)}».` : "No hay equipos de este tipo configurados."}</div>`;
+    summary();
+  };
+
+  box.addEventListener("click", (e) => {
+    const caret = e.target.closest("[data-toggle]");
+    if (!caret || caret.classList.contains("leaf")) return;
+    const id = caret.dataset.toggle;
+    if (open.has(id)) open.delete(id); else open.add(id);
+    paint();
+  });
+  box.addEventListener("change", (e) => {
+    const input = e.target.closest("[data-pick]");
+    if (!input) return;
+    if (input.checked) set.add(input.dataset.pick); else set.delete(input.dataset.pick);
+    input.closest(".wfe-tree-row").classList.toggle("picked", input.checked);
+    summary();
+  });
+  $("#wfe-tree-q").addEventListener("input", paint);
+  $("#wfe-tree-expand").addEventListener("click", () => { allIds.forEach((id) => open.add(id)); paint(); });
+  $("#wfe-tree-clear").addEventListener("click", () => { set.clear(); paint(); });
+  $("#wfe-tree-cancel").addEventListener("click", closeModal);
+  $("#wfe-tree-ok").addEventListener("click", () => {
+    spec.fields.forEach((f) => { conditions[f] = []; });
+    set.forEach((key) => {
+      const [field, value] = wfeSourceKeyParts(key);
+      if (spec.fields.includes(field)) conditions[field].push(field.endsWith("Keys") ? value : Number(value));
+    });
+    closeModal();
+    onDone();
+  });
+  paint();
+  $("#wfe-tree-q").focus();
 }
 
 /// Resumen legible de un conjunto de condiciones (tarjetas y listado).
@@ -1105,8 +1316,14 @@ function wfeConditionsSummary(c, triggerType) {
   if (c.doorNumbers?.length) push(`puertas ${c.doorNumbers.join(", ")}`);
   if (c.employeeNos?.length) push(`personas ${c.employeeNos.join(", ")}`);
   if (c.scheduleTimes?.length) push(`a las ${c.scheduleTimes.join(", ")}`);
-  if (c.fromTime || c.toTime) push(`${c.fromTime || "00:00"}–${c.toTime || "24:00"}`);
-  if (c.daysOfWeek?.length && c.daysOfWeek.length < 7) push(c.daysOfWeek.map((d) => WF_DAYS[d].slice(0, 3)).join("/"));
+  const band = (days, from, to) => {
+    const bits = [];
+    if (days?.length && days.length < 7) bits.push(WF_DAY_ORDER.filter((d) => days.includes(d)).map((d) => WF_DAYS[d].slice(0, 3)).join("/"));
+    if (from || to) bits.push(`${from || "00:00"}–${to || "24:00"}`);
+    return bits.join(" ");
+  };
+  const bands = [band(c.daysOfWeek, c.fromTime, c.toTime), ...(c.timeBands || []).map((b) => band(b.daysOfWeek, b.fromTime, b.toTime))].filter((b) => b);
+  if (bands.length) push(bands.join(" ó "));
   void L; void triggerType;
   return parts.join(" · ");
 }

@@ -34,7 +34,8 @@ internal static class HikvisionEvents
                 $"No se pudo iniciar sesión en {info.Host}:{info.Port}: {HikvisionException.DescribeForUser(code)} (error {code}).");
         }
 
-        HikvisionAlarmChannel.Register(userId, (command, data, length) => Handle(command, data, length, onEvent));
+        var subscription = new Subscription(userId, info.Host);
+        HikvisionAlarmChannel.Register(userId, (command, data, length) => Handle(command, data, length, subscription, onEvent));
         var param = new ItsInterop.NET_DVR_SETUPALARM_PARAM
         {
             dwSize = (uint)Marshal.SizeOf<ItsInterop.NET_DVR_SETUPALARM_PARAM>(),
@@ -54,21 +55,108 @@ internal static class HikvisionEvents
                 $"El equipo {info.Host} no aceptó el canal de eventos: " +
                 $"{HikvisionException.DescribeForUser(code)} (error {code}).");
         }
-        return new Subscription(userId, handle);
+        subscription.AlarmHandle = handle;
+        subscription.RefreshChannelMap();
+        return subscription;
     }
 
-    private sealed class Subscription(int userId, int alarmHandle) : IDeviceEventSubscription
+    /// <summary>
+    /// Sesión de eventos de un equipo. Guarda además el mapa "cámara IP →
+    /// canal del grabador": en un DVR/NVR las alarmas inteligentes
+    /// (<c>NET_VCA_DEV_INFO</c>) vienen identificadas por la IP y el canal
+    /// propio de la cámara (casi siempre 1), NO por el canal del grabador
+    /// (33, 34...). Sin este mapa un cruce de línea de la cámara IP D2 se
+    /// atribuiría al canal analógico 1.
+    /// </summary>
+    private sealed class Subscription(int userId, string host) : IDeviceEventSubscription
     {
+        private static readonly TimeSpan RefreshThrottle = TimeSpan.FromMinutes(1);
+
         private int _disposed;
+        private int _refreshing;
+        private DateTime _lastRefreshUtc = DateTime.MinValue;
+
+        /// <summary>(IP de la cámara, canal en la cámara) → canal del grabador.</summary>
+        private volatile Dictionary<(string Ip, int Channel), int> _byIpAndChannel = [];
+
+        /// <summary>IP de la cámara → canal del grabador (solo cámaras con un canal en el grabador).</summary>
+        private volatile Dictionary<string, int> _byIp = [];
+
+        public int AlarmHandle { get; set; } = -1;
 
         public bool IsAlive => Volatile.Read(ref _disposed) == 0;
+
+        /// <summary>
+        /// Canal del grabador al que pertenece el equipo frontal de una alarma.
+        /// Si el equipo frontal es el propio grabador (o una cámara sola), el
+        /// canal viene tal cual; si es una cámara IP conocida se traduce; si es
+        /// una cámara que el mapa aún no conoce (agregada hace poco) se pide
+        /// refrescar el mapa y el evento sale sin canal (0), nunca al canal
+        /// equivocado.
+        /// </summary>
+        public int ResolveChannel(CHCNetSDK.NET_VCA_DEV_INFO front)
+        {
+            string ip = front.struDevIP.sIpV4?.Trim() ?? "";
+            if (ip.Length == 0 || ip == "0.0.0.0" || string.Equals(ip, host, StringComparison.OrdinalIgnoreCase))
+                return front.byChannel;
+            if (_byIpAndChannel.TryGetValue((ip, front.byChannel), out int channel)) return channel;
+            if (_byIp.TryGetValue(ip, out channel)) return channel;
+            RequestRefresh();
+            return 0;
+        }
+
+        private void RequestRefresh()
+        {
+            if (!IsAlive || DateTime.UtcNow - _lastRefreshUtc < RefreshThrottle) return;
+            if (Interlocked.Exchange(ref _refreshing, 1) != 0) return;
+            // Nunca consultar al equipo desde el hilo del SDK.
+            _ = Task.Run(() =>
+            {
+                try { if (IsAlive) RefreshChannelMap(); }
+                catch { /* se reintenta con el siguiente evento */ }
+                finally { Volatile.Write(ref _refreshing, 0); }
+            });
+        }
+
+        /// <summary>Lee la configuración de canales IP del grabador (NET_DVR_GET_IPPARACFG_V40) y arma el mapa.</summary>
+        public void RefreshChannelMap()
+        {
+            _lastRefreshUtc = DateTime.UtcNow;
+            if (HikvisionDeviceDriver.TryGetIpParaCfg(userId) is not { } cfg) return;
+            if (cfg.struStreamMode is null || cfg.struIPDevInfo is null) return;
+
+            var byIpAndChannel = new Dictionary<(string, int), int>();
+            var byIp = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var ambiguous = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int start = (int)cfg.dwStartDChan;
+            for (int i = 0; i < cfg.struStreamMode.Length; i++)
+            {
+                var mode = cfg.struStreamMode[i];
+                // Solo canales que toman el flujo directo de un equipo IP:
+                // NET_DVR_IPCHANINFO = byEnable, byIPID, byChannel, byIPIDHigh...
+                if (mode.byGetStreamType != 0 || mode.uGetStream.byUnion is not { Length: >= 4 } u || u[0] == 0) continue;
+                int ipId = u[1] | (u[3] << 8);
+                if (ipId < 1 || ipId > cfg.struIPDevInfo.Length) continue;
+                var dev = cfg.struIPDevInfo[ipId - 1];
+                string ip = dev.struIP.sIpV4?.Trim() ?? "";
+                if (ip.Length == 0) continue;
+                int recorderChannel = start + i;
+                byIpAndChannel[(ip, u[2])] = recorderChannel;
+                if (byIp.ContainsKey(ip)) ambiguous.Add(ip);
+                else byIp[ip] = recorderChannel;
+            }
+            foreach (string ip in ambiguous) byIp.Remove(ip);
+
+            _byIpAndChannel = byIpAndChannel;
+            _byIp = byIp;
+        }
 
         public ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return ValueTask.CompletedTask;
             HikvisionAlarmChannel.Unregister(userId);
-            CHCNetSDK.NET_DVR_CloseAlarmChan_V30(alarmHandle);
+            if (AlarmHandle >= 0) CHCNetSDK.NET_DVR_CloseAlarmChan_V30(AlarmHandle);
             CHCNetSDK.NET_DVR_Logout(userId);
             return ValueTask.CompletedTask;
         }
@@ -78,7 +166,7 @@ internal static class HikvisionEvents
     // Parseo (hilo del SDK: copiar y salir)
     // ------------------------------------------------------------------
 
-    private static void Handle(int command, IntPtr data, uint length, Action<DeviceEvent> onEvent)
+    private static void Handle(int command, IntPtr data, uint length, Subscription subscription, Action<DeviceEvent> onEvent)
     {
         switch (command)
         {
@@ -89,19 +177,19 @@ internal static class HikvisionEvents
                 foreach (var evt in ParseV40(data, length)) Deliver(onEvent, evt);
                 break;
             case CHCNetSDK.COMM_ALARM_RULE:
-                if (ParseRule(data, length) is { } rule) Deliver(onEvent, rule);
+                if (ParseRule(data, length, subscription) is { } rule) Deliver(onEvent, rule);
                 break;
             case CHCNetSDK.COMM_ALARM_FACE:
-                if (ParseFace(data, length) is { } face) Deliver(onEvent, face);
+                if (ParseFace(data, length, subscription) is { } face) Deliver(onEvent, face);
                 break;
             case CHCNetSDK.COMM_ALARM_PDC:
-                if (ParsePdc(data, length) is { } pdc) Deliver(onEvent, pdc);
+                if (ParsePdc(data, length, subscription) is { } pdc) Deliver(onEvent, pdc);
                 break;
             case CHCNetSDK.COMM_ALARM_AUDIOEXCEPTION:
-                if (ParseAudio(data, length) is { } audio) Deliver(onEvent, audio);
+                if (ParseAudio(data, length, subscription) is { } audio) Deliver(onEvent, audio);
                 break;
             case CHCNetSDK.COMM_ALARM_DEFOCUS:
-                if (ParseDefocus(data, length) is { } defocus) Deliver(onEvent, defocus);
+                if (ParseDefocus(data, length, subscription) is { } defocus) Deliver(onEvent, defocus);
                 break;
             // Las patentes (COMM_ITS_*) van por la suscripción ANPR, no por esta.
         }
@@ -192,7 +280,7 @@ internal static class HikvisionEvents
         if (!any) yield return new DeviceEvent(0, info.Kind, info.Description, at);
     }
 
-    private static DeviceEvent? ParseRule(IntPtr data, uint length)
+    private static DeviceEvent? ParseRule(IntPtr data, uint length, Subscription subscription)
     {
         if (length < Marshal.SizeOf<CHCNetSDK.NET_VCA_RULE_ALARM>()) return null;
         var r = Marshal.PtrToStructure<CHCNetSDK.NET_VCA_RULE_ALARM>(data);
@@ -242,31 +330,33 @@ internal static class HikvisionEvents
         };
         string? rule = DecodeName(r.struRuleInfo.byRuleName);
         string description = rule is { Length: > 0 } ? $"{label} (regla '{rule}')" : label;
-        byte[]? image = r.dwPicDataLen > 0 && r.pImage != IntPtr.Zero ? CopyBuffer(r.pImage, r.dwPicDataLen) : null;
+        // byPicTransType 1 = el equipo manda una URL en vez de la foto: no es una imagen.
+        byte[]? image = r.dwPicDataLen > 0 && r.byPicTransType == 0 && r.pImage != IntPtr.Zero
+            ? CopyBuffer(r.pImage, r.dwPicDataLen) : null;
 
-        return new DeviceEvent(r.struDevInfo.byChannel, kind, description, FromPackedTime(r.dwAbsTime) ?? DateTime.Now,
-            RuleName: rule, Image: image);
+        return new DeviceEvent(subscription.ResolveChannel(r.struDevInfo), kind, description,
+            FromPackedTime(r.dwAbsTime) ?? DateTime.Now, RuleName: rule, Image: image);
     }
 
-    private static DeviceEvent? ParseFace(IntPtr data, uint length)
+    private static DeviceEvent? ParseFace(IntPtr data, uint length, Subscription subscription)
     {
         if (length < Marshal.SizeOf<CHCNetSDK.NET_DVR_FACEDETECT_ALARM>()) return null;
         var f = Marshal.PtrToStructure<CHCNetSDK.NET_DVR_FACEDETECT_ALARM>(data);
         string? rule = DecodeName(f.byRuleName);
-        return new DeviceEvent(f.struDevInfo.byChannel, VideoEventKind.FaceDetection,
+        return new DeviceEvent(subscription.ResolveChannel(f.struDevInfo), VideoEventKind.FaceDetection,
             rule is { Length: > 0 } ? $"Detección de rostro (regla '{rule}')" : "Detección de rostro",
             FromPackedTime(f.dwAbsTime) ?? DateTime.Now, RuleName: rule);
     }
 
-    private static DeviceEvent? ParsePdc(IntPtr data, uint length)
+    private static DeviceEvent? ParsePdc(IntPtr data, uint length, Subscription subscription)
     {
         if (length < Marshal.SizeOf<CHCNetSDK.NET_DVR_PDC_ALRAM_INFO>()) return null;
         var p = Marshal.PtrToStructure<CHCNetSDK.NET_DVR_PDC_ALRAM_INFO>(data);
-        int channel = p.byChannel > 0 ? p.byChannel : p.struDevInfo.byChannel;
+        int channel = p.byChannel > 0 ? p.byChannel : subscription.ResolveChannel(p.struDevInfo);
         return new DeviceEvent(channel, VideoEventKind.PeopleCounting, "Conteo de personas", DateTime.Now);
     }
 
-    private static DeviceEvent? ParseAudio(IntPtr data, uint length)
+    private static DeviceEvent? ParseAudio(IntPtr data, uint length, Subscription subscription)
     {
         if (length < Marshal.SizeOf<CHCNetSDK.NET_DVR_AUDIOEXCEPTION_ALARM>()) return null;
         var a = Marshal.PtrToStructure<CHCNetSDK.NET_DVR_AUDIOEXCEPTION_ALARM>(data);
@@ -276,14 +366,14 @@ internal static class HikvisionEvents
             2 => "Subida brusca del audio" + (a.wAudioDecibel > 0 ? $" ({a.wAudioDecibel} dB)" : ""),
             _ => "Anomalía de audio",
         };
-        return new DeviceEvent(a.struDevInfo.byChannel, VideoEventKind.AudioException, description, DateTime.Now);
+        return new DeviceEvent(subscription.ResolveChannel(a.struDevInfo), VideoEventKind.AudioException, description, DateTime.Now);
     }
 
-    private static DeviceEvent? ParseDefocus(IntPtr data, uint length)
+    private static DeviceEvent? ParseDefocus(IntPtr data, uint length, Subscription subscription)
     {
         if (length < Marshal.SizeOf<CHCNetSDK.NET_DVR_DEFOCUS_ALARM>()) return null;
         var d = Marshal.PtrToStructure<CHCNetSDK.NET_DVR_DEFOCUS_ALARM>(data);
-        return new DeviceEvent(d.struDevInfo.byChannel, VideoEventKind.VideoException, "Cámara desenfocada", DateTime.Now);
+        return new DeviceEvent(subscription.ResolveChannel(d.struDevInfo), VideoEventKind.VideoException, "Cámara desenfocada", DateTime.Now);
     }
 
     // ------------------------------------------------------------------

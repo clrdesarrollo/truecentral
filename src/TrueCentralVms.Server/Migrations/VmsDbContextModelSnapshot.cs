@@ -1056,6 +1056,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int>("DeviceId")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
@@ -1229,6 +1232,161 @@ namespace TrueCentralVms.Server.Migrations
                         .IsUnique();
 
                     b.ToTable("Devices");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Intercom", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("CallCenterEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("ChannelId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DoorCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DriverKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("FirmwareVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("GroupName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("HttpPort")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<byte[]>("PasswordCiphertext")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SerialNumber")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChannelId");
+
+                    b.HasIndex("Host", "Port")
+                        .IsUnique();
+
+                    b.ToTable("Intercoms");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.IntercomCall", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("AnsweredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AnsweredBy")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("AnsweredByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("DoorOpened")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("DoorOpenedBy")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("EndReason")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("IntercomId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("IntercomName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Origin")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartedAt");
+
+                    b.HasIndex("IntercomId", "StartedAt");
+
+                    b.ToTable("IntercomCalls");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveView", b =>
@@ -2129,6 +2287,14 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<DateTime>("RaisedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("RecipientUserIds")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Recipients")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
                     b.Property<bool>("RequiresAck")
                         .HasColumnType("boolean");
 
@@ -2394,6 +2560,16 @@ namespace TrueCentralVms.Server.Migrations
                         .IsRequired();
 
                     b.Navigation("Device");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Intercom", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Channel", "Channel")
+                        .WithMany()
+                        .HasForeignKey("ChannelId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Channel");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveView", b =>

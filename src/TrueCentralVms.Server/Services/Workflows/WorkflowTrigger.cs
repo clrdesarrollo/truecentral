@@ -63,6 +63,7 @@ public sealed record WorkflowTrigger(
         AlarmEventKind.Trouble => "Falla",
         AlarmEventKind.System => "Sistema",
         AlarmEventKind.ZoneTriggered => "Sensor interrumpido",
+        AlarmEventKind.ZoneRestored => "Sensor restablecido",
         _ => "Información",
     };
 

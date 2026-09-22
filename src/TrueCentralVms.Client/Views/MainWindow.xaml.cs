@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using TrueCentralVms.Client.ViewModels;
 
 namespace TrueCentralVms.Client.Views;
@@ -183,6 +184,8 @@ public partial class MainWindow : Window
     }
 
     private const int WM_GETMINMAXINFO = 0x0024;
+    private const int WM_DISPLAYCHANGE = 0x007E;
+    private const int WM_DPICHANGED = 0x02E0;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
@@ -195,6 +198,22 @@ public partial class MainWindow : Window
 
     private IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        // Cambió la resolución o el escalado (monitor nuevo, consola de una
+        // VM que redimensiona la pantalla, RDP): una ventana maximizada se
+        // queda con el tamaño de la pantalla anterior y la superficie de WPF
+        // no se vuelve a pintar completa. Se rehace el maximizado con los
+        // límites nuevos una vez que Windows terminó de aplicar el cambio.
+        if (msg is WM_DISPLAYCHANGE or WM_DPICHANGED)
+        {
+            if (WindowState == WindowState.Maximized && !_vm.IsGridFullscreen)
+                Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+                {
+                    if (WindowState != WindowState.Maximized) return;
+                    WindowState = WindowState.Normal;
+                    WindowState = WindowState.Maximized;
+                });
+            return IntPtr.Zero;
+        }
         if (msg != WM_GETMINMAXINFO) return IntPtr.Zero;
         var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
@@ -206,6 +225,11 @@ public partial class MainWindow : Window
         mmi.ptMaxPosition.Y = info.rcWork.Top - info.rcMonitor.Top;
         mmi.ptMaxSize.X = info.rcWork.Right - info.rcWork.Left;
         mmi.ptMaxSize.Y = info.rcWork.Bottom - info.rcWork.Top;
+        // Sin esto el tamaño máximo queda en el del monitor PRINCIPAL: en un
+        // monitor más grande que el principal la ventana maximizada se
+        // recortaba (se veía el escritorio a la derecha y abajo).
+        mmi.ptMaxTrackSize.X = Math.Max(mmi.ptMaxTrackSize.X, info.rcMonitor.Right - info.rcMonitor.Left);
+        mmi.ptMaxTrackSize.Y = Math.Max(mmi.ptMaxTrackSize.Y, info.rcMonitor.Bottom - info.rcMonitor.Top);
         Marshal.StructureToPtr(mmi, lParam, false);
         handled = true;
         return IntPtr.Zero;

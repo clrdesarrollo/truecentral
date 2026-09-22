@@ -91,6 +91,11 @@ public partial class AuxScreenViewModel : ObservableObject
     public async Task ApplyLayoutAsync(VideoLayout layout)
     {
         MaximizedIndex = -1;
+        // Igual que en la grilla principal: el secundario estacionado de un
+        // cuadro promovido ya no tiene a qué volver.
+        _autoPromotedCell?.ReleaseParked();
+        _autoPromotedCell = null;
+        _autoPromotedChannel = null;
         CurrentLayout = layout;
         int count = layout.CellCount;
         while (Cells.Count > count)
@@ -99,6 +104,7 @@ public partial class AuxScreenViewModel : ObservableObject
             Cells.RemoveAt(Cells.Count - 1);
             cell.AudioActivated -= _shell.OnCellAudioActivated;
             cell.MediaSaved -= OnCellMediaSaved;
+            cell.AssignedChannelChanged -= _shell.RefreshLiveChannels;
             cell.Dispose();
             await MainViewModel.BreatheAsync();
         }
@@ -107,6 +113,8 @@ public partial class AuxScreenViewModel : ObservableObject
             var cell = new VideoCellViewModel(_shell.Api, _shell.Settings);
             cell.AudioActivated += _shell.OnCellAudioActivated;
             cell.MediaSaved += OnCellMediaSaved;
+            // El árbol es del shell: la marca de "en vivo" cuenta todas las pantallas.
+            cell.AssignedChannelChanged += _shell.RefreshLiveChannels;
             Cells.Add(cell);
             await MainViewModel.BreatheAsync();
         }
@@ -114,6 +122,7 @@ public partial class AuxScreenViewModel : ObservableObject
             Cells[i].Index = i + 1;
         if (SelectedCell is not null && !Cells.Contains(SelectedCell))
             SelectedCell = null;
+        _shell.RefreshLiveChannels();
     }
 
     private void OnCellMediaSaved(string title, string glyph, string path) =>
@@ -151,7 +160,8 @@ public partial class AuxScreenViewModel : ObservableObject
         {
             _autoPromotedCell = cell;
             _autoPromotedChannel = node;
-            _ = cell.SwitchToProfileAsync(StreamProfile.Main);
+            // El secundario queda estacionado: restaurar es instantáneo.
+            _ = cell.SwitchToProfileAsync(StreamProfile.Main, keepCurrentForRestore: true);
         }
     }
 

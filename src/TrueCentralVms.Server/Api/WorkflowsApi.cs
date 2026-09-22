@@ -33,6 +33,19 @@ public static class WorkflowsApi
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
 
+    /// <summary>
+    /// Alertas que puede ver una sesión: todas para el administrador; para el
+    /// resto, las dirigidas a todos (sin destinatarios) o las que lo incluyen
+    /// (los ids se guardan como ",3,5," justamente para buscar ",id,").
+    /// </summary>
+    private static IQueryable<WorkflowAlert> VisibleAlerts(VmsDbContext db, SessionInfo session)
+    {
+        var alerts = db.WorkflowAlerts.AsNoTracking();
+        if (session.Role == Core.Domain.Roles.Admin) return alerts;
+        string me = $",{session.UserId},";
+        return alerts.Where(a => a.RecipientUserIds == null || a.RecipientUserIds.Contains(me));
+    }
+
     /// <summary>Marcas comunes a todos los disparadores.</summary>
     private static readonly WorkflowPlaceholderDto[] Placeholders =
     [
@@ -137,16 +150,20 @@ public static class WorkflowsApi
         // Catálogo para el editor
         // ------------------------------------------------------------------
         app.MapGet("/api/workflows/catalog", async (HttpContext ctx, WorkflowEngine engine, SmtpSender smtp,
-            CancellationToken ct) =>
+            VmsDbContext db, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             var settings = await smtp.LoadAsync(ct);
+            // Destinatarios posibles de un aviso (solo nombre y rol: nada sensible).
+            var users = await db.Users.AsNoTracking().OrderBy(u => u.Username)
+                .Select(u => new WorkflowUserDto(u.Id, u.Username, u.Role, u.Enabled)).ToListAsync(ct);
             return Results.Ok(new WorkflowCatalogDto(
                 Triggers,
                 engine.Executors.Select(e => new WorkflowActionInfoDto(e.Type, e.Label, e.Description, e.UsesSecret, ActionGroup(e.Type))).ToList(),
                 Placeholders,
                 settings is { Enabled: true, Host.Length: > 0 },
-                MediaMtxManager.LocateFfmpeg() is not null));
+                MediaMtxManager.LocateFfmpeg() is not null,
+                users));
         });
 
         // Cámaras elegibles en la acción "capturar foto" y en los filtros por
@@ -498,14 +515,16 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/alerts", async (HttpContext ctx, VmsDbContext db,
             bool? pending, int? skip, int? take, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
 
-            var query = db.WorkflowAlerts.AsNoTracking().AsQueryable();
+            // Un operador ve las alertas dirigidas a todos o a él; el
+            // administrador las ve todas (es quien responde "quién la vio").
+            var visible = VisibleAlerts(db, session);
+            var query = visible;
             if (pending == true) query = query.Where(a => a.RequiresAck && a.AcknowledgedAt == null);
 
             int total = await query.CountAsync(ct);
-            int pendingCount = await db.WorkflowAlerts
-                .CountAsync(a => a.RequiresAck && a.AcknowledgedAt == null, ct);
+            int pendingCount = await visible.CountAsync(a => a.RequiresAck && a.AcknowledgedAt == null, ct);
             var alerts = await query.OrderByDescending(a => a.RaisedAt)
                 .Skip(Math.Max(skip ?? 0, 0))
                 .Take(Math.Clamp(take ?? 50, 1, MaxTake))
@@ -517,8 +536,8 @@ public static class WorkflowsApi
 
         app.MapGet("/api/workflows/alerts/{id:long}", async (HttpContext ctx, long id, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            var alert = await db.WorkflowAlerts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, ct);
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var alert = await VisibleAlerts(db, session).FirstOrDefaultAsync(a => a.Id == id, ct);
             return alert is null ? Results.NotFound() : Results.Ok(WorkflowMapper.ToDto(alert));
         });
 

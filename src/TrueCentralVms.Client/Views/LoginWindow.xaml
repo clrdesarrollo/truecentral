@@ -8,16 +8,13 @@
         Icon="/Assets/logo.png"
         Background="{StaticResource BgBrush}">
     <!-- Sin marco estándar de Windows: la franja superior (CaptionHeight)
-         permite arrastrar la ventana y el ✕ propio la cierra. -->
+         permite arrastrar la ventana y el botón "Cerrar" del formulario la cierra. -->
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="52" ResizeBorderThickness="0"
                       GlassFrameThickness="0,0,0,1" CornerRadius="0"
                       UseAeroCaptionButtons="False"/>
     </WindowChrome.WindowChrome>
     <Grid>
-    <Button Style="{StaticResource TitleBarCloseButton}" Content="&#xE8BB;" Height="30"
-            HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,4,0" Panel.ZIndex="1"
-            Click="OnCloseClick" ToolTip="Cerrar"/>
     <Border Background="{StaticResource PanelBrush}" Margin="18,22,18,18" CornerRadius="10"
             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="24">
         <StackPanel>
@@ -101,6 +98,8 @@
 
             <Button x:Name="LoginButton" Content="Ingresar" Style="{StaticResource PrimaryButton}"
                     Click="OnLoginClick" IsDefault="True"/>
+            <Button Content="Cerrar" Style="{StaticResource GhostButton}" Margin="0,8,0,0"
+                    Click="OnCloseClick"/>
         </StackPanel>
     </Border>
     </Grid>

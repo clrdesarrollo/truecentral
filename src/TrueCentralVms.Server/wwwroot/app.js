@@ -7,6 +7,37 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // ---------------------------------------------------------------------------
+// Campo de contraseña con botón "mostrar/ocultar"
+// ---------------------------------------------------------------------------
+const EYE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const EYE_OFF_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+
+/// Un <input type="password"> con el ojo para ver lo escrito. `attrs` son los
+/// atributos del input (id, autocomplete, required...). Activar con bindPasswordToggles().
+function passwordInputHtml(attrs) {
+  return `<div class="pw-wrap">
+    <input type="password" ${attrs}>
+    <button type="button" class="pw-toggle" title="Mostrar contraseña" aria-label="Mostrar contraseña" aria-pressed="false">${EYE_ICON}</button>
+  </div>`;
+}
+
+/// Activa los botones de mostrar/ocultar de todos los campos de contraseña dentro de `root`.
+function bindPasswordToggles(root) {
+  $$(".pw-toggle", root).forEach((button) => {
+    const input = button.previousElementSibling;
+    if (!input) return;
+    button.addEventListener("click", () => {
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      button.innerHTML = show ? EYE_OFF_ICON : EYE_ICON;
+      button.title = button.ariaLabel = show ? "Ocultar contraseña" : "Mostrar contraseña";
+      button.setAttribute("aria-pressed", String(show));
+      input.focus();
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Política de contraseñas (réplica de Core\Auth\PasswordPolicy.cs; el servidor
 // es la fuente de verdad y revalida siempre)
 // ---------------------------------------------------------------------------
@@ -42,13 +73,38 @@ function passwordOk(p) { return PASSWORD_RULES.every((r) => r.test(p || "")); }
 // Utilitarios de interfaz
 // ---------------------------------------------------------------------------
 let toastTimer = null;
-function toast(message, isError) {
+function toast(message, isError, options = {}) {
   const el = $("#toast");
   el.textContent = message;
   el.classList.toggle("error", !!isError);
+  el.classList.toggle("warning", !!options.warning);
   el.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
+  // Un aviso (p. ej. canales fuera del cupo de licencia) se deja más tiempo en pantalla.
+  toastTimer = setTimeout(() => el.classList.add("hidden"), options.warning ? 9000 : 3500);
+}
+
+/** Resultado de alta/edición/revalidación de un equipo: el mensaje normal, o
+ *  el aviso del servidor (canales deshabilitados por cupo) si lo hay. */
+function toastDeviceSaved(result, message) {
+  if (result && result.warning) toast(`${message} ${result.warning}`, false, { warning: true });
+  else toast(message);
+}
+
+/** Celda "Canales": habilitados / total. Solo se destaca si hay canales CON
+ *  SEÑAL deshabilitados (cámaras que los operadores no ven); las entradas sin
+ *  cámara de un DVR/NVR son normales y quedan en gris. */
+function channelCountCell(d) {
+  const total = d.channelCount ?? 0;
+  const enabled = d.enabledChannelCount ?? total;
+  if (total === 0) return `<span class="muted">0</span>`;
+  if (enabled === total) return `${total}`;
+  const hidden = d.disabledWithSignalCount ?? 0;
+  if (hidden === 0) {
+    return `<span class="muted" style="white-space:nowrap" title="${enabled} de ${total} canales habilitados. Los otros ${total - enabled} no tienen señal (entradas sin cámara${d.status === "Online" ? "" : " o equipo sin conexión"}).">${enabled} / ${total}</span>`;
+  }
+  const cls = enabled === 0 ? "off" : "warn";
+  return `<span class="tag ${cls}" style="white-space:nowrap" title="${hidden} canal(es) con señal están deshabilitados: los operadores no los ven y no tienen ruta de streaming. Habilítelos desde &quot;Canales&quot;.">${enabled} / ${total}</span>`;
 }
 
 function openModal(html, size) {
@@ -160,10 +216,12 @@ function renderLogin(message) {
       </div>
       <div class="field">
         <label>Contraseña</label>
-        <input id="login-password" type="password" autocomplete="current-password" required>
+        ${passwordInputHtml(`id="login-password" autocomplete="current-password" required`)}
       </div>
       <button class="btn block" type="submit">Ingresar</button>
     </form>`;
+
+  bindPasswordToggles($("#login-form"));
 
   $("#login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -451,7 +509,7 @@ async function renderDevices() {
               <td>${esc(d.model ?? "—")}</td>
               <td class="muted">${esc(d.serialNumber ?? "—")}</td>
               <td class="muted">${esc(d.firmwareVersion ?? "—")}</td>
-              <td>${d.channelCount}</td>
+              <td>${channelCountCell(d)}</td>
               <td>${anprCell(d, isAdmin)}</td>
               <td>${statusTag(d.status)}</td>
               <td class="row-actions">
@@ -495,8 +553,8 @@ async function renderDevices() {
     e.target.disabled = true;
     e.target.textContent = "Sondeando…";
     try {
-      await Api.post(`/api/devices/${id}/revalidate`);
-      toast("Equipo revalidado: información y canales actualizados.");
+      const result = await Api.post(`/api/devices/${id}/revalidate`);
+      toastDeviceSaved(result, "Equipo revalidado: información y canales actualizados.");
       renderDevices();
     } catch (err) {
       toast(err.error, true);
@@ -693,6 +751,7 @@ async function deviceModal(device, prefill) {
         <input id="df-password" type="password" autocomplete="new-password" ${isNew ? "required" : ""}>
       </div>
       <div id="probe-result"></div>
+      <div id="channel-picker"></div>
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="df-cancel">Cancelar</button>
         <button class="btn ghost" type="button" id="df-probe">Probar conexión</button>
@@ -706,15 +765,68 @@ async function deviceModal(device, prefill) {
     if (dr && isNew) { $("#df-sdkport").value = dr.defaultSdkPort; $("#df-rtspport").value = dr.defaultRtspPort; }
   });
 
-  const readForm = () => ({
-    name: $("#df-name").value.trim() || "(sin nombre)",
-    driverKey: $("#df-driver").value,
-    host: $("#df-host").value.trim(),
-    sdkPort: Number($("#df-sdkport").value),
-    rtspPort: Number($("#df-rtspport").value),
-    username: $("#df-username").value.trim(),
-    password: $("#df-password").value || null,
-  });
+  // Selector de canales del alta: aparece solo cuando el equipo reporta más
+  // canales activos que los que deja libres la licencia. El servidor exige
+  // la selección en ese caso (a lo sumo `available` canales).
+  let pickerLimit = 0;
+  const pickerActive = () => isNew && $("#channel-picker").querySelector("input[type=checkbox]") !== null;
+  const pickedChannels = () => $$("#channel-picker input[type=checkbox]:checked").map((c) => Number(c.value));
+
+  const renderChannelPicker = (channels, available, message) => {
+    pickerLimit = available;
+    const box = $("#channel-picker");
+    if (!isNew || !channels.length || available <= 0) { box.innerHTML = ""; return; }
+    // Preselección: los primeros canales activos hasta completar el cupo.
+    let left = available;
+    const preselected = new Set();
+    for (const c of channels) { if (left > 0 && c.isOnline) { preselected.add(c.channelNumber); left--; } }
+    box.innerHTML = `
+      <div class="picker-box">
+        <div class="picker-title">Seleccione los canales a habilitar</div>
+        <div class="muted picker-note">${esc(message)}</div>
+        <div class="picker-tools">
+          <span id="picker-count"></span>
+          <button class="btn ghost small" type="button" id="picker-clear">Quitar todos</button>
+        </div>
+        <div class="picker-list">
+          ${channels.map((c) => `
+            <label class="picker-row">
+              <input type="checkbox" value="${c.channelNumber}" ${preselected.has(c.channelNumber) ? "checked" : ""}>
+              <span class="picker-num">${c.channelNumber}</span>
+              <span class="picker-name">${esc(c.name)}</span>
+              <span class="tag ${c.isOnline ? "on" : "operator"}">${c.isOnline ? "activo" : "sin señal"}</span>
+            </label>`).join("")}
+        </div>
+      </div>`;
+    const refresh = () => {
+      const picked = pickedChannels().length;
+      $("#picker-count").textContent = `${picked} de ${available} disponibles seleccionados`;
+      $("#picker-count").classList.toggle("over", picked > available);
+      // Al llenar el cupo se bloquean los no marcados; desmarcar libera.
+      $$("#channel-picker input[type=checkbox]").forEach((cb) => { cb.disabled = !cb.checked && picked >= available; });
+      $("#df-save").disabled = picked === 0;
+    };
+    $$("#channel-picker input[type=checkbox]").forEach((cb) => cb.addEventListener("change", refresh));
+    $("#picker-clear").addEventListener("click", () => {
+      $$("#channel-picker input[type=checkbox]").forEach((cb) => { cb.checked = false; });
+      refresh();
+    });
+    refresh();
+  };
+
+  const readForm = () => {
+    const body = {
+      name: $("#df-name").value.trim() || "(sin nombre)",
+      driverKey: $("#df-driver").value,
+      host: $("#df-host").value.trim(),
+      sdkPort: Number($("#df-sdkport").value),
+      rtspPort: Number($("#df-rtspport").value),
+      username: $("#df-username").value.trim(),
+      password: $("#df-password").value || null,
+    };
+    if (pickerActive()) body.enabledChannels = pickedChannels();
+    return body;
+  };
 
   $("#df-probe").addEventListener("click", async () => {
     const errorBox = $("#dev-modal-error");
@@ -731,6 +843,8 @@ async function deviceModal(device, prefill) {
         return;
       }
       if (r.detectedRtspPort) $("#df-rtspport").value = r.detectedRtspPort;
+      const active = r.channels.filter((c) => c.isOnline).length;
+      const needsPicker = isNew && r.availableVideoChannels > 0 && active > r.availableVideoChannels;
       resultBox.innerHTML = `
         <div class="probe-box">
           <div class="probe-title">✔ Conexión validada</div>
@@ -741,10 +855,23 @@ async function deviceModal(device, prefill) {
             <span>Firmware</span><b>${esc(r.firmwareVersion ?? "—")}</b>
             <span>Canales</span><b>${r.analogChannelCount} analógicos, ${r.ipChannelCount} IP</b>
             <span>Puerto RTSP</span><b>${r.detectedRtspPort ? r.detectedRtspPort + " (detectado por SDK)" : "no reportado"}</b>
+            <span>Cupo de licencia</span><b>${r.availableVideoChannels} canales disponibles (${r.videoChannelsInUse} de ${r.videoChannelQuota} en uso)</b>
           </div>
-          ${r.channels.length ? `<div class="probe-channels">${r.channels.map((c) =>
+          ${r.channels.length && !needsPicker ? `<div class="probe-channels">${r.channels.map((c) =>
             `<span class="tag ${c.isOnline ? "on" : "operator"}" title="Canal ${c.channelNumber}">${esc(c.name)}</span>`).join(" ")}</div>` : ""}
         </div>`;
+      $("#df-save").disabled = false;
+      if (isNew && r.availableVideoChannels <= 0) {
+        // Sin cupo el servidor rechaza el alta: se avisa antes de intentarlo.
+        $("#channel-picker").innerHTML = "";
+        errorBox.innerHTML = `<div class="error-box">No hay canales de video disponibles en la licencia (${r.videoChannelsInUse} de ${r.videoChannelQuota} en uso). Amplíe la licencia o deshabilite canales en otros equipos antes de agregar este.</div>`;
+        $("#df-save").disabled = true;
+      } else if (needsPicker) {
+        renderChannelPicker(r.channels, r.availableVideoChannels,
+          `El equipo reporta ${active} canales activos y la licencia solo tiene ${r.availableVideoChannels} disponibles. Los demás quedan deshabilitados y pueden habilitarse después desde "Canales" si se amplía la licencia.`);
+      } else {
+        $("#channel-picker").innerHTML = "";
+      }
     } catch (err) {
       resultBox.innerHTML = "";
       $("#dev-modal-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
@@ -762,13 +889,18 @@ async function deviceModal(device, prefill) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
-      if (isNew) await Api.post("/api/devices", body);
-      else await Api.put(`/api/devices/${device.id}`, body);
+      const result = isNew
+        ? await Api.post("/api/devices", body)
+        : await Api.put(`/api/devices/${device.id}`, body);
       closeModal();
-      toast(isNew ? "Dispositivo agregado y validado." : "Dispositivo actualizado.");
+      toastDeviceSaved(result, isNew ? "Dispositivo agregado y validado." : "Dispositivo actualizado.");
       renderDevices();
     } catch (err) {
       errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+      // El equipo tiene más canales activos que cupo: el servidor devuelve la
+      // lista para elegir; al reenviar el formulario viaja la selección.
+      if (err.data && err.data.channelSelectionRequired)
+        renderChannelPicker(err.data.channels, err.data.availableVideoChannels, err.error);
     } finally {
       saveButton.disabled = false;
       saveButton.textContent = isNew ? "Guardar" : "Guardar cambios";
@@ -782,9 +914,18 @@ async function channelsModal(device) {
   catch (err) { toast(err.error, true); return; }
 
   const isAdmin = Api.role === "Admin";
+  // Hubo cambios: al cerrar se vuelve a pintar la tabla (contador habilitados / total).
+  let changed = false;
+  const pendingOnline = channels.filter((c) => !c.enabled && c.isOnline).length;
   openModal(`
     <h3>Canales — ${esc(device.name)}</h3>
     <div id="ch-modal-error"></div>
+    ${isAdmin && pendingOnline > 0 ? `
+      <div class="info-box" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <span>${pendingOnline} canal(es) con señal están deshabilitados.</span>
+        <button class="btn" type="button" id="ch-enable-online" style="flex:none;white-space:nowrap"
+                title="Habilita todos los canales con señal hasta donde alcance la licencia. Los que no quepan quedan esperando cupo y se habilitan solos cuando lo haya.">Habilitar canales con señal</button>
+      </div>` : ""}
     ${channels.length === 0 ? `<div class="info-box">El equipo no reportó canales.</div>` : `
       <div class="channel-list">
         ${channels.map((c) => `
@@ -795,7 +936,8 @@ async function channelsModal(device) {
             <div class="channel-info">
               <input class="ch-name" value="${esc(c.name)}" maxlength="128" ${isAdmin ? "" : "disabled"}>
               <div class="muted" style="font-size:11.5px">Canal ${c.channelNumber} · RTSP ${c.rtspChannel} ·
-                ${c.isOnline ? '<span class="tag on">Con señal</span>' : '<span class="tag operator">Sin señal</span>'}</div>
+                ${c.isOnline ? '<span class="tag on">Con señal</span>' : '<span class="tag operator">Sin señal</span>'}
+                ${c.disabledByLicense ? '<span class="tag warn" title="Quedó deshabilitado por el cupo de canales de la licencia: se habilita solo cuando haya cupo.">Esperando cupo de licencia</span>' : ""}</div>
             </div>
             <label class="checkbox-row" style="margin:0" title="Visible para los operadores">
               <input type="checkbox" class="ch-enabled" ${c.enabled ? "checked" : ""} ${isAdmin ? "" : "disabled"}> Habilitado
@@ -813,9 +955,24 @@ async function channelsModal(device) {
       </div>`}
     <div class="modal-actions">
       <button class="btn ghost" type="button" id="ch-close">Cerrar</button>
-    </div>`);
+    </div>`, "wider");
 
-  $("#ch-close").addEventListener("click", closeModal);
+  $("#ch-close").addEventListener("click", () => {
+    closeModal();
+    if (changed) renderDevices();
+  });
+  $("#ch-enable-online")?.addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    try {
+      const result = await Api.post(`/api/devices/${device.id}/channels/enable-online`);
+      toast(result.message, false, result.leftWithoutQuota > 0 ? { warning: true } : undefined);
+      renderDevices();
+      await channelsModal(device); // recarga los estados de cada canal
+    } catch (err) {
+      e.target.disabled = false;
+      $("#ch-modal-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    }
+  });
   $$(".ch-save").forEach((b) => b.addEventListener("click", async (e) => {
     const row = e.target.closest(".channel-row");
     const channelId = Number(row.dataset.id);
@@ -826,6 +983,7 @@ async function channelsModal(device) {
         supportsPtz: row.querySelector(".ch-ptz").checked,
         useFfmpegProxy: row.querySelector(".ch-proxy").checked,
       });
+      changed = true;
       toast("Canal actualizado.");
     } catch (err) {
       $("#ch-modal-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
@@ -1170,6 +1328,7 @@ const routes = {
   "#/access-schedules": renderAccessSchedules,
   "#/access-events": renderAccessEvents,
   "#/speakers": renderSpeakers,
+  "#/intercoms": renderIntercoms,
   "#/workflows": renderWorkflows,
   "#/workflows/edit": renderWorkflowEditor,
   "#/decoders": renderDecoders,
@@ -1236,6 +1395,7 @@ function navigate() {
   clearInterval(discoveryTimer); // ídem el de equipos en línea
   clearInterval(alarmsTimer);    // ídem el de paneles de alarma
   clearInterval(speakersTimer);  // ídem el de parlantes IP
+  clearInterval(intercomsTimer); // ídem el de citofonía
   clearInterval(accessTimer);    // ídem el de control de acceso
   clearInterval(accessDoorsTimer);  // ídem el del monitoreo de puertas
   clearInterval(accessEventsTimer); // ídem el del historial de accesos
@@ -1258,6 +1418,9 @@ function navigate() {
   // Las páginas a pantalla completa (editor de automatizaciones) cambian la
   // clase del contenedor; cada navegación parte limpia.
   $("#view").className = "";
+  // El menú lateral que el usuario abrió a mano en el editor no se arrastra a otra página.
+  $("#app-shell").classList.remove("sidebar-open");
+  $("#btn-menu").setAttribute("aria-expanded", "false");
   render();
 }
 
@@ -1284,6 +1447,11 @@ window.addEventListener("hashchange", () => {
 
 window.addEventListener("tcvms:unauthorized", () => {
   renderLogin("La sesión expiró. Ingrese nuevamente.");
+});
+
+$("#btn-menu").addEventListener("click", () => {
+  const open = $("#app-shell").classList.toggle("sidebar-open");
+  $("#btn-menu").setAttribute("aria-expanded", String(open));
 });
 
 $("#btn-logout").addEventListener("click", async () => {

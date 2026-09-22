@@ -25,7 +25,15 @@ public sealed record DeviceDto(
     DateTime? LastSeenAt,
     DateTime CreatedAt,
     /// <summary>El equipo es fuente del módulo Reconocimiento de patentes.</summary>
-    bool AnprEnabled = false);
+    bool AnprEnabled = false,
+    /// <summary>Canales habilitados (los que el cliente muestra y tienen ruta de streaming).</summary>
+    int EnabledChannelCount = 0,
+    /// <summary>Solo en respuestas de alta/edición/revalidación: aviso no bloqueante
+    /// (p. ej. canales que quedaron deshabilitados por el cupo de la licencia).</summary>
+    string? Warning = null,
+    /// <summary>Canales deshabilitados que SÍ tienen señal (cámaras que los operadores
+    /// no ven). 0 si el equipo no está en línea. Las entradas sin cámara no cuentan.</summary>
+    int DisabledWithSignalCount = 0);
 
 /// <summary>
 /// Alta/edición de dispositivo. En edición, Password null o vacía = mantener
@@ -39,7 +47,11 @@ public sealed record DeviceWriteDto(
     int SdkPort,
     int RtspPort,
     string Username,
-    string? Password);
+    string? Password,
+    /// <summary>Solo en el alta: números de canal que quedan habilitados. Null = todos
+    /// los que el equipo reporta activos, siempre que quepan en el cupo de la licencia;
+    /// si no caben, el servidor exige esta selección (a lo sumo los canales disponibles).</summary>
+    IReadOnlyList<int>? EnabledChannels = null);
 
 /// <summary>Resultado del botón "Probar conexión" del asistente (no persiste nada).</summary>
 public sealed record DeviceProbeResultDto(
@@ -53,11 +65,20 @@ public sealed record DeviceProbeResultDto(
     int IpChannelCount,
     IReadOnlyList<ProbedChannelDto> Channels,
     /// <summary>Puerto RTSP real detectado por SDK (null = no consultable; se usa el del formulario).</summary>
-    int? DetectedRtspPort = null);
+    int? DetectedRtspPort = null,
+    /// <summary>Cupo de canales de video de la licencia y cuántos ya están en uso (sin
+    /// contar el equipo que se edita): el asistente limita con esto la selección.</summary>
+    int VideoChannelQuota = 0,
+    int VideoChannelsInUse = 0,
+    int AvailableVideoChannels = 0);
 
 public sealed record ProbedChannelDto(int ChannelNumber, int RtspChannel, string Name, bool IsOnline);
 
-public sealed record ChannelDto(int Id, int DeviceId, int ChannelNumber, int RtspChannel, string Name, bool Enabled, bool IsOnline, bool SupportsPtz, bool UseFfmpegProxy = false);
+/// <summary>Canal de un equipo. DisabledByLicense: quedó deshabilitado por el cupo de canales de la licencia (se habilita solo al haber cupo).</summary>
+public sealed record ChannelDto(int Id, int DeviceId, int ChannelNumber, int RtspChannel, string Name, bool Enabled, bool IsOnline, bool SupportsPtz, bool UseFfmpegProxy = false, bool DisabledByLicense = false);
+
+/// <summary>Resultado de "Habilitar canales con señal": cuántos se habilitaron y cuántos quedaron fuera por cupo.</summary>
+public sealed record ChannelBulkEnableResultDto(int Enabled, int LeftWithoutQuota, string Message);
 
 /// <summary>Orden PTZ del cliente (Speed 1..7; Stop=true detiene el movimiento en curso).</summary>
 public sealed record PtzRequestDto(Drivers.PtzCommand Command, int Speed, bool Stop);

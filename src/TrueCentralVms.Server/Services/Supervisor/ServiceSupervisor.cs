@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Reflection;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting.WindowsServices;
@@ -118,6 +118,9 @@ public sealed class ServiceSupervisor : BackgroundService
         yield return new HostedServiceAdapter("speakers", "Parlantes IP",
             "Sondeo de estado, reproducción sincronizada y voz en vivo hacia los altavoces de red.",
             sp.GetRequiredService<SpeakerService>());
+        yield return new HostedServiceAdapter("intercom", "Citofonía",
+            "Enlace de llamadas y sondeo de cada frente de videoportero; conversaciones de los operadores.",
+            sp.GetRequiredService<IntercomService>());
         yield return new HostedServiceAdapter("anpr", "Reconocimiento de patentes",
             "Mantiene abierto el canal de eventos ANPR de cada equipo marcado como fuente.",
             sp.GetRequiredService<AnprService>());

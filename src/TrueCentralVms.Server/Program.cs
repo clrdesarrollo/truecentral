@@ -127,6 +127,11 @@ builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFac
 builder.Services.AddSingleton<SpeakerDriverRegistry>();
 builder.Services.AddSingleton<SpeakerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>());
+// Citofonía: frentes de videoportero (enlace de llamadas por SDK, voz bidireccional y apertura de puerta).
+builder.Services.AddSingleton<IIntercomDriverFactory, HikvisionIntercomDriverFactory>();
+builder.Services.AddSingleton<IntercomDriverRegistry>();
+builder.Services.AddSingleton<IntercomService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IntercomService>());
 // Centro receptor de alarmas (SIA DC-09: ADM-CID / SIA-DCS por TCP) al que
 // los paneles reportan como "Alarm Receiving Center".
 builder.Services.AddSingleton<AlarmReceiverService>();
@@ -313,6 +318,7 @@ app.MapAnprApi();
 app.MapAuditApi();
 app.MapAlarmsApi();
 app.MapSpeakersApi();
+app.MapIntercomsApi();
 app.MapAccessApi();
 app.MapAccessCatalogApi();
 app.MapWorkflowsApi();

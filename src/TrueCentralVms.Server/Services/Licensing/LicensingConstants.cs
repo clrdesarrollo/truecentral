@@ -1,4 +1,4 @@
-using TrueCentralVms.Core.Contracts;
+﻿using TrueCentralVms.Core.Contracts;
 
 namespace TrueCentralVms.Server.Services.Licensing;
 
@@ -51,6 +51,8 @@ public static class LicensingConstants
         [LicenseFeatures.VideowallDecoders] = 2,
         [LicenseFeatures.ModuleSpeakers] = true,
         [LicenseFeatures.SpeakerChannels] = 4,
+        [LicenseFeatures.ModuleIntercom] = true,
+        [LicenseFeatures.IntercomDevices] = 2,
         [LicenseFeatures.ModuleAutomation] = true,
         [LicenseFeatures.AutomationRules] = 10,
     };

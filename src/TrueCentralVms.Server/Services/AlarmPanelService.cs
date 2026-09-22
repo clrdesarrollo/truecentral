@@ -687,7 +687,7 @@ public sealed class AlarmPanelService(
                     string key = $"zone:{read.Number}:open:{isOpen}";
                     if (!worker.WasRecentlyReported(key, now))
                         events.Add(Make(panel,
-                            isOpen ? AlarmEventKind.ZoneTriggered : AlarmEventKind.Restore,
+                            isOpen ? AlarmEventKind.ZoneTriggered : AlarmEventKind.ZoneRestored,
                             AlarmSeverity.Info,
                             isOpen ? "Sensor interrumpido (detector activado)" : "Sensor restablecido",
                             read.AreaNumber, areaName, read.Number, read.Name, now));

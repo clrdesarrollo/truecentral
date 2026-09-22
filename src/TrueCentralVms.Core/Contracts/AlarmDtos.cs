@@ -59,6 +59,13 @@ public enum AlarmEventKind
     /// por Contact-ID lo que pasa con el área desarmada).
     /// </summary>
     ZoneTriggered,
+    /// <summary>
+    /// Detector que vuelve a reposo tras un <see cref="ZoneTriggered"/>: puerta
+    /// cerrada, fin del movimiento con el área desarmada. Tipo propio para que
+    /// una automatización pueda filtrarlo aparte de las restauraciones de
+    /// alarma o de falla (<see cref="Restore"/>), que sí reporta el panel.
+    /// </summary>
+    ZoneRestored,
 }
 
 public enum AlarmSeverity { Info, Warning, Critical }

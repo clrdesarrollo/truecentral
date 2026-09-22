@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
@@ -296,7 +296,7 @@ public sealed class WorkflowEngine : BackgroundService
         // estado con el área desarmada y no tienen severidad propia: el
         // filtro de severidad no los afecta, si no una automatización con
         // "Advertencia" marcada nunca dispararía con el sensor.
-        bool stateDiff = trigger.Kind is AlarmEventKind.ZoneTriggered;
+        bool stateDiff = trigger.Kind is AlarmEventKind.ZoneTriggered or AlarmEventKind.ZoneRestored;
         if (!stateDiff && Has(conditions.Severities) &&
             (trigger.Severity is null || !conditions.Severities!.Contains(trigger.Severity.Value)))
             return false;
@@ -398,13 +398,36 @@ public sealed class WorkflowEngine : BackgroundService
     }
 
     /// <summary>
-    /// Ventana horaria (hora local del servidor). Si la hora de término es
-    /// menor que la de inicio, la ventana cruza la medianoche (22:00 → 06:00)
-    /// y el DÍA que se compara es el del comienzo de la ventana.
+    /// Calendario de la automatización: la franja principal (DaysOfWeek,
+    /// FromTime, ToTime) más las franjas adicionales de TimeBands. Sin ninguna
+    /// franja definida está siempre activa; con franjas, basta que UNA se
+    /// cumpla en la hora local del servidor.
     /// </summary>
     private static bool InSchedule(WorkflowConditionsDto conditions, DateTime localTime)
     {
-        bool hasWindow = TryTime(conditions.FromTime, out var from) & TryTime(conditions.ToTime, out var to);
+        bool anyBand = false;
+        if (Has(conditions.DaysOfWeek) || !string.IsNullOrWhiteSpace(conditions.FromTime) || !string.IsNullOrWhiteSpace(conditions.ToTime))
+        {
+            anyBand = true;
+            if (InBand(conditions.DaysOfWeek, conditions.FromTime, conditions.ToTime, localTime)) return true;
+        }
+        foreach (var band in conditions.TimeBands ?? [])
+        {
+            if (band is null) continue;
+            anyBand = true;
+            if (InBand(band.DaysOfWeek, band.FromTime, band.ToTime, localTime)) return true;
+        }
+        return !anyBand;
+    }
+
+    /// <summary>
+    /// Una franja: días de la semana y ventana horaria. Si la hora de término
+    /// es menor que la de inicio, la ventana cruza la medianoche (22:00 → 06:00)
+    /// y el DÍA que se compara es el del comienzo de la ventana.
+    /// </summary>
+    private static bool InBand(IReadOnlyList<int>? daysOfWeek, string? fromTime, string? toTime, DateTime localTime)
+    {
+        bool hasWindow = TryTime(fromTime, out var from) & TryTime(toTime, out var to);
         var time = localTime.TimeOfDay;
         var day = localTime.DayOfWeek;
 
@@ -421,17 +444,21 @@ public sealed class WorkflowEngine : BackgroundService
         {
             return false;
         }
+        else if (!hasWindow && TryTime(fromTime, out var onlyFrom) && time < onlyFrom)
+        {
+            return false; // solo "desde": rige hasta el fin del día
+        }
+        else if (!hasWindow && TryTime(toTime, out var onlyTo) && time >= onlyTo)
+        {
+            return false; // solo "hasta": rige desde el comienzo del día
+        }
 
-        if (Has(conditions.DaysOfWeek) && !conditions.DaysOfWeek!.Contains((int)day))
+        if (Has(daysOfWeek) && !daysOfWeek!.Contains((int)day))
             return false;
         return true;
     }
 
-    private static bool TryTime(string? value, out TimeSpan time)
-    {
-        time = default;
-        return !string.IsNullOrWhiteSpace(value) && TimeSpan.TryParse(value, out time);
-    }
+    private static bool TryTime(string? value, out TimeSpan time) => WorkflowGraph.TryParseWindowTime(value, out time);
 
     /// <summary>
     /// Condición sostenida: la interrupción tiene que durar. Durante la

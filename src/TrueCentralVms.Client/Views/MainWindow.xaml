@@ -52,6 +52,31 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <!-- Citofonía: activo por sección y, con una llamada sonando, en ámbar y
+             pulsando aunque la viñeta esté cerrada. -->
+        <Style x:Key="RailIntercomButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveSection}" Value="Intercom">
+                    <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Intercom.HasRingingCall}" Value="True">
+                    <Setter Property="Foreground" Value="#FBBF24"/>
+                    <Setter Property="ToolTip" Value="Citofonía: hay una llamada sonando"/>
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard x:Name="IntercomPulse">
+                            <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 From="1" To="0.35" Duration="0:0:0.5"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                        <StopStoryboard BeginStoryboardName="IntercomPulse"/>
+                    </DataTrigger.ExitActions>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="RailLprButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding ActiveSection}" Value="Lpr">
@@ -399,6 +424,24 @@
                                 Command="{Binding CloseAlarmsCommand}"
                                 ToolTip="Cerrar Paneles de alarma"/>
                     </Grid>
+                    <!-- Citofonía: cerrar la viñeta no apaga nada, las llamadas
+                         siguen sonando y abriendo su ventana. -->
+                    <Grid Visibility="{Binding IsIntercomOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
+                                     Padding="14,0,34,0"
+                                     IsChecked="{Binding ActiveSection, Mode=TwoWay,
+                                                 Converter={x:Static vm:SectionEquals.Instance}, ConverterParameter=Intercom}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE717;" FontSize="12"
+                                           VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="Citofonía" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+                        <Button Style="{StaticResource TabCloseButton}" Content="&#xE8BB;"
+                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
+                                Command="{Binding CloseIntercomCommand}"
+                                ToolTip="Cerrar Citofonía"/>
+                    </Grid>
                     <!-- Centro de eventos: historial de alertas y acuse de
                          recibo. Puede sacarse a su propia ventana. -->
                     <Grid Visibility="{Binding IsEventsOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
@@ -474,6 +517,9 @@
                         <Button Style="{StaticResource RailAlarmsButton}" Content="&#xE730;"
                                 ToolTip="Paneles de alarma"
                                 Command="{Binding OpenAlarmsCommand}"/>
+                        <Button Style="{StaticResource RailIntercomButton}" Content="&#xE717;"
+                                ToolTip="Citofonía"
+                                Command="{Binding OpenIntercomCommand}"/>
                         <Grid>
                             <Button Style="{StaticResource RailEventsButton}" Content="&#xE7BA;"
                                     ToolTip="Centro de eventos — alertas y acuse de recibo"
@@ -523,6 +569,10 @@
                                Visibility="{Binding DataContext.ActiveSection,
                                             RelativeSource={RelativeSource AncestorType=Window},
                                             Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Lpr}"/>
+                <views:IntercomView DataContext="{Binding Intercom}"
+                                    Visibility="{Binding DataContext.ActiveSection,
+                                                 RelativeSource={RelativeSource AncestorType=Window},
+                                                 Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Intercom}"/>
             </Grid>
         </Grid>
 

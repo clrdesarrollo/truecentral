@@ -308,4 +308,60 @@ public static class ContactIdCatalog
         };
         return (resultKind, resultSeverity, description);
     }
+
+    /// <summary>
+    /// Explica en una frase corta el código tal como lo envió el panel, para
+    /// mostrarlo junto al evento sin que el operador tenga que conocer la norma:
+    /// "Contact-ID 1406 · evento nuevo · apertura/cierre (406)". El primer dígito
+    /// es el calificador (1 nuevo/apertura, 3 restauración/cierre, 6 estado) y
+    /// los tres restantes el evento, cuya centena define el grupo. Acepta
+    /// también los códigos SIA cortos (E350 / R350). Devuelve null si no
+    /// reconoce el formato.
+    /// </summary>
+    public static string? Explain(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code)) return null;
+        code = code.Trim();
+
+        if (code.Length == 4 && int.TryParse(code, out int value))
+        {
+            int qualifier = value / 1000;
+            int eventCode = value % 1000;
+            int hundreds = eventCode / 100;
+            string? qualifierText = (qualifier, hundreds) switch
+            {
+                (1, 4) => eventCode == 406 ? "cancelación" : "apertura (desarmado)",
+                (3, 4) => eventCode == 406 ? "cancelación" : "cierre (armado)",
+                (1, _) => "evento nuevo",
+                (3, _) => "restauración",
+                (6, _) => "reporte de estado",
+                _ => null,
+            };
+            if (qualifierText is null) return null;
+            string group = hundreds switch
+            {
+                1 => "alarma",
+                2 => "supervisión",
+                3 => "falla del sistema",
+                4 => "apertura/cierre",
+                5 => "anulación / deshabilitación",
+                6 => "prueba / misceláneo",
+                _ => "propio del fabricante",
+            };
+            return $"Contact-ID {code} · {qualifierText} · {group} ({eventCode})";
+        }
+
+        if (code.Length is >= 2 and <= 5 && char.IsLetter(code[0]) && code[1..].All(char.IsDigit))
+        {
+            string? kind = char.ToUpperInvariant(code[0]) switch
+            {
+                'E' => "evento",
+                'R' => "restauración",
+                'P' => "estado",
+                _ => null,
+            };
+            return kind is null ? null : $"SIA {code.ToUpperInvariant()} · {kind}";
+        }
+        return null;
+    }
 }

@@ -208,7 +208,7 @@ public partial class AlertWindow : Window
     /// <summary>Abre el vivo de todas las cámaras si la pestaña está a la vista; si no, las suelta.</summary>
     private async Task OpenVideoAsync()
     {
-        bool visible = Tabs.SelectedIndex == 0 && IsVisible;
+        bool visible = ReferenceEquals(Tabs.SelectedItem, VideoTab) && IsVisible;
         if (!visible)
         {
             foreach (var cell in _cells) cell.Clear();
@@ -344,8 +344,14 @@ public partial class AlertWindow : Window
         _photos = alert.ImagePaths.Count > 0
             ? [.. alert.ImagePaths]
             : alert.ImagePath is { Length: > 0 } one ? [one] : [];
-        _photo = _photos.Count - 1;   // la última es la más cercana al hecho
+        _photo = 0;   // la primera según el orden configurado en la acción "Capturar foto"
         Thumbnails.Items.Clear();
+        // La caché guarda solo las fotos de la alerta en pantalla. Una foto
+        // decodificada pesa ~8 MB (1080p en BGRA): con cientos de alertas
+        // pendientes y la ventana viva todo el turno, guardarlas todas se
+        // comía gigas de RAM.
+        foreach (string path in _images.Keys.Where(k => !_photos.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList())
+            _images.Remove(path);
 
         if (_photos.Count == 0)
         {

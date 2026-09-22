@@ -148,6 +148,12 @@ public static class VmsHubContract
     /// <summary>Avanzó la pasada de escritura en los equipos (payload: AccessSyncProgressDto).</summary>
     public const string AccessSyncProgress = nameof(AccessSyncProgress);
 
+    /// <summary>Un frente de citofonía cambió de estado de conexión (payload: IntercomDto).</summary>
+    public const string IntercomStatusChanged = nameof(IntercomStatusChanged);
+
+    /// <summary>Una llamada de citofonía empezó a sonar, fue contestada o terminó (payload: IntercomCallDto).</summary>
+    public const string IntercomCallChanged = nameof(IntercomCallChanged);
+
     /// <summary>Un servicio supervisado cambió de estado (payload: ManagedServiceDto).</summary>
     public const string ServiceStateChanged = nameof(ServiceStateChanged);
 }

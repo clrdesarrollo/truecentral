@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=15">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -44,6 +44,7 @@
             <a href="#/alarm-panels" data-route="alarm-panels">Paneles de alarma</a>
             <a href="#/access" data-route="access">Control de acceso</a>
             <a href="#/speakers" data-route="speakers">Parlantes IP</a>
+            <a href="#/intercoms" data-route="intercoms">Citofonía</a>
             <div class="nav-group" data-group="videowall">
               <button type="button" class="nav-toggle">
                 <span class="caret" aria-hidden="true"></span><span>Videowalls</span>
@@ -107,7 +108,12 @@
     </aside>
     <div class="main">
       <header class="topbar">
-        <h2 id="page-title">Panel</h2>
+        <div class="topbar-left">
+          <!-- Solo a la vista en las páginas a pantalla completa (editor de
+               automatizaciones), donde el menú lateral parte oculto. -->
+          <button type="button" class="btn ghost topbar-menu" id="btn-menu" title="Mostrar u ocultar el menú" aria-label="Menú" aria-expanded="false">&#9776;</button>
+          <h2 id="page-title">Panel</h2>
+        </div>
         <div class="topbar-user">
           <span id="current-user" class="muted"></span>
           <button class="btn ghost" id="btn-logout">Cerrar sesión</button>
@@ -131,13 +137,14 @@
   <script src="walls.js?v=2"></script>
   <script src="alarms.js?v=9"></script>
   <script src="speakers.js?v=7"></script>
+  <script src="intercoms.js?v=2"></script>
   <script src="access.js?v=4"></script>
   <script src="enroll.js?v=1"></script>
   <script src="access-catalog.js?v=9"></script>
-  <script src="workflows.js?v=12"></script>
-  <script src="workflow-editor.js?v=4"></script>
+  <script src="workflows.js?v=13"></script>
+  <script src="workflow-editor.js?v=5"></script>
   <script src="services.js?v=1"></script>
   <script src="license.js?v=1"></script>
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>

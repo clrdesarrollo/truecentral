@@ -1,4 +1,4 @@
-// CLR TrueCentral VMS — panel: automatizaciones (workflows).
+﻿// CLR TrueCentral VMS — panel: automatizaciones (workflows).
 //
 // Se carga ANTES que app.js: este archivo solo declara funciones (sin efectos
 // al cargar) y app.js las referencia desde su tabla de rutas.
@@ -28,13 +28,44 @@ async function wfCameras() {
   return wfCamerasCache;
 }
 
-const WF_KINDS = [["Alarm", "Alarma"], ["ZoneTriggered", "Sensor interrumpido"], ["Restore", "Restauración"],
+const WF_KINDS = [["Alarm", "Alarma"], ["ZoneTriggered", "Sensor interrumpido"], ["ZoneRestored", "Sensor restablecido"], ["Restore", "Restauración"],
   ["Arm", "Armado"], ["Disarm", "Desarmado"], ["Bypass", "Anulación"], ["Trouble", "Falla"],
   ["System", "Sistema"], ["Info", "Información"]];
 const WF_SEVERITIES = [["Critical", "Crítica"], ["Warning", "Advertencia"], ["Info", "Informativa"]];
 const WF_STATUSES = [["Offline", "Sin conexión"], ["AuthFailed", "Credenciales rechazadas"], ["Online", "En línea"]];
 const WF_SOURCES = [["panel", "Informado por el panel"], ["poll", "Detectado por sondeo"], ["vms", "Orden desde el VMS"]];
 const WF_DAYS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+/** Orden en que se muestran los días (lunes primero); el valor guardado sigue siendo 0 = domingo. */
+const WF_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const WF_DAY_ITEMS = () => WF_DAY_ORDER.map((d) => [d, WF_DAYS[d]]);
+
+/**
+ * Normaliza una hora escrita a mano a "HH:mm" en 24 h ("6" → "06:00",
+ * "1830" → "18:30", "18:5" → "18:05", "24:00" = fin del día). Devuelve "" si no es una hora. Se usa
+ * en vez de <input type="time"> porque ese control muestra AM/PM según el
+ * idioma del navegador y no se puede forzar a 24 h.
+ */
+function wfNormalizeTime(value) {
+  const v = String(value ?? "").trim().replace(/[.,;]/g, ":").replace(/\s+/g, "");
+  if (v === "") return "";
+  let h, m;
+  const parts = v.split(":");
+  if (parts.length === 2) { h = parts[0]; m = parts[1]; }
+  else if (parts.length === 1 && /^\d{1,4}$/.test(v)) {
+    if (v.length <= 2) { h = v; m = "0"; }
+    else { h = v.slice(0, v.length - 2); m = v.slice(-2); }
+  } else return "";
+  if (!/^\d{1,2}$/.test(h) || !/^\d{1,2}$/.test(m)) return "";
+  const hh = Number(h), mm = Number(m);
+  if (hh === 24 && mm === 0) return "24:00"; // fin del día, válido solo como "hasta"
+  if (hh > 23 || mm > 59) return "";
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+/** Campo de hora en 24 h: texto con normalización al perder el foco. */
+function wfTimeInput(id, value) {
+  return `<input id="${id}" class="wf-time" inputmode="numeric" maxlength="5" placeholder="hh:mm" value="${esc(value || "")}" title="Hora local en formato 24 h (por ejemplo 18:00)">`;
+}
 
 const WF_EMAIL_BODY =
   "{tipo}: {evento}\n\n" +
@@ -134,6 +165,8 @@ const WF_FIELDS = {
     { k: "message", t: "text", label: "Mensaje", def: "{evento} · {fechahora}" },
     { k: "severity", t: "select", label: "Importancia", def: "Warning",
       options: [["Critical", "Crítica"], ["Warning", "Advertencia"], ["Info", "Informativa"]] },
+    { k: "userIds", t: "users", label: "Destinatarios",
+      help: "Sin ninguno marcado, el aviso llega a todos los operadores conectados. Un operador solo ve las alertas dirigidas a él o a todos; el administrador las ve todas." },
     { k: "attachSnapshot", t: "check", label: "Mostrar la foto capturada en el aviso", def: true },
     { k: "requireAck", t: "check", label: "Exigir que un operador se dé por enterado", def: true,
       help: "El aviso queda en pantalla y en la lista de alertas hasta que alguien lo confirme; se registra quién y cuándo." },
@@ -375,7 +408,8 @@ async function wfLoadAlerts() {
         ${data.items.map((a) => `
           <tr data-alert="${a.id}">
             <td class="muted">${wfDate(a.raisedAt)}</td>
-            <td>${esc(a.title)}<div class="muted" style="font-size:11px">${esc(a.message)}</div></td>
+            <td>${esc(a.title)}<div class="muted" style="font-size:11px">${esc(a.message)}</div>
+              <div class="muted" style="font-size:11px">Para: ${a.recipients ? esc(a.recipients) : "todos los operadores"}</div></td>
             <td class="muted" style="max-width:280px">${esc(a.triggerSummary)}</td>
             <td>${!a.requiresAck ? `<span class="tag operator">Informativa</span>`
               : a.acknowledgedAt ? `<span class="tag on">Confirmada</span>`
@@ -499,9 +533,11 @@ function wfRunModal(run) {
 // ---------------------------------------------------------------------------
 
 /// HTML de un campo de configuración de acción. `lists` trae las listas del
-/// servidor: { cameras, audio, speakers, doors, panels }.
+/// servidor: { cameras, audio, speakers, doors, panels, catalog } (los
+/// usuarios destinatarios vienen en catalog.users).
 function wfFieldHtml(action, field, lists) {
-  const { cameras = [], audio = [], speakers = [], doors = [], panels = [] } = lists;
+  const { cameras = [], audio = [], speakers = [], doors = [], panels = [], catalog = null } = lists;
+  const users = catalog?.users || [];
   const value = action.config[field.k];
   const current = value === undefined ? field.def : value;
   const attributes = `data-key="${esc(field.k)}" data-type="${esc(field.t)}"`;
@@ -524,15 +560,25 @@ function wfFieldHtml(action, field, lists) {
         <select ${attributes}>${field.options.map(([v, l]) =>
           `<option value="${esc(v)}" ${String(current ?? field.def) === String(v) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>${help}</div>`;
     case "cameras": {
+      // El orden en que se guardan las cámaras es el orden en que se capturan
+      // y en que las fotos aparecen en el aviso; se ajusta con las flechas.
       const selected = (current || []).map(String);
+      const known = cameras.map((c) => String(c.channelId));
+      const ordered = selected.filter((id) => known.includes(id));
       return `<div class="field"><label>${esc(field.label)}</label>
         ${cameras.length === 0 ? `<div class="muted">No hay cámaras configuradas.</div>` : `
+          <div class="wf-cameras" ${attributes} data-order="${esc(ordered.join(","))}">
           <input type="text" class="wf-filter" placeholder="Filtrar cámaras por nombre…" autocomplete="off"
                  title="Escriba parte del nombre del equipo o de la cámara; las marcadas siempre se muestran">
-          <div class="wf-check-grid" ${attributes}>
+          <div class="wf-check-grid">
             ${cameras.map((c) => `<label class="checkbox-row" ${wfPreviewAttr(c)} ${c.supportsSnapshot ? "" : 'title="El driver de este equipo no captura imágenes"'}>
               <input type="checkbox" data-camera="${c.channelId}" ${selected.includes(String(c.channelId)) ? "checked" : ""} ${c.supportsSnapshot ? "" : "disabled"}>
               ${esc(c.deviceName)} · ${esc(c.channelName)}</label>`).join("")}
+          </div>
+          <div class="wf-cam-order">${wfCameraOrderHtml(ordered, (id) => {
+            const c = cameras.find((x) => String(x.channelId) === id);
+            return c ? `${c.deviceName} · ${c.channelName}` : `Cámara ${id}`;
+          })}</div>
           </div>`}${help}</div>`;
     }
     case "ptzcamera": {
@@ -552,6 +598,16 @@ function wfFieldHtml(action, field, lists) {
             ${speakers.map((s) => `<label class="checkbox-row" ${s.enabled ? "" : 'title="Parlante desactivado"'}>
               <input type="checkbox" data-speaker="${s.id}" ${selected.includes(String(s.id)) ? "checked" : ""}>
               ${esc(s.name)}${s.groupName ? ` <span class="muted">· ${esc(s.groupName)}</span>` : ""}</label>`).join("")}
+          </div>`}${help}</div>`;
+    }
+    case "users": {
+      const selected = (current || []).map(String);
+      return `<div class="field"><label>${esc(field.label)}</label>
+        ${users.length === 0 ? `<div class="muted">No hay usuarios.</div>` : `
+          <div class="wf-check-grid" ${attributes}>
+            ${users.map((u) => `<label class="checkbox-row" ${u.enabled ? "" : 'title="Usuario desactivado: no recibirá el aviso"'}>
+              <input type="checkbox" data-user="${u.id}" ${selected.includes(String(u.id)) ? "checked" : ""}>
+              ${esc(u.username)} <span class="muted">· ${u.role === "Admin" ? "administrador" : "operador"}${u.enabled ? "" : " · desactivado"}</span></label>`).join("")}
           </div>`}${help}</div>`;
     }
     case "doors": {
@@ -619,8 +675,49 @@ function wfPreviewAttr(camera) {
   return `data-preview="${camera.deviceId}/${camera.channelNumber}" data-preview-name="${esc(camera.deviceName)} · ${esc(camera.channelName)}"`;
 }
 
-/// Activa el filtro y la vista previa en todas las listas de cámaras dentro de `root`.
+/// Lista numerada de las cámaras marcadas en el orden de captura, con flechas
+/// para subir o bajar cada una. `nameOf` da el nombre de una cámara por id.
+function wfCameraOrderHtml(ids, nameOf) {
+  if (ids.length < 2) return "";
+  return `<div class="muted" style="font-size:11.5px;margin:8px 0 3px">Orden de captura (es el orden de las fotos en el aviso):</div>` +
+    ids.map((id, i) => `<div class="wf-cam-order-row">
+      <span class="wf-cam-order-n">${i + 1}</span><span class="wf-cam-order-name">${esc(nameOf(id))}</span>
+      <button type="button" class="btn ghost wf-cam-move" data-id="${esc(id)}" data-move="-1" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
+      <button type="button" class="btn ghost wf-cam-move" data-id="${esc(id)}" data-move="1" title="Bajar" ${i === ids.length - 1 ? "disabled" : ""}>▼</button>
+    </div>`).join("");
+}
+
+/// Vuelve a pintar la lista de orden de un campo de cámaras según su data-order.
+function wfRefreshCameraOrder(wrapper) {
+  const list = wrapper.querySelector(".wf-cam-order");
+  if (!list) return;
+  const ids = (wrapper.dataset.order || "").split(",").filter((id) => id.length > 0);
+  list.innerHTML = wfCameraOrderHtml(ids, (id) => {
+    const box = wrapper.querySelector(`[data-camera="${id}"]`);
+    return box ? box.closest("label").textContent.trim() : `Cámara ${id}`;
+  });
+}
+
+/// Activa el filtro, el orden y la vista previa en todas las listas de cámaras dentro de `root`.
 function wfBindCameraLists(root) {
+  // Flechas de orden: cambian data-order y avisan "change" al campo para que
+  // se guarde igual que al marcar una casilla.
+  $$(".wf-cameras", root).forEach((wrapper) => {
+    wrapper.addEventListener("click", (e) => {
+      const button = e.target.closest(".wf-cam-move");
+      if (!button || button.disabled) return;
+      e.preventDefault();
+      const ids = (wrapper.dataset.order || "").split(",").filter((id) => id.length > 0);
+      const from = ids.indexOf(button.dataset.id);
+      const to = from + Number(button.dataset.move);
+      if (from < 0 || to < 0 || to >= ids.length) return;
+      [ids[from], ids[to]] = [ids[to], ids[from]];
+      wrapper.dataset.order = ids.join(",");
+      wfRefreshCameraOrder(wrapper);
+      wrapper.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  });
+
   $$(".wf-filter", root).forEach((input) => {
     const grid = input.nextElementSibling;
     if (!grid || !grid.classList.contains("wf-check-grid")) return;
@@ -696,10 +793,17 @@ function wfReadField(action, input) {
     case "check": action.config[key] = input.checked; break;
     case "number": action.config[key] = Number(input.value) || 0; break;
     case "password": action.secret = input.value; break;
-    case "cameras":
-      action.config[key] = Array.from(input.querySelectorAll("[data-camera]"))
-        .filter((c) => c.checked).map((c) => Number(c.dataset.camera));
+    case "cameras": {
+      // Se respeta el orden ya definido; lo recién marcado va al final.
+      const checked = Array.from(input.querySelectorAll("[data-camera]"))
+        .filter((c) => c.checked).map((c) => c.dataset.camera);
+      const previous = (input.dataset.order || "").split(",").filter((id) => id.length > 0);
+      const ordered = previous.filter((id) => checked.includes(id)).concat(checked.filter((id) => !previous.includes(id)));
+      input.dataset.order = ordered.join(",");
+      action.config[key] = ordered.map(Number);
+      wfRefreshCameraOrder(input);
       break;
+    }
     case "speakers":
       action.config[key] = Array.from(input.querySelectorAll("[data-speaker]"))
         .filter((c) => c.checked).map((c) => Number(c.dataset.speaker));
@@ -707,6 +811,10 @@ function wfReadField(action, input) {
     case "doors":
       action.config[key] = Array.from(input.querySelectorAll("[data-door]"))
         .filter((c) => c.checked).map((c) => Number(c.dataset.door));
+      break;
+    case "users":
+      action.config[key] = Array.from(input.querySelectorAll("[data-user]"))
+        .filter((c) => c.checked).map((c) => Number(c.dataset.user));
       break;
     case "panel":
     case "area":

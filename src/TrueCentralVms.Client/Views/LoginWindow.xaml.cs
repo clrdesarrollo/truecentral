@@ -110,7 +110,7 @@ public partial class LoginWindow : Window
             SetPassword(password);
     }
 
-    /// <summary>✕ de la barra de título propia (ventana sin marco de Windows).</summary>
+    /// <summary>Botón "Cerrar" del formulario (ventana sin marco de Windows).</summary>
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
     // ------------------------------------------------------------------

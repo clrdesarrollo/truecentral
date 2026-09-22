@@ -6742,10 +6742,17 @@ namespace TrueCentralVms.Drivers.Hikvision.Interop
             public NET_VCA_DEV_INFO struDevInfo;//前端设备信息
             public uint dwPicDataLen;//返回图片的长度 为0表示没有图片，大于0表示该结构后面紧跟图片数据*/
             public byte byPicType;		//  0-普通图片 1-对比图片
-            [MarshalAsAttribute(UnmanagedType.ByValArray, SizeConst = 3, ArraySubType = UnmanagedType.I1)]
-            public byte[] byRes;		// 保留字节
-            [MarshalAsAttribute(UnmanagedType.ByValArray, SizeConst = 3, ArraySubType = UnmanagedType.U4)]
-            public uint[] dwRes;//保留，设置为0
+            // Cola segun HCNetSDK.h 6.1.9 (tagNET_VCA_RULE_ALARM). La version
+            // del demo en C# (byRes[3] + dwRes[3]) ocupa 4 bytes mas y corre
+            // pImage sobre pAppendInfo: la foto llegaba siempre nula.
+            public byte byRelAlarmPicNum;
+            public byte bySmart;
+            public byte byPicTransType;         // 0 = binario, 1 = URL
+            public uint dwAlarmID;
+            public ushort wDevInfoIvmsChannelEx;
+            public byte byRelativeTimeFlag;
+            public byte byAppendInfoUploadEnabled;
+            public IntPtr pAppendInfo;          // NET_VCA_APPEND_INFO si byAppendInfoUploadEnabled = 1
             public IntPtr pImage;//指向图片的指针
         }
 

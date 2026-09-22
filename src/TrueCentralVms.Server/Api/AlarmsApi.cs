@@ -950,8 +950,15 @@ public static class AlarmsApi
 
             var query = db.AlarmEvents.AsNoTracking().AsQueryable();
             if (panelId is > 0) query = query.Where(e => e.AlarmPanelId == panelId);
-            if (!string.IsNullOrWhiteSpace(kind) && Enum.TryParse<AlarmEventKind>(kind, true, out var k))
-                query = query.Where(e => e.Kind == k);
+            // Uno o varios tipos separados por coma ("ZoneTriggered,ZoneRestored" = sensores).
+            if (!string.IsNullOrWhiteSpace(kind))
+            {
+                var kinds = kind.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(k => Enum.TryParse<AlarmEventKind>(k, true, out var parsed) ? parsed : (AlarmEventKind?)null)
+                    .Where(k => k is not null).Select(k => k!.Value).ToList();
+                if (kinds.Count == 1) { var k = kinds[0]; query = query.Where(e => e.Kind == k); }
+                else if (kinds.Count > 1) query = query.Where(e => kinds.Contains(e.Kind));
+            }
             if (!string.IsNullOrWhiteSpace(severity) && Enum.TryParse<AlarmSeverity>(severity, true, out var s))
                 query = query.Where(e => e.Severity == s);
             if (from is { } fromValue) query = query.Where(e => e.Timestamp >= DateTime.SpecifyKind(fromValue, DateTimeKind.Utc));

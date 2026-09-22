@@ -1,9 +1,10 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using TrueCentralVms.Client.Services;
 using TrueCentralVms.Core.Contracts;
+using TrueCentralVms.Core.Drivers;
 
 namespace TrueCentralVms.Client.ViewModels;
 
@@ -95,7 +96,8 @@ public sealed partial class AlarmsViewModel : ObservableObject
         new("Armados", nameof(AlarmEventKind.Arm)),
         new("Desarmados", nameof(AlarmEventKind.Disarm)),
         new("Anulaciones", nameof(AlarmEventKind.Bypass)),
-        new("Sensores", nameof(AlarmEventKind.ZoneTriggered)),
+        // Interrupción y restablecimiento de detectores, juntos (la API acepta varios tipos separados por coma).
+        new("Sensores", $"{nameof(AlarmEventKind.ZoneTriggered)},{nameof(AlarmEventKind.ZoneRestored)}"),
         new("Fallas", nameof(AlarmEventKind.Trouble)),
         new("Restauraciones", nameof(AlarmEventKind.Restore)),
         new("Sistema", nameof(AlarmEventKind.System)),
@@ -197,7 +199,7 @@ public sealed partial class AlarmsViewModel : ObservableObject
     private void OnEvent(AlarmEventDto dto)
     {
         bool matches = (!OnlySelectedPanel || SelectedPanel?.Id == dto.PanelId)
-                       && (string.IsNullOrEmpty(KindFilter) || dto.Kind.ToString() == KindFilter);
+                       && (string.IsNullOrEmpty(KindFilter) || KindFilter.Split(',').Contains(dto.Kind.ToString()));
         if (matches)
         {
             Events.Insert(0, new AlarmEventItem(dto));
@@ -527,12 +529,38 @@ public sealed class AlarmEventItem(AlarmEventDto dto)
         Dto.ZoneName,
     }.Where(s => !string.IsNullOrWhiteSpace(s))!);
 
-    public string Origin => Dto.Source switch
+    /// <summary>
+    /// Quién originó el evento y qué significa el código con que lo reportó el
+    /// panel, ya interpretado: los paneles Hikvision ponen como "usuario" el
+    /// canal por el que llegó la orden (ISUP/OTAP = receptora, ISAPI = VMS
+    /// directo, Hik-Connect = app) y el código es Contact-ID (calificador +
+    /// evento) o SIA (E/R + evento).
+    /// </summary>
+    public string Origin
     {
-        "vms" => $"Operador: {Dto.Operator}",
-        "panel" => Dto.Operator is { Length: > 0 } ? $"Usuario del panel: {Dto.Operator}" : "Informado por el panel",
-        _ => "Detectado por sondeo",
-    } + (Dto.Code is null ? "" : $"  ·  código {Dto.Code}");
+        get
+        {
+            string who = Dto.Source switch
+            {
+                "vms" => $"Operador: {Dto.Operator}",
+                "panel" => DescribePanelUser(Dto.Operator),
+                _ => "Detectado por sondeo",
+            };
+            string? code = Dto.Code is null ? null
+                : ContactIdCatalog.Explain(Dto.Code) ?? $"código {Dto.Code}";
+            return code is null ? who : $"{who}  ·  {code}";
+        }
+    }
+
+    private static string DescribePanelUser(string? user) => user?.Trim().ToUpperInvariant() switch
+    {
+        null or "" => "Informado por el panel",
+        "ISUP" or "OTAP" or "EHOME" => $"Orden remota por {user!.Trim()} (receptora / VMS)",
+        "ISAPI" => "Orden remota por ISAPI (VMS)",
+        "HIK-CONNECT" or "HIKCONNECT" or "CLOUD" => "Orden desde la app (Hik-Connect)",
+        "KEYPAD" or "KEYFOB" => $"Orden desde {user!.Trim().ToLowerInvariant()} (teclado/llavero)",
+        _ => $"Usuario del panel: {user!.Trim()}",
+    };
 
     public string Glyph => Dto.Kind switch
     {
@@ -542,6 +570,7 @@ public sealed class AlarmEventItem(AlarmEventDto dto)
         AlarmEventKind.Bypass => "\uE894",
         AlarmEventKind.Trouble => "\uE7BA",
         AlarmEventKind.ZoneTriggered => "\uE7B3",
+        AlarmEventKind.ZoneRestored => "\uE7B3",
         AlarmEventKind.Restore => "\uE8FB",
         _ => "\uE946",
     };

@@ -22,7 +22,7 @@ namespace TrueCentralVms.Client.ViewModels;
 public sealed partial class LprViewModel : ObservableObject
 {
     /// <summary>Tope de la lista en memoria: más allá no aporta y consume RAM en miniaturas.</summary>
-    private const int MaxItems = 300;
+    private const int MaxItems = 50;
 
     private readonly ApiClient _api;
     private readonly ClientSettings _settings;
@@ -83,6 +83,12 @@ public sealed partial class LprViewModel : ObservableObject
         : $"{LiveSourceCount} de {Sources.Count(s => s.Enabled)} fuente(s) activa(s)";
 
     partial void OnLiveSourceCountChanged(int value) => OnPropertyChanged(nameof(SourcesSummary));
+
+    partial void OnSelectedChanged(PlateEventViewModel? oldValue, PlateEventViewModel? newValue)
+    {
+        // La ficha anterior suelta sus imágenes grandes: solo la seleccionada las tiene.
+        if (oldValue is not null && !ReferenceEquals(oldValue, newValue)) oldValue.ReleaseDetail();
+    }
 
     partial void OnSelectedChanged(PlateEventViewModel? value)
     {

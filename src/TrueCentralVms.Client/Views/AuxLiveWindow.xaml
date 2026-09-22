@@ -167,21 +167,47 @@
                                     </StackPanel>
                                 </HierarchicalDataTemplate>
                                 <DataTemplate DataType="{x:Type vm:ChannelNode}">
-                                    <StackPanel Orientation="Horizontal" Margin="0,1"
-                                                ToolTip="Doble clic para ver en vivo en esta pantalla">
-                                        <TextBlock Text="◉" Margin="0,0,6,0" FontSize="10" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Margin="0,1">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="ToolTip" Value="Doble clic para ver en vivo en esta pantalla"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsLive}" Value="True">
+                                                        <Setter Property="ToolTip" Value="{Binding LiveLocation}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <!-- ▶ = en un cuadro de cualquier pantalla (mismo árbol que la principal) -->
+                                        <TextBlock Width="11" Margin="0,0,5,0" VerticalAlignment="Center" TextAlignment="Center">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="◉"/>
+                                                    <Setter Property="FontSize" Value="10"/>
                                                     <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsOnline}" Value="True">
                                                             <Setter Property="Foreground" Value="{StaticResource OkBrush}"/>
                                                         </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsLive}" Value="True">
+                                                            <Setter Property="Text" Value="▶"/>
+                                                            <Setter Property="FontSize" Value="9"/>
+                                                        </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
                                             </TextBlock.Style>
                                         </TextBlock>
-                                        <TextBlock Text="{Binding Header}"/>
+                                        <TextBlock Text="{Binding Header}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsLive}" Value="True">
+                                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                     </StackPanel>
                                 </DataTemplate>
                             </TreeView.Resources>

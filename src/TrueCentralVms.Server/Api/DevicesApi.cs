@@ -22,10 +22,18 @@ public static class DevicesApi
     /// <summary>Máximo de capturas simultáneas hacia los equipos (no saturar DVR/NVR).</summary>
     private static readonly SemaphoreSlim SnapshotThrottle = new(4, 4);
 
-    private static DeviceDto ToDto(Device d, int channelCount) => new(
+    private static DeviceDto ToDto(Device d, int channelCount, int enabledChannelCount, int disabledWithSignal,
+        string? warning = null) => new(
         d.Id, d.Name, d.DeviceType, d.DriverKey, d.Host, d.SdkPort, d.RtspPort, d.Username,
         d.Model, d.SerialNumber, d.FirmwareVersion, channelCount, d.Status, d.LastSeenAt, d.CreatedAt,
-        d.AnprEnabled);
+        d.AnprEnabled, enabledChannelCount, warning,
+        // Mismo criterio que ToDto(Channel): sin el equipo en línea no hay señal.
+        d.Status == DeviceStatus.Online ? disabledWithSignal : 0);
+
+    /// <summary>DTO de un equipo con sus canales ya cargados (respuestas de alta/edición/revalidación).</summary>
+    private static DeviceDto ToDto(Device d, int trimmedByQuota = 0) =>
+        ToDto(d, d.Channels.Count, d.Channels.Count(c => c.Enabled), d.Channels.Count(c => !c.Enabled && c.IsOnline),
+            QuotaWarning(d, trimmedByQuota));
 
     /// <summary>
     /// Un canal solo se reporta en línea si su equipo también lo está: con el
@@ -34,7 +42,7 @@ public static class DevicesApi
     /// </summary>
     private static ChannelDto ToDto(Channel c, DeviceStatus deviceStatus) =>
         new(c.Id, c.DeviceId, c.ChannelNumber, c.RtspChannel, c.Name, c.Enabled,
-            c.IsOnline && deviceStatus == DeviceStatus.Online, c.SupportsPtz, c.UseFfmpegProxy);
+            c.IsOnline && deviceStatus == DeviceStatus.Online, c.SupportsPtz, c.UseFfmpegProxy, c.DisabledByLicense);
 
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
@@ -135,8 +143,9 @@ public static class DevicesApi
     /// <summary>
     /// Cupo de canales de video de la licencia: los canales habilitados de
     /// este equipo que no caben (contando los ya habilitados en los demás)
-    /// entran deshabilitados, de mayor a menor número. El equipo se agrega
-    /// igual; el administrador elige cuáles habilitar. Devuelve cuántos.
+    /// entran deshabilitados, de mayor a menor número, y quedan marcados
+    /// (<see cref="Channel.DisabledByLicense"/>) para habilitarse solos cuando
+    /// la licencia tenga cupo. El equipo se agrega igual. Devuelve cuántos.
     /// </summary>
     private static async Task<int> EnforceChannelQuotaAsync(LicenseService license, VmsDbContext db, Device device, CancellationToken ct)
     {
@@ -148,13 +157,80 @@ public static class DevicesApi
         {
             if (allowed > 0) { allowed--; continue; }
             channel.Enabled = false;
+            channel.DisabledByLicense = true;
             trimmed++;
         }
         return trimmed;
     }
 
+    /// <summary>Cupo de canales de video de la licencia: total, en uso (sin contar
+    /// <paramref name="excludeDeviceId"/>) y cuántos quedan libres.</summary>
+    private static async Task<(int Quota, int InUse, int Available)> VideoChannelBudgetAsync(
+        LicenseService license, VmsDbContext db, int? excludeDeviceId, CancellationToken ct)
+    {
+        int quota = license.IsModuleEnabled(LicenseFeatures.ModuleVideo) ? license.Quota(LicenseFeatures.VideoChannels) : 0;
+        int inUse = await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != excludeDeviceId, ct);
+        return (quota, inUse, Math.Max(0, quota - inUse));
+    }
+
+    /// <summary>
+    /// Alta: el equipo no puede entrar con más canales habilitados que los que
+    /// deja libres la licencia. Sin selección explícita se habilitan los canales
+    /// activos si caben; si no caben, se exige elegir cuáles (a lo sumo los
+    /// disponibles). Devuelve el error a responder, o null si quedó resuelto.
+    /// </summary>
+    private static IResult? ApplyChannelSelection(Device device, IReadOnlyList<int>? selection, (int Quota, int InUse, int Available) budget)
+    {
+        if (selection is null)
+        {
+            int active = device.Channels.Count(c => c.Enabled);
+            if (active <= budget.Available) return null;
+            return ChannelSelectionRequired(device, budget,
+                $"El equipo reporta {active} canales activos y la licencia solo tiene {budget.Available} disponibles " +
+                $"({budget.InUse} de {budget.Quota} en uso). Seleccione hasta {budget.Available} canales para habilitar.");
+        }
+
+        var chosen = selection.Distinct().ToHashSet();
+        var unknown = chosen.Where(n => device.Channels.All(c => c.ChannelNumber != n)).ToList();
+        if (unknown.Count > 0)
+            return Error($"El equipo no reporta el canal {unknown[0]}.");
+        if (chosen.Count > budget.Available)
+            return ChannelSelectionRequired(device, budget,
+                $"Seleccionó {chosen.Count} canales, pero la licencia solo tiene {budget.Available} disponibles " +
+                $"({budget.InUse} de {budget.Quota} en uso).");
+        // Si faltaba cupo, los canales activos que quedaron fuera de la
+        // selección se marcan: se habilitan solos cuando la licencia tenga cupo.
+        bool shortage = device.Channels.Count(c => c.Enabled) > budget.Available;
+        foreach (var channel in device.Channels)
+        {
+            bool wasActive = channel.Enabled;
+            channel.Enabled = chosen.Contains(channel.ChannelNumber);
+            channel.DisabledByLicense = shortage && wasActive && !channel.Enabled;
+        }
+        return null;
+    }
+
+    /// <summary>422 con los datos que el asistente necesita para mostrar el selector de canales.</summary>
+    private static IResult ChannelSelectionRequired(Device device, (int Quota, int InUse, int Available) budget, string message) =>
+        Results.Json(new
+        {
+            error = message,
+            channelSelectionRequired = true,
+            videoChannelQuota = budget.Quota,
+            videoChannelsInUse = budget.InUse,
+            availableVideoChannels = budget.Available,
+            channels = device.Channels.OrderBy(c => c.ChannelNumber)
+                .Select(c => new ProbedChannelDto(c.ChannelNumber, c.RtspChannel, c.Name, c.IsOnline)).ToList(),
+        }, statusCode: StatusCodes.Status422UnprocessableEntity);
+
     private static string QuotaNote(int trimmed) =>
         trimmed == 0 ? "" : $"; {trimmed} canal(es) quedaron deshabilitados por el cupo de canales de la licencia";
+
+    /// <summary>Aviso para el panel: el equipo se guardó, pero parte de sus canales no caben en la licencia.</summary>
+    private static string? QuotaWarning(Device device, int trimmed) =>
+        trimmed == 0 ? null
+            : $"{trimmed} de {device.Channels.Count} canales quedaron deshabilitados por el cupo de canales de la licencia. " +
+              "Se habilitarán solos cuando la licencia tenga cupo (amplíela o libere canales en otros equipos).";
 
     public static void MapDevicesApi(this WebApplication app)
     {
@@ -177,10 +253,16 @@ public static class DevicesApi
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             var devices = await db.Devices
-                .Select(d => new { Device = d, ChannelCount = d.Channels.Count })
+                .Select(d => new
+                {
+                    Device = d,
+                    ChannelCount = d.Channels.Count,
+                    EnabledCount = d.Channels.Count(c => c.Enabled),
+                    DisabledWithSignal = d.Channels.Count(c => !c.Enabled && c.IsOnline),
+                })
                 .OrderBy(x => x.Device.Name)
                 .ToListAsync();
-            return Results.Ok(devices.Select(x => ToDto(x.Device, x.ChannelCount)));
+            return Results.Ok(devices.Select(x => ToDto(x.Device, x.ChannelCount, x.EnabledCount, x.DisabledWithSignal)));
         });
 
         app.MapPost("/api/devices", async (HttpContext ctx, DeviceWriteDto request, VmsDbContext db,
@@ -191,6 +273,14 @@ public static class DevicesApi
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (license.Deny(LicenseFeatures.ModuleVideo, null, 0, 0) is { } denied)
                 return await license.DenyAsync(ctx, denied, "device", request.Name?.Trim());
+            // Sin canales libres en la licencia no tiene sentido dar de alta el
+            // equipo: ninguna de sus cámaras podría verse.
+            var budget = await VideoChannelBudgetAsync(license, db, null, ct);
+            if (budget.Available <= 0)
+                return await license.DenyAsync(ctx,
+                    $"No hay canales de video disponibles en la licencia ({budget.InUse} de {budget.Quota} en uso). " +
+                    "Amplíe la licencia o deshabilite canales en otros equipos antes de agregar este.",
+                    "device", request.Name?.Trim());
             if (string.IsNullOrEmpty(request.Password))
                 return Error("La contraseña del dispositivo es obligatoria.");
             if (await db.Devices.AnyAsync(d => d.Host == request.Host && d.SdkPort == request.SdkPort, ct))
@@ -219,18 +309,26 @@ public static class DevicesApi
                 PasswordCiphertext = protector.Protect(request.Password),
             };
             ApplyProbe(device, info);
-            int trimmed = await EnforceChannelQuotaAsync(license, db, device, ct);
+            if (ApplyChannelSelection(device, request.EnabledChannels, budget) is { } selectionError)
+            {
+                await audit.LogAsync(ctx, "devices", "device-created",
+                    targetType: "device", targetName: device.Name,
+                    detail: $"Alta de '{device.Name}' pendiente de selección de canales: {device.Channels.Count} canales, " +
+                            $"{budget.Available} disponibles en la licencia ({budget.InUse} de {budget.Quota} en uso).",
+                    success: false);
+                return selectionError;
+            }
             db.Devices.Add(device);
             await db.SaveChangesAsync(ct);
 
             await audit.LogAsync(ctx, "devices", "device-created",
                 targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
                 detail: $"Agregó el dispositivo '{device.Name}' ({device.DriverKey}, {device.Host}:{device.SdkPort}, " +
-                        $"{device.Channels.Count} canales{QuotaNote(trimmed)}).",
+                        $"{device.Channels.Count} canales, {device.Channels.Count(c => c.Enabled)} habilitados).",
                 data: new { device.Host, device.SdkPort, device.RtspPort, device.DriverKey, device.Model, device.SerialNumber });
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
-            return Results.Ok(ToDto(device, device.Channels.Count));
+            return Results.Ok(ToDto(device));
         });
 
         app.MapPut("/api/devices/{id:int}", async (HttpContext ctx, int id, DeviceWriteDto request, VmsDbContext db,
@@ -257,6 +355,7 @@ public static class DevicesApi
                 device.Username != request.Username ||
                 device.DriverKey != request.DriverKey ||
                 !string.IsNullOrEmpty(request.Password);
+            int trimmed = 0;
             if (connectionChanged)
             {
                 var conn = new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, password);
@@ -264,7 +363,7 @@ public static class DevicesApi
                 if (info is null)
                     return Error(probeError!);
                 ApplyProbe(device, info);
-                await EnforceChannelQuotaAsync(license, db, device, ct);
+                trimmed = await EnforceChannelQuotaAsync(license, db, device, ct);
             }
 
             var changes = new List<string>();
@@ -289,7 +388,7 @@ public static class DevicesApi
             await audit.LogAsync(ctx, "devices", "device-updated",
                 targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
                 detail: $"Modificó el dispositivo '{device.Name}': " +
-                        (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios de conexión."));
+                        (changes.Count > 0 ? string.Join(", ", changes) : "sin cambios de conexión") + QuotaNote(trimmed) + ".");
 
             // El canal de eventos de patentes cuelga de estas credenciales: si
             // la conexión cambió hay que rehacerlo con las nuevas.
@@ -301,7 +400,7 @@ public static class DevicesApi
 
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
-            return Results.Ok(ToDto(device, device.Channels.Count));
+            return Results.Ok(ToDto(device, trimmed));
         });
 
         app.MapDelete("/api/devices/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
@@ -363,7 +462,7 @@ public static class DevicesApi
                 detail: $"Revalidó '{device.Name}': {device.Channels.Count} canales, firmware {device.FirmwareVersion ?? "—"}{QuotaNote(trimmed)}.");
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
-            return Results.Ok(ToDto(device, device.Channels.Count));
+            return Results.Ok(ToDto(device, trimmed));
         });
 
         // ------------------------------------------------------------------
@@ -371,8 +470,8 @@ public static class DevicesApi
         // ?deviceId= reutiliza la contraseña guardada cuando no se escribe una.
         // ------------------------------------------------------------------
         app.MapPost("/api/devices/probe", async (HttpContext ctx, DeviceWriteDto request, VmsDbContext db,
-            DriverRegistry drivers, CredentialProtector protector, AuditService audit, int? deviceId,
-            CancellationToken ct) =>
+            DriverRegistry drivers, CredentialProtector protector, AuditService audit, LicenseService license,
+            int? deviceId, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -396,11 +495,12 @@ public static class DevicesApi
                 return Results.Ok(new DeviceProbeResultDto(false, probeError, null, null, null, null, 0, 0, []));
 
             var suggested = Enum.TryParse<DeviceType>(info.SuggestedType, out var t) ? t : (DeviceType?)null;
+            var budget = await VideoChannelBudgetAsync(license, db, deviceId, ct);
             return Results.Ok(new DeviceProbeResultDto(
                 true, null, info.Model, info.SerialNumber, info.FirmwareVersion, suggested,
                 info.AnalogChannelCount, info.IpChannelCount,
                 info.Channels.Select(c => new ProbedChannelDto(c.ChannelNumber, c.RtspChannel, c.Name, c.IsOnline)).ToList(),
-                info.RtspPort));
+                info.RtspPort, budget.Quota, budget.InUse, budget.Available));
         });
 
         // ------------------------------------------------------------------
@@ -442,6 +542,9 @@ public static class DevicesApi
 
             bool pathsChanged = channel.Enabled != request.Enabled
                 || channel.UseFfmpegProxy != request.UseFfmpegProxy;
+            // Habilitar o deshabilitar a mano es decisión del administrador:
+            // el canal deja de esperar cupo de la licencia.
+            if (channel.Enabled != request.Enabled) channel.DisabledByLicense = false;
             channel.Name = request.Name.Trim();
             channel.Enabled = request.Enabled;
             channel.SupportsPtz = request.SupportsPtz;
@@ -457,6 +560,58 @@ public static class DevicesApi
                 await mtx.RefreshPathsAsync(ct); // habilitar/deshabilitar o proxy cambian la ruta
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "channels", cancellationToken: ct);
             return Results.Ok(ToDto(channel, channel.Device.Status));
+        });
+
+        // Habilita en bloque los canales CON SEÑAL que están deshabilitados,
+        // hasta donde alcance la licencia. Sirve para los que el cupo dejó
+        // apagados antes de existir la marca DisabledByLicense (p. ej. durante
+        // la prueba de 16 canales) y para cámaras conectadas después del alta.
+        // Los que no caben quedan marcados y se habilitan solos al haber cupo.
+        app.MapPost("/api/devices/{id:int}/channels/enable-online", async (HttpContext ctx, int id, VmsDbContext db,
+            IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, AuditService audit, LicenseService license,
+            CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
+            if (device is null) return Results.NotFound();
+            if (device.Status != DeviceStatus.Online)
+                return Error($"'{device.Name}' no está en línea: no se sabe qué canales tienen señal. Revalídelo e intente de nuevo.");
+
+            var candidates = device.Channels
+                .Where(c => !c.Enabled && c.IsOnline)
+                .OrderBy(c => c.ChannelNumber)
+                .ToList();
+            if (candidates.Count == 0)
+                return Results.Ok(new ChannelBulkEnableResultDto(0, 0, $"'{device.Name}' no tiene canales con señal deshabilitados."));
+
+            var budget = await VideoChannelBudgetAsync(license, db, null, ct);
+            var enabled = candidates.Take(Math.Max(0, budget.Available)).ToList();
+            var left = candidates.Skip(enabled.Count).ToList();
+            foreach (var channel in enabled)
+            {
+                channel.Enabled = true;
+                channel.DisabledByLicense = false;
+            }
+            foreach (var channel in left)
+                channel.DisabledByLicense = true;
+            await db.SaveChangesAsync(ct);
+
+            if (enabled.Count == 0)
+                return await license.DenyAsync(ctx,
+                    $"No hay canales de video disponibles en la licencia ({budget.InUse} de {budget.Quota} en uso): " +
+                    $"los {left.Count} canales con señal de '{device.Name}' quedan esperando cupo y se habilitarán solos cuando lo haya.",
+                    "device", device.Name);
+
+            string message = $"Se habilitaron {enabled.Count} canal(es) con señal de '{device.Name}'" +
+                (left.Count > 0
+                    ? $"; {left.Count} quedan esperando cupo de la licencia ({budget.Quota} canales) y se habilitarán solos cuando lo haya."
+                    : ".");
+            await audit.LogAsync(ctx, "devices", "channels-enabled-bulk",
+                targetType: "device", targetId: id.ToString(), targetName: device.Name,
+                detail: $"{message} Canales habilitados: {string.Join(", ", enabled.Select(c => c.ChannelNumber))}.");
+            await mtx.RefreshPathsAsync(ct);
+            await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "channels", cancellationToken: ct);
+            return Results.Ok(new ChannelBulkEnableResultDto(enabled.Count, left.Count, message));
         });
 
         // ------------------------------------------------------------------

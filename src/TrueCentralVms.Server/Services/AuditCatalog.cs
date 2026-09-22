@@ -1,4 +1,4 @@
-namespace TrueCentralVms.Server.Services;
+﻿namespace TrueCentralVms.Server.Services;
 
 /// <summary>
 /// Catálogo de categorías y acciones de la bitácora. Las CLAVES son estables
@@ -36,6 +36,7 @@ public static class AuditCatalog
             new("device-revalidated", "Dispositivo revalidado"),
             new("device-probed", "Prueba de conexión"),
             new("channel-updated", "Canal modificado"),
+            new("channels-enabled-bulk", "Canales con señal habilitados en bloque"),
             new("discovery-scan", "Búsqueda de equipos en la red"),
         ]),
         new("live", "Video en vivo",
@@ -184,6 +185,29 @@ public static class AuditCatalog
             new("speaker-offline", "Parlante sin conexión"),
             new("speaker-online", "Parlante recuperó conexión"),
         ]),
+        new("intercom", "Citofonía",
+        [
+            new("intercom-created", "Frente de citofonía agregado"),
+            new("intercom-updated", "Frente de citofonía modificado"),
+            new("intercom-deleted", "Frente de citofonía eliminado"),
+            new("intercom-probed", "Prueba de conexión con frente de citofonía"),
+            new("call-center-configured", "Botón del frente configurado para llamar a la central"),
+            new("video-optimized", "Video del frente ajustado (cuadro completo por segundo)"),
+            new("call-ringing", "Llamada de citofonía recibida"),
+            new("call-answered", "Llamada de citofonía contestada"),
+            new("call-rejected", "Llamada de citofonía rechazada"),
+            new("call-ended", "Llamada de citofonía terminada"),
+            new("call-missed", "Llamada de citofonía no contestada"),
+            new("call-command-failed", "Orden de llamada rechazada por el frente"),
+            new("door-opened", "Puerta abierta desde citofonía"),
+            new("door-open-failed", "Apertura de puerta fallida"),
+            new("talk-started", "Conversación con el frente iniciada"),
+            new("talk-stopped", "Conversación con el frente terminada"),
+            new("talk-rejected", "Conversación con el frente rechazada"),
+            new("history-viewed", "Consulta del historial de llamadas"),
+            new("intercom-offline", "Frente de citofonía sin conexión"),
+            new("intercom-online", "Frente de citofonía recuperó conexión"),
+        ]),
         new("workflows", "Automatizaciones",
         [
             new("workflow-created", "Automatización creada"),
@@ -218,6 +242,7 @@ public static class AuditCatalog
             new("license-unlicensed", "Sistema sin licencia"),
             new("license-warning", "Aviso de licencia por vencer"),
             new("license-denied", "Operación rechazada por licencia (módulo o cupo)"),
+            new("license-channels-restored", "Canales habilitados al haber cupo en la licencia"),
         ]),
         new("system", "Sistema",
         [

@@ -15,6 +15,13 @@ public class Channel
     public string Name { get; set; } = "";
     /// <summary>Visible para los operadores (editable en el mantenedor).</summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Deshabilitado por el cupo de canales de la licencia, no por decisión del
+    /// administrador ni por falta de señal. Cuando la licencia vuelve a tener
+    /// cupo el servidor lo habilita solo (LicenseService); cualquier cambio
+    /// manual de <see cref="Enabled"/> limpia la marca.
+    /// </summary>
+    public bool DisabledByLicense { get; set; }
     /// <summary>Reportado por el equipo en el último sondeo.</summary>
     public bool IsOnline { get; set; }
     /// <summary>El equipo reporta PTZ en este canal (el cliente muestra el control solo si es true).</summary>

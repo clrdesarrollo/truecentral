@@ -187,6 +187,9 @@ public partial class AuxLiveWindow : Window
         mmi.ptMaxPosition.Y = info.rcWork.Top - info.rcMonitor.Top;
         mmi.ptMaxSize.X = info.rcWork.Right - info.rcWork.Left;
         mmi.ptMaxSize.Y = info.rcWork.Bottom - info.rcWork.Top;
+        // Ídem MainWindow: el tope por defecto es el monitor principal.
+        mmi.ptMaxTrackSize.X = Math.Max(mmi.ptMaxTrackSize.X, info.rcMonitor.Right - info.rcMonitor.Left);
+        mmi.ptMaxTrackSize.Y = Math.Max(mmi.ptMaxTrackSize.Y, info.rcMonitor.Bottom - info.rcMonitor.Top);
         Marshal.StructureToPtr(mmi, lParam, false);
         handled = true;
         return IntPtr.Zero;

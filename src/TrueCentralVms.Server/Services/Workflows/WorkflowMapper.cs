@@ -29,7 +29,8 @@ public static class WorkflowMapper
         alert.Sound, alert.SoundRepeat,
         alert.TriggerSummary, alert.RequiresAck,
         alert.AcknowledgedAt, alert.AcknowledgedBy, alert.AcknowledgedFrom,
-        alert.AcknowledgedAt is { } ack ? (int)Math.Round((ack - alert.RaisedAt).TotalSeconds) : null);
+        alert.AcknowledgedAt is { } ack ? (int)Math.Round((ack - alert.RaisedAt).TotalSeconds) : null,
+        alert.Recipients);
 
     public static SmtpSettingsDto ToDto(SmtpSettings settings) => new(
         settings.Enabled, settings.Host, settings.Port, settings.Security, settings.Username,

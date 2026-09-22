@@ -155,6 +155,15 @@ public class WorkflowAlert
     /// <summary>Exige acuse de recibo (queda pendiente hasta que alguien la confirme).</summary>
     public bool RequiresAck { get; set; } = true;
 
+    /// <summary>
+    /// Destinatarios: ids de usuario como ",3,5," (para buscar con LIKE
+    /// ",id,") o null = todos los operadores conectados. Un operador que no
+    /// es administrador solo ve las alertas dirigidas a él o a todos.
+    /// </summary>
+    public string? RecipientUserIds { get; set; }
+    /// <summary>Nombres de los destinatarios, para el registro ("admin, guardia"); null = todos.</summary>
+    public string? Recipients { get; set; }
+
     public DateTime? AcknowledgedAt { get; set; }
     public int? AcknowledgedByUserId { get; set; }
     public string? AcknowledgedBy { get; set; }

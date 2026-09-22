@@ -135,16 +135,16 @@ public sealed class ApiClient
 
     /// <summary>Alertas de automatizaciones (pendientes de confirmar o todas).</summary>
     public Task<WorkflowAlertListDto?> GetAlertsAsync(bool pendingOnly = true, int take = 20, CancellationToken ct = default) =>
-        SendAsync<WorkflowAlertListDto>(HttpMethod.Get,
+        SendAsync<WorkflowAlertListDto?>(HttpMethod.Get,
             $"/api/workflows/alerts?pending={(pendingOnly ? "true" : "false")}&take={take}", null, ct);
 
     /// <summary>Detalle completo de una alerta (todas sus fotos y su ejecución).</summary>
     public Task<WorkflowAlertDto?> GetAlertAsync(long alertId, CancellationToken ct = default) =>
-        SendAsync<WorkflowAlertDto>(HttpMethod.Get, $"/api/workflows/alerts/{alertId}", null, ct);
+        SendAsync<WorkflowAlertDto?>(HttpMethod.Get, $"/api/workflows/alerts/{alertId}", null, ct);
 
     /// <summary>Ejecución de una automatización (los pasos que corrió y su resultado).</summary>
     public Task<WorkflowRunDto?> GetWorkflowRunAsync(long runId, CancellationToken ct = default) =>
-        SendAsync<WorkflowRunDto>(HttpMethod.Get, $"/api/workflows/runs/{runId}", null, ct);
+        SendAsync<WorkflowRunDto?>(HttpMethod.Get, $"/api/workflows/runs/{runId}", null, ct);
 
     /// <summary>
     /// Se da por enterado de una alerta: el servidor registra quién y cuándo.
@@ -152,7 +152,7 @@ public sealed class ApiClient
     /// nombre: la primera confirmación es la que vale).
     /// </summary>
     public Task<WorkflowAlertDto?> AcknowledgeAlertAsync(long alertId, CancellationToken ct = default) =>
-        SendAsync<WorkflowAlertDto>(HttpMethod.Post, $"/api/workflows/alerts/{alertId}/ack", null, ct);
+        SendAsync<WorkflowAlertDto?>(HttpMethod.Post, $"/api/workflows/alerts/{alertId}/ack", null, ct);
 
     /// <summary>
     /// Sonido de alarma cargado en el servidor (los mismos de los parlantes
@@ -453,6 +453,33 @@ public sealed class ApiClient
 
     public Task<SpeakerDto> SetSpeakerVolumeAsync(int speakerId, int volume, CancellationToken ct = default) =>
         SendAsync<SpeakerDto>(HttpMethod.Put, $"/api/speakers/{speakerId}/volume", new SpeakerVolumeRequestDto(volume), ct);
+
+    // -----------------------------------------------------------------
+    // Citofonía
+    // -----------------------------------------------------------------
+
+    public Task<List<IntercomDto>> GetIntercomsAsync(CancellationToken ct = default) =>
+        SendAsync<List<IntercomDto>>(HttpMethod.Get, "/api/intercoms", null, ct);
+
+    /// <summary>Llamadas sonando o en conversación ahora (al conectar, para no perder una que ya suena).</summary>
+    public Task<List<IntercomCallDto>> GetActiveIntercomCallsAsync(CancellationToken ct = default) =>
+        SendAsync<List<IntercomCallDto>>(HttpMethod.Get, "/api/intercoms/calls/active", null, ct);
+
+    public Task<IntercomCallPageDto> GetIntercomCallsAsync(int? intercomId, int skip, int take, CancellationToken ct = default) =>
+        SendAsync<IntercomCallPageDto>(HttpMethod.Get,
+            $"/api/intercoms/calls?skip={skip}&take={take}{(intercomId is int id ? $"&intercomId={id}" : "")}", null, ct);
+
+    public Task<IntercomActionResultDto> AnswerIntercomCallAsync(long callId, CancellationToken ct = default) =>
+        SendAsync<IntercomActionResultDto>(HttpMethod.Post, $"/api/intercoms/calls/{callId}/answer", null, ct);
+
+    public Task<IntercomActionResultDto> RejectIntercomCallAsync(long callId, CancellationToken ct = default) =>
+        SendAsync<IntercomActionResultDto>(HttpMethod.Post, $"/api/intercoms/calls/{callId}/reject", null, ct);
+
+    public Task<IntercomActionResultDto> HangUpIntercomCallAsync(long callId, CancellationToken ct = default) =>
+        SendAsync<IntercomActionResultDto>(HttpMethod.Post, $"/api/intercoms/calls/{callId}/hangup", null, ct);
+
+    public Task<IntercomActionResultDto> OpenIntercomDoorAsync(int intercomId, int door, CancellationToken ct = default) =>
+        SendAsync<IntercomActionResultDto>(HttpMethod.Post, $"/api/intercoms/{intercomId}/doors/{door}/open", null, ct);
 
     // -----------------------------------------------------------------
     // Paneles de alarma
