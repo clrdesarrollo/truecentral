@@ -345,7 +345,12 @@ function wfeSubtitle(node) {
     case "http": return c.url ? `${c.method || "POST"} ${c.url}` : "sin URL";
     case "speaker": {
       const mode = c.mode || "inventory";
-      if (mode === "inventory") return `${n(c.speakerIds)} parlante(s)${c.group ? " + grupo " + c.group : ""} · ${{ server: c.audio || "sonido", library: c.libraryName || "biblioteca", tts: "voz" }[c.source || "server"]}`;
+      if (mode === "inventory") {
+        const who = `${n(c.speakerIds)} parlante(s)${c.group ? " + grupo " + c.group : ""}`;
+        if ((c.command || "play") === "stop") return `${who} · detener`;
+        const what = { server: c.audio || "sonido", library: c.libraryName || "biblioteca", tts: "voz" }[c.source || "server"];
+        return `${who} · ${what}${c.repeat === 0 ? " en bucle" : ""}${c.setVolume ? ` · vol ${c.volume ?? 80}%` : ""}`;
+      }
       return `${mode} · ${c.host || c.url || ""}`;
     }
     case "notify": {

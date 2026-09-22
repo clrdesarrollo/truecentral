@@ -680,18 +680,17 @@ public sealed class AlarmPanelService(
                 // canal de eventos —las centrales solo reportan Contact-ID—, así
                 // que sale de la diferencia de estado. Es lo que permite
                 // automatizar "el sensor quedó interrumpido".
+                // Sin ventana antirrepetición: el sondeo es la ÚNICA fuente de
+                // estos dos eventos (no llegan también por el canal del panel),
+                // y un botón que se pulsa dos veces en 15 s debe sonar dos veces.
                 bool wasOpen = zone.Status == AlarmZoneStatus.Triggered;
                 bool isOpen = read.Status == AlarmZoneStatus.Triggered;
                 if (wasOpen != isOpen && !read.InAlarm)
-                {
-                    string key = $"zone:{read.Number}:open:{isOpen}";
-                    if (!worker.WasRecentlyReported(key, now))
-                        events.Add(Make(panel,
-                            isOpen ? AlarmEventKind.ZoneTriggered : AlarmEventKind.ZoneRestored,
-                            AlarmSeverity.Info,
-                            isOpen ? "Sensor interrumpido (detector activado)" : "Sensor restablecido",
-                            read.AreaNumber, areaName, read.Number, read.Name, now));
-                }
+                    events.Add(Make(panel,
+                        isOpen ? AlarmEventKind.ZoneTriggered : AlarmEventKind.ZoneRestored,
+                        AlarmSeverity.Info,
+                        isOpen ? "Sensor interrumpido (detector activado)" : "Sensor restablecido",
+                        read.AreaNumber, areaName, read.Number, read.Name, now));
                 if (zone.Bypassed != read.Bypassed)
                 {
                     string key = $"zone:{read.Number}:bypass:{read.Bypassed}";

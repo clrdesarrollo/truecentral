@@ -50,6 +50,10 @@ public sealed class SpeakerAction(WorkflowStore store, SpeakerService speakers, 
     private static string Mode(JsonElement config) =>
         (config.TryGetProperty("mode", out var m) ? m.GetString() : null)?.Trim().ToLowerInvariant() is { Length: > 0 } mode ? mode : "inventory";
 
+    /// <summary>Orden para los parlantes del inventario: "play" (por defecto) o "stop".</summary>
+    private static string Command(JsonElement config) =>
+        (config.TryGetProperty("command", out var c) ? c.GetString() : null)?.Trim().ToLowerInvariant() == "stop" ? "stop" : "play";
+
     public string? Validate(JsonElement config)
     {
         string mode = Mode(config);
@@ -61,7 +65,11 @@ public sealed class SpeakerAction(WorkflowStore store, SpeakerService speakers, 
             bool anySpeaker = config.TryGetProperty("speakerIds", out var ids) && ids.ValueKind == JsonValueKind.Array && ids.GetArrayLength() > 0;
             bool anyGroup = config.TryGetProperty("group", out var g) && !string.IsNullOrWhiteSpace(g.GetString());
             if (!anySpeaker && !anyGroup) return "Elija al menos un parlante o un grupo.";
+            if (Command(config) == "stop") return null;
             string source = (config.TryGetProperty("source", out var s) ? s.GetString() : null)?.ToLowerInvariant() ?? SpeakerPlaySources.Server;
+            bool loop = config.TryGetProperty("repeat", out var r) && r.ValueKind == JsonValueKind.Number && r.TryGetInt32(out int rep) && rep == 0;
+            if (loop && source != SpeakerPlaySources.Server)
+                return "El bucle hasta detener (0 repeticiones) solo está disponible con un sonido del servidor.";
             return source switch
             {
                 SpeakerPlaySources.Server when string.IsNullOrWhiteSpace(config.TryGetProperty("audio", out var a) ? a.GetString() : null)
@@ -135,14 +143,30 @@ public sealed class SpeakerAction(WorkflowStore store, SpeakerService speakers, 
         if (ids.Count == 0)
             return WorkflowStepResult.Fail(group.Length > 0 ? $"El grupo '{group}' no tiene parlantes activos." : "La acción no tiene parlantes elegidos.");
 
+        // "Detener": corta lo que esté sonando (sonido del servidor en curso,
+        // audio de la biblioteca o voz). Es la pareja de un sonido en bucle:
+        // "sensor interrumpido" → sonar en bucle, "sensor restablecido" → detener.
+        if (Command(context.Config) == "stop")
+        {
+            var stopped = await speakers.StopAsync(ids, ct);
+            string stopDetail = string.Join(" · ", stopped.Results.Select(r => $"{r.SpeakerName}: {r.Message}"));
+            if (stopDetail.Length == 0) stopDetail = stopped.Message;
+            return stopped.Success ? WorkflowStepResult.Ok(stopDetail) : WorkflowStepResult.Fail(stopDetail);
+        }
+
         string source = context.Text("source", SpeakerPlaySources.Server).Trim().ToLowerInvariant();
+        // 0 = en bucle hasta que una acción "Detener" o el operador lo corte.
+        int repeat = Math.Clamp(context.Number("repeat", 1), 0, 5);
+        if (repeat == 0 && source != SpeakerPlaySources.Server) repeat = 1;
+        int? volume = context.Flag("setVolume") ? Math.Clamp(context.Number("volume", 80), 0, 100) : null;
         var request = new SpeakerPlayRequestDto(ids, source,
             Sound: context.Text("audio"),
             LibraryName: context.Text("libraryName"),
             Text: context.Render(context.Text("text")),
             Language: context.Text("language", "spanish"),
             Voice: context.Text("voice", "female"),
-            Repeat: Math.Clamp(context.Number("repeat", 1), 1, 5));
+            Repeat: repeat,
+            Volume: volume);
 
         var result = await speakers.PlayAsync(request, $"automatización '{context.Workflow.Name}'", ct);
         string detail = string.Join(" · ", result.Results.Select(r => $"{r.SpeakerName}: {r.Message}"));

@@ -97,7 +97,10 @@ public sealed record SpeakerPlayRequestDto(
     string? Text = null,
     string? Language = null,
     string? Voice = null,
-    int Repeat = 1);
+    /// <summary>Repeticiones de un sonido del servidor (1–5); 0 = en bucle hasta que alguien lo detenga.</summary>
+    int Repeat = 1,
+    /// <summary>Volumen de salida (0–100) que se fija en cada parlante antes de reproducir; null = no tocarlo.</summary>
+    int? Volume = null);
 
 public sealed record SpeakerStopRequestDto(IReadOnlyList<int> SpeakerIds);
 

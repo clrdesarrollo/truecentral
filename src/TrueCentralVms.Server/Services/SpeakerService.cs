@@ -48,6 +48,8 @@ public sealed class SpeakerService(
     private readonly ConcurrentDictionary<int, string> _busy = new();
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _playing = new();
     private readonly SemaphoreSlim _wake = new(0);
+    /// <summary>Apagado del servidor: corta los sonidos en bucle que sigan sonando.</summary>
+    private CancellationToken _stopping = CancellationToken.None;
 
     /// <summary>Qué está ocupando el parlante ahora ("Voz: admin", "Sonido: sirena") o null si está libre.</summary>
     /// <summary>Ganancia de la voz del operador antes de codificar (Speakers:TalkGain; 1 = sin cambio). Los micrófonos suelen entregar poco nivel.</summary>
@@ -78,6 +80,7 @@ public sealed class SpeakerService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stopping = stoppingToken;
         // Dar tiempo a que la API y el hub estén arriba antes del primer sondeo.
         try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
         catch (OperationCanceledException) { return; }
@@ -207,11 +210,15 @@ public sealed class SpeakerService(
         speakers = speakers.Where(s => s.Enabled).ToList();
         var results = disabled.Select(s => new SpeakerActionResultDto(s.Id, s.Name, false, "El parlante está desactivado.")).ToList();
 
+        // Volumen pedido por la orden: se fija en cada parlante antes de sonar;
+        // si un equipo no lo acepta se avisa, pero igual se reproduce.
+        var volumeNotes = request.Volume is { } volume ? await SetVolumeQuietlyAsync(speakers, volume, ct) : [];
+
         string source = (request.Source ?? "").Trim().ToLowerInvariant();
         switch (source)
         {
             case SpeakerPlaySources.Server:
-                results.AddRange(await PlayServerSoundAsync(speakers, request.Sound ?? "", Math.Clamp(request.Repeat, 1, 5), actor, ct));
+                results.AddRange(await PlayServerSoundAsync(speakers, request.Sound ?? "", Math.Clamp(request.Repeat, 0, 5), actor, ct));
                 break;
             case SpeakerPlaySources.Library:
                 results.AddRange(await PlayLibraryAsync(speakers, request.LibraryName ?? "", ct));
@@ -223,6 +230,8 @@ public sealed class SpeakerService(
                 return new SpeakerOperationResultDto(false, $"Origen de audio desconocido: '{request.Source}'.", results);
         }
 
+        if (volumeNotes.Count > 0)
+            results = results.Select(r => volumeNotes.TryGetValue(r.SpeakerId, out var note) ? r with { Message = $"{r.Message} {note}" } : r).ToList();
         int ok = results.Count(r => r.Success);
         string summary = ok == results.Count ? $"Reproducido en {ok} parlante{(ok == 1 ? "" : "s")}."
             : ok == 0 ? "Ningún parlante reprodujo el audio."
@@ -256,6 +265,9 @@ public sealed class SpeakerService(
             }
             claimed.Add(speaker);
         }
+
+        bool loop = repeat == 0;
+        bool streaming = false;
         try
         {
             var opened = await Task.WhenAll(claimed.Select(async speaker =>
@@ -294,64 +306,135 @@ public sealed class SpeakerService(
             }
             if (sessions.Count == 0) return results;
 
-            // 2) Enviar el mismo trozo a todos y recién entonces esperar: así
-            //    los parlantes van a la par (desfase = jitter de la red).
-            using var stopper = new CancellationTokenSource();
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, stopper.Token);
-            foreach (var (speaker, _, _) in sessions) _playing[speaker.Id] = stopper;
-            var failures = new Dictionary<int, string>();
-            int length = sessions.Max(s => s.Payload.Length);
-            var started = DateTime.UtcNow;
-            int chunkIndex = 0;
-            try
+            if (loop)
             {
-                for (int pass = 0; pass < repeat && !linked.IsCancellationRequested; pass++)
+                // En bucle hasta que alguien lo detenga (acción "Detener",
+                // el operador o el apagado del servidor): la transmisión sigue
+                // en segundo plano y quien pidió el sonido no se queda esperando.
+                var claimedNow = sessions.Select(s => s.Speaker).ToList();
+                streaming = true;
+                _ = Task.Run(async () =>
                 {
-                    for (int offset = 0; offset < length && !linked.IsCancellationRequested; offset += ChunkBytes, chunkIndex++)
+                    try { await StreamAsync(sessions, sound, 0, _stopping); }
+                    catch (Exception ex) { logger.LogWarning(ex, "El sonido en bucle '{Sound}' terminó con error.", sound); }
+                    finally
                     {
-                        var writes = new List<Task>();
-                        foreach (var (speaker, session, payload) in sessions)
+                        foreach (var (_, session, _) in sessions)
                         {
-                            if (failures.ContainsKey(speaker.Id) || offset >= payload.Length) continue;
-                            int size = Math.Min(ChunkBytes, payload.Length - offset);
-                            var frame = payload.AsMemory(offset, size);
-                            writes.Add(WriteOrRecordAsync(session, speaker, frame, failures, linked.Token));
+                            try { await session.DisposeAsync(); }
+                            catch (Exception ex) { logger.LogDebug(ex, "No se pudo cerrar el canal de audio de un parlante."); }
                         }
-                        await Task.WhenAll(writes);
-                        if (failures.Count == sessions.Count) break;
-                        // Ritmo real: el trozo k debe salir k×80 ms después del inicio.
-                        var due = started + TimeSpan.FromMilliseconds((chunkIndex + 1) * ChunkMilliseconds);
-                        var wait = due - DateTime.UtcNow;
-                        if (wait > TimeSpan.Zero) await Task.Delay(wait, linked.Token);
+                        foreach (var speaker in claimedNow) _busy.TryRemove(speaker.Id, out _);
                     }
-                }
+                }, CancellationToken.None);
+                results.AddRange(sessions.Select(s => new SpeakerActionResultDto(s.Speaker.Id, s.Speaker.Name, true,
+                    $"Sonido '{sound}' en bucle hasta que se detenga.")));
+                return results;
             }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                // Detenido por el operador: se cierra normalmente.
-            }
-            bool stopped = stopper.IsCancellationRequested;
-            foreach (var (speaker, session, payload) in sessions)
-            {
-                _playing.TryRemove(speaker.Id, out _);
-                double seconds = Math.Round(payload.Length * repeat / (double)G711.BytesPerSecond, 1);
-                results.Add(failures.TryGetValue(speaker.Id, out var error)
-                    ? new(speaker.Id, speaker.Name, false, error)
-                    : new(speaker.Id, speaker.Name, true, stopped
-                        ? $"Sonido '{sound}' detenido por el operador."
-                        : $"Sonido '{sound}' reproducido ({seconds} s{(repeat > 1 ? $", {repeat} repeticiones" : "")})."));
-            }
+
+            results.AddRange(await StreamAsync(sessions, sound, repeat, ct));
         }
         finally
         {
-            foreach (var (_, session, _) in sessions)
+            if (!streaming)
             {
-                try { await session.DisposeAsync(); }
-                catch (Exception ex) { logger.LogDebug(ex, "No se pudo cerrar el canal de audio de un parlante."); }
+                foreach (var (_, session, _) in sessions)
+                {
+                    try { await session.DisposeAsync(); }
+                    catch (Exception ex) { logger.LogDebug(ex, "No se pudo cerrar el canal de audio de un parlante."); }
+                }
+                foreach (var speaker in claimed) _busy.TryRemove(speaker.Id, out _);
             }
-            foreach (var speaker in claimed) _busy.TryRemove(speaker.Id, out _);
         }
         return results;
+    }
+
+    /// <summary>
+    /// 2) Envía el mismo trozo a todos y recién entonces espera: así los
+    /// parlantes van a la par (desfase = jitter de la red). <paramref name="repeat"/>
+    /// 0 = sin fin, hasta que se cancele por <see cref="StopAsync"/>.
+    /// </summary>
+    private async Task<List<SpeakerActionResultDto>> StreamAsync(
+        List<(Speaker Speaker, ISpeakerAudioSession Session, byte[] Payload)> sessions, string sound, int repeat, CancellationToken ct)
+    {
+        var results = new List<SpeakerActionResultDto>();
+        using var stopper = new CancellationTokenSource();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, stopper.Token);
+        foreach (var (speaker, _, _) in sessions) _playing[speaker.Id] = stopper;
+        var failures = new Dictionary<int, string>();
+        int length = sessions.Max(s => s.Payload.Length);
+        var started = DateTime.UtcNow;
+        int chunkIndex = 0;
+        int passes = 0;
+        try
+        {
+            for (int pass = 0; (repeat == 0 || pass < repeat) && !linked.IsCancellationRequested; pass++, passes++)
+            {
+                for (int offset = 0; offset < length && !linked.IsCancellationRequested; offset += ChunkBytes, chunkIndex++)
+                {
+                    var writes = new List<Task>();
+                    foreach (var (speaker, session, payload) in sessions)
+                    {
+                        if (failures.ContainsKey(speaker.Id) || offset >= payload.Length) continue;
+                        int size = Math.Min(ChunkBytes, payload.Length - offset);
+                        var frame = payload.AsMemory(offset, size);
+                        writes.Add(WriteOrRecordAsync(session, speaker, frame, failures, linked.Token));
+                    }
+                    await Task.WhenAll(writes);
+                    if (failures.Count == sessions.Count) break;
+                    // Ritmo real: el trozo k debe salir k×80 ms después del inicio.
+                    var due = started + TimeSpan.FromMilliseconds((chunkIndex + 1) * ChunkMilliseconds);
+                    var wait = due - DateTime.UtcNow;
+                    if (wait > TimeSpan.Zero) await Task.Delay(wait, linked.Token);
+                }
+                if (failures.Count == sessions.Count) break;
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Detenido por el operador o por una acción "Detener": se cierra normalmente.
+        }
+        catch (OperationCanceledException) when (repeat == 0)
+        {
+            // Apagado del servidor con un bucle en curso: se cierra normalmente.
+        }
+        bool stopped = stopper.IsCancellationRequested;
+        foreach (var (speaker, session, payload) in sessions)
+        {
+            _playing.TryRemove(speaker.Id, out _);
+            double seconds = Math.Round(payload.Length * Math.Max(passes, 1) / (double)G711.BytesPerSecond, 1);
+            results.Add(failures.TryGetValue(speaker.Id, out var error)
+                ? new(speaker.Id, speaker.Name, false, error)
+                : new(speaker.Id, speaker.Name, true, stopped
+                    ? $"Sonido '{sound}' detenido."
+                    : $"Sonido '{sound}' reproducido ({seconds} s{(repeat > 1 ? $", {repeat} repeticiones" : "")})."));
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// Fija el volumen en cada parlante antes de reproducir. Devuelve, por
+    /// parlante, la nota a agregar al resultado ("volumen 80 %" o el motivo
+    /// por el que no se pudo); nunca impide la reproducción.
+    /// </summary>
+    private async Task<Dictionary<int, string>> SetVolumeQuietlyAsync(List<Speaker> speakers, int volume, CancellationToken ct)
+    {
+        volume = Math.Clamp(volume, 0, 100);
+        var notes = new Dictionary<int, string>();
+        await Task.WhenAll(speakers.Select(async speaker =>
+        {
+            try
+            {
+                await DriverOf(speaker).SetVolumeAsync(ConnectionOf(speaker), volume, ct);
+                lock (notes) notes[speaker.Id] = $"Volumen fijado en {volume} %.";
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogDebug(ex, "No se pudo fijar el volumen del parlante '{Name}'.", speaker.Name);
+                lock (notes) notes[speaker.Id] = $"No se pudo fijar el volumen: {ex.Message}";
+            }
+        }));
+        return notes;
     }
 
     private static async Task WriteOrRecordAsync(ISpeakerAudioSession session, Speaker speaker, ReadOnlyMemory<byte> frame,

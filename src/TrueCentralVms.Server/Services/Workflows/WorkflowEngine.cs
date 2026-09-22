@@ -528,8 +528,10 @@ public sealed class WorkflowEngine : BackgroundService
 
     /// <summary>
     /// Le dice al módulo de paneles qué paneles necesitan sondeo rápido: los
-    /// de las automatizaciones con condición sostenida (sin él, una
-    /// interrupción de pocos segundos ocurre entera entre dos lecturas).
+    /// de las automatizaciones con condición sostenida y los que escuchan
+    /// «Sensor interrumpido» / «Sensor restablecido» (sin él, una
+    /// interrupción de pocos segundos —un botón de pánico— ocurre entera
+    /// entre dos lecturas y no se ve).
     /// </summary>
     private void ApplyFastPoll(List<Workflow> workflows)
     {
@@ -538,7 +540,10 @@ public sealed class WorkflowEngine : BackgroundService
         foreach (var workflow in workflows)
         {
             var conditions = WorkflowJson.Conditions(workflow.ConditionsJson);
-            if (conditions.SustainedSeconds is not > 0) continue;
+            bool zoneState = workflow.TriggerType == WorkflowTriggerTypes.AlarmEvent &&
+                             conditions.Kinds is { Count: > 0 } kinds &&
+                             kinds.Any(k => k is AlarmEventKind.ZoneTriggered or AlarmEventKind.ZoneRestored);
+            if (conditions.SustainedSeconds is not > 0 && !zoneState) continue;
             if (conditions.PanelIds is { Count: > 0 } ids) panels.UnionWith(ids);
             else if (conditions.ZoneKeys is { Count: > 0 } keys)
                 panels.UnionWith(keys.Select(k => int.TryParse(k.Split(':')[0], out int p) ? p : -1).Where(p => p > 0));

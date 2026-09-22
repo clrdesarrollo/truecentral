@@ -282,10 +282,13 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
             {
                 if (type == IntercomInterop.NET_SDK_CALLBACK_TYPE_STATUS)
                 {
-                    // FAILED (1002) llega cada 5 s mientras no hay llamadas: es el
-                    // "timeout de configuración larga" del SDK y el enlace sigue
-                    // vivo. EXCEPTION sí indica que se cortó.
-                    if (length >= 4 && Marshal.ReadInt32(buffer) == IntercomInterop.NET_SDK_CALLBACK_STATUS_EXCEPTION)
+                    // FAILED (1002) o EXCEPTION (1003): el enlace murió. Verificado
+                    // el 2026-09-22 con el DS-KB8113: sin llamadas, el frente cierra
+                    // la conexión del enlace a los ~3,5 min y el SDK avisa UNA vez
+                    // 1002; desde ahí el frente ya no ve a la central y llama solo
+                    // al monitor interior. Hay que reabrirlo de inmediato.
+                    if (length >= 4 && Marshal.ReadInt32(buffer) is IntercomInterop.NET_SDK_CALLBACK_STATUS_FAILED
+                            or IntercomInterop.NET_SDK_CALLBACK_STATUS_EXCEPTION)
                         _broken = true;
                     return;
                 }

@@ -73,6 +73,11 @@ const WF_EMAIL_BODY =
   "Fecha y hora: {fechahora}\n\n" +
   "Aviso automático de CLR TrueCentral VMS ({servidor}) — automatización «{workflow}».";
 
+/** Acción de parlante del inventario con orden "reproducir" (no "detener"). */
+function wfSpeakerPlays(c) {
+  return (c.mode || "inventory") === "inventory" && (c.command || "play") === "play";
+}
+
 // Cómo se pinta la configuración de cada acción. `when` oculta campos según
 // otro campo (el modo del parlante, el tipo de autenticación...).
 const WF_FIELDS = {
@@ -126,26 +131,36 @@ const WF_FIELDS = {
     { k: "group", t: "text", label: "O bien todos los parlantes del grupo", placeholder: "Bodega, Perímetro…",
       when: (c) => (c.mode || "inventory") === "inventory",
       help: "Nombre de grupo tal como está en el mantenedor de parlantes; se suma a los marcados arriba." },
-    { k: "source", t: "select", label: "Qué reproducir", def: "server", rerender: true,
+    { k: "command", t: "select", label: "Orden", def: "play", rerender: true,
       when: (c) => (c.mode || "inventory") === "inventory",
+      options: [["play", "Reproducir"], ["stop", "Detener lo que esté sonando"]],
+      help: "«Detener» es la pareja de un sonido en bucle: por ejemplo, botón presionado (sensor interrumpido) → reproducir en bucle; botón soltado (sensor restablecido) → detener." },
+    { k: "source", t: "select", label: "Qué reproducir", def: "server", rerender: true,
+      when: (c) => wfSpeakerPlays(c),
       options: [["server", "Sonido del servidor (Sonidos)"], ["library", "Audio de la biblioteca del parlante"], ["tts", "Texto leído en voz alta (TTS del parlante)"]] },
     { k: "audio", t: "audio", label: "Sonido a reproducir",
-      when: (c) => (c.mode || "inventory") === "inventory" && (c.source || "server") === "server" },
+      when: (c) => wfSpeakerPlays(c) && (c.source || "server") === "server" },
     { k: "libraryName", t: "text", label: "Nombre del audio en el parlante", placeholder: "Siren, RestrictAreaKeepAway…",
-      when: (c) => (c.mode || "inventory") === "inventory" && c.source === "library",
+      when: (c) => wfSpeakerPlays(c) && c.source === "library",
       help: "Se busca por nombre en la biblioteca de cada parlante (con o sin extensión)." },
     { k: "text", t: "textarea", label: "Texto a leer (máximo 100 caracteres)", rows: 2,
       placeholder: "Atención: intruso detectado en {zona}. Retírese del lugar.",
-      when: (c) => (c.mode || "inventory") === "inventory" && c.source === "tts",
+      when: (c) => wfSpeakerPlays(c) && c.source === "tts",
       help: "Admite las marcas {zona}, {panel}, {evento}… El parlante genera la voz y la guarda; un mismo texto se reutiliza." },
     { k: "language", t: "select", label: "Idioma de la voz", def: "spanish",
-      when: (c) => (c.mode || "inventory") === "inventory" && c.source === "tts",
+      when: (c) => wfSpeakerPlays(c) && c.source === "tts",
       options: [["spanish", "Español"], ["english", "Inglés"], ["brazilianPortuguese", "Portugués (Brasil)"], ["french", "Francés"]] },
     { k: "voice", t: "select", label: "Voz", def: "female",
-      when: (c) => (c.mode || "inventory") === "inventory" && c.source === "tts",
+      when: (c) => wfSpeakerPlays(c) && c.source === "tts",
       options: [["female", "Femenina"], ["male", "Masculina"]] },
-    { k: "repeat", t: "number", label: "Repeticiones", def: 1, min: 1, max: 5,
-      when: (c) => (c.mode || "inventory") === "inventory" && (c.source || "server") === "server" },
+    { k: "repeat", t: "number", label: "Repeticiones", def: 1, min: 0, max: 5,
+      when: (c) => wfSpeakerPlays(c) && (c.source || "server") === "server",
+      help: "0 = en bucle hasta que una acción «Detener» o el operador lo corte." },
+    { k: "setVolume", t: "check", label: "Fijar el volumen del parlante antes de reproducir", rerender: true,
+      when: (c) => wfSpeakerPlays(c) },
+    { k: "volume", t: "number", label: "Volumen (%)", def: 80, min: 0, max: 100,
+      when: (c) => wfSpeakerPlays(c) && !!c.setVolume,
+      help: "Queda fijado en el equipo (no vuelve solo al valor anterior)." },
     // --- Equipo suelto por dirección (modos heredados) ---
     { k: "host", t: "text", label: "Dirección del parlante", placeholder: "192.168.1.90", when: (c) => !["inventory", "http"].includes(c.mode || "inventory") },
     { k: "port", t: "number", label: "Puerto", def: 80, min: 1, max: 65535, when: (c) => !["inventory", "http"].includes(c.mode || "inventory") },

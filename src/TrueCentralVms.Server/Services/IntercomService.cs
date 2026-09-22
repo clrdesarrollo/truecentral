@@ -15,7 +15,8 @@ namespace TrueCentralVms.Server.Services;
 /// Módulo Citofonía. Por cada frente habilitado el servicio mantiene:
 /// <list type="bullet">
 /// <item><b>El enlace de llamadas</b> (SDK): por él llega el timbre y salen
-/// contestar/rechazar/colgar. Si se corta se reabre solo cada 30 s.</item>
+/// contestar/rechazar/colgar. El frente lo cierra tras unos minutos sin
+/// llamadas: se reabre al instante (si no, el frente llama solo al monitor).</item>
 /// <item><b>Un sondeo del estado de línea</b> cada 2 s (ISAPI
 /// <c>callStatus</c>): dice si el frente está en línea y es el RESPALDO del
 /// enlace —si el enlace no avisó, igual se detecta que suena o que colgaron—.</item>
@@ -39,10 +40,13 @@ public sealed class IntercomService(
     ILogger<IntercomService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan StatusPollInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReloadInterval = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan LinkRetry = TimeSpan.FromSeconds(30);
-    /// <summary>Fallas seguidas del sondeo antes de declarar el frente sin conexión (~6 s).</summary>
-    private const int OfflineAfterFailures = 3;
+    /// <summary>Espera antes de reintentar un enlace que NO se pudo abrir (equipo apagado, credenciales...).</summary>
+    private static readonly TimeSpan LinkRetry = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan LinkRefresh = TimeSpan.FromMinutes(10);
+    /// <summary>Fallas seguidas del sondeo antes de declarar el frente sin conexión (~20 s).</summary>
+    private const int OfflineAfterFailures = 2;
 
     /// <summary>Tope de timbre sin respuesta (el frente suele cortar antes, a los ~65 s).</summary>
     private TimeSpan MaxRing => TimeSpan.FromSeconds(Math.Clamp(config.GetValue("Intercom:MaxRingSeconds", 90), 15, 600));
@@ -66,8 +70,10 @@ public sealed class IntercomService(
         public readonly SemaphoreSlim Gate = new(1, 1);
         public IIntercomCallLink? Link;
         public DateTime NextLinkAttempt = DateTime.MinValue;
+        public DateTime LinkOpenedAt;
         public string? LinkError;
         public int PollFailures;
+        public DateTime NextPoll = DateTime.MinValue;
         public IntercomCall? Call;
         /// <summary>El sondeo ISAPI llegó a ver la línea ocupada durante esta llamada (solo entonces su "idle" cuenta como fin).</summary>
         public bool LineSeenBusy;
@@ -211,13 +217,23 @@ public sealed class IntercomService(
 
     private async Task TickAsync(Line line, CancellationToken ct)
     {
-        // 1) Enlace de llamadas.
+        // 1) Enlace de llamadas. Se cae solo (el frente lo cierra tras unos
+        // minutos sin llamadas) y mientras está caído el frente llama SOLO al
+        // monitor interior: se reabre en el siguiente ciclo (≤ 2 s). Por si
+        // alguna vez muere sin aviso del SDK, además se renueva cada 10 min
+        // cuando no hay llamada en curso.
         if (line.Link is { IsAlive: false } dead)
         {
             await dead.DisposeAsync();
             line.Link = null;
-            line.LinkError = "el enlace de llamadas se cortó";
-            logger.LogInformation("Se cortó el enlace de llamadas con el frente {Name}; se reabrirá.", line.Intercom.Name);
+            line.NextLinkAttempt = DateTime.MinValue;
+            logger.LogInformation("Se cortó el enlace de llamadas con el frente {Name}; se reabre.", line.Intercom.Name);
+        }
+        else if (line.Link is { } aged && line.Call is null && line.Voice is null && DateTime.UtcNow - line.LinkOpenedAt > LinkRefresh)
+        {
+            await aged.DisposeAsync();
+            line.Link = null;
+            line.NextLinkAttempt = DateTime.MinValue;
         }
         if (line.Link is null && DateTime.UtcNow >= line.NextLinkAttempt)
         {
@@ -228,37 +244,20 @@ public sealed class IntercomService(
                 line.Link = await line.Driver.OpenCallLinkAsync(line.Connection,
                     signal => _signals.Writer.TryWrite((id, signal)), ct);
                 line.LinkError = null;
+                line.LinkOpenedAt = DateTime.UtcNow;
+                logger.LogInformation("Enlace de llamadas abierto con el frente {Name}.", line.Intercom.Name);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 line.LinkError = ex.Message;
-                logger.LogDebug("Enlace de llamadas con {Name} no disponible: {Error}", line.Intercom.Name, ex.Message);
+                logger.LogWarning("Enlace de llamadas con {Name} no disponible: {Error}", line.Intercom.Name, ex.Message);
             }
         }
 
-        // 2) Estado de línea (y de conexión).
-        IntercomLineState? state = null;
-        string? error = null;
-        bool authFailed = false;
-        try { state = await line.Driver.GetLineStateAsync(line.Connection, ct); }
-        catch (DriverException ex)
-        {
-            error = ex.Message;
-            authFailed = ex.Message.Contains("credenciales", StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException) { error = ex.Message; }
-
-        if (state is null)
-        {
-            line.PollFailures++;
-            if (line.PollFailures >= OfflineAfterFailures || authFailed)
-                await SetStatusAsync(line, authFailed ? IntercomStatus.AuthFailed : IntercomStatus.Offline, error, ct);
-        }
-        else
-        {
-            line.PollFailures = 0;
-            await SetStatusAsync(line, IntercomStatus.Online, line.Link is null ? line.LinkError : null, ct);
-        }
+        // 2) Estado de línea (y de conexión). Cada 10 s: el frente NO refleja en
+        // callStatus las llamadas a la central (verificado: sigue en "idle"
+        // mientras suena), así que esto sirve sobre todo para saber si está en línea.
+        IntercomLineState? state = DateTime.UtcNow >= line.NextPoll ? await PollStatusAsync(line, ct) : null;
 
         // 3) Respaldo del enlace y topes de tiempo.
         await line.Gate.WaitAsync(ct);
@@ -289,6 +288,35 @@ public sealed class IntercomService(
             }
         }
         finally { line.Gate.Release(); }
+    }
+
+    /// <summary>Consulta el estado de línea y actualiza el estado de conexión; null si el frente no contestó.</summary>
+    private async Task<IntercomLineState?> PollStatusAsync(Line line, CancellationToken ct)
+    {
+        line.NextPoll = DateTime.UtcNow + StatusPollInterval;
+        IntercomLineState? state = null;
+        string? error = null;
+        bool authFailed = false;
+        try { state = await line.Driver.GetLineStateAsync(line.Connection, ct); }
+        catch (DriverException ex)
+        {
+            error = ex.Message;
+            authFailed = ex.Message.Contains("credenciales", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { error = ex.Message; }
+
+        if (state is null)
+        {
+            line.PollFailures++;
+            if (line.PollFailures >= OfflineAfterFailures || authFailed)
+                await SetStatusAsync(line, authFailed ? IntercomStatus.AuthFailed : IntercomStatus.Offline, error, ct);
+        }
+        else
+        {
+            line.PollFailures = 0;
+            await SetStatusAsync(line, IntercomStatus.Online, line.Link is null ? line.LinkError : null, ct);
+        }
+        return state;
     }
 
     private async Task SetStatusAsync(Line line, IntercomStatus status, string? error, CancellationToken ct)
