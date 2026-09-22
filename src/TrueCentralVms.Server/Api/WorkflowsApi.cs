@@ -711,6 +711,43 @@ public static class WorkflowsApi
                 detail: $"Eliminó el sonido '{name}' de los parlantes IP.");
             return Results.NoContent();
         });
+
+        // Nivel del sonido (pico y medio) y cuánto admite de amplificación.
+        app.MapGet("/api/workflows/audio/{name}/level", async (HttpContext ctx, string name, WorkflowStore store,
+            CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (store.FindAudio(name) is null) return Results.NotFound();
+            var level = await store.MeasureAudioAsync(name, ct);
+            double suggested = level?.PeakDb is { } peak ? Math.Max(Math.Round(-peak - WorkflowStore.GainHeadroomDb, 1), 0) : 0;
+            return Results.Ok(new WorkflowAudioLevelDto(level?.PeakDb, level?.MeanDb, level?.DurationSeconds, suggested));
+        });
+
+        // Ganancia: amplifica (o atenúa) el sonido y lo vuelve a convertir.
+        // Sin ganancia indicada sube al máximo sin saturar.
+        app.MapPost("/api/workflows/audio/{name}/gain", async (HttpContext ctx, string name, WorkflowAudioGainRequestDto? request,
+            WorkflowStore store, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (store.FindAudio(name) is null) return Results.NotFound();
+            var (applied, error) = await store.ApplyGainAsync(name, request?.GainDb, ct);
+            await audit.LogAsync(ctx, "workflows", "audio-gain",
+                targetType: "audio", targetName: name,
+                detail: error is null
+                    ? $"Amplificó el sonido '{name}' en {applied:+0.0;-0.0} dB{(request?.GainDb is null ? " (al máximo sin saturar)" : "")} y lo reconvirtió a G.711."
+                    : $"No se pudo amplificar el sonido '{name}': {error}",
+                data: new { name, requestedGainDb = request?.GainDb, appliedGainDb = applied },
+                success: error is null);
+            if (error is not null) return Error(error);
+            var level = await store.MeasureAudioAsync(name, ct);
+            return Results.Ok(new
+            {
+                ok = true, appliedGainDb = applied,
+                level = new WorkflowAudioLevelDto(level?.PeakDb, level?.MeanDb, level?.DurationSeconds,
+                    level?.PeakDb is { } p ? Math.Max(Math.Round(-p - WorkflowStore.GainHeadroomDb, 1), 0) : 0),
+                items = store.ListAudio(),
+            });
+        });
     }
 
     // ------------------------------------------------------------------

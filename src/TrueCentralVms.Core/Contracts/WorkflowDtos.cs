@@ -468,6 +468,17 @@ public sealed record WorkflowAudioDto(
     /// <summary>Tiene la versión convertida a G.711 que exige el parlante.</summary>
     bool Ready);
 
+/// <summary>Nivel de un sonido del servidor (dBFS; 0 = techo digital) y cuánto se puede amplificar sin saturar.</summary>
+public sealed record WorkflowAudioLevelDto(
+    double? PeakDb,
+    double? MeanDb,
+    double? DurationSeconds,
+    /// <summary>Ganancia que deja el pico justo bajo el techo (0 si ya está al máximo).</summary>
+    double SuggestedGainDb);
+
+/// <summary>Ganancia a aplicar a un sonido; null = amplificar al máximo sin saturar.</summary>
+public sealed record WorkflowAudioGainRequestDto(double? GainDb);
+
 /// <summary>
 /// Alerta generada por una automatización: el aviso que se le muestra al
 /// operador Y su acuse de recibo. Existe para poder responder "quién se dio

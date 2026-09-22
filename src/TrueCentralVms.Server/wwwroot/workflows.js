@@ -355,7 +355,7 @@ async function renderWorkflows() {
 
   $("#btn-wf-new")?.addEventListener("click", () => { location.hash = "#/workflows/edit"; });
   $("#btn-wf-smtp")?.addEventListener("click", wfSmtpModal);
-  $("#btn-wf-audio")?.addEventListener("click", wfAudioModal);
+  $("#btn-wf-audio")?.addEventListener("click", () => { location.hash = "#/sounds"; });
   $$("#view .btn-wf-edit").forEach((b) => b.addEventListener("click", (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
     location.hash = `#/workflows/edit?id=${id}`;
@@ -1071,4 +1071,205 @@ async function wfAudioModal() {
     });
   };
   await draw();
+}
+
+// ---------------------------------------------------------------------------
+// Biblioteca de sonidos: todo lo que puede sonar en los parlantes IP. Los
+// sonidos del servidor (se transmiten desde acá, sincronizados) con su nivel
+// y el control de ganancia; y, solo lectura, los audios que cada parlante
+// guarda en su propia biblioteca (los usa la acción "audio de la biblioteca").
+// ---------------------------------------------------------------------------
+
+function wfDb(value) {
+  return value === null || value === undefined ? "—" : `${value > 0 ? "+" : ""}${Number(value).toFixed(1)} dB`;
+}
+
+/** Barra de nivel: pico en dBFS (−60 … 0) como porcentaje del ancho. */
+function wfLevelBar(peakDb) {
+  if (peakDb === null || peakDb === undefined) return "";
+  const pct = Math.max(0, Math.min(100, Math.round((60 + peakDb) / 60 * 100)));
+  const color = peakDb > -1 ? "var(--danger, #e5484d)" : peakDb > -6 ? "var(--accent)" : "var(--muted, #888)";
+  return `<div title="Pico ${wfDb(peakDb)} (0 dB = techo digital)" style="height:6px;border-radius:3px;background:var(--border);overflow:hidden;min-width:90px">
+    <div style="width:${pct}%;height:100%;background:${color}"></div></div>`;
+}
+
+async function renderSounds() {
+  $("#page-title").textContent = "Biblioteca de sonidos";
+  const isAdmin = Api.role === "Admin";
+  let items, catalog, speakers;
+  try {
+    [items, catalog, speakers] = await Promise.all([Api.get("/api/workflows/audio"), wfCatalog(), Api.get("/api/speakers").catch(() => [])]);
+  } catch (err) {
+    $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    return;
+  }
+
+  $("#view").innerHTML = `
+    <div class="toolbar">
+      <h3>Sonidos del servidor <span class="muted" style="font-weight:normal;font-size:12px">(se transmiten a los parlantes desde el servidor, sincronizados)</span></h3>
+      ${isAdmin ? `<div class="row-actions" style="align-items:center;gap:8px">
+        <input type="file" id="wf-audio-file" accept="audio/*" style="max-width:260px">
+        <button class="btn" id="wf-audio-upload">Subir</button>
+      </div>` : ""}
+    </div>
+    <div id="wf-audio-error"></div>
+    ${catalog.ffmpegAvailable ? "" : `<div class="error-box" style="margin-bottom:10px">El servidor no tiene FFmpeg disponible: los sonidos no se pueden convertir ni amplificar.</div>`}
+    <div class="info-box" style="margin-bottom:12px">
+      Cualquier archivo de audio (WAV, MP3…) se convierte a G.711 8 kHz mono, el formato del canal de audio de los parlantes.
+      <b>Nivel</b> es el pico del sonido respecto del techo digital (0 dB): <b>Amplificar</b> lo sube justo hasta ese techo sin saturar
+      (queda 0,3 dB por debajo). Los sonidos también sirven como alarma sonora en el equipo del operador.
+    </div>
+    <div id="wf-sounds-table">
+    ${items.length === 0 ? `<div class="info-box">Aún no hay sonidos cargados.${isAdmin ? " Elija un archivo y pulse <b>Subir</b>." : ""}</div>` : `
+      <div class="table-scroll"><table class="grid">
+        <thead><tr><th>Sonido</th><th>Duración</th><th>Tamaño</th><th style="min-width:200px">Nivel (pico)</th><th>Medio</th><th>Estado</th><th></th></tr></thead>
+        <tbody>
+          ${items.map((a) => `
+            <tr data-name="${esc(a.displayName)}">
+              <td>${esc(a.displayName)}<div class="muted" style="font-size:11px">${esc(a.fileName)}</div></td>
+              <td class="muted wf-snd-duration">…</td>
+              <td class="muted">${Math.round(a.bytes / 1024)} kB</td>
+              <td class="wf-snd-level"><span class="muted">midiendo…</span></td>
+              <td class="muted wf-snd-mean">…</td>
+              <td>${a.ready ? `<span class="tag on">Listo</span>` : `<span class="tag off">Sin convertir</span>`}</td>
+              <td class="row-actions">
+                <button class="btn ghost btn-audio-play" data-name="${esc(a.displayName)}" title="Escuchar en el navegador">▶</button>
+                ${isAdmin ? `
+                  <button class="btn ghost btn-audio-gain" data-name="${esc(a.displayName)}" disabled title="Sube el sonido hasta justo antes de saturar">Amplificar</button>
+                  <button class="btn ghost btn-audio-gain-custom" data-name="${esc(a.displayName)}" title="Aplicar una ganancia a elección (dB); nunca por encima del techo">dB…</button>
+                  <button class="btn danger btn-audio-del" data-name="${esc(a.displayName)}">Eliminar</button>` : ""}
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table></div>`}
+    </div>
+    <h3 style="margin-top:22px">Audios en los parlantes <span class="muted" style="font-weight:normal;font-size:12px">(biblioteca de cada equipo; los reproduce el propio parlante)</span></h3>
+    <div id="wf-speaker-libs">${speakers.length === 0 ? `<div class="info-box">No hay parlantes IP configurados.</div>` : `<div class="info-box">Cargando…</div>`}</div>`;
+
+  // Nivel de cada sonido, en paralelo y sin bloquear la tabla.
+  const rows = $$("#wf-sounds-table tr[data-name]");
+  await Promise.all(rows.map(async (tr) => {
+    const name = tr.dataset.name;
+    try {
+      const level = await Api.get(`/api/workflows/audio/${encodeURIComponent(name)}/level`);
+      wfApplyLevel(tr, level);
+    } catch {
+      tr.querySelector(".wf-snd-level").innerHTML = `<span class="muted">sin medir</span>`;
+      tr.querySelector(".wf-snd-duration").textContent = "—";
+      tr.querySelector(".wf-snd-mean").textContent = "—";
+    }
+  }));
+
+  $$(".btn-audio-play").forEach((b) => b.addEventListener("click", () => wfTogglePreview(b.dataset.name, b)));
+  $$(".btn-audio-del").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm(`¿Eliminar el sonido "${b.dataset.name}"? Las automatizaciones que lo usen quedarán sin sonido.`)) return;
+    wfStopPreview();
+    try {
+      await Api.delete(`/api/workflows/audio/${encodeURIComponent(b.dataset.name)}`);
+      toast("Sonido eliminado.");
+      wfCatalogCache = null;
+      renderSounds();
+    } catch (err) { toast(err.error, true); }
+  }));
+  const applyGain = async (name, gainDb, button) => {
+    wfStopPreview();
+    const tr = button.closest("tr");
+    tr.querySelectorAll("button").forEach((x) => (x.disabled = true));
+    button.textContent = "Aplicando…";
+    try {
+      const data = await Api.post(`/api/workflows/audio/${encodeURIComponent(name)}/gain`, { gainDb });
+      toast(`Sonido «${name}» amplificado ${wfDb(data.appliedGainDb)} y reconvertido.`);
+      wfApplyLevel(tr, data.level);
+      const item = (data.items || []).find((i) => i.displayName === name);
+      if (item) tr.querySelector("td:first-child .muted").textContent = item.fileName;
+    } catch (err) {
+      toast(err.error, true);
+    } finally {
+      button.textContent = button.classList.contains("btn-audio-gain") ? "Amplificar" : "dB…";
+      tr.querySelectorAll("button").forEach((x) => (x.disabled = false));
+      wfRefreshGainButton(tr);
+    }
+  };
+  $$(".btn-audio-gain").forEach((b) => b.addEventListener("click", () => applyGain(b.dataset.name, null, b)));
+  $$(".btn-audio-gain-custom").forEach((b) => b.addEventListener("click", () => {
+    const tr = b.closest("tr");
+    const suggested = Number(tr.dataset.suggested || 0);
+    const answer = prompt(`Ganancia a aplicar a «${b.dataset.name}», en dB (positivo amplifica, negativo atenúa).\nMáximo sin saturar: ${wfDb(suggested)}.`, suggested.toFixed(1));
+    if (answer === null) return;
+    const gain = Number(String(answer).replace(",", "."));
+    if (!Number.isFinite(gain)) { toast("Escriba un número de decibeles.", true); return; }
+    applyGain(b.dataset.name, gain, b);
+  }));
+
+  $("#wf-audio-upload")?.addEventListener("click", async () => {
+    const file = $("#wf-audio-file").files[0];
+    if (!file) { toast("Elija un archivo de audio.", true); return; }
+    const button = $("#wf-audio-upload");
+    button.disabled = true;
+    button.textContent = "Subiendo…";
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const response = await fetch("/api/workflows/audio", {
+        method: "POST", headers: { Authorization: "Bearer " + Api.token }, body: form,
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw { error: (data && data.error) || `Error ${response.status}` };
+      toast("Sonido subido y convertido.");
+      wfStopPreview();
+      wfCatalogCache = null;
+      renderSounds();
+    } catch (err) {
+      $("#wf-audio-error").innerHTML = `<div class="error-box" style="margin-bottom:10px">${esc(err.error || "No se pudo subir el sonido.")}</div>`;
+      button.disabled = false;
+      button.textContent = "Subir";
+    }
+  });
+
+  // Bibliotecas de los parlantes (una consulta por equipo; los que no
+  // respondan quedan marcados sin tumbar la página).
+  if (speakers.length > 0) {
+    const blocks = await Promise.all(speakers.map(async (s) => {
+      if (!s.supportsLibrary) return `<div class="info-box"><b>${esc(s.name)}</b>: el equipo no tiene biblioteca de audios.</div>`;
+      try {
+        const lib = await Api.get(`/api/speakers/${s.id}/library`);
+        return `<h4 style="margin:14px 0 6px">${esc(s.name)} <span class="muted" style="font-weight:normal;font-size:12px">${esc(s.host || "")} · ${lib.length} audio${lib.length === 1 ? "" : "s"}</span></h4>
+          ${lib.length === 0 ? `<div class="muted" style="font-size:12px">Sin audios en el equipo.</div>` : `
+          <div class="table-scroll"><table class="grid">
+            <thead><tr><th>Nombre</th><th>Formato</th><th>Duración</th><th>Tamaño</th><th>Origen</th></tr></thead>
+            <tbody>${lib.map((i) => `<tr>
+              <td>${esc(i.name)}</td><td class="muted">${esc(i.format || "")}</td>
+              <td class="muted">${i.durationSeconds ? `${i.durationSeconds} s` : "—"}</td>
+              <td class="muted">${i.bytes ? `${Math.round(i.bytes / 1024)} kB` : "—"}</td>
+              <td>${i.builtIn ? `<span class="tag operator">de fábrica</span>` : `<span class="tag on">cargado</span>`}</td>
+            </tr>`).join("")}</tbody>
+          </table></div>`}`;
+      } catch (err) {
+        return `<div class="error-box" style="margin-top:10px"><b>${esc(s.name)}</b>: ${esc(err.error || "no respondió")}</div>`;
+      }
+    }));
+    const box = $("#wf-speaker-libs");
+    if (box) box.innerHTML = blocks.join("") + `<div class="muted" style="font-size:11.5px;margin-top:8px">Los audios de los parlantes se administran desde Dispositivos → Parlantes IP; la ganancia solo aplica a los sonidos del servidor.</div>`;
+  }
+}
+
+function wfApplyLevel(tr, level) {
+  tr.dataset.suggested = String(level?.suggestedGainDb ?? 0);
+  tr.dataset.peak = level?.peakDb === null || level?.peakDb === undefined ? "" : String(level.peakDb);
+  tr.querySelector(".wf-snd-duration").textContent = level?.durationSeconds ? `${level.durationSeconds} s` : "—";
+  tr.querySelector(".wf-snd-mean").textContent = wfDb(level?.meanDb);
+  tr.querySelector(".wf-snd-level").innerHTML = level?.peakDb === null || level?.peakDb === undefined
+    ? `<span class="muted">sin medir</span>`
+    : `<div style="display:flex;align-items:center;gap:8px">${wfLevelBar(level.peakDb)}<span class="muted" style="font-size:12px;white-space:nowrap">${wfDb(level.peakDb)}</span></div>`;
+  wfRefreshGainButton(tr);
+}
+
+function wfRefreshGainButton(tr) {
+  const button = tr.querySelector(".btn-audio-gain");
+  if (!button) return;
+  const suggested = Number(tr.dataset.suggested || 0);
+  const measured = tr.dataset.peak !== "" && tr.dataset.peak !== undefined;
+  button.disabled = !measured || suggested < 0.1;
+  button.textContent = measured && suggested >= 0.1 ? `Amplificar ${wfDb(suggested)}` : "Al máximo";
+  button.title = !measured ? "Sin medición" : suggested < 0.1 ? "El sonido ya está al máximo sin saturar" : "Sube el sonido hasta justo antes de saturar";
 }

@@ -1331,6 +1331,7 @@ const routes = {
   "#/intercoms": renderIntercoms,
   "#/workflows": renderWorkflows,
   "#/workflows/edit": renderWorkflowEditor,
+  "#/sounds": renderSounds,
   "#/decoders": renderDecoders,
   "#/walls": renderWalls,
   "#/sessions": renderSessions,

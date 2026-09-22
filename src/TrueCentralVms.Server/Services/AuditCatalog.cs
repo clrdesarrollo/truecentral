@@ -224,6 +224,7 @@ public static class AuditCatalog
             new("smtp-tested", "Correo de prueba enviado"),
             new("audio-uploaded", "Sonido de parlante subido"),
             new("audio-deleted", "Sonido de parlante eliminado"),
+            new("audio-gain", "Sonido de parlante amplificado"),
             new("search", "Consulta del historial de ejecuciones"),
         ]),
         new("license", "Licenciamiento",

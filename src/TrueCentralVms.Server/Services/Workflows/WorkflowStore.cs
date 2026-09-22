@@ -232,6 +232,126 @@ public sealed class WorkflowStore
         }
     }
 
+    /// <summary>Nivel de un sonido medido con FFmpeg (volumedetect) sobre el original.</summary>
+    public sealed record AudioLevel(double? PeakDb, double? MeanDb, double? DurationSeconds);
+
+    /// <summary>Margen bajo 0 dBFS al amplificar "al máximo": evita el recorte por redondeo del códec.</summary>
+    public const double GainHeadroomDb = 0.3;
+
+    /// <summary>
+    /// Mide el pico y el nivel medio del original (dBFS, 0 = techo digital).
+    /// Con eso el panel muestra cuánto se puede amplificar sin saturar.
+    /// </summary>
+    public async Task<AudioLevel?> MeasureAudioAsync(string name, CancellationToken ct)
+    {
+        if (FindAudio(name) is not { } original) return null;
+        if (MediaMtxManager.LocateFfmpeg() is not { } ffmpeg) return null;
+        var psi = new ProcessStartInfo(ffmpeg)
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true,
+        };
+        foreach (string argument in (string[])["-hide_banner", "-nostdin", "-i", original, "-af", "volumedetect", "-f", "null", "-"])
+            psi.ArgumentList.Add(argument);
+        try
+        {
+            using var process = Process.Start(psi)!;
+            string stderr = await process.StandardError.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
+            return new AudioLevel(ParseDb(stderr, "max_volume:"), ParseDb(stderr, "mean_volume:"), ParseDuration(stderr));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "No se pudo medir el nivel del sonido '{Name}'.", name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Aplica una ganancia en dB al original (queda como WAV PCM de 16 bits) y
+    /// vuelve a convertirlo a G.711. Si <paramref name="gainDb"/> es null se
+    /// amplifica al máximo sin saturar: el pico queda a <see cref="GainHeadroomDb"/>
+    /// bajo 0 dBFS. Nunca deja el pico por encima de ese margen, aunque se
+    /// pida más. Devuelve (ganancia aplicada, error).
+    /// </summary>
+    public async Task<(double Applied, string? Error)> ApplyGainAsync(string name, double? gainDb, CancellationToken ct)
+    {
+        if (FindAudio(name) is not { } original) return (0, "El sonido no existe.");
+        if (MediaMtxManager.LocateFfmpeg() is not { } ffmpeg) return (0, "El servidor no tiene FFmpeg disponible.");
+        var level = await MeasureAudioAsync(name, ct);
+        if (level?.PeakDb is not { } peak) return (0, "No se pudo medir el nivel del sonido.");
+
+        double max = -peak - GainHeadroomDb;            // lo más que se puede subir sin recortar
+        double gain = Math.Round(Math.Min(gainDb ?? max, max), 1);
+        if (gainDb is null && gain <= 0.05) return (0, "El sonido ya está al máximo sin saturar.");
+        if (gain is < -30 or > 40) return (0, "La ganancia debe estar entre -30 y +40 dB.");
+
+        string safe = Path.GetFileNameWithoutExtension(original);
+        string temp = Path.Combine(AudioDirectory, $"{safe}.gain-{Guid.NewGuid():N}.wav");
+        var psi = new ProcessStartInfo(ffmpeg)
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true,
+        };
+        foreach (string argument in (string[])[
+            "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+            "-i", original, "-af", $"volume={gain.ToString(System.Globalization.CultureInfo.InvariantCulture)}dB",
+            "-c:a", "pcm_s16le", temp])
+            psi.ArgumentList.Add(argument);
+        try
+        {
+            using var process = Process.Start(psi)!;
+            string stderr = await process.StandardError.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
+            if (process.ExitCode != 0 || new FileInfo(temp).Length == 0)
+            {
+                _logger.LogWarning("FFmpeg no pudo aplicar ganancia a '{Name}': {Error}", name, stderr.Trim());
+                try { File.Delete(temp); } catch (IOException) { /* nada */ }
+                return (0, "FFmpeg no pudo aplicar la ganancia: ¿es un audio válido?");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Fallo al ejecutar FFmpeg para amplificar '{Name}'.", name);
+            return (0, $"No se pudo ejecutar FFmpeg: {ex.Message}");
+        }
+
+        // Reemplazar el original (y sus conversiones) por la versión amplificada.
+        foreach (string old in Directory.EnumerateFiles(AudioDirectory, safe + ".*"))
+        {
+            if (string.Equals(old, temp, StringComparison.OrdinalIgnoreCase)) continue;
+            try { File.Delete(old); } catch (IOException) { /* en uso: se sobreescribe abajo */ }
+        }
+        string target = Path.Combine(AudioDirectory, safe + ".wav");
+        File.Move(temp, target, overwrite: true);
+        foreach (string codec in (string[])["ulaw", "alaw"])
+        {
+            string? error = await ConvertAsync(ffmpeg, target, PayloadPath(safe, codec), codec, ct);
+            if (error is not null) return (gain, error);
+        }
+        return (gain, null);
+    }
+
+    private static double? ParseDb(string text, string label)
+    {
+        int i = text.LastIndexOf(label, StringComparison.Ordinal);
+        if (i < 0) return null;
+        string rest = text[(i + label.Length)..].TrimStart();
+        int end = rest.IndexOf(" dB", StringComparison.Ordinal);
+        if (end < 0) return null;
+        return double.TryParse(rest[..end].Trim(), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out double value) ? value : null;
+    }
+
+    private static double? ParseDuration(string text)
+    {
+        int i = text.IndexOf("Duration:", StringComparison.Ordinal);
+        if (i < 0) return null;
+        string rest = text[(i + 9)..].TrimStart();
+        int end = rest.IndexOf(',');
+        if (end < 0) return null;
+        return TimeSpan.TryParse(rest[..end].Trim(), System.Globalization.CultureInfo.InvariantCulture, out var span)
+            ? Math.Round(span.TotalSeconds, 1) : null;
+    }
+
     /// <summary>Deja solo caracteres seguros para un nombre de archivo.</summary>
     public static string Sanitize(string value)
     {
