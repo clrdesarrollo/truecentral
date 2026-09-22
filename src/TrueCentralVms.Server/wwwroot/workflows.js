@@ -286,14 +286,21 @@ async function renderWorkflows() {
           ? "Con <b>Nueva automatización</b> se abre el editor de diagrama: parta de un disparador (una alarma de panel, una cámara caída, una patente leída, un acceso, una analítica de video, una hora del día o una llamada externa), agregue condiciones sí/no y conecte acciones: foto, correo, FTP, HTTP, parlante, aviso a los operadores, abrir puerta, armar/desarmar, mover un PTZ."
           : "Un administrador debe crearlas."}
       </div>` : `
-      <div class="table-scroll"><table class="grid">
+      <div class="wf-search" style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+        <input type="search" id="wf-search" class="wf-filter" style="max-width:420px;margin:0" autocomplete="off"
+               placeholder="Buscar por nombre, descripción, disparador, filtro, acción o estado…"
+               title="Escriba parte del texto; se buscan todas las palabras en cualquier columna">
+        <span class="muted" id="wf-search-count" style="font-size:12px">${workflows.length} automatización${workflows.length === 1 ? "" : "es"}</span>
+      </div>
+      <div class="table-scroll"><table class="grid" id="wf-table">
         <thead><tr>
           <th>Nombre</th><th>Cuándo</th><th>Filtro</th><th>Qué hace</th>
           <th>Pasos</th><th>Espera</th><th>Ejecuciones</th><th>Última</th><th>Estado</th><th></th>
         </tr></thead>
         <tbody>
           ${workflows.map((w) => `
-            <tr data-id="${w.id}">
+            <tr data-id="${w.id}" data-search="${esc([w.name, w.description || "", triggerLabel(w.triggerType), wfConditionsText(w),
+              ...w.actions.map((a) => actionLabel(a.type)), w.enabled ? "activa" : "pausada"].join(" · ").toLowerCase())}">
               <td>${esc(w.name)}${w.description ? `<div class="muted" style="font-size:11px">${esc(w.description)}</div>` : ""}</td>
               <td>${esc(triggerLabel(w.triggerType))}</td>
               <td class="muted" style="font-size:12px;max-width:260px">${esc(wfConditionsText(w))}</td>
@@ -317,6 +324,34 @@ async function renderWorkflows() {
     <div id="wf-alerts"><div class="info-box">Cargando…</div></div>
     <h3 style="margin-top:22px">Últimas ejecuciones</h3>
     <div id="wf-runs"><div class="info-box">Cargando…</div></div>`;
+
+  // Buscador: todas las palabras escritas deben aparecer en la fila (en
+  // cualquier columna). Se recuerda dentro de la sesión del navegador para
+  // que al volver del editor siga filtrado.
+  const search = $("#wf-search");
+  if (search) {
+    const apply = () => {
+      const words = search.value.trim().toLowerCase().split(/\s+/).filter((w) => w.length > 0);
+      let visible = 0;
+      $$("#wf-table tbody tr").forEach((tr) => {
+        const hay = tr.dataset.search || "";
+        const match = words.every((w) => hay.includes(w));
+        tr.style.display = match ? "" : "none";
+        if (match) visible++;
+      });
+      $("#wf-table .wf-filter-empty")?.remove();
+      if (visible === 0)
+        $("#wf-table tbody").insertAdjacentHTML("beforeend",
+          `<tr class="wf-filter-empty"><td colspan="10" class="muted">Ninguna automatización coincide con «${esc(search.value.trim())}».</td></tr>`);
+      $("#wf-search-count").textContent = words.length === 0
+        ? `${workflows.length} automatización${workflows.length === 1 ? "" : "es"}`
+        : `${visible} de ${workflows.length}`;
+      try { sessionStorage.setItem("wf-search", search.value); } catch { /* sin almacenamiento */ }
+    };
+    try { search.value = sessionStorage.getItem("wf-search") || ""; } catch { /* sin almacenamiento */ }
+    search.addEventListener("input", apply);
+    if (search.value) apply();
+  }
 
   $("#btn-wf-new")?.addEventListener("click", () => { location.hash = "#/workflows/edit"; });
   $("#btn-wf-smtp")?.addEventListener("click", wfSmtpModal);
