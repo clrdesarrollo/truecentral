@@ -1332,6 +1332,11 @@ const routes = {
   "#/workflows": renderWorkflows,
   "#/workflows/edit": renderWorkflowEditor,
   "#/sounds": renderSounds,
+  "#/anpr": renderAnpr,
+  "#/alarms": renderAlarmMonitor,
+  "#/event-center": renderEventCenter,
+  "#/videowall": renderVideowall,
+  "#/intercom-console": renderIntercomConsole,
   "#/decoders": renderDecoders,
   "#/walls": renderWalls,
   "#/sessions": renderSessions,
@@ -1402,6 +1407,13 @@ function navigate() {
   clearInterval(accessEventsTimer); // ídem el del historial de accesos
   clearInterval(workflowsTimer); // ídem el del historial de automatizaciones
   clearInterval(servicesTimer);  // ídem el del supervisor de servicios
+  clearInterval(anprTimer);      // ídem el de lecturas de patentes
+  clearInterval(alarmMonTimer);  // ídem el del monitoreo de alarmas
+  clearInterval(eventCenterTimer); // ídem el del centro de eventos
+  evcStopSound();                // y su alarma sonora no sigue en otra página
+  clearInterval(videowallTimer); // ídem el del puesto de videowall
+  document.getElementById("vw-menu")?.remove();
+  intercomConsoleLeave();        // timbre, conversación y sondeo de la citofonía
   // La ruta puede llevar parámetros (#/workflows/edit?id=7): la tabla se
   // consulta sin ellos, y el enlace del menú se marca también en las
   // subrutas (#/workflows/edit resalta "Automatizaciones").
