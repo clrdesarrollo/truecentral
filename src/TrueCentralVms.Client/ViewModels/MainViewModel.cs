@@ -20,6 +20,12 @@ public partial class MainViewModel : ObservableObject
     private readonly VmsHubClient _hub;
     /// <summary>Alarma sonora de las automatizaciones en este equipo.</summary>
     private readonly AlertSoundPlayer _alertSound;
+    /// <summary>Sirena de alarma de cerco (una por puesto) y los paneles que la mantienen sonando.</summary>
+    private readonly CercoSiren _cercoSiren = new();
+    private readonly HashSet<int> _cercoSounding = [];
+    /// <summary>Aviso en pantalla de cada panel (id negativo: no choca con las alertas de automatizaciones).</summary>
+    private readonly Dictionary<int, long> _cercoToast = [];
+    private long _cercoToastSeq;
     /// <summary>Preferencias locales (última división, etc.). Copia propia:
     /// el login ya terminó de escribir las suyas cuando esta ventana nace.</summary>
     private readonly ClientSettings _settings = ClientSettings.Load();
@@ -150,6 +156,65 @@ public partial class MainViewModel : ObservableObject
         IsAlarmsOpen = false;
         ActiveSection = "Home";
         StatusMessage = ReadyMessage;
+    }
+
+    /// <summary>La viñeta "Cerco eléctrico" existe en el navbar.</summary>
+    [ObservableProperty] private bool _isCercoOpen;
+
+    /// <summary>
+    /// Módulo Cerco eléctrico. Vive desde el arranque: una alarma de cerco tiene
+    /// que sonar y avisar aunque la viñeta nunca se haya abierto.
+    /// </summary>
+    public CercoViewModel Cerco { get; }
+
+    [RelayCommand]
+    private void OpenCerco()
+    {
+        IsCercoOpen = true;
+        ActiveSection = "Cerco";
+        StatusMessage = CercoHintMessage;
+        _ = Cerco.InitializeAsync();
+    }
+
+    /// <summary>Cerrar la viñeta no apaga nada: las alarmas de cerco siguen sonando en este puesto.</summary>
+    [RelayCommand]
+    private void CloseCerco()
+    {
+        IsCercoOpen = false;
+        ActiveSection = "Home";
+        StatusMessage = ReadyMessage;
+    }
+
+    /// <summary>
+    /// Alarma de un panel de cerco: sirena en este puesto + aviso flotante que se
+    /// queda hasta que el operador pulse "Enterado", se esté donde se esté.
+    /// </summary>
+    private void OnCercoAlarm(Core.Contracts.CercoEventDto dto)
+    {
+        StatusMessage = $"ALARMA DE CERCO: {dto.PanelName} — {dto.Description}";
+        _cercoSounding.Add(dto.PanelId);
+        _cercoSiren.Start();
+        long toastId = -(++_cercoToastSeq);
+        _cercoToast[dto.PanelId] = toastId;
+        if (Application.Current.MainWindow is { IsLoaded: true } owner)
+            Views.ToastWindow.ShowAlertWithAck(owner, toastId, $"Alarma de cerco · {dto.PanelName}",
+                $"{dto.Description}\n{dto.ReceivedAt.ToLocalTime():HH:mm:ss}", "\uE945", null,
+                () =>
+                {
+                    // "Enterado" apaga el sonido en este puesto (la sirena del panel se
+                    // silencia con el botón Silenciar del módulo).
+                    _cercoSounding.Clear();
+                    _cercoSiren.Stop();
+                    return Task.CompletedTask;
+                });
+    }
+
+    /// <summary>Se silenció o desarmó el panel (desde aquí, otro puesto o el control): calla la sirena local.</summary>
+    private void OnCercoAlarmHandled(int panelId, bool disarmed)
+    {
+        _cercoSounding.Remove(panelId);
+        if (_cercoSounding.Count == 0) _cercoSiren.Stop();
+        if (disarmed && _cercoToast.Remove(panelId, out long toastId)) Views.ToastWindow.DismissAlert(toastId);
     }
 
     /// <summary>Alarma crítica de un panel: aviso flotante + barra de estado,
@@ -696,6 +761,9 @@ public partial class MainViewModel : ObservableObject
     private const string AlarmsHintMessage =
         "Paneles de alarma: seleccione un panel para ver sus áreas y zonas; armar, desarmar y anular zonas queda auditado.";
 
+    private const string CercoHintMessage =
+        "Cerco eléctrico: armar, desarmar y silenciar quedan auditados; las alarmas suenan aunque cierre esta viñeta.";
+
     private const string WallHintMessage =
         "Muro de video: arrastre un canal a una ventana; doble clic para pantalla completa.";
 
@@ -765,6 +833,11 @@ public partial class MainViewModel : ObservableObject
 
         Alarms = new AlarmsViewModel(api, hub);
         Alarms.AlarmRaised += OnAlarmRaised;
+
+        Cerco = new CercoViewModel(api, hub);
+        Cerco.AlarmRaised += OnCercoAlarm;
+        Cerco.AlarmHandled += OnCercoAlarmHandled;
+        _ = Cerco.InitializeAsync();
 
         Speakers = new SpeakersViewModel(api, hub, _settings);
         _ = Speakers.InitializeAsync();
@@ -1253,6 +1326,7 @@ public partial class MainViewModel : ObservableObject
     {
         _metricsTimer.Stop();
         _licenseTimer.Stop();
+        _cercoSiren.Stop();
         // Las pantallas auxiliares mueren con la principal (cada una libera
         // sus players en su propio Closed).
         foreach (var window in _auxWindows.ToList())

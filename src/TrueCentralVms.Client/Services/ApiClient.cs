@@ -485,6 +485,19 @@ public sealed class ApiClient
     // Paneles de alarma
     // -----------------------------------------------------------------
 
+    // ---------- Paneles de cerco eléctrico ----------
+
+    public Task<List<CercoPanelDto>> GetCercoPanelsAsync(CancellationToken ct = default) =>
+        SendAsync<List<CercoPanelDto>>(HttpMethod.Get, "/api/cerco/panels", null, ct);
+
+    /// <summary>Últimos eventos de cerco (todos los paneles).</summary>
+    public Task<List<CercoEventDto>> GetCercoEventsAsync(int take, CancellationToken ct = default) =>
+        SendAsync<List<CercoEventDto>>(HttpMethod.Get, $"/api/cerco/events?take={take}", null, ct);
+
+    /// <summary>Orden al panel: "arm", "disarm" o "silence". El estado resultante llega por el hub.</summary>
+    public Task SendCercoCommandAsync(int panelId, string command, CancellationToken ct = default) =>
+        SendAsync<object?>(HttpMethod.Post, $"/api/cerco/panels/{panelId}/{command}", null, ct);
+
     /// <summary>Paneles de alarma con el estado de sus áreas y zonas.</summary>
     public Task<List<AlarmPanelDto>> GetAlarmPanelsAsync(CancellationToken ct = default) =>
         SendAsync<List<AlarmPanelDto>>(HttpMethod.Get, "/api/alarms/panels", null, ct);

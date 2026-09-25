@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TrueCentralVms.Server.Data;
@@ -11,9 +12,11 @@ using TrueCentralVms.Server.Data;
 namespace TrueCentralVms.Server.Migrations
 {
     [DbContext(typeof(VmsDbContext))]
-    partial class VmsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260924025508_CercoPanels")]
+    partial class CercoPanels
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1118,17 +1121,8 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<bool>("Armed")
                         .HasColumnType("boolean");
 
-                    b.Property<bool>("Arming")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("Chirp")
-                        .HasColumnType("boolean");
-
                     b.Property<long>("CmdSeq")
                         .HasColumnType("bigint");
-
-                    b.Property<bool>("ConfigSynced")
-                        .HasColumnType("boolean");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1144,9 +1138,6 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("Equipo")
                         .HasColumnType("integer");
 
-                    b.Property<int>("ExitDelaySeconds")
-                        .HasColumnType("integer");
-
                     b.Property<bool>("FenceOk")
                         .HasColumnType("boolean");
 
@@ -1157,18 +1148,7 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("GroundMs")
                         .HasColumnType("integer");
 
-                    b.Property<int>("HvLevel")
-                        .HasColumnType("integer");
-
                     b.Property<bool>("HvOk")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("KeyMode")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<bool>("KeyOn")
                         .HasColumnType("boolean");
 
                     b.Property<string>("LastError")
@@ -1197,32 +1177,15 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<int?>("PowerDropPermille")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("PowerSource")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
                     b.Property<byte[]>("PskCiphertext")
                         .IsRequired()
                         .HasColumnType("bytea");
-
-                    b.Property<int?>("ReturnUs")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("RfLearning")
-                        .HasColumnType("boolean");
 
                     b.Property<int?>("Rssi")
                         .HasColumnType("integer");
 
                     b.Property<bool>("Siren")
                         .HasColumnType("boolean");
-
-                    b.Property<int>("SirenSeconds")
-                        .HasColumnType("integer");
 
                     b.Property<string>("Site")
                         .HasMaxLength(255)
@@ -1239,66 +1202,12 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("Voltage")
                         .HasColumnType("integer");
 
-                    b.Property<int?>("Zone0Adc")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("Zone0BlocksArm")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Zone0Mode")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
                     b.HasKey("Id");
 
                     b.HasIndex("DeviceId")
                         .IsUnique();
 
                     b.ToTable("CercoPanels");
-                });
-
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.CercoRemote", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<int>("Bits")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("CercoPanelId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<int>("Slot")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CercoPanelId", "Slot")
-                        .IsUnique();
-
-                    b.ToTable("CercoRemotes");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.CercoZone", b =>
@@ -2846,17 +2755,6 @@ namespace TrueCentralVms.Server.Migrations
                     b.Navigation("AlarmPanel");
                 });
 
-            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.CercoRemote", b =>
-                {
-                    b.HasOne("TrueCentralVms.Server.Data.Entities.CercoPanel", "CercoPanel")
-                        .WithMany("Remotes")
-                        .HasForeignKey("CercoPanelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CercoPanel");
-                });
-
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.CercoZone", b =>
                 {
                     b.HasOne("TrueCentralVms.Server.Data.Entities.CercoPanel", "CercoPanel")
@@ -3096,8 +2994,6 @@ namespace TrueCentralVms.Server.Migrations
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.CercoPanel", b =>
                 {
-                    b.Navigation("Remotes");
-
                     b.Navigation("Zones");
                 });
 

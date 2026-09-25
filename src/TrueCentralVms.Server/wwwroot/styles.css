@@ -1206,3 +1206,19 @@ main#view.view-editor { padding: 0; overflow: hidden; display: flex; flex-direct
   .ica-list { max-height: 45vh; }
   .ica-window { grid-template-columns: 1fr; grid-template-rows: 40% 60%; height: 100%; }
 }
+
+/* ---------- Alarma global de cerco eléctrico (cerco-alarm.js) ---------- */
+.cerco-alarm {
+  position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+  width: min(760px, calc(100vw - 24px)); z-index: 80;
+  display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap;
+  background: #3B0D0D; border: 2px solid var(--danger); border-radius: var(--radius);
+  padding: 12px 14px; box-shadow: 0 10px 40px rgba(239, 68, 68, .35);
+  animation: cerco-alarm-pulse 1s ease-in-out infinite alternate;
+}
+.cerco-alarm ul { margin: 6px 0 0; padding-left: 18px; }
+.cerco-alarm li { margin: 2px 0; }
+.cerco-alarm-hint { margin-top: 6px; color: #FCD34D; font-size: 13px; }
+.cerco-alarm-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+@keyframes cerco-alarm-pulse { from { border-color: var(--danger); } to { border-color: #FCA5A5; } }
+@media (prefers-reduced-motion: reduce) { .cerco-alarm { animation: none; } }

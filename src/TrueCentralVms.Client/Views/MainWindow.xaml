@@ -110,6 +110,31 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <!-- Cerco eléctrico: activo por sección y, con una alarma de cerco en curso,
+             en rojo y pulsando aunque la viñeta esté cerrada. -->
+        <Style x:Key="RailCercoButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveSection}" Value="Cerco">
+                    <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Cerco.HasActiveAlarms}" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                    <Setter Property="ToolTip" Value="Cerco eléctrico: hay una alarma activa"/>
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard x:Name="CercoPulse">
+                            <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 From="1" To="0.35" Duration="0:0:0.6"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                        <StopStoryboard BeginStoryboardName="CercoPulse"/>
+                    </DataTrigger.ExitActions>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <!-- Centro de eventos: activo por sección y, con alertas sin confirmar,
              en rojo y pulsando (más la insignia con el número) aunque la
              viñeta esté cerrada. -->
@@ -424,6 +449,24 @@
                                 Command="{Binding CloseAlarmsCommand}"
                                 ToolTip="Cerrar Paneles de alarma"/>
                     </Grid>
+                    <!-- Cerco eléctrico: cerrar la viñeta no apaga nada, las alarmas
+                         siguen sonando en este puesto. -->
+                    <Grid Visibility="{Binding IsCercoOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
+                                     Padding="14,0,34,0"
+                                     IsChecked="{Binding ActiveSection, Mode=TwoWay,
+                                                 Converter={x:Static vm:SectionEquals.Instance}, ConverterParameter=Cerco}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE945;" FontSize="12"
+                                           VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="Cerco eléctrico" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+                        <Button Style="{StaticResource TabCloseButton}" Content="&#xE8BB;"
+                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
+                                Command="{Binding CloseCercoCommand}"
+                                ToolTip="Cerrar Cerco eléctrico"/>
+                    </Grid>
                     <!-- Citofonía: cerrar la viñeta no apaga nada, las llamadas
                          siguen sonando y abriendo su ventana. -->
                     <Grid Visibility="{Binding IsIntercomOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
@@ -517,6 +560,9 @@
                         <Button Style="{StaticResource RailAlarmsButton}" Content="&#xE730;"
                                 ToolTip="Paneles de alarma"
                                 Command="{Binding OpenAlarmsCommand}"/>
+                        <Button Style="{StaticResource RailCercoButton}" Content="&#xE945;"
+                                ToolTip="Cerco eléctrico"
+                                Command="{Binding OpenCercoCommand}"/>
                         <Button Style="{StaticResource RailIntercomButton}" Content="&#xE717;"
                                 ToolTip="Citofonía"
                                 Command="{Binding OpenIntercomCommand}"/>
@@ -559,6 +605,10 @@
                                   Visibility="{Binding DataContext.ActiveSection,
                                                RelativeSource={RelativeSource AncestorType=Window},
                                                Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Alarms}"/>
+                <views:CercoView DataContext="{Binding Cerco}"
+                                 Visibility="{Binding DataContext.ActiveSection,
+                                              RelativeSource={RelativeSource AncestorType=Window},
+                                              Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Cerco}"/>
                 <views:EventCenterView DataContext="{Binding Events}"
                                        Visibility="{Binding DataContext.ActiveSection,
                                                     RelativeSource={RelativeSource AncestorType=Window},

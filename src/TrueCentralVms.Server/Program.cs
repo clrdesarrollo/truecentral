@@ -137,6 +137,12 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<IntercomService>()
 builder.Services.AddSingleton<AlarmReceiverService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmReceiverService>());
 
+// Paneles de cerco eléctrico: receptor WebSocket en PUERTO PROPIO (Cerco:Receiver:Port,
+// 5092 por omisión) al que los ESP8266 se conectan y autentican con su PSK.
+builder.Services.AddSingleton<CercoConnectionManager>();
+builder.Services.AddSingleton<CercoReceiverService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CercoReceiverService>());
+
 // Automatizaciones (workflows): "cuando pase ESTO, hacer ESTO OTRO". El motor
 // escucha lo que publican los módulos (hoy, los paneles de alarma) y ejecuta
 // las acciones configuradas. Para soportar una acción nueva basta con
@@ -317,6 +323,7 @@ app.MapLiveViewsApi();
 app.MapAnprApi();
 app.MapAuditApi();
 app.MapAlarmsApi();
+app.MapCercoApi();
 app.MapSpeakersApi();
 app.MapIntercomsApi();
 app.MapAccessApi();

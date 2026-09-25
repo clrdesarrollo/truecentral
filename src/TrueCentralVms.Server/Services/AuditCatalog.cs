@@ -110,6 +110,16 @@ public static class AuditCatalog
             new("event-deleted", "Reconocimiento eliminado"),
             new("search", "Búsqueda en el historial"),
         ]),
+        new("cerco", "Paneles de cerco eléctrico",
+        [
+            new("panel-created", "Panel agregado"),
+            new("panel-updated", "Panel modificado"),
+            new("panel-deleted", "Panel eliminado"),
+            new("panel-key-rotated", "Clave del panel rotada"),
+            new("panel-config", "Configuración del cerco modificada"),
+            new("command", "Orden enviada al panel"),
+            new("events-exported", "Historial de eventos exportado"),
+        ]),
         new("alarms", "Paneles de alarma",
         [
             new("panel-created", "Panel agregado"),

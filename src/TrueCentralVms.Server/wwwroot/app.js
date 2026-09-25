@@ -1334,6 +1334,8 @@ const routes = {
   "#/sounds": renderSounds,
   "#/anpr": renderAnpr,
   "#/alarms": renderAlarmMonitor,
+  "#/cerco": renderCercoMonitor,
+  "#/cerco-panels": renderCercoPanels,
   "#/event-center": renderEventCenter,
   "#/videowall": renderVideowall,
   "#/intercom-console": renderIntercomConsole,
@@ -1409,6 +1411,7 @@ function navigate() {
   clearInterval(servicesTimer);  // ídem el del supervisor de servicios
   clearInterval(anprTimer);      // ídem el de lecturas de patentes
   clearInterval(alarmMonTimer);  // ídem el del monitoreo de alarmas
+  if (typeof cercoDetachHub === "function") cercoDetachHub(); // suelta hub + delegaciones de cerco
   clearInterval(eventCenterTimer); // ídem el del centro de eventos
   evcStopSound();                // y su alarma sonora no sigue en otra página
   clearInterval(videowallTimer); // ídem el del puesto de videowall
@@ -1439,6 +1442,7 @@ function navigate() {
 
 function enterApp() {
   showAppShell();
+  CercoAlarm.start();          // alarma de cerco con sonido, en cualquier página
   setupNav();
   refreshLicenseBanner();
   if (!location.hash || !routes[location.hash.split("?")[0]]) location.hash = "#/";

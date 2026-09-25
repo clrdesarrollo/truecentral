@@ -41,6 +41,7 @@ HikCentral / SmartPSS / iVMS-4200).
 | MediaMTX RTSP (espectadores) | **8654** | 0.0.0.0, solo TCP |
 | MediaMTX API de control | **9911** | 127.0.0.1 |
 | MediaMTX del **cliente** (solo al proyectar la pantalla al muro) | **8554** | 0.0.0.0, TCP |
+| Receptor de paneles de cerco (WebSocket) | **5092** | 0.0.0.0, TCP |
 
 El 8554 lo abre el propio puesto de operación mientras transmite su pantalla
 al muro (lo consume el decodificador); el resto del tiempo no escucha nada.
@@ -112,9 +113,10 @@ Qué hace la suite en el equipo, además de copiar archivos:
   automático) con acciones de recuperación del SCM (reinicio a los 5, 15 y
   60 s si el proceso muere; contador reseteado tras un día estable). Las
   caídas de los servicios internos las cubre el supervisor del servidor.
-- Reglas de firewall: TCP 5090 (panel/API) y 5091 (receptor SIA DC-09), UDP
-  por programa para el descubrimiento de equipos (SADP 37020, WS-Discovery
-  3702, Dahua 37810) y TCP 8654 para el MediaMTX del servidor.
+- Reglas de firewall: TCP 5090 (panel/API), 5091 (receptor SIA DC-09) y 5092
+  (receptor de paneles de cerco por WebSocket), UDP por programa para el
+  descubrimiento de equipos (SADP 37020, WS-Discovery 3702, Dahua 37810) y TCP
+  8654 para el MediaMTX del servidor.
 - ACL de `%ProgramData%\CLRTrueCentralVMS` solo para SYSTEM y
   Administradores (ahí viven la clave del clúster y la llave AES de las
   credenciales de los equipos).

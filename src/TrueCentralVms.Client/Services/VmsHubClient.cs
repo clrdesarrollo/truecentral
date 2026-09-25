@@ -36,6 +36,12 @@ public sealed class VmsHubClient : IAsyncDisposable
     /// <summary>Llegó un evento de un panel de alarma (alarma, armado, falla...).</summary>
     public event Action<AlarmEventDto>? AlarmEventReceived;
 
+    /// <summary>Cambió el estado de un panel de cerco eléctrico (armado, sirena, cerco, conexión).</summary>
+    public event Action<CercoPanelDto>? CercoPanelStateChanged;
+
+    /// <summary>Evento empujado por un panel de cerco (caída, alarma de zona, pánico, armado…).</summary>
+    public event Action<CercoEventDto>? CercoEventReceived;
+
     /// <summary>Una automatización pide avisar al operador (puede traer una foto).</summary>
     public event Action<WorkflowNotificationDto>? WorkflowNotification;
 
@@ -72,6 +78,8 @@ public sealed class VmsHubClient : IAsyncDisposable
         _connection.On<PlateEventDto>(VmsHubContract.PlateRecognized, dto => PlateRecognized?.Invoke(dto));
         _connection.On<AlarmPanelDto>(VmsHubContract.AlarmPanelStateChanged, dto => AlarmPanelStateChanged?.Invoke(dto));
         _connection.On<AlarmEventDto>(VmsHubContract.AlarmEventReceived, dto => AlarmEventReceived?.Invoke(dto));
+        _connection.On<CercoPanelDto>(VmsHubContract.CercoPanelStateChanged, dto => CercoPanelStateChanged?.Invoke(dto));
+        _connection.On<CercoEventDto>(VmsHubContract.CercoEventReceived, dto => CercoEventReceived?.Invoke(dto));
         _connection.On<WorkflowNotificationDto>(VmsHubContract.WorkflowNotification, dto => WorkflowNotification?.Invoke(dto));
         _connection.On<WorkflowAlertDto>(VmsHubContract.WorkflowAlertAcknowledged, dto => WorkflowAlertAcknowledged?.Invoke(dto));
         _connection.On<SpeakerDto>(VmsHubContract.SpeakerStatusChanged, dto => SpeakerStatusChanged?.Invoke(dto));

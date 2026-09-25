@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TrueCentralVms.Server.Data;
@@ -11,9 +12,11 @@ using TrueCentralVms.Server.Data;
 namespace TrueCentralVms.Server.Migrations
 {
     [DbContext(typeof(VmsDbContext))]
-    partial class VmsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260924224748_CercoConfigRemotes")]
+    partial class CercoConfigRemotes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1197,20 +1200,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<int?>("PowerDropPermille")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("PowerSource")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
                     b.Property<byte[]>("PskCiphertext")
                         .IsRequired()
                         .HasColumnType("bytea");
-
-                    b.Property<int?>("ReturnUs")
-                        .HasColumnType("integer");
 
                     b.Property<bool>("RfLearning")
                         .HasColumnType("boolean");

@@ -156,4 +156,13 @@ public static class VmsHubContract
 
     /// <summary>Un servicio supervisado cambió de estado (payload: ManagedServiceDto).</summary>
     public const string ServiceStateChanged = nameof(ServiceStateChanged);
+
+    /// <summary>Cambió el estado de un panel de cerco: armado, sirena, voltaje o conexión (payload: CercoPanelDto).</summary>
+    public const string CercoPanelStateChanged = nameof(CercoPanelStateChanged);
+
+    /// <summary>Cambió la lista de controles RF de un panel de cerco (payload: { panelId, remotes: CercoRemoteDto[] }).</summary>
+    public const string CercoRemotesChanged = nameof(CercoRemotesChanged);
+
+    /// <summary>Llegó un evento de un panel de cerco (payload: CercoEventDto).</summary>
+    public const string CercoEventReceived = nameof(CercoEventReceived);
 }

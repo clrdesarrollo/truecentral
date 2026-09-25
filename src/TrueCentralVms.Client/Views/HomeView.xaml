@@ -149,6 +149,19 @@
                     </DockPanel>
                 </Button>
 
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenCercoCommand}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33F59E0B">
+                            <TextBlock Text="&#xE945;" Foreground="#F59E0B" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Cerco eléctrico" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Estado de los energizadores, armado, desarmado y silencio de sirena; las alarmas suenan en este puesto."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Button>
+
                 <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenIntercomCommand}">
                     <DockPanel Margin="16,0">
                         <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#3334D399">

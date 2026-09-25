@@ -27,6 +27,12 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<AlarmZone> AlarmZones => Set<AlarmZone>();
     public DbSet<AlarmEvent> AlarmEvents => Set<AlarmEvent>();
 
+    // Paneles de cerco eléctrico (ESP8266 que reportan por WebSocket)
+    public DbSet<CercoPanel> CercoPanels => Set<CercoPanel>();
+    public DbSet<CercoZone> CercoZones => Set<CercoZone>();
+    public DbSet<CercoEvent> CercoEvents => Set<CercoEvent>();
+    public DbSet<CercoRemote> CercoRemotes => Set<CercoRemote>();
+
     // Parlantes IP
     public DbSet<Speaker> Speakers => Set<Speaker>();
 
@@ -475,6 +481,59 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             // por naturaleza y por fecha del evento.
             e.HasIndex(a => a.ReceivedAt);
             e.HasIndex(a => new { a.AlarmPanelId, a.ReceivedAt });
+            e.HasIndex(a => new { a.Kind, a.ReceivedAt });
+        });
+
+        // ---- Paneles de cerco eléctrico ----
+        modelBuilder.Entity<CercoPanel>(e =>
+        {
+            e.Property(p => p.Name).HasMaxLength(128);
+            e.Property(p => p.DeviceId).HasMaxLength(48);
+            e.Property(p => p.Site).HasMaxLength(255);
+            e.Property(p => p.Model).HasMaxLength(64);
+            e.Property(p => p.Firmware).HasMaxLength(64);
+            e.Property(p => p.Mac).HasMaxLength(32);
+            e.Property(p => p.LastError).HasMaxLength(512);
+            e.Property(p => p.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(p => p.KeyMode).HasConversion<string>().HasMaxLength(16);
+            e.Property(p => p.Zone0Mode).HasConversion<string>().HasMaxLength(16);
+            e.Property(p => p.PowerSource).HasConversion<string>().HasMaxLength(16);
+            // El DeviceId identifica al panel en el handshake: único.
+            e.HasIndex(p => p.DeviceId).IsUnique();
+        });
+
+        modelBuilder.Entity<CercoRemote>(e =>
+        {
+            e.Property(r => r.Name).HasMaxLength(64);
+            e.Property(r => r.Code).HasMaxLength(16);
+            e.Property(r => r.Action).HasConversion<string>().HasMaxLength(16);
+            e.HasOne(r => r.CercoPanel)
+                .WithMany(p => p.Remotes)
+                .HasForeignKey(r => r.CercoPanelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(r => new { r.CercoPanelId, r.Slot }).IsUnique();
+        });
+
+        modelBuilder.Entity<CercoZone>(e =>
+        {
+            e.Property(z => z.Name).HasMaxLength(128);
+            e.HasOne(z => z.CercoPanel)
+                .WithMany(p => p.Zones)
+                .HasForeignKey(z => z.CercoPanelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(z => new { z.CercoPanelId, z.Number }).IsUnique();
+        });
+
+        modelBuilder.Entity<CercoEvent>(e =>
+        {
+            e.Property(a => a.PanelName).HasMaxLength(128);
+            e.Property(a => a.Kind).HasConversion<string>().HasMaxLength(16);
+            e.Property(a => a.Severity).HasConversion<string>().HasMaxLength(16);
+            e.Property(a => a.Description).HasMaxLength(256);
+            e.Property(a => a.ZoneName).HasMaxLength(128);
+            e.Property(a => a.RawJson).HasMaxLength(4096);
+            e.HasIndex(a => a.ReceivedAt);
+            e.HasIndex(a => new { a.CercoPanelId, a.ReceivedAt });
             e.HasIndex(a => new { a.Kind, a.ReceivedAt });
         });
 
