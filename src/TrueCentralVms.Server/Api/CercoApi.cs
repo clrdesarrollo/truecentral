@@ -19,30 +19,35 @@ namespace TrueCentralVms.Server.Api;
 /// en vivo llegan empujados por el hub (<see cref="VmsHubContract.CercoPanelStateChanged"/>
 /// y <see cref="VmsHubContract.CercoEventReceived"/>).
 ///
-/// Modelo tipo ISUP: al crear (o rotar) se genera un DeviceId + PSK que se muestran
-/// UNA sola vez; el instalador se los asigna al equipo con la herramienta de
-/// provisioning. El PSK se guarda cifrado y nunca se vuelve a exponer.
+/// Modelo tipo ISUP: al crear (o rotar) se genera un DeviceId de 6 dígitos y un
+/// código de enrolamiento de 8 dígitos que se muestran UNA sola vez; el instalador
+/// los carga en el equipo. En la primera conexión ambos lados derivan la PSK del
+/// código (ver <see cref="CercoReceiverService"/>); la PSK se guarda cifrada y nunca
+/// se expone.
 /// </summary>
 public static class CercoApi
 {
     private const int MaxTake = 500;
+    private static readonly TimeSpan EnrollValidity = TimeSpan.FromHours(48);
 
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
 
-    private static string NewDeviceId()
-    {
-        Span<byte> b = stackalloc byte[6];
-        RandomNumberGenerator.Fill(b);
-        return "CERCO-" + Convert.ToHexStringLower(b);
-    }
+    /// <summary>ID de equipo: 6 dígitos (100000..999999), fácil de dictar y teclear en terreno.</summary>
+    private static string NewDeviceId() =>
+        RandomNumberGenerator.GetInt32(100_000, 1_000_000).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string NewEnrollCode() =>
+        RandomNumberGenerator.GetInt32(0, 100_000_000).ToString("D8", System.Globalization.CultureInfo.InvariantCulture);
 
     private static CercoPanelCredentialsDto GenerateCredentials(CercoPanel panel, CredentialProtector protector, IConfiguration config, HttpContext ctx)
     {
-        byte[] psk = CercoCrypto.RandomBytes(32);
-        panel.PskCiphertext = protector.ProtectBytes(psk);
-        string pskB64 = Convert.ToBase64String(psk);
-        CryptographicOperations.ZeroMemory(psk);
+        string code = NewEnrollCode();
+        panel.EnrollCodeCiphertext = protector.ProtectBytes(System.Text.Encoding.ASCII.GetBytes(code));
+        panel.EnrollExpiresAt = DateTime.UtcNow + EnrollValidity;
+        panel.EnrollAttempts = 0;
+        panel.Enrolled = false;
+        panel.PskCiphertext = [];               // la PSK anterior deja de valer
         int port = config.GetValue("Cerco:Receiver:Port", 5092);
         string? pub = config.GetValue<string?>("Cerco:Receiver:PublicUrl", null);
         // El panel se conecta desde OTRO equipo, así que "localhost"/127.0.0.1 (que es
@@ -52,7 +57,7 @@ public static class CercoApi
         if (string.IsNullOrEmpty(host) || host is "localhost" or "127.0.0.1" || host == "::1")
             host = ServerLanIp() ?? host;
         string hint = !string.IsNullOrWhiteSpace(pub) ? pub! : $"ws://{host}:{port}/panel";
-        return new CercoPanelCredentialsDto(panel.DeviceId, pskB64, hint);
+        return new CercoPanelCredentialsDto(panel.DeviceId, code, hint, panel.EnrollExpiresAt.Value);
     }
 
     /// <summary>Primera IPv4 LAN del servidor (para sugerir la URL WS a los paneles).</summary>
@@ -187,21 +192,31 @@ public static class CercoApi
             return Results.NoContent();
         });
 
-        // -------- rotar clave (nuevas credenciales, se muestran una vez) --------
+        // -------- rotar clave: nuevo código de enrolamiento (se muestra una vez) --------
         app.MapPost("/api/cerco/panels/{id:int}/rotate-key", async (HttpContext ctx, int id, VmsDbContext db,
-            CredentialProtector protector, IConfiguration config, AuditService audit, CancellationToken ct) =>
+            CredentialProtector protector, IConfiguration config, AuditService audit, IHubContext<VmsHub> hub,
+            CercoConnectionManager conns, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
-            var panel = await db.CercoPanels.FirstOrDefaultAsync(p => p.Id == id, ct);
+            var panel = await db.CercoPanels.Include(p => p.Zones).FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
             var creds = GenerateCredentials(panel, protector, config, ctx);
             panel.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             await audit.LogAsync(ctx, "cerco", "panel-key-rotated", targetType: "cerco-panel",
                 targetId: panel.Id.ToString(), targetName: panel.Name,
-                detail: $"Rotó la clave del panel de cerco '{panel.Name}'. Hay que re-provisionar el equipo.");
+                detail: $"Rotó la clave del panel de cerco '{panel.Name}'. Hay que re-enrolar el equipo con el código nuevo.");
+            await hub.Clients.All.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)), ct);
             return Results.Ok(creds);
         });
+
+        // -------- mantenimiento del equipo (administrador) --------
+        app.MapPost("/api/cerco/panels/{id:int}/reboot", (HttpContext ctx, int id) =>
+            Command(ctx, id, "reboot", null, "reinició", admin: true));
+        // Restaurar de fábrica: el panel borra WiFi/servidor/PSK/contraseña y vuelve al portal
+        // SoftAP (conserva ajustes del cerco y controles RF). Hay que re-provisionarlo.
+        app.MapPost("/api/cerco/panels/{id:int}/factory", (HttpContext ctx, int id) =>
+            Command(ctx, id, "factory", null, "restauró de fábrica", admin: true));
 
         // -------- órdenes: armar / desarmar / silenciar / zona --------
         app.MapPost("/api/cerco/panels/{id:int}/arm", (HttpContext ctx, int id) => Command(ctx, id, "arm", null, "armó"));

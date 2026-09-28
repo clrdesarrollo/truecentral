@@ -133,19 +133,25 @@ public sealed record CercoPanelDto(
     /// <summary>Caída del pulso de retorno respecto de la referencia con red, en por mil.</summary>
     int? PowerDropPermille = null,
     /// <summary>Ancho medio del pulso de retorno (µs).</summary>
-    int? ReturnUs = null);
+    int? ReturnUs = null,
+    /// <summary>El panel ya se enroló (tiene PSK). Si no, espera el código de enrolamiento.</summary>
+    bool Enrolled = false);
 
 /// <summary>
 /// Credenciales generadas por el servidor al crear o rotar la clave de un panel.
-/// Se muestran UNA sola vez; el instalador las carga en el equipo con la
-/// herramienta de provisioning (SoftAP). El servidor guarda el PSK cifrado.
+/// Se muestran UNA sola vez; el instalador carga el ID y el código en el equipo
+/// (portal SoftAP o CLR Cerco Provisioner). En la primera conexión el panel y el
+/// servidor derivan la PSK del código (no viaja); el código queda consumido.
 /// </summary>
 public sealed record CercoPanelCredentialsDto(
+    /// <summary>ID de equipo de 6 dígitos.</summary>
     string DeviceId,
-    /// <summary>PSK de 256 bits en base64. No se vuelve a mostrar.</summary>
-    string Psk,
+    /// <summary>Código de enrolamiento de 8 dígitos, un solo uso.</summary>
+    string EnrollCode,
     /// <summary>Sugerencia de URL WebSocket a cargar en el panel.</summary>
-    string WsUrlHint);
+    string WsUrlHint,
+    /// <summary>Vencimiento del código (UTC).</summary>
+    DateTime ExpiresAt);
 
 /// <summary>Alta/edición de un panel de cerco (el PSK no se envía; lo genera el servidor).</summary>
 public sealed record CercoPanelUpsertDto(string Name, string? Site, bool Enabled = true);

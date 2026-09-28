@@ -95,12 +95,21 @@ public sealed class CercoReceiverService(
         if (hello is null || (string?)hello["t"] != "hello") return;
         string deviceId = (string?)hello["id"] ?? "";
         byte[] nonceC = FromB64((string?)hello["nonce_c"]);
+        bool wantsEnroll = (bool?)hello["enroll"] ?? false;
         if (deviceId.Length == 0 || nonceC.Length != 16) return;
 
-        // ---- panel + PSK ----
+        // ---- panel + PSK (o enrolamiento) ----
+        // Enrolamiento: si el panel trae código pendiente y aquí hay un código vigente,
+        // ambos derivan PSK = HMAC(código, 'E'|id|nonce_c|nonce_s) y el handshake sigue
+        // igual con esa PSK; se confirma (y el código se consume) al validar proof_c.
+        // Si el welcome se pierde, el panel reintenta con enroll pero el código ya no
+        // está: se entra por la ruta normal con la PSK guardada, que es la misma que
+        // el panel persistió. Ver docs/WS_PROTOCOL.md §2b.
         int panelId;
         byte[] psk;
         long lastEventSeq;
+        string? enrollCode = null;
+        byte[] nonceS = CercoCrypto.RandomBytes(16);
         {
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
@@ -112,22 +121,40 @@ public sealed class CercoReceiverService(
             }
             panelId = panel.Id;
             lastEventSeq = panel.LastEventSeq;
-            try { psk = protector.UnprotectBytes(panel.PskCiphertext); }
-            catch { logger.LogError("No se pudo descifrar el PSK del panel '{Id}'", deviceId); return; }
+            bool codeUsable = panel.EnrollCodeCiphertext is { Length: > 0 }
+                              && panel.EnrollExpiresAt > DateTime.UtcNow && panel.EnrollAttempts < 5;
+            if (wantsEnroll && codeUsable)
+            {
+                try { enrollCode = Encoding.ASCII.GetString(protector.UnprotectBytes(panel.EnrollCodeCiphertext!)); }
+                catch { logger.LogError("No se pudo descifrar el código de enrolamiento del panel '{Id}'", deviceId); return; }
+                psk = CercoCrypto.DerivePsk(enrollCode, deviceId, nonceC, nonceS);
+            }
+            else if (panel.PskCiphertext.Length > 0)
+            {
+                try { psk = protector.UnprotectBytes(panel.PskCiphertext); }
+                catch { logger.LogError("No se pudo descifrar el PSK del panel '{Id}'", deviceId); return; }
+            }
+            else
+            {
+                logger.LogWarning("Panel de cerco '{Id}' sin PSK y sin código de enrolamiento vigente — rechazado", deviceId);
+                await SendJsonAsync(ws, new JsonObject { ["t"] = "welcome", ["ok"] = false, ["err"] = "enroll" }, ct);
+                return;
+            }
         }
 
         // ---- 2) challenge ----
-        byte[] nonceS = CercoCrypto.RandomBytes(16);
         byte[] proofS = CercoCrypto.Proof(psk, 'S', deviceId, nonceC, nonceS);
         int reportInterval = config.GetValue("Cerco:Receiver:ReportIntervalSeconds", 15);
-        await SendJsonAsync(ws, new JsonObject
+        var challenge = new JsonObject
         {
             ["t"] = "challenge",
             ["nonce_s"] = Convert.ToBase64String(nonceS),
             ["proof_s"] = Convert.ToBase64String(proofS),
             ["server_ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             ["report_interval"] = reportInterval,
-        }, ct);
+        };
+        if (enrollCode is not null) challenge["enroll"] = true;
+        await SendJsonAsync(ws, challenge, ct);
 
         // ---- 3) auth ----
         var auth = await ReceiveJsonAsync(ws, HandshakeTimeout, ct);
@@ -137,9 +164,11 @@ public sealed class CercoReceiverService(
         if (gotC.Length != expectC.Length || !CryptographicOperations.FixedTimeEquals(expectC, gotC))
         {
             logger.LogWarning("Panel de cerco '{Id}': proof_c inválido — cerrando", deviceId);
+            if (enrollCode is not null) await BumpEnrollAttemptsAsync(panelId);
             await SendJsonAsync(ws, new JsonObject { ["t"] = "welcome", ["ok"] = false }, ct);
             return;
         }
+        if (enrollCode is not null) { await CommitEnrollmentAsync(panelId, psk); lastEventSeq = 0; }
 
         byte[] sk = CercoCrypto.SessionKey(psk, nonceC, nonceS);
         CryptographicOperations.ZeroMemory(psk);
@@ -186,6 +215,33 @@ public sealed class CercoReceiverService(
     }
 
     // ---- persistencia + push ----
+
+    /// <summary>proof_c válido durante el enrolamiento: la PSK derivada pasa a ser la del panel y el código se consume.</summary>
+    private async Task CommitEnrollmentAsync(int panelId, byte[] psk)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+        var panel = await db.CercoPanels.FirstAsync(p => p.Id == panelId, CancellationToken.None);
+        panel.PskCiphertext = protector.ProtectBytes(psk);
+        panel.EnrollCodeCiphertext = null;
+        panel.EnrollExpiresAt = null;
+        panel.EnrollAttempts = 0;
+        panel.Enrolled = true;
+        panel.CmdSeq = 0;                 // el panel reinició sus contadores al provisionarse
+        panel.LastEventSeq = 0;
+        panel.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(CancellationToken.None);
+        logger.LogInformation("Panel de cerco '{Id}' enrolado", panel.DeviceId);
+    }
+
+    private async Task BumpEnrollAttemptsAsync(int panelId)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+        var panel = await db.CercoPanels.FirstAsync(p => p.Id == panelId, CancellationToken.None);
+        panel.EnrollAttempts++;
+        await db.SaveChangesAsync(CancellationToken.None);
+    }
 
     private async Task MarkOnlineAsync(int panelId, JsonObject hello, CancellationToken ct)
     {

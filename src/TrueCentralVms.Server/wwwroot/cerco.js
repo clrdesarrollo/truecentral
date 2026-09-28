@@ -68,7 +68,7 @@ async function renderCercoPanels() {
     ${panels.length === 0 ? `
       <div class="info-box">
         Aún no hay paneles de cerco. ${isAdmin
-          ? "Use <b>Agregar panel</b>: el sistema genera un <b>ID de equipo</b> y una <b>clave</b> que debe cargar en el panel con la herramienta de provisioning. Desde que el panel se conecta, el guardia puede armar, desarmar y silenciar."
+          ? "Use <b>Agregar panel</b>: el sistema genera un <b>ID de equipo</b> (6 dígitos) y un <b>código de enrolamiento</b> (8 dígitos) que el instalador carga en el panel. Desde que el panel se conecta, el guardia puede armar, desarmar y silenciar."
           : "Un administrador debe agregarlos."}
       </div>` : `
       <div class="table-scroll"><table class="grid">
@@ -99,7 +99,7 @@ function cercoRow(p, isAdmin) {
   return `
     <tr id="cerco-row-${p.id}" data-id="${p.id}" data-name="${esc(p.name)}">
       <td>${esc(p.name)}</td>
-      <td class="muted">${esc(p.deviceId)}</td>
+      <td class="muted">${esc(p.deviceId)}${p.enrolled ? "" : ` <span class="tag warn" title="Esperando que el instalador cargue el código de enrolamiento en el equipo">sin enrolar</span>`}</td>
       <td class="muted">${esc(p.site ?? "—")}</td>
       <td class="muted">${esc(p.firmware ?? "—")}</td>
       <td>${p.armed ? `<span class="tag ok">armado</span>` : `<span class="tag">desarmado</span>`}</td>
@@ -108,7 +108,9 @@ function cercoRow(p, isAdmin) {
       <td>${cercoConnDot(p)}</td>
       <td class="row-actions">
         ${isAdmin ? `<button class="btn btn-config" title="Potencia, sirena, zona, llave y controles remotos">Configurar</button>
-        <button class="btn ghost btn-key" title="Rotar la clave (hay que re-provisionar)">Rotar clave</button>
+        <button class="btn ghost btn-key" title="Genera un código de enrolamiento nuevo (hay que re-enrolar el equipo)">Rotar clave</button>
+        <button class="btn ghost btn-reboot" title="Reiniciar el equipo">Reiniciar</button>
+        <button class="btn ghost btn-factory" title="Borra WiFi, servidor y clave del equipo; vuelve al portal de provisioning">Restaurar</button>
         <button class="btn ghost btn-edit">Editar</button>
         <button class="btn danger btn-delete">Eliminar</button>` : ""}
       </td>
@@ -131,8 +133,16 @@ async function onCercoAdminClick(e) {
     try { await Api.delete(`/api/cerco/panels/${id}`); toast("Panel eliminado."); document.getElementById(`cerco-row-${id}`)?.remove(); }
     catch (err) { toast(err.error, true); }
   } else if (btn.classList.contains("btn-key")) {
-    if (!confirm(`¿Rotar la clave de "${name}"? El panel dejará de conectar hasta que lo re-provisione con la nueva clave.`)) return;
+    if (!confirm(`¿Rotar la clave de "${name}"? El panel dejará de conectar hasta que lo re-enrole con el código nuevo (desde CLR Cerco Provisioner o el portal del equipo).`)) return;
     try { cercoCredentialsModal(await Api.post(`/api/cerco/panels/${id}/rotate-key`), name); }
+    catch (err) { toast(err.error, true); }
+  } else if (btn.classList.contains("btn-reboot")) {
+    if (!confirm(`¿Reiniciar el panel "${name}"?`)) return;
+    try { await Api.post(`/api/cerco/panels/${id}/reboot`); toast("Reinicio enviado."); }
+    catch (err) { toast(err.error, true); }
+  } else if (btn.classList.contains("btn-factory")) {
+    if (!confirm(`¿Restaurar de fábrica el panel "${name}"?\n\nEl equipo borra su WiFi, servidor, clave y contraseña, y vuelve al portal de provisioning. Conserva la configuración del cerco y los controles remotos. Habrá que provisionarlo de nuevo en terreno.`)) return;
+    try { await Api.post(`/api/cerco/panels/${id}/factory`); toast("Restauración enviada: el panel vuelve al portal."); }
     catch (err) { toast(err.error, true); }
   }
 }
@@ -144,7 +154,7 @@ function cercoPanelModal(panel) {
     <div class="field"><label>Nombre</label><input id="c-name" maxlength="128" value="${editing ? esc(panel.name) : ""}" placeholder="Cerco perímetro norte"></div>
     <div class="field"><label>Sitio</label><input id="c-site" maxlength="255" value="${editing ? esc(panel.site ?? "") : ""}" placeholder="Bodega central"></div>
     <div class="field checkbox"><label><input type="checkbox" id="c-enabled" ${!editing || panel.enabled ? "checked" : ""}> Habilitado</label></div>
-    ${editing ? "" : `<div class="info-box">Al guardar, el sistema genera el <b>ID de equipo</b> y la <b>clave (PSK)</b>. Se muestran una sola vez: cárguelos en el panel con la herramienta de provisioning.</div>`}
+    ${editing ? "" : `<div class="info-box">Al guardar, el sistema genera el <b>ID de equipo</b> (6 dígitos) y el <b>código de enrolamiento</b> (8 dígitos, válido 48 h). Se muestran una sola vez: el instalador los carga en el panel.</div>`}
     <div class="modal-actions">
       <button class="btn ghost" type="button" id="c-cancel">Cancelar</button>
       <button class="btn" type="button" id="c-save">${editing ? "Guardar" : "Crear y generar clave"}</button>
@@ -168,14 +178,17 @@ function cercoPanelModal(panel) {
   });
 }
 
-// Credenciales estilo ISUP: se muestran UNA vez.
+// Credenciales estilo ISUP: se muestran UNA vez. La PSK no existe todavía: se deriva
+// del código en la primera conexión del panel.
 function cercoCredentialsModal(creds, name) {
+  const exp = creds.expiresAt ? new Date(creds.expiresAt).toLocaleString() : "";
   openModal(`
     <h3>Credenciales de "${esc(name)}"</h3>
-    <div class="info-box"><b>Anótelas ahora: no se vuelven a mostrar.</b> Cárguelas en el panel con la herramienta de
-      provisioning (SoftAP). Si las pierde, rote la clave y re-provisione.</div>
+    <div class="info-box"><b>Anótelas ahora: no se vuelven a mostrar.</b> El instalador carga el ID y el código en el
+      panel (CLR Cerco Provisioner o portal del equipo). El código sirve una sola vez${exp ? ` y vence el ${esc(exp)}` : ""}.
+      Si se pierde, rote la clave para generar otro.</div>
     <div class="field"><label>ID de equipo</label><input readonly id="cr-id" value="${esc(creds.deviceId)}"></div>
-    <div class="field"><label>Clave (PSK)</label><input readonly id="cr-psk" value="${esc(creds.psk)}"></div>
+    <div class="field"><label>Código de enrolamiento</label><input readonly id="cr-code" value="${esc(creds.enrollCode)}"></div>
     <div class="field"><label>URL WebSocket</label><input readonly id="cr-ws" value="${esc(creds.wsUrlHint)}"></div>
     <div class="modal-actions">
       <button class="btn ghost" type="button" id="cr-copy">Copiar todo</button>
@@ -183,7 +196,7 @@ function cercoCredentialsModal(creds, name) {
     </div>`, true);
   $("#cr-close").addEventListener("click", closeModal);
   $("#cr-copy").addEventListener("click", async () => {
-    const txt = `device_id=${creds.deviceId}\npsk=${creds.psk}\nws_url=${creds.wsUrlHint}`;
+    const txt = `device_id=${creds.deviceId}\nenroll_code=${creds.enrollCode}\nws_url=${creds.wsUrlHint}`;
     try { await navigator.clipboard.writeText(txt); toast("Credenciales copiadas."); }
     catch { toast("No se pudo copiar; cópielas a mano.", true); }
   });

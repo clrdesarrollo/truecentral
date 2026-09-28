@@ -14,11 +14,23 @@ public class CercoPanel
     public int Id { get; set; }
     public string Name { get; set; } = "";
 
-    /// <summary>Identificador estable del panel ("CERCO-xxxxxxxxxxxx"), generado al crear.</summary>
+    /// <summary>Identificador estable del panel (6 dígitos), generado al crear.</summary>
     public string DeviceId { get; set; } = "";
 
-    /// <summary>Secreto compartido de 256 bits, cifrado. Base de la autenticación mutua.</summary>
+    /// <summary>
+    /// Secreto compartido de 256 bits, cifrado. Base de la autenticación mutua.
+    /// Vacío hasta que el panel se enrola (se deriva del código de enrolamiento).
+    /// </summary>
     public byte[] PskCiphertext { get; set; } = [];
+
+    // ---- enrolamiento: código de 8 dígitos, un solo uso, vence a las 48 h ----
+    /// <summary>Código de enrolamiento vigente, cifrado. null cuando ya se consumió.</summary>
+    public byte[]? EnrollCodeCiphertext { get; set; }
+    public DateTime? EnrollExpiresAt { get; set; }
+    /// <summary>Handshakes de enrolamiento fallidos con el código vigente (máx. 5).</summary>
+    public int EnrollAttempts { get; set; }
+    /// <summary>El panel ya derivó y confirmó su PSK.</summary>
+    public bool Enrolled { get; set; }
 
     /// <summary>Ubicación / sitio (texto libre para el operador).</summary>
     public string? Site { get; set; }

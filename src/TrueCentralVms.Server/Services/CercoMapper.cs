@@ -15,7 +15,7 @@ public static class CercoMapper
                .Select(z => new CercoZoneDto(z.Number, z.Name, z.Enabled, z.InAlarm))
                .ToList(),
         p.Arming, p.KeyOn, p.RfLearning, p.Zone0Adc, p.ConfigSynced,
-        p.PowerSource, p.PowerDropPermille, p.ReturnUs);
+        p.PowerSource, p.PowerDropPermille, p.ReturnUs, p.Enrolled);
 
     public static CercoEventDto ToDto(CercoEvent e) => new(
         e.Id, e.CercoPanelId, e.PanelName, e.Timestamp, e.ReceivedAt, e.Kind,

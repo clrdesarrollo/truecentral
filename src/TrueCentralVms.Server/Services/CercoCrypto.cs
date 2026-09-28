@@ -37,6 +37,13 @@ public static class CercoCrypto
         return Hmac(psk, buf);
     }
 
+    /// <summary>
+    /// Enrolamiento: PSK = HMAC(ASCII(código), 'E' | id | nonce_c | nonce_s). El panel
+    /// deriva la misma con el código que cargó el instalador; la PSK nunca viaja.
+    /// </summary>
+    public static byte[] DerivePsk(string enrollCode, string deviceId, byte[] nonceC, byte[] nonceS) =>
+        Proof(Encoding.ASCII.GetBytes(enrollCode), 'E', deviceId, nonceC, nonceS);
+
     /// <summary>sk = HMAC(psk, nonce_c | nonce_s).</summary>
     public static byte[] SessionKey(byte[] psk, byte[] nonceC, byte[] nonceS)
     {
