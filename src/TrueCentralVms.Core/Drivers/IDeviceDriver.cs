@@ -169,7 +169,34 @@ public interface IDeviceDriver
     Task<IDeviceEventSubscription> SubscribeEventsAsync(DeviceConnectionInfo info, Action<DeviceEvent> onEvent,
         CancellationToken ct = default) =>
         throw new DriverException("Este driver no entrega eventos del equipo.");
+
+    /// <summary>
+    /// Geometría de la regla de analítica (la línea del cruce de línea, la
+    /// región de intrusión...) leída de la configuración del equipo, para
+    /// marcarla sobre la foto cuando el evento no la trae. null = no se sabe.
+    /// <paramref name="rtspChannel"/> es el índice de las URL RTSP/ISAPI del
+    /// fabricante (<see cref="DeviceChannelInfo.RtspChannel"/>), no el número del SDK.
+    /// </summary>
+    Task<VideoEventOverlay?> GetEventOverlayAsync(DeviceConnectionInfo info, int rtspChannel,
+        Contracts.VideoEventKind kind, int? ruleId, CancellationToken ct = default) =>
+        Task.FromResult<VideoEventOverlay?>(null);
+
+    /// <summary>
+    /// Líneas/regiones que admite la analítica <paramref name="kind"/> en el
+    /// canal (las "Line 1..4" del cruce de línea), según la configuración del
+    /// propio equipo: tantas como su capacidad, marcando las dibujadas.
+    /// null = el driver no lo sabe (el editor ofrece una lista genérica).
+    /// </summary>
+    Task<IReadOnlyList<AnalyticsRuleInfo>?> GetAnalyticsRulesAsync(DeviceConnectionInfo info, int rtspChannel,
+        Contracts.VideoEventKind kind, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<AnalyticsRuleInfo>?>(null);
 }
+
+/// <summary>
+/// Una línea/región de la analítica de un canal, numerada como en el equipo
+/// (desde 1). <paramref name="Configured"/>: tiene coordenadas dibujadas.
+/// </summary>
+public sealed record AnalyticsRuleInfo(int Id, bool Configured, bool Enabled);
 
 /// <summary>
 /// Un evento empujado por una cámara o grabador. <paramref name="ChannelNumber"/>
@@ -187,7 +214,25 @@ public sealed record DeviceEvent(
     /// <summary>Número de entrada de alarma (contacto seco), cuando corresponde.</summary>
     int? AlarmInput = null,
     /// <summary>Foto adjunta al evento (JPEG), si el equipo la envía.</summary>
-    byte[]? Image = null);
+    byte[]? Image = null,
+    /// <summary>Número de la regla/línea de la analítica en el equipo (la "Line 1", "Line 2" del cruce de línea).</summary>
+    int? RuleId = null,
+    /// <summary>Dónde ocurrió: la línea/región de la regla y el recuadro del objeto, para dibujarlos sobre la foto.</summary>
+    VideoEventOverlay? Overlay = null);
+
+/// <summary>Punto en coordenadas normalizadas de la imagen: 0..1, origen arriba a la izquierda.</summary>
+public readonly record struct OverlayPoint(float X, float Y);
+
+/// <summary>Rectángulo normalizado (0..1, origen arriba a la izquierda).</summary>
+public readonly record struct OverlayRect(float X, float Y, float Width, float Height);
+
+/// <summary>
+/// Geometría de una analítica para marcarla sobre la foto del evento:
+/// <paramref name="Rule"/> es la línea (2 puntos) o la región (polígono,
+/// <paramref name="Closed"/>) configurada en la cámara; <paramref name="Target"/>
+/// el recuadro del objeto que la disparó, si el equipo lo informa.
+/// </summary>
+public sealed record VideoEventOverlay(IReadOnlyList<OverlayPoint> Rule, bool Closed, OverlayRect? Target, string? Label = null);
 
 /// <summary>Suscripción viva a los eventos de un equipo. Liberarla cierra el canal.</summary>
 public interface IDeviceEventSubscription : IAsyncDisposable

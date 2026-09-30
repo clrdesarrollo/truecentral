@@ -41,6 +41,10 @@ public sealed record WorkflowTrigger(
     // --- Video ---
     int? ChannelId = null,
     VideoEventKind? VideoKind = null,
+    /// <summary>Número de línea/regla de la analítica en la cámara.</summary>
+    int? RuleId = null,
+    /// <summary>Línea/región de la regla y recuadro del objeto, para marcarlos sobre la foto.</summary>
+    Core.Drivers.VideoEventOverlay? Overlay = null,
     // --- Patentes ---
     string? Plate = null,
     int? Confidence = null,
@@ -272,6 +276,7 @@ public sealed record WorkflowTrigger(
         fields["camara"] = camera;
         fields["canal"] = evt.ChannelNumber > 0 ? evt.ChannelNumber.ToString() : "";
         fields["regla"] = evt.RuleName ?? "";
+        fields["linea"] = evt.RuleId?.ToString() ?? "";
         fields["entrada"] = evt.AlarmInput?.ToString() ?? "";
         fields["evento"] = evt.Description;
         fields["tipo"] = kind;
@@ -283,7 +288,8 @@ public sealed record WorkflowTrigger(
         return new WorkflowTrigger(WorkflowTriggerTypes.VideoEvent,
             Truncate($"Cámara '{camera}' ({device.Name}) · {evt.Description}", 256), fields, local,
             Severity: AlarmSeverity.Critical, Text: evt.Description,
-            DeviceKind: "video", DeviceId: device.Id, ChannelId: channel?.Id, VideoKind: evt.Kind, Image: evt.Image);
+            DeviceKind: "video", DeviceId: device.Id, ChannelId: channel?.Id, VideoKind: evt.Kind, RuleId: evt.RuleId,
+            Overlay: evt.Overlay, Image: evt.Image);
     }
 
     // ------------------------------------------------------------------
@@ -447,8 +453,9 @@ public sealed record WorkflowTrigger(
 
             case WorkflowTriggerTypes.VideoEvent:
             {
+                int ruleId = WorkflowJson.Conditions(workflow.ConditionsJson).RuleIds is { Count: > 0 } rules ? rules[^1] : 1;
                 var evt = new Core.Drivers.DeviceEvent(channel?.ChannelNumber ?? 1, VideoEventKind.LineCrossing,
-                    "Cruce de línea (prueba manual)", local, RuleName: "Regla de prueba");
+                    $"Cruce de línea · línea {ruleId} (prueba manual)", local, RuleName: "Regla de prueba", RuleId: ruleId);
                 var dev = device ?? new Device { Id = 0, Name = deviceName, Host = "192.168.1.10" };
                 return FromVideoEvent(dev, channel, evt) with { Summary = $"Prueba manual · {cameraName} · Cruce de línea" };
             }

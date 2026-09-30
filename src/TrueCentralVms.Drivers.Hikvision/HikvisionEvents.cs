@@ -329,13 +329,61 @@ internal static class HikvisionEvents
             _ => $"Regla de comportamiento (tipo {(ex != 0 ? ex : mask)})",
         };
         string? rule = DecodeName(r.struRuleInfo.byRuleName);
-        string description = rule is { Length: > 0 } ? $"{label} (regla '{rule}')" : label;
+        // byRuleID es el índice de la línea/región en la cámara, desde 0
+        // (0-7): la "Línea 1" de la web de la cámara y de HikCentral llega
+        // como 0 (verificado con DS-2CD4A25FWD-IZ, directa y vía DVR). Se
+        // informa desde 1, como las numera la cámara y el editor de
+        // automatizaciones (filtro por línea, "todas las líneas").
+        int ruleId = r.struRuleInfo.byRuleID + 1;
+        string numbered = kind == VideoEventKind.LineCrossing ? $"{label} · línea {ruleId}" : $"{label} · regla {ruleId}";
+        string description = rule is { Length: > 0 } ? $"{numbered} ('{rule}')" : numbered;
         // byPicTransType 1 = el equipo manda una URL en vez de la foto: no es una imagen.
         byte[]? image = r.dwPicDataLen > 0 && r.byPicTransType == 0 && r.pImage != IntPtr.Zero
             ? CopyBuffer(r.pImage, r.dwPicDataLen) : null;
 
         return new DeviceEvent(subscription.ResolveChannel(r.struDevInfo), kind, description,
-            FromPackedTime(r.dwAbsTime) ?? DateTime.Now, RuleName: rule, Image: image);
+            FromPackedTime(r.dwAbsTime) ?? DateTime.Now, RuleName: rule, Image: image, RuleId: ruleId,
+            Overlay: RuleOverlay(kind, r, kind == VideoEventKind.LineCrossing ? $"Línea {ruleId}" : $"Regla {ruleId}"));
+    }
+
+    /// <summary>
+    /// Geometría de la regla (la línea o la región configurada en la cámara)
+    /// y recuadro del objeto, en coordenadas 0..1: con eso el servidor marca
+    /// sobre la foto dónde fue la detección. La cámara no la dibuja en la
+    /// captura. <c>uEventParam</c> es una unión: línea (<c>NET_VCA_LINE</c>)
+    /// para el cruce de línea, polígono (<c>NET_VCA_POLYGON</c>) para las
+    /// reglas de región. Valores fuera de 0..1 = el equipo no la informó.
+    /// </summary>
+    private static VideoEventOverlay? RuleOverlay(VideoEventKind kind, CHCNetSDK.NET_VCA_RULE_ALARM r, string label)
+    {
+        uint[]? raw = r.struRuleInfo.uEventParam.uLen;
+        List<OverlayPoint> rule = [];
+        bool closed = false;
+        if (raw is { Length: >= 21 })
+        {
+            float F(int i) => BitConverter.Int32BitsToSingle((int)raw[i]);
+            if (kind == VideoEventKind.LineCrossing)
+            {
+                rule = [new(F(0), F(1)), new(F(2), F(3))];
+            }
+            else if (kind is VideoEventKind.RegionEntrance or VideoEventKind.RegionExit or VideoEventKind.Intrusion
+                     or VideoEventKind.Loitering or VideoEventKind.Parking or VideoEventKind.ObjectLeftOrTaken
+                     or VideoEventKind.FastMoving or VideoEventKind.Crowd)
+            {
+                int count = (int)Math.Min(raw[0], CHCNetSDK.VCA_MAX_POLYGON_POINT_NUM);
+                for (int i = 0; i < count; i++) rule.Add(new(F(1 + i * 2), F(2 + i * 2)));
+                closed = true;
+            }
+        }
+        if (!rule.All(Valid) || rule.Distinct().Count() < 2) rule = [];
+
+        var t = r.struTargetInfo.struRect;
+        OverlayRect? target = t.fWidth > 0 && t.fHeight > 0 && Valid(new(t.fX, t.fY)) && Valid(new(t.fX + t.fWidth, t.fY + t.fHeight))
+            ? new OverlayRect(t.fX, t.fY, t.fWidth, t.fHeight) : null;
+
+        return rule.Count > 0 || target is not null ? new VideoEventOverlay(rule, closed, target, label) : null;
+
+        static bool Valid(OverlayPoint p) => float.IsFinite(p.X) && float.IsFinite(p.Y) && p.X is >= 0 and <= 1.001f && p.Y is >= 0 and <= 1.001f;
     }
 
     private static DeviceEvent? ParseFace(IntPtr data, uint length, Subscription subscription)

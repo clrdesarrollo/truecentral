@@ -529,6 +529,14 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
     public Task<IDeviceEventSubscription> SubscribeEventsAsync(DeviceConnectionInfo info, Action<DeviceEvent> onEvent,
         CancellationToken ct = default) =>
         Task.Run(() => HikvisionEvents.Subscribe(info, onEvent), ct);
+
+    public Task<VideoEventOverlay?> GetEventOverlayAsync(DeviceConnectionInfo info, int rtspChannel,
+        Core.Contracts.VideoEventKind kind, int? ruleId, CancellationToken ct = default) =>
+        HikvisionRuleGeometry.GetAsync(info, rtspChannel, kind, ruleId, ct);
+
+    public Task<IReadOnlyList<AnalyticsRuleInfo>?> GetAnalyticsRulesAsync(DeviceConnectionInfo info, int rtspChannel,
+        Core.Contracts.VideoEventKind kind, CancellationToken ct = default) =>
+        HikvisionRuleGeometry.ListAsync(info, rtspChannel, kind, ct);
 }
 
 /// <summary>Fábrica del driver Hikvision (clave estable para la base de datos).</summary>

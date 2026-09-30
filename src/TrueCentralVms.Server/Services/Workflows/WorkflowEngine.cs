@@ -86,6 +86,9 @@ public sealed class WorkflowEngine : BackgroundService
     /// <summary>Última ejecución REAL por workflow (para el tiempo mínimo entre ejecuciones).</summary>
     private readonly ConcurrentDictionary<int, DateTime> _lastRun = new();
 
+    /// <summary>Automatizaciones «de una ejecución a la vez» que están corriendo ahora.</summary>
+    private readonly ConcurrentDictionary<int, byte> _running = new();
+
     /// <summary>Automatizaciones con una verificación de condición sostenida en curso.</summary>
     private readonly ConcurrentDictionary<int, byte> _verifying = new();
 
@@ -183,6 +186,7 @@ public sealed class WorkflowEngine : BackgroundService
         {
             if (workflow.TriggerType != trigger.Type) continue;
             if (!Matches(workflow, trigger)) continue;
+            if (!AllRulesCrossed(workflow, trigger)) continue;
 
             // Tiempo mínimo entre ejecuciones (anti-avalancha). Solo se
             // CONSULTA aquí: se consume al ejecutar de verdad, más abajo. Si
@@ -198,7 +202,18 @@ public sealed class WorkflowEngine : BackgroundService
             }
 
             var current = workflow;
-            int sustained = WorkflowJson.Conditions(current.ConditionsJson).SustainedSeconds ?? 0;
+            var currentConditions = WorkflowJson.Conditions(current.ConditionsJson);
+            int sustained = currentConditions.SustainedSeconds ?? 0;
+            bool singleRun = currentConditions.SingleRun == true;
+
+            // «No ejecutar de nuevo mientras siga en curso»: el sensor que
+            // sigue pulsando durante la advertencia o la sirena no abre
+            // ejecuciones paralelas.
+            if (singleRun && _running.ContainsKey(current.Id))
+            {
+                _logger.LogDebug("Automatización '{Name}' omitida: la ejecución anterior sigue en curso.", current.Name);
+                continue;
+            }
 
             // Con condición sostenida, una sola verificación en curso por
             // automatización: un detector que pulsa manda varios eventos del
@@ -213,8 +228,14 @@ public sealed class WorkflowEngine : BackgroundService
             await _slots!.WaitAsync(ct);
             _ = Task.Run(async () =>
             {
+                bool claimed = false;
                 try
                 {
+                    if (currentConditions.AreaArmed == true && await IsAreaArmedAsync(trigger, ct) == false)
+                    {
+                        _logger.LogInformation("Automatización '{Name}' omitida: el área no está armada.", current.Name);
+                        return;
+                    }
                     if (!await IsSustainedAsync(current, trigger, sustained, ct)) return;
                     // El tiempo mínimo se consume recién ahora: cuenta desde
                     // la última ejecución REAL.
@@ -225,6 +246,7 @@ public sealed class WorkflowEngine : BackgroundService
                             current.Name, (int)wait.TotalSeconds);
                         return;
                     }
+                    if (singleRun && !(claimed = _running.TryAdd(current.Id, 0))) return;
                     _lastRun[current.Id] = DateTime.UtcNow;
                     await ExecuteWorkflowAsync(current, trigger, "automático", ct);
                 }
@@ -236,10 +258,60 @@ public sealed class WorkflowEngine : BackgroundService
                 finally
                 {
                     if (sustained > 0) _verifying.TryRemove(current.Id, out _);
+                    if (claimed) _running.TryRemove(current.Id, out _);
                     _slots!.Release();
                 }
             }, ct);
         }
+    }
+
+    /// <summary>
+    /// Último cruce de cada línea por automatización y cámara:
+    /// (workflow, cámara) → (línea → hora UTC). Solo lo usan las
+    /// automatizaciones que exigen cruzar varias líneas.
+    /// </summary>
+    private readonly ConcurrentDictionary<(int Workflow, string Camera), Dictionary<int, DateTime>> _ruleHits = new();
+
+    /// <summary>
+    /// "Todas las líneas": con <c>AllRulesWithinSeconds</c> la automatización
+    /// no se ejecuta con un cruce suelto, sino cuando cada línea marcada se
+    /// cruzó en la MISMA cámara dentro de la ventana (y en orden ascendente,
+    /// si se pidió). Al completarse se olvidan los cruces: el siguiente
+    /// vehículo empieza de cero. Solo lo llama el despachador (un hilo).
+    /// </summary>
+    private bool AllRulesCrossed(Workflow workflow, WorkflowTrigger trigger)
+    {
+        var conditions = WorkflowJson.Conditions(workflow.ConditionsJson);
+        if (conditions.AllRulesWithinSeconds is not > 0 || conditions.RuleIds is not { Count: >= 2 } rules) return true;
+        if (trigger.RuleId is not { } ruleId) return false;
+
+        var now = DateTime.UtcNow;
+        var window = TimeSpan.FromSeconds(conditions.AllRulesWithinSeconds.Value);
+        var key = (workflow.Id, trigger.ChannelId?.ToString() ?? $"d{trigger.DeviceId}");
+        var hits = _ruleHits.GetOrAdd(key, _ => []);
+        foreach (int stale in hits.Where(h => now - h.Value > window).Select(h => h.Key).ToList())
+            hits.Remove(stale);
+
+        var ordered = rules.Distinct().Order().ToList();
+        if (conditions.RulesInOrder == true)
+        {
+            // En orden: la línea k solo cuenta si la k-1 ya se cruzó antes;
+            // cruzar la primera reinicia la secuencia.
+            int index = ordered.IndexOf(ruleId);
+            if (index == 0) hits.Clear();
+            else if (!hits.ContainsKey(ordered[index - 1])) return false;
+        }
+        hits[ruleId] = now;
+
+        if (ordered.All(hits.ContainsKey))
+        {
+            hits.Clear();
+            return true;
+        }
+        _logger.LogInformation(
+            "Automatización '{Name}': línea {Rule} cruzada; faltan {Missing} dentro de {Seconds} s.",
+            workflow.Name, ruleId, string.Join(", ", ordered.Where(r => !hits.ContainsKey(r))), (int)window.TotalSeconds);
+        return false;
     }
 
     // ------------------------------------------------------------------
@@ -348,6 +420,8 @@ public sealed class WorkflowEngine : BackgroundService
         if (Has(conditions.VideoEventKinds) && (trigger.VideoKind is null || !conditions.VideoEventKinds!.Contains(trigger.VideoKind.Value)))
             return false;
         if (Has(conditions.ChannelIds) && (trigger.ChannelId is null || !conditions.ChannelIds!.Contains(trigger.ChannelId.Value)))
+            return false;
+        if (Has(conditions.RuleIds) && (trigger.RuleId is null || !conditions.RuleIds!.Contains(trigger.RuleId.Value)))
             return false;
 
         // --- Patentes ---
@@ -517,11 +591,58 @@ public sealed class WorkflowEngine : BackgroundService
                 .Where(z => z.AlarmPanelId == panelId && z.Number == zoneNumber)
                 .Select(z => new { z.Status, z.InAlarm })
                 .FirstOrDefaultAsync(ct);
-            return zone is null ? null : zone.InAlarm || zone.Status == AlarmZoneStatus.Triggered;
+            // Con el área armada la zona queda "en alarma" (memoria) aunque el
+            // rayo ya se haya restablecido: si el panel informa el estado
+            // físico en reposo, manda ese.
+            return zone is null ? null
+                : zone.Status == AlarmZoneStatus.Triggered || (zone.InAlarm && zone.Status != AlarmZoneStatus.Normal);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "No se pudo leer el estado de la zona {Zone} del panel {Panel}.", zoneNumber, panelId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// ¿Está armada AHORA el área del evento (o la de la zona que disparó)?
+    /// Se lee de la base, que el sondeo del panel mantiene al día. El retardo
+    /// de salida ("armando") todavía no cuenta como armada. null = no se sabe
+    /// (evento sin panel, área desconocida): no se bloquea la automatización.
+    /// </summary>
+    private async Task<bool?> IsAreaArmedAsync(WorkflowTrigger trigger, CancellationToken ct)
+    {
+        if (trigger.PanelId is not { } panelId) return null;
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            int? areaNumber = trigger.AreaNumber;
+            if (areaNumber is null && trigger.ZoneNumber is { } zoneNumber)
+            {
+                var zone = await db.AlarmZones.AsNoTracking()
+                    .Where(z => z.AlarmPanelId == panelId && z.Number == zoneNumber)
+                    .Select(z => new { z.AreaNumber, z.Armed })
+                    .FirstOrDefaultAsync(ct);
+                if (zone?.AreaNumber is null) return zone?.Armed;
+                areaNumber = zone.AreaNumber;
+            }
+            if (areaNumber is null) return null;
+
+            var state = await db.AlarmAreas.AsNoTracking()
+                .Where(a => a.AlarmPanelId == panelId && a.Number == areaNumber)
+                .Select(a => (AlarmArmState?)a.ArmState)
+                .FirstOrDefaultAsync(ct);
+            return state switch
+            {
+                null or AlarmArmState.Unknown => null,
+                AlarmArmState.Away or AlarmArmState.Stay or AlarmArmState.Vacation => true,
+                _ => false,
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogDebug(ex, "No se pudo leer el estado de armado del panel {Panel}.", panelId);
             return null;
         }
     }
@@ -643,9 +764,94 @@ public sealed class WorkflowEngine : BackgroundService
         public int TimeoutSeconds;
     }
 
+    /// <summary>
+    /// Evento de cámara SIN foto (p. ej. un DVR/NVR que no reenvía la captura de
+    /// la cámara IP): se toma una del canal apenas llega, para que la alerta y
+    /// el correo no queden sin imagen. Se omite si la automatización ya tiene
+    /// su propia acción "capturar foto" (ella decide qué cámaras y cuántas).
+    /// </summary>
+    private async Task CaptureEventPhotoAsync(RunState state)
+    {
+        var trigger = state.Trigger;
+        if (trigger.Type != WorkflowTriggerTypes.VideoEvent || trigger.ChannelId is not { } channelId) return;
+        if (state.ActionsByNode.Count == 0 ||
+            state.ActionsByNode.Values.Any(a => string.Equals(a.Type, WorkflowActionTypes.Snapshot, StringComparison.OrdinalIgnoreCase)))
+            return;
+        if (FindExecutor(WorkflowActionTypes.Snapshot) is not { } executor) return;
+
+        var action = new WorkflowAction
+        {
+            Type = WorkflowActionTypes.Snapshot,
+            ConfigJson = $$"""{"channelIds":[{{channelId}}],"count":1}""",
+        };
+        var watch = Stopwatch.StartNew();
+        WorkflowStepResult result;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(state.Ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Min(state.TimeoutSeconds, 15)));
+            result = await executor.ExecuteAsync(new WorkflowActionContext
+            {
+                Workflow = state.Workflow,
+                Action = action,
+                Trigger = trigger,
+                Config = WorkflowJson.ParseConfig(action.ConfigJson),
+                Files = state.Files,
+                Channels = state.Channels,
+                Alerts = state.Alerts,
+            }, timeout.Token);
+        }
+        catch (OperationCanceledException) when (state.Ct.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) { result = WorkflowStepResult.Fail("La cámara no respondió a tiempo."); }
+        catch (Exception ex) { result = WorkflowStepResult.Fail(ex.Message); }
+
+        // No cuenta como fallo de la automatización: solo queda en el historial.
+        state.Steps.Add(new WorkflowRunStepDto(state.Steps.Count + 1, WorkflowActionTypes.Snapshot,
+            "Foto del evento", result.Success,
+            Cut(result.Success ? $"El equipo no envió foto con el evento; se capturó del canal. {result.Detail}" : result.Detail, 512),
+            (int)watch.ElapsedMilliseconds, result.Files));
+    }
+
+    /// <summary>
+    /// Evento de cámara sin la geometría de la regla (las cámaras "smart" no
+    /// la mandan, ni directas ni vía DVR): se lee de la configuración del
+    /// equipo, para marcar en la foto dónde está la línea/región que se cruzó.
+    /// Si no se puede, la foto queda tal cual.
+    /// </summary>
+    private async Task<WorkflowTrigger> WithOverlayAsync(WorkflowTrigger trigger, CancellationToken ct)
+    {
+        if (trigger.Type != WorkflowTriggerTypes.VideoEvent || trigger.Overlay is not null ||
+            trigger.ChannelId is not { } channelId || trigger.VideoKind is not { } kind)
+            return trigger;
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var channel = await db.Channels.AsNoTracking().Include(c => c.Device)
+                .FirstOrDefaultAsync(c => c.Id == channelId, ct);
+            if (channel?.Device is not { } device) return trigger;
+            if (_services.GetRequiredService<Core.Drivers.DriverRegistry>().Find(device.DriverKey) is not { } factory) return trigger;
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(8));
+            var connection = new Core.Drivers.DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
+                _credentials.Unprotect(device.PasswordCiphertext));
+            var overlay = await factory.Create().GetEventOverlayAsync(connection,
+                channel.RtspChannel > 0 ? channel.RtspChannel : channel.ChannelNumber, kind, trigger.RuleId, timeout.Token);
+            return overlay is null ? trigger : trigger with { Overlay = overlay };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "No se pudo leer la geometría de la regla del canal {Channel}.", channelId);
+            return trigger;
+        }
+    }
+
     private async Task<WorkflowRunDto> ExecuteWorkflowAsync(Workflow workflow, WorkflowTrigger trigger,
         string startedBy, CancellationToken ct)
     {
+        trigger = await WithOverlayAsync(trigger, ct);
         var run = new WorkflowRun
         {
             WorkflowId = workflow.Id,
@@ -674,6 +880,9 @@ public sealed class WorkflowEngine : BackgroundService
         // disponible como si la hubiera tomado la acción "capturar foto".
         if (trigger.Image is { Length: > 0 } image)
         {
+            // Se marca dónde fue la detección (línea/región y objeto).
+            if (trigger.Overlay is { } overlay && OperatingSystem.IsWindows())
+                image = EventPhotoAnnotator.Annotate(image, overlay) ?? image;
             string suffix = trigger.Fields.TryGetValue("camara", out var cam) && cam.Length > 0 ? cam : "evento";
             if (_store.Save(image, trigger.At, suffix) is { } relative)
             {
@@ -682,6 +891,11 @@ public sealed class WorkflowEngine : BackgroundService
                 if (trigger.ChannelId is { } channelId) state.Channels.Add(channelId);
             }
         }
+        else
+        {
+            await CaptureEventPhotoAsync(state);
+        }
+        int automaticSteps = state.Steps.Count;
 
         try
         {
@@ -694,7 +908,7 @@ public sealed class WorkflowEngine : BackgroundService
             state.Error ??= "El servidor se está deteniendo.";
         }
 
-        if (state.Steps.Count == 0)
+        if (state.Steps.Count == automaticSteps)
         {
             // Todas las ramas terminaron en condiciones que no se cumplieron:
             // no es un error, pero conviene que el historial lo diga.
@@ -766,10 +980,22 @@ public sealed class WorkflowEngine : BackgroundService
 
             case WorkflowNodeKinds.Condition:
             {
-                bool yes = node.Conditions is null || Matches(node.Conditions, state.Trigger);
+                var watch = Stopwatch.StartNew();
+                var conditions = node.Conditions;
+                bool yes = conditions is null || Matches(conditions, state.Trigger);
+                string detail = yes ? "Se cumple: sigue por «Sí»." : "No se cumple: sigue por «No».";
+                // Condiciones "en vivo": se leen del panel ahora, no del evento.
+                if (yes && conditions?.AreaArmed == true && await IsAreaArmedAsync(state.Trigger, state.Ct) == false)
+                    (yes, detail) = (false, "El área no está armada: sigue por «No».");
+                if (yes && conditions?.SustainedSeconds is int seconds && seconds > 0)
+                {
+                    yes = await IsSustainedAsync(state.Workflow, state.Trigger, Math.Min(seconds, 600), state.Ct);
+                    detail = yes
+                        ? $"El sensor siguió interrumpido {seconds} s: sigue por «Sí»."
+                        : $"El sensor se restableció antes de {seconds} s: sigue por «No».";
+                }
                 state.Steps.Add(new WorkflowRunStepDto(state.Steps.Count + 1, "condition",
-                    node.Label ?? "Condición", true, yes ? "Se cumple: sigue por «Sí»." : "No se cumple: sigue por «No».",
-                    0, null, node.Id));
+                    node.Label ?? "Condición", true, detail, (int)watch.ElapsedMilliseconds, null, node.Id));
                 foreach (var next in state.Graph.Next(node.Id, yes ? WorkflowPorts.Yes : WorkflowPorts.No))
                     await WalkAsync(state, next);
                 return;
@@ -779,9 +1005,30 @@ public sealed class WorkflowEngine : BackgroundService
             {
                 int seconds = Math.Clamp(node.DelaySeconds, 0, WorkflowGraph.MaxDelaySeconds);
                 var watch = Stopwatch.StartNew();
-                if (seconds > 0) await Task.Delay(TimeSpan.FromSeconds(seconds), state.Ct);
+                string detail = $"Esperó {seconds} s.";
+                if (node.Conditions?.AreaArmed == true)
+                {
+                    // «Terminar si se desarma el área»: se mira el panel cada
+                    // segundo y la espera se corta al desarmar, así el paso
+                    // siguiente (p. ej. detener la sirena) llega de inmediato.
+                    var until = TimeSpan.FromSeconds(seconds);
+                    while (watch.Elapsed < until)
+                    {
+                        var left = until - watch.Elapsed;
+                        await Task.Delay(left < TimeSpan.FromSeconds(1) ? left : TimeSpan.FromSeconds(1), state.Ct);
+                        if (await IsAreaArmedAsync(state.Trigger, state.Ct) == false)
+                        {
+                            detail = $"Se desarmó el área: la espera terminó a los {(int)watch.Elapsed.TotalSeconds} s de {seconds}.";
+                            break;
+                        }
+                    }
+                }
+                else if (seconds > 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(seconds), state.Ct);
+                }
                 state.Steps.Add(new WorkflowRunStepDto(state.Steps.Count + 1, "delay",
-                    node.Label ?? "Espera", true, $"Esperó {seconds} s.", (int)watch.ElapsedMilliseconds, null, node.Id));
+                    node.Label ?? "Espera", true, detail, (int)watch.ElapsedMilliseconds, null, node.Id));
                 foreach (var next in state.Graph.Next(node.Id, WorkflowPorts.Next))
                     await WalkAsync(state, next);
                 return;

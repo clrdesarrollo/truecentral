@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
+using TrueCentralVms.Server.Data.Entities;
 
 namespace TrueCentralVms.Server.Services.Workflows.Actions;
 
@@ -21,8 +22,13 @@ public sealed class SnapshotAction(
     WorkflowStore store,
     ILogger<SnapshotAction> logger) : IWorkflowActionExecutor
 {
-    /// <summary>Las capturas van contra el equipo: no más de dos a la vez en todo el motor.</summary>
-    private static readonly SemaphoreSlim Throttle = new(2, 2);
+    /// <summary>
+    /// Tope de capturas simultáneas en todo el motor. Las cámaras de una misma
+    /// acción se disparan a la vez (fotos del mismo instante), así que el tope
+    /// debe cubrir una acción típica sin serializarla; solo frena ráfagas de
+    /// muchas ejecuciones juntas contra los equipos.
+    /// </summary>
+    private static readonly SemaphoreSlim Throttle = new(12, 12);
 
     public string Type => WorkflowActionTypes.Snapshot;
     public string Label => "Capturar foto";
@@ -53,6 +59,9 @@ public sealed class SnapshotAction(
         var taken = new List<string>();
         var failures = new List<string>();
 
+        // Cámaras capturables, en el orden que definió el usuario (el aviso y
+        // el correo muestran las fotos en ese orden).
+        var active = new List<(Channel Channel, IDeviceDriverFactory Factory)>();
         foreach (int channelId in channelIds)
         {
             var channel = channels.FirstOrDefault(c => c.Id == channelId);
@@ -64,48 +73,52 @@ public sealed class SnapshotAction(
                 failures.Add($"'{channel.Name}' (el driver no soporta capturas)");
                 continue;
             }
+            active.Add((channel, factory));
+        }
 
-            for (int shot = 0; shot < count; shot++)
+        // Cada ronda dispara todas las cámaras a la vez, para que las fotos
+        // sean del mismo instante y no una tras otra. Una cámara que falla
+        // sale de las rondas siguientes (igual que antes).
+        for (int shot = 0; shot < count && active.Count > 0; shot++)
+        {
+            if (shot > 0 && interval > 0) await Task.Delay(TimeSpan.FromSeconds(interval), ct);
+
+            var captures = await Task.WhenAll(active.Select(a => CaptureAsync(a.Channel, a.Factory, ct)));
+
+            var failed = new List<int>();
+            for (int i = 0; i < active.Count; i++)
             {
-                if (shot > 0 && interval > 0) await Task.Delay(TimeSpan.FromSeconds(interval), ct);
-                try
+                var channel = active[i].Channel;
+                var (jpeg, error) = captures[i];
+
+                if (error is not null) { failures.Add($"'{channel.Name}' ({error})"); failed.Add(i); continue; }
+                if (jpeg is null or { Length: 0 })
                 {
-                    await Throttle.WaitAsync(ct);
-                    byte[]? jpeg;
-                    try
-                    {
-                        var connection = new DeviceConnectionInfo(channel.Device.Host, channel.Device.SdkPort,
-                            channel.Device.Username, credentials.Unprotect(channel.Device.PasswordCiphertext));
-                        jpeg = await factory.Create().CaptureSnapshotAsync(connection, channel.ChannelNumber, ct);
-                    }
-                    finally { Throttle.Release(); }
-
-                    if (jpeg is null or { Length: 0 })
-                    {
-                        failures.Add($"'{channel.Name}' (el equipo no entregó imagen)");
-                        break;
-                    }
-
-                    string suffix = $"{channel.Device.Name}-{channel.Name}" + (count > 1 ? $"-{shot + 1}" : "");
-                    if (store.Save(jpeg, context.Trigger.At, suffix) is not { } relative)
-                    {
-                        failures.Add($"'{channel.Name}' (no se pudo guardar en disco)");
-                        break;
-                    }
-
-                    context.Files.Add(new WorkflowFile(relative, store.FullPath(relative)!,
-                        $"{WorkflowStore.Sanitize(suffix)}-{context.Trigger.At:yyyyMMdd-HHmmss}.jpg"));
-                    taken.Add(relative);
-                    if (!context.Channels.Contains(channel.Id)) context.Channels.Add(channel.Id);
+                    failures.Add($"'{channel.Name}' (el equipo no entregó imagen)");
+                    failed.Add(i);
+                    continue;
                 }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
+
+                // La cámara que disparó el evento: se marca la línea/región de
+                // la regla (sin el recuadro del objeto: esta foto es posterior).
+                if (context.Trigger.Overlay is { } overlay && context.Trigger.ChannelId == channel.Id && OperatingSystem.IsWindows())
+                    jpeg = EventPhotoAnnotator.Annotate(jpeg, overlay, includeTarget: false) ?? jpeg;
+
+                string suffix = $"{channel.Device.Name}-{channel.Name}" + (count > 1 ? $"-{shot + 1}" : "");
+                if (store.Save(jpeg, context.Trigger.At, suffix) is not { } relative)
                 {
-                    logger.LogWarning(ex, "No se pudo capturar la foto del canal {Channel}.", channelId);
-                    failures.Add($"'{channel.Name}' ({ex.Message})");
-                    break;
+                    failures.Add($"'{channel.Name}' (no se pudo guardar en disco)");
+                    failed.Add(i);
+                    continue;
                 }
+
+                context.Files.Add(new WorkflowFile(relative, store.FullPath(relative)!,
+                    $"{WorkflowStore.Sanitize(suffix)}-{context.Trigger.At:yyyyMMdd-HHmmss}.jpg"));
+                taken.Add(relative);
+                if (!context.Channels.Contains(channel.Id)) context.Channels.Add(channel.Id);
             }
+
+            for (int i = failed.Count - 1; i >= 0; i--) active.RemoveAt(failed[i]);
         }
 
         if (taken.Count == 0)
@@ -114,5 +127,28 @@ public sealed class SnapshotAction(
         string detail = $"{taken.Count} foto(s) capturada(s).";
         if (failures.Count > 0) detail += $" Sin imagen: {string.Join("; ", failures)}.";
         return WorkflowStepResult.Ok(detail, taken);
+    }
+
+    /// <summary>Una captura contra el equipo; devuelve la imagen o el motivo del error (nunca lanza, salvo cancelación).</summary>
+    private async Task<(byte[]? Jpeg, string? Error)> CaptureAsync(Channel channel, IDeviceDriverFactory factory,
+        CancellationToken ct)
+    {
+        try
+        {
+            await Throttle.WaitAsync(ct);
+            try
+            {
+                var connection = new DeviceConnectionInfo(channel.Device.Host, channel.Device.SdkPort,
+                    channel.Device.Username, credentials.Unprotect(channel.Device.PasswordCiphertext));
+                return (await factory.Create().CaptureSnapshotAsync(connection, channel.ChannelNumber, ct), null);
+            }
+            finally { Throttle.Release(); }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "No se pudo capturar la foto del canal {Channel}.", channel.Id);
+            return (null, ex.Message);
+        }
     }
 }

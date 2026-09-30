@@ -26,6 +26,51 @@ const WFE_TRIGGER_ICONS = {
   "plate-recognized": "🚗", "access-event": "🪪", schedule: "🕒", webhook: "🔗",
 };
 
+/// Tipos de evento que traen número de línea/región (reglas de la analítica de la cámara).
+const WFE_RULE_KINDS = ["LineCrossing", "Intrusion", "RegionEntrance", "RegionExit", "Loitering",
+  "ObjectLeftOrTaken", "Parking", "FastMoving", "Crowd"];
+/// Sin cámaras elegidas (o si el equipo no informa su capacidad): hasta 8, el máximo del SDK Hikvision.
+const WFE_RULE_FALLBACK = 8;
+/// Respuestas de /api/workflows/analytics-rules por cámaras + tipos (una consulta por combinación).
+const wfeRuleCache = new Map();
+
+/// Líneas/regiones que se ofrecen en el filtro: las que admite el equipo
+/// según su propia configuración. Devuelve null mientras se consulta (y
+/// llama a onReady al llegar la respuesta).
+function wfeRuleItems(c, onReady) {
+  const kinds = (c.videoEventKinds || []).filter((k) => WFE_RULE_KINDS.includes(k));
+  const word = kinds.length > 0 && kinds.every((k) => k === "LineCrossing") ? "Línea"
+    : kinds.length > 0 && !kinds.includes("LineCrossing") ? "Región" : "Línea / regla";
+  const chosen = (c.ruleIds || []).map(Number);
+  const generic = () => ({
+    items: Array.from({ length: Math.max(WFE_RULE_FALLBACK, ...chosen) }, (_, i) => [i + 1, `${word} ${i + 1}`]),
+    known: false,
+  });
+  if (!c.channelIds?.length && !c.deviceIds?.length) return generic();
+
+  const query = new URLSearchParams({
+    channelIds: (c.channelIds || []).join(","), deviceIds: (c.deviceIds || []).join(","), kinds: kinds.join(","),
+  }).toString();
+  const cached = wfeRuleCache.get(query);
+  if (cached === undefined) {
+    wfeRuleCache.set(query, null);
+    Api.get(`/api/workflows/analytics-rules?${query}`)
+      .then((r) => wfeRuleCache.set(query, r), () => wfeRuleCache.set(query, { known: false, rules: [] }))
+      .then(onReady);
+    return null;
+  }
+  if (cached === null) return null;
+  if (!cached.known || cached.rules.length === 0) return generic();
+
+  const dim = 'style="opacity:.55"';
+  const items = cached.rules.map((r) => [r.id, `${word} ${r.id}${r.configured ? "" : " (sin dibujar)"}`,
+    r.configured ? "Dibujada en la cámara" : "La cámara la admite, pero no tiene la línea/región dibujada", r.configured ? "" : dim]);
+  // Lo ya marcado que la cámara no tiene no se pierde en silencio: se muestra para poder quitarlo.
+  for (const id of chosen.filter((id) => !cached.rules.some((r) => r.id === id)))
+    items.push([id, `${word} ${id} (no existe en la cámara)`, "La cámara no admite esta línea/regla", dim]);
+  return { items, known: true };
+}
+
 const WFE_VIDEO_KINDS = [
   ["Motion", "Detección de movimiento"], ["LineCrossing", "Cruce de línea"], ["Intrusion", "Intrusión"],
   ["RegionEntrance", "Entrada a región"], ["RegionExit", "Salida de región"], ["Loitering", "Merodeo"],
@@ -335,7 +380,7 @@ function wfeSubtitle(node) {
   switch (node.kind) {
     case "trigger": return wfeConditionsSummary(node.conditions, wfEd.triggerType) || "Cualquier evento";
     case "condition": return wfeConditionsSummary(node.conditions, wfEd.triggerType) || "(sin condiciones: siempre «Sí»)";
-    case "delay": return `${node.delaySeconds || 0} s`;
+    case "delay": return `${node.delaySeconds || 0} s${node.conditions?.areaArmed ? " · o hasta desarmar" : ""}`;
     case "end": return "";
   }
   switch (node.type) {
@@ -768,9 +813,14 @@ function wfeProps() {
         <div class="wfe-props-title">${WFE_ICONS.delay} Espera</div>
         ${labelField("Dar tiempo a que abra el portón")}
         <div class="field"><label>Segundos</label>
-          <input id="wfe-delay" type="number" min="1" max="3600" value="${node.delaySeconds || 10}"></div>`;
+          <input id="wfe-delay" type="number" min="1" max="3600" value="${node.delaySeconds || 10}"></div>
+        ${wfEd.triggerType === "alarm-event" ? `<div class="field">
+          <label class="checkbox-row"><input type="checkbox" id="wfe-delay-armed" ${node.conditions?.areaArmed ? "checked" : ""}> Terminar antes si se desarma el área</label>
+          <div class="muted" style="font-size:11.5px;margin-top:3px">Mira el panel cada segundo: al desarmar el área del sensor, la espera termina y sigue de inmediato el paso siguiente (por ejemplo, «Detener» la sirena).</div>
+        </div>` : ""}`;
       bindLabel();
       $("#wfe-delay").addEventListener("change", (e) => { node.delaySeconds = Number(e.target.value) || 1; wfeDrawKeepProps(); });
+      $("#wfe-delay-armed")?.addEventListener("change", (e) => { node.conditions = e.target.checked ? { areaArmed: true } : {}; wfeDrawKeepProps(); });
       break;
 
     case "end":
@@ -876,10 +926,13 @@ function wfeConditionsForm(container, node, isTrigger) {
             <div class="field"><label>La descripción contiene</label><input id="wfe-text" value="${esc(c.textContains || "")}" placeholder="intrusión"></div>
           </div>`);
           field("Cómo se supo", wfeCheckList(WF_SOURCES, c.sources, "source"));
-          if (isTrigger)
-            field("Solo si la condición se sostiene (segundos)",
-              `<input id="wfe-sustained" type="number" min="0" max="600" value="${c.sustainedSeconds || 0}">`,
-              "0 = de inmediato. Con un valor mayor el servidor vigila la zona ese tiempo y ejecuta solo si el sensor sigue interrumpido (tolera los pulsos cortos del detector).");
+          field(isTrigger ? "Solo si la condición se sostiene (segundos)" : "¿Sigue interrumpido durante… (segundos)?",
+            `<input id="wfe-sustained" type="number" min="0" max="600" value="${c.sustainedSeconds || 0}">`,
+            isTrigger
+              ? "0 = de inmediato. Con un valor mayor el servidor vigila la zona ese tiempo y ejecuta solo si el sensor sigue interrumpido (tolera los pulsos cortos del detector)."
+              : "0 = no se vigila. Con un valor mayor, este paso espera ese tiempo mirando el sensor que disparó: sigue por «Sí» si continuó interrumpido y por «No» si se restableció. Sirve para escalar: advertencia primero y, si sigue cortado, sirena.");
+          field("Estado del área", `<label class="checkbox-row"><input type="checkbox" id="wfe-armed" ${c.areaArmed ? "checked" : ""}> Solo si el área del sensor está armada</label>`,
+            "Se lee el estado actual del panel (el retardo de salida todavía no cuenta como armada). Si el panel no informa el estado, no se bloquea.");
         } else {
           field("Estado de conexión que dispara", wfeCheckList(WF_STATUSES, c.statuses, "status"));
         }
@@ -894,6 +947,35 @@ function wfeConditionsForm(container, node, isTrigger) {
       case "video-event":
         field("Tipo de evento", wfeCheckList(WFE_VIDEO_KINDS, c.videoEventKinds, "vkind"));
         sources("Un grabador completo o solo algunas de sus cámaras. El servidor se suscribe solo a los eventos de los equipos que pida alguna automatización; las reglas (movimiento, cruce de línea…) se configuran en la web del propio equipo. Hoy reciben eventos los equipos Hikvision por SDK.");
+        const ruleKinds = !c.videoEventKinds?.length || c.videoEventKinds.some((k) => WFE_RULE_KINDS.includes(k));
+        const rules = ruleKinds ? wfeRuleItems(c, () => { if (container.isConnected && wfEd.selected?.id === node.id) { read(); draw(); } }) : null;
+        if (!ruleKinds) {
+          field("Líneas / reglas de la analítica", `<div class="muted" style="font-size:12px">Los tipos de evento marcados no usan líneas ni regiones.</div>`);
+        } else if (!rules) {
+          // Mientras responde el equipo se conserva lo marcado (read() lo toma de aquí).
+          field("Líneas / reglas de la analítica", `<div class="muted" style="font-size:12px">Consultando las líneas configuradas en la cámara…</div>
+            <div hidden>${wfeCheckList((c.ruleIds || []).map((n) => [n, String(n)]), c.ruleIds, "rule")}</div>`);
+        } else {
+          field("Líneas / reglas de la analítica", wfeCheckList(rules.items, c.ruleIds, "rule"),
+            "Nada marcado = cualquiera. " + (rules.known
+              ? "Son las líneas (o regiones) que admite la cámara, numeradas como en su configuración; las atenuadas no están dibujadas."
+              : (c.channelIds?.length || c.deviceIds?.length
+                ? "El equipo no informó cuántas líneas admite: se ofrece la numeración genérica (Línea 1, Línea 2…)."
+                : "Elija las cámaras para ver las líneas que admite cada una.")));
+        }
+        if (isTrigger && ruleKinds) {
+          const all = (c.allRulesWithinSeconds || 0) > 0;
+          field("Cuándo se ejecuta", `
+            <select id="wfe-allrules" style="margin-bottom:6px">
+              <option value="any" ${all ? "" : "selected"}>Al cruzar cualquiera de las líneas marcadas</option>
+              <option value="all" ${all ? "selected" : ""}>Solo cuando se crucen TODAS las líneas marcadas</option>
+            </select>
+            ${all ? `<div class="form-grid">
+              <div class="field"><label>Dentro de (segundos)</label><input id="wfe-allrules-secs" type="number" min="1" max="3600" value="${c.allRulesWithinSeconds}"></div>
+              <div class="field"><label>&nbsp;</label><label class="checkbox-row"><input type="checkbox" id="wfe-rulesorder" ${c.rulesInOrder ? "checked" : ""}> En orden (1 → 2 → …)</label></div>
+            </div>` : ""}`,
+            "Con «todas», en la misma cámara deben cruzarse cada una de las líneas marcadas dentro de ese tiempo (por ejemplo, un vehículo que pasa la línea 1 y luego la 2). Requiere marcar al menos dos líneas.");
+        }
         break;
 
       case "plate-recognized":
@@ -938,6 +1020,10 @@ function wfeConditionsForm(container, node, isTrigger) {
         break;
     }
 
+    if (isTrigger)
+      field("Ejecuciones simultáneas", `<label class="checkbox-row"><input type="checkbox" id="wfe-singlerun" ${c.singleRun ? "checked" : ""}> No volver a ejecutar mientras la anterior siga en curso</label>`,
+        "Los eventos que lleguen mientras corre (por ejemplo, durante una espera con la sirena sonando) se descartan. Complementa el mínimo entre ejecuciones, que cuenta desde el inicio.");
+
     // Ventana horaria: sirve en todos los disparadores. Fuera del disparador
     // de horario admite varias franjas (basta que una se cumpla): la principal
     // va en daysOfWeek/fromTime/toTime y las demás en timeBands.
@@ -975,6 +1061,8 @@ function wfeConditionsForm(container, node, isTrigger) {
     }));
 
     $$("input:not(.wf-filter), select, textarea", container).forEach((el) => el.addEventListener("change", () => { read(); wfeDraw(); }));
+    // «Todas las líneas» muestra u oculta la ventana de segundos (ya leído por el manejador de arriba).
+    $("#wfe-allrules", container)?.addEventListener("change", () => draw());
     // Selector de equipos: el árbol escribe en node.conditions; después se redibuja el filtro y el diagrama.
     $("#wfe-pick-sources", container)?.addEventListener("click", () => {
       read();
@@ -1030,7 +1118,8 @@ function wfeConditionsForm(container, node, isTrigger) {
           kinds: marked("kind"), severities: marked("severity"),
           zoneNumbers: numbersOf(next.zoneKeys), areaNumbers: numbersOf(next.areaKeys),
           codes: strings("wfe-codes"), textContains: $("#wfe-text", container)?.value.trim() || null,
-          sources: marked("source"), sustainedSeconds: isTrigger ? (number("wfe-sustained") || 0) : 0,
+          sources: marked("source"), sustainedSeconds: number("wfe-sustained") || 0,
+          areaArmed: $("#wfe-armed", container)?.checked || null,
         });
         break;
       }
@@ -1041,8 +1130,19 @@ function wfeConditionsForm(container, node, isTrigger) {
         Object.assign(next, { deviceKinds: marked("dkind"), deviceStatuses: marked("dstatus") });
         break;
       case "video-event":
-        Object.assign(next, { videoEventKinds: marked("vkind") });
+      {
+        Object.assign(next, { videoEventKinds: marked("vkind"), ruleIds: marked("rule").map(Number) });
+        const mode = $("#wfe-allrules", container)?.value;
+        if (mode === "all") {
+          // Recién elegido «todas»: el campo de segundos aún no existe; 30 s de base.
+          next.allRulesWithinSeconds = number("wfe-allrules-secs") || node.conditions.allRulesWithinSeconds || 30;
+          next.rulesInOrder = $("#wfe-rulesorder", container)?.checked ?? node.conditions.rulesInOrder ?? false;
+        } else {
+          next.allRulesWithinSeconds = null;
+          next.rulesInOrder = null;
+        }
         break;
+      }
       case "plate-recognized":
         Object.assign(next, {
           plates: strings("wfe-plates").map((p) => p.toUpperCase()),
@@ -1063,6 +1163,7 @@ function wfeConditionsForm(container, node, isTrigger) {
         if (isTrigger) next.hookKey = node.conditions.hookKey || null;
         break;
     }
+    if (isTrigger) next.singleRun = $("#wfe-singlerun", container)?.checked || null;
     node.conditions = next;
   };
 
@@ -1307,6 +1408,8 @@ function wfeConditionsSummary(c, triggerType) {
   if (c.sources?.length) push(names(c.sources, WF_SOURCES));
   if (c.textContains) push(`contiene «${c.textContains}»`);
   if (c.sustainedSeconds > 0) push(`sostenido ≥ ${c.sustainedSeconds} s`);
+  if (c.areaArmed) push("con el área armada");
+  if (c.singleRun) push("una ejecución a la vez");
   if (c.deviceKinds?.length) push(names(c.deviceKinds, WFE_DEVICE_KINDS));
   if (c.deviceStatuses?.length) push(names(c.deviceStatuses, WFE_DEVICE_STATUSES));
   push(count(c.deviceIds, "equipo", "equipos"));
@@ -1314,6 +1417,12 @@ function wfeConditionsSummary(c, triggerType) {
   push(count(c.speakerIds, "parlante", "parlantes"));
   if (c.videoEventKinds?.length) push(names(c.videoEventKinds, WFE_VIDEO_KINDS));
   push(count(c.channelIds, "cámara", "cámaras"));
+  if (c.ruleIds?.length) {
+    const lines = [...c.ruleIds].sort((a, b) => a - b);
+    push(c.allRulesWithinSeconds > 0
+      ? `líneas ${lines.join(c.rulesInOrder ? " → " : " + ")} en ≤ ${c.allRulesWithinSeconds} s`
+      : `${lines.length > 1 ? "líneas" : "línea"} ${lines.join(", ")}`);
+  }
   if (c.plates?.length) push(`${c.plateMatch === "unlisted" ? "excepto" : "patentes"} ${c.plates.slice(0, 3).join(", ")}${c.plates.length > 3 ? "…" : ""}`);
   if (c.minConfidence > 0) push(`confianza ≥ ${c.minConfidence}%`);
   if (c.accessKinds?.length) push(names(c.accessKinds, WFE_ACCESS_KINDS));
@@ -1353,7 +1462,7 @@ function wfePayload() {
         config: n.kind === "action" ? n.config : null,
         enabled: n.enabled !== false,
         delaySeconds: n.delaySeconds || 0,
-        conditions: n.kind === "condition" ? n.conditions : null,
+        conditions: n.kind === "condition" || (n.kind === "delay" && n.conditions?.areaArmed) ? n.conditions : null,
         secret: n.kind === "action" ? (n.secret || null) : null,
         actionId: n.actionId || 0,
       })),

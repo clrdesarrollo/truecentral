@@ -168,8 +168,23 @@ public sealed record WorkflowConditionsDto(
     /// vuelve a leer el panel; si el sensor ya se restableció, no hace nada.
     /// Es lo que distingue "alguien pasó frente al detector" de "la puerta
     /// quedó abierta". 0 o null = ejecutar de inmediato.
+    /// En un nodo de condición: espera ese tiempo vigilando el sensor que
+    /// disparó y sigue por «Sí» si continuó interrumpido, por «No» si se
+    /// restableció (la segunda etapa: advertencia → si sigue, sirena).
     /// </summary>
     int? SustainedSeconds = null,
+    /// <summary>
+    /// true = solo si el área del sensor que disparó está armada AHORA (se
+    /// lee el estado del panel, no el del evento). En el disparador y en los
+    /// nodos de condición.
+    /// </summary>
+    bool? AreaArmed = null,
+    /// <summary>
+    /// Solo en el disparador: no se inicia otra ejecución mientras la
+    /// anterior siga en curso (p. ej. mientras suena la sirena de una espera
+    /// larga). Los eventos que lleguen entre medio se descartan.
+    /// </summary>
+    bool? SingleRun = null,
     /// <summary>Días de la semana en que la automatización está activa (0 = domingo).</summary>
     IReadOnlyList<int>? DaysOfWeek = null,
     /// <summary>Hora local de inicio de la ventana horaria ("22:00"); null = sin restricción.</summary>
@@ -200,6 +215,21 @@ public sealed record WorkflowConditionsDto(
     IReadOnlyList<VideoEventKind>? VideoEventKinds = null,
     /// <summary>Canales de video (Ids de Channels).</summary>
     IReadOnlyList<int>? ChannelIds = null,
+    /// <summary>
+    /// Números de línea/regla de la analítica en la cámara (la "Line 1",
+    /// "Line 2" del cruce de línea; la región 1, 2... de intrusión). Vacío =
+    /// cualquiera.
+    /// </summary>
+    IReadOnlyList<int>? RuleIds = null,
+    /// <summary>
+    /// Con dos o más <see cref="RuleIds"/>: la automatización se ejecuta solo
+    /// cuando TODAS esas líneas se cruzaron en la misma cámara dentro de esta
+    /// ventana de segundos (p. ej. un vehículo que pasa la línea 1 y luego la
+    /// 2). 0 o null = basta con cualquiera de las líneas.
+    /// </summary>
+    int? AllRulesWithinSeconds = null,
+    /// <summary>Con <see cref="AllRulesWithinSeconds"/>: exigir además que se crucen en orden ascendente (1 → 2 → ...).</summary>
+    bool? RulesInOrder = null,
 
     // --- Patentes (disparador plate-recognized) ---
     /// <summary>Patentes de la lista (admiten * y ? como comodines).</summary>

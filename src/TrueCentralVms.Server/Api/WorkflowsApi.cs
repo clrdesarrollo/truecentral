@@ -87,6 +87,7 @@ public static class WorkflowsApi
                 new("camara", "Nombre de la cámara (canal)"),
                 new("canal", "Número del canal"),
                 new("regla", "Nombre de la regla de analítica"),
+                new("linea", "Número de la línea/regla en la cámara (1, 2...)"),
                 new("entrada", "Número de la entrada de alarma"),
                 new("horaequipo", "Hora según el equipo"),
             ], "Video"),
@@ -189,6 +190,51 @@ public static class WorkflowsApi
                 supportsSnapshot = drivers.Find(c.DriverKey)?.Capabilities.SupportsSnapshot ?? false,
                 supportsPtz = c.SupportsPtz,
             }));
+        });
+
+        // Líneas/regiones de la analítica que admiten las cámaras elegidas en
+        // el disparador "evento de cámara": se leen del propio equipo, así el
+        // editor ofrece tantas como su capacidad (y marca las dibujadas).
+        // known = false: ningún equipo lo informó (el editor usa una lista genérica).
+        app.MapGet("/api/workflows/analytics-rules", async (HttpContext ctx, string? channelIds, string? deviceIds,
+            string? kinds, VmsDbContext db, DriverRegistry drivers, CredentialProtector protector, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            static List<int> Ids(string? csv) => (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(v => int.TryParse(v, out int n) ? n : 0).Where(n => n > 0).Distinct().ToList();
+            var channelList = Ids(channelIds);
+            var deviceList = Ids(deviceIds);
+            var kindList = (kinds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(k => Enum.TryParse<VideoEventKind>(k, true, out var kind) ? kind : (VideoEventKind?)null)
+                .OfType<VideoEventKind>().Distinct().ToList();
+            if (kindList.Count == 0) kindList = [VideoEventKind.LineCrossing];
+
+            var channels = await db.Channels.AsNoTracking().Include(c => c.Device)
+                .Where(c => c.Enabled && (channelList.Contains(c.Id) || deviceList.Contains(c.DeviceId)))
+                .OrderBy(c => c.Id).Take(16).ToListAsync(ct);
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            var lookups = channels.SelectMany(c => kindList.Select(async kind =>
+            {
+                if (drivers.Find(c.Device.DriverKey) is not { } factory) return null;
+                try
+                {
+                    var connection = new DeviceConnectionInfo(c.Device.Host, c.Device.SdkPort, c.Device.Username,
+                        protector.Unprotect(c.Device.PasswordCiphertext));
+                    return await factory.Create().GetAnalyticsRulesAsync(connection,
+                        c.RtspChannel > 0 ? c.RtspChannel : c.ChannelNumber, kind, timeout.Token);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return null; }
+            }));
+            var found = (await Task.WhenAll(lookups)).OfType<IReadOnlyList<AnalyticsRuleInfo>>().ToList();
+
+            // Varias cámaras o tipos: la capacidad mayor; una línea cuenta como
+            // dibujada si lo está en alguna de ellas.
+            var rules = found.SelectMany(r => r).GroupBy(r => r.Id).OrderBy(g => g.Key)
+                .Select(g => new { id = g.Key, configured = g.Any(r => r.Configured), enabled = g.Any(r => r.Enabled) })
+                .ToList();
+            return Results.Ok(new { known = found.Count > 0, rules });
         });
 
         // Equipos de video (cámaras/grabadores) para los disparadores de

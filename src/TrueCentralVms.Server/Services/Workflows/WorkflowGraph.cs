@@ -262,6 +262,12 @@ public sealed class WorkflowGraph
         }
         if (conditions.SustainedSeconds is < 0 or > 600)
             return "la condición sostenida debe estar entre 0 y 600 segundos.";
+        if (conditions.RuleIds is { Count: > 0 } rules && rules.Any(r => r is < 0 or > 255))
+            return "los números de línea/regla deben ir de 0 a 255.";
+        if (conditions.AllRulesWithinSeconds is < 0 or > 3600)
+            return "la ventana para cruzar todas las líneas debe estar entre 0 y 3600 segundos.";
+        if (conditions.AllRulesWithinSeconds > 0 && conditions.RuleIds is not { Count: >= 2 })
+            return "para exigir que se crucen todas las líneas marque al menos dos líneas/reglas.";
         if (conditions.MinConfidence is < 0 or > 100)
             return "la confianza mínima debe estar entre 0 y 100.";
         if (conditions.ScheduleTimes is { Count: > 0 } times && times.Any(t => !TimeSpan.TryParse(t, out _)))
@@ -333,7 +339,10 @@ public sealed class WorkflowGraph
                 Type: n.Kind == WorkflowNodeKinds.Action ? n.Type : null,
                 Enabled: n.Enabled,
                 DelaySeconds: n.Kind == WorkflowNodeKinds.Delay ? n.DelaySeconds : 0,
-                Conditions: n.Kind == WorkflowNodeKinds.Condition ? n.Conditions : null)).ToList(),
+                // La espera guarda solo «terminar si se desarma el área».
+                Conditions: n.Kind == WorkflowNodeKinds.Condition ? n.Conditions
+                    : n.Kind == WorkflowNodeKinds.Delay && n.Conditions?.AreaArmed == true ? new WorkflowConditionsDto(AreaArmed: true)
+                    : null)).ToList(),
             (graph.Edges ?? []).Select(e => new WorkflowEdgeDto(e.From, e.To, string.IsNullOrEmpty(e.Port) ? WorkflowPorts.Next : e.Port))
                 .ToList());
         workflow.GraphJson = WorkflowJson.Serialize(stored);

@@ -31,6 +31,7 @@
     <!-- Licenciamiento: verificación Ed25519 del archivo .lic firmado por el
          servidor central de licencias (.NET no trae Ed25519 nativo). -->
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
   </ItemGroup>
 
   <PropertyGroup>

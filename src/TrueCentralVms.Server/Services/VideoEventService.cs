@@ -251,7 +251,7 @@ public sealed class VideoEventService(
         // informa cada segundo. La automatización tiene además su propio
         // tiempo mínimo entre ejecuciones; esto solo evita inundar la cola.
         int debounce = Math.Clamp(config.GetValue("Workflows:VideoEventDebounceSeconds", 5), 0, 300);
-        string key = $"{deviceId}|{evt.ChannelNumber}|{evt.Kind}|{evt.RuleName}|{evt.AlarmInput}";
+        string key = $"{deviceId}|{evt.ChannelNumber}|{evt.Kind}|{evt.RuleId}|{evt.RuleName}|{evt.AlarmInput}";
         var now = DateTime.UtcNow;
         if (debounce > 0 && _recent.TryGetValue(key, out var last) && now - last < TimeSpan.FromSeconds(debounce))
             return;
