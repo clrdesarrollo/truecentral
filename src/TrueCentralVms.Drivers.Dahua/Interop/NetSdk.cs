@@ -212,6 +212,87 @@ internal static class NetSdk
     public static extern bool CLIENT_FindClose(long lFindHandle);
 
     // ------------------------------------------------------------------
+    // Eventos inteligentes con foto (patentes de cámaras ITC)
+    // ------------------------------------------------------------------
+
+    /// <summary>EVENT_IVS_ALL: todos los eventos inteligentes del canal.</summary>
+    public const uint EventIvsAll = 0x00000001;
+    /// <summary>EVENT_IVS_TRAFFICJUNCTION → DEV_EVENT_TRAFFICJUNCTION_INFO.</summary>
+    public const uint EventIvsTrafficJunction = 0x00000017;
+    /// <summary>EVENT_IVS_TRAFFICGATE → DEV_EVENT_TRAFFICGATE_INFO.</summary>
+    public const uint EventIvsTrafficGate = 0x00000018;
+
+    /// <summary>
+    /// fAnalyzerDataCallBack: pAlarmInfo es la estructura del evento según
+    /// dwAlarmType; pBuffer, las fotos (escena y recortes, ubicados por los
+    /// DH_PIC_INFO de cada objeto). Devuelve 0.
+    /// </summary>
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate int AnalyzerDataCallback(long lAnalyzerHandle, uint dwAlarmType, IntPtr pAlarmInfo,
+        IntPtr pBuffer, uint dwBufSize, IntPtr dwUser, int nSequence, IntPtr reserved);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+    public static extern long CLIENT_RealLoadPictureEx(long lLoginID, int nChannelID, uint dwAlarmType,
+        [MarshalAs(UnmanagedType.Bool)] bool bNeedPicFile, AnalyzerDataCallback cbAnalyzerData, IntPtr dwUser,
+        IntPtr reserved);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool CLIENT_StopLoadPic(long lAnalyzerHandle);
+
+    /// <summary>
+    /// Desplazamientos de los eventos de tránsito. NO están calculados a mano:
+    /// salen de compilar dhnetsdk.h (V3.061, MSVC x64) con un programa que
+    /// imprime offsetof/sizeof de cada campo (build\sdk-offsets\dahua-traffic.cpp).
+    /// </summary>
+    public static class Traffic
+    {
+        // DH_MSG_OBJECT (692 bytes)
+        public const int ObjConfidence = 132;      // int
+        public const int ObjBoundingBox = 140;     // DH_RECT: 4 × int (left, top, right, bottom), 0..8191
+        public const int ObjText = 232;            // char[128]: la patente (en el objeto patente)
+        public const int ObjSubType = 360;         // char[62]
+        public const int ObjPicEnabled = 427;      // bool
+        public const int ObjPicOffset = 428;       // DH_PIC_INFO.dwOffSet dentro de pBuffer
+        public const int ObjPicLength = 432;       // DH_PIC_INFO.dwFileLenth
+
+        // NET_TIME_EX (36 bytes): año, mes, día, hora, minuto, segundo (DWORD)
+        public const int TimeSize = 36;
+
+        // DEV_EVENT_TRAFFIC_TRAFFICCAR_INFO (2752 bytes)
+        public const int CarPlateNumber = 0;       // char[32]
+        public const int CarPlateType = 32;        // char[32]
+        public const int CarPlateColor = 64;       // char[32]
+        public const int CarVehicleColor = 96;     // char[32]
+        public const int CarSpeed = 128;           // int
+        public const int CarEvent = 132;           // char[64]
+        public const int CarViolationDesc = 228;   // char[64]
+        public const int CarLane = 308;            // int
+        public const int CarVehicleLength = 316;   // float, metros
+        public const int CarVehicleSign = 1712;    // char[32]: marca
+
+        // DEV_EVENT_TRAFFICJUNCTION_INFO (34296 bytes)
+        public const int JunctionSize = 34296;
+        public const int JunctionChannel = 0;
+        public const int JunctionName = 4;         // char[128]
+        public const int JunctionUtc = 144;        // NET_TIME_EX
+        public const int JunctionObject = 184;     // DH_MSG_OBJECT (la patente)
+        public const int JunctionLane = 876;
+        public const int JunctionSpeed = 968;
+        public const int JunctionVehicle = 980;    // DH_MSG_OBJECT (el vehículo)
+        public const int JunctionTrafficCar = 2160;
+
+        // DEV_EVENT_TRAFFICGATE_INFO (7648 bytes)
+        public const int GateSize = 7648;
+        public const int GateChannel = 0;
+        public const int GateName = 4;
+        public const int GateUtc = 144;
+        public const int GateObject = 184;
+        public const int GateLane = 876;
+        public const int GateSpeed = 880;
+        public const int GateVehicle = 940;
+    }
+
+    // ------------------------------------------------------------------
     // Inicialización de equipos de fábrica (primer usuario y contraseña)
     // ------------------------------------------------------------------
 

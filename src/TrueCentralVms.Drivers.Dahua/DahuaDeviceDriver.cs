@@ -51,6 +51,12 @@ public sealed class DahuaDeviceDriver : IDeviceDriver
         }
     }, ct);
 
+    public bool SupportsAnpr => true;
+
+    /// <summary>Patentes de cámaras ITC: eventos de tránsito del NetSDK con sus fotos (ver <see cref="DahuaAnpr"/>).</summary>
+    public Task<IPlateSubscription> SubscribePlatesAsync(DeviceConnectionInfo info, Action<PlateRecognition> onPlate,
+        CancellationToken ct = default) => DahuaAnpr.SubscribeAsync(info, onPlate, ct);
+
     public string BuildRtspUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel, StreamProfile profile)
     {
         int subtype = profile == StreamProfile.Main ? 0 : 1;
@@ -358,7 +364,9 @@ public sealed class DahuaDeviceDriverFactory : IDeviceDriverFactory
         SupportsSnapshot: true,
         SupportsDiscovery: false,
         DefaultSdkPort: 37777,
-        DefaultRtspPort: 554);
+        DefaultRtspPort: 554,
+        // Patentes de las cámaras ITC: eventos de tránsito del NetSDK (DahuaAnpr).
+        SupportsAnpr: true);
 
     public IDeviceDriver Create() => new DahuaDeviceDriver();
 }

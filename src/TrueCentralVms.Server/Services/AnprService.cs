@@ -93,6 +93,10 @@ public sealed class AnprService(
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        // El receptor de patentes Dahua anota en el log su conexión y el texto
+        // de los primeros eventos (los nombres de campo varían con el firmware).
+        TrueCentralVms.Drivers.Dahua.DahuaDiagnostics.Log = message => logger.LogInformation("{Message}", message);
+
         // El consumidor de la cola corre en paralelo al reconciliador.
         var consumer = Task.Run(() => ConsumeAsync(ct), ct);
         var purger = Task.Run(() => PurgeLoopAsync(ct), ct);

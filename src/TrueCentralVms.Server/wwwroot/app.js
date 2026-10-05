@@ -474,7 +474,7 @@ async function getDrivers() {
 let lastScan = null; // resultados del último sondeo (persisten al re-renderizar)
 
 /** Drivers que entregan reconocimientos de patentes (ver DriverCapabilities.SupportsAnpr). */
-const ANPR_DRIVERS = ["hikvision-netsdk"];
+const ANPR_DRIVERS = ["hikvision-netsdk", "dahua-netsdk"];
 
 async function renderDevices() {
   $("#page-title").textContent = "Dispositivos";
