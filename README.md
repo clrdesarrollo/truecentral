@@ -92,6 +92,20 @@ solo acepta conexiones desde la propia máquina del servidor.
 
 ## Instaladores
 
+### Menú de compilación
+
+`installeruild-menu.cmd` abre un menú (Terminal.Gui) para elegir qué compilar: suite, cliente, complemento y/o migrador, versión y si se vuelve a publicar.
+
+Modo silencioso, sin menú (para scripts, Jenkins o una IA; código de salida 0 = ok):
+
+```
+installeruild-menu.cmd --silent --only suite,client
+installeruild-menu.cmd --silent --only all --version 0.5.2 --skip-publish
+installeruild-menu.cmd --list
+```
+
+`build-installers.ps1` también acepta varios a la vez: `-Solo Suite,Client`.
+
 Dos instaladores de Windows (Inno Setup 6, x64, en español) salen de
 `installer\build-installers.ps1`:
 

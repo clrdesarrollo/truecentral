@@ -26,9 +26,10 @@
 param(
     # Versión x.y.z; por defecto se lee del archivo VERSION en la raíz del repo.
     [string]$Version,
-    # Compilar solo uno de los instaladores ('Ambos' = suite y cliente).
-    [ValidateSet('Suite', 'Client', 'Complemento', 'Migrador', 'Ambos')]
-    [string]$Solo = 'Ambos',
+    # Qué compilar: uno o varios de Suite, Client, Complemento, Migrador
+    # (separados por coma, p. ej. -Solo Suite,Client). 'Ambos' = suite, cliente,
+    # complemento y migrador (comportamiento histórico); 'Todos' es sinónimo.
+    [string[]]$Solo = @('Ambos'),
     # Reutilizar build\publish existente (no vuelve a publicar los proyectos).
     [switch]$SkipPublish
 )
@@ -43,16 +44,24 @@ if (-not $Version) {
 }
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Versión inválida: '$Version' (se espera x.y.z)." }
 
+# Vía -File, "Suite,Client" llega como UN string: se separa y valida a mano.
+$validos = 'Suite', 'Client', 'Complemento', 'Migrador', 'Ambos', 'Todos'
+$Solo = @($Solo | ForEach-Object { $_ -split '[,;\s]+' } | Where-Object { $_ })
+foreach ($x in $Solo) {
+    if ($validos -notcontains $x) { throw "-Solo '$x' no es válido. Use: $($validos -join ', ')." }
+}
+$todo = ($Solo -contains 'Ambos') -or ($Solo -contains 'Todos')
+
 # La suite empaqueta el instalador del cliente: compilar la suite implica
 # compilar (o tener ya compilado) el del cliente.
-$buildSuite  = ($Solo -eq 'Ambos' -or $Solo -eq 'Suite')
-$buildClient = ($Solo -eq 'Ambos' -or $Solo -eq 'Client')
+$buildSuite  = ($todo -or $Solo -contains 'Suite')
+$buildClient = ($todo -or $Solo -contains 'Client')
 # El complemento de enrolamiento (lector de huellas USB) va con la suite: es
 # ella la que lo publica para que el panel lo ofrezca en descarga.
-$buildAgent  = ($Solo -eq 'Ambos' -or $Solo -eq 'Suite' -or $Solo -eq 'Complemento')
+$buildAgent  = ($todo -or $Solo -contains 'Suite' -or $Solo -contains 'Complemento')
 # El migrador desde HikCentral es una herramienta de puesta en marcha: se
 # entrega como carpeta comprimida (se ejecuta donde haga falta, sin instalar).
-$buildMigrador = ($Solo -eq 'Ambos' -or $Solo -eq 'Migrador')
+$buildMigrador = ($todo -or $Solo -contains 'Migrador')
 $publish = Join-Path $repo 'build\publish'
 $dist = Join-Path $repo 'dist'
 
