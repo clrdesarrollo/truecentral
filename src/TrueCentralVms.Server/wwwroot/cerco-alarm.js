@@ -92,31 +92,34 @@ const CercoAlarm = (() => {
       el.id = "cerco-alarm";
       el.className = "cerco-alarm hidden";
       el.setAttribute("role", "alert");
+      el.innerHTML = `<div class="cerco-alarm-body"></div><div class="cerco-alarm-actions"></div>`;
       document.body.appendChild(el);
       el.addEventListener("click", onClick);
     }
     return el;
   }
 
+  // Cada parte se reescribe solo si cambió: unlock() re-renderiza en cada pointerdown y,
+  // si los botones se reemplazaran entre pointerdown y pointerup, el clic se perdería.
+  function setHtml(node, html) { if (node.dataset.html !== html) { node.innerHTML = html; node.dataset.html = html; } }
+
   function render() {
     const el = bar();
-    if (!active.size) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+    const body = el.querySelector(".cerco-alarm-body"), actions = el.querySelector(".cerco-alarm-actions");
+    if (!active.size) { el.classList.add("hidden"); setHtml(body, ""); setHtml(actions, ""); return; }
     const list = [...active.values()].sort((a, b) => b.at - a.at);
     const panels = [...new Map(list.map((a) => [a.panelId, a.panelName])).entries()];
-    el.innerHTML = `
-      <div class="cerco-alarm-body">
+    setHtml(body, `
         <b>🚨 Alarma de cerco eléctrico</b>
         <ul>${list.slice(0, 4).map((a) => `<li><b>${esc(a.panelName)}</b> — ${esc(a.description)}
           <span class="muted">${a.at.toLocaleTimeString()}</span></li>`).join("")}
           ${list.length > 4 ? `<li class="muted">y ${list.length - 4} más…</li>` : ""}</ul>
         ${list.some((a) => a.sounding) && !audioReady()
-          ? `<div class="cerco-alarm-hint">🔇 Haga clic en cualquier parte de la página para activar el sonido de la alarma.</div>` : ""}
-      </div>
-      <div class="cerco-alarm-actions">
+          ? `<div class="cerco-alarm-hint">🔇 Haga clic en cualquier parte de la página para activar el sonido de la alarma.</div>` : ""}`);
+    setHtml(actions, `
         ${panels.map(([id, name]) => `<button class="btn danger" data-silence="${id}" title="Apaga la sirena del panel ${esc(name)}">Silenciar sirena${panels.length > 1 ? ` · ${esc(name)}` : ""}</button>`).join("")}
         <button class="btn ghost" data-go="monitor">Ver monitor</button>
-        <button class="btn" data-ack="1" title="Detiene el sonido en este navegador y cierra el aviso">Reconocer</button>
-      </div>`;
+        <button class="btn" data-ack="1" title="Detiene el sonido en este navegador y cierra el aviso">Reconocer</button>`);
     el.classList.remove("hidden");
   }
 

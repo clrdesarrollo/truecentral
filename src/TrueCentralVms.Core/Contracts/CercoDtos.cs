@@ -44,6 +44,8 @@ public enum CercoEventKind
     PowerLost,
     /// <summary>Volvió la red eléctrica.</summary>
     PowerRestored,
+    /// <summary>El panel recuperó la sesión con el servidor sin reiniciarse (detail = segundos sin conexión).</summary>
+    Reconnected,
 }
 
 /// <summary>

@@ -76,11 +76,24 @@ public static class CercoMapper
         "rf_learn_timeout" => (CercoEventKind.RfLearnTimeout, CercoSeverity.Info),
         "power_lost"       => (CercoEventKind.PowerLost,      CercoSeverity.Warning),
         "power_restored"   => (CercoEventKind.PowerRestored,  CercoSeverity.Info),
+        "reconnect"        => (CercoEventKind.Reconnected,    CercoSeverity.Info),
         _                  => (CercoEventKind.Boot,           CercoSeverity.Info),
     };
 
     // "detail" de armed/disarmed = origen (firmware ArmSource).
-    private static string Source(long detail) => detail switch { 1 => " (llave)", 2 => " (control RF)", _ => "" };
+    private static string Source(long detail) => detail switch { 1 => " (llave)", 2 => " (control RF)", 3 => " (restaurado tras reinicio)", _ => "" };
+
+    // "detail" de boot = motivo del reinicio (rst_info.reason del ESP8266; firmware >= 1.4.0).
+    private static string ResetReason(long detail) => detail switch
+    {
+        1 => " (watchdog de hardware)",
+        2 => " (excepción del firmware)",
+        3 => " (watchdog de software)",
+        4 => " (reinicio por software)",
+        5 => " (salida de deep sleep)",
+        6 => " (reset externo)",
+        _ => "",
+    };
 
     public static string ActionName(CercoRfAction a) => a switch
     {
@@ -111,6 +124,7 @@ public static class CercoMapper
         CercoEventKind.RfLearnTimeout => detail == 1 ? "Programación de control: memoria llena" : "Programación de control sin respuesta",
         CercoEventKind.PowerLost      => detail > 0 ? $"Corte de energía: operando con batería (pulso -{detail / 10.0:0.0} %)" : "Corte de energía: operando con batería",
         CercoEventKind.PowerRestored  => "Energía restablecida",
-        _                             => "Arranque del panel",
+        CercoEventKind.Reconnected    => detail > 0 ? $"Reconexión con el servidor (sin conexión {detail} s)" : "Reconexión con el servidor",
+        _                             => "Arranque del panel" + ResetReason(detail),
     };
 }

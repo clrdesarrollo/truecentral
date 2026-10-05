@@ -108,19 +108,23 @@ public sealed partial class CercoViewModel : ObservableObject
 
     private void Recount() => ActiveAlarmCount = Panels.Count(p => p.InAlarm);
 
-    [RelayCommand] private Task Arm(CercoPanelItem? panel) => RunAsync(panel, "arm", "Orden de armar enviada.");
-    [RelayCommand] private Task Disarm(CercoPanelItem? panel) => RunAsync(panel, "disarm", "Orden de desarmar enviada.");
-    [RelayCommand] private Task Silence(CercoPanelItem? panel) => RunAsync(panel, "silence", "Sirena silenciada.");
+    [RelayCommand] private Task Arm(CercoPanelItem? panel) => RunAsync(panel, "arm");
+    [RelayCommand] private Task Disarm(CercoPanelItem? panel) => RunAsync(panel, "disarm");
+    [RelayCommand] private Task Silence(CercoPanelItem? panel) => RunAsync(panel, "silence");
 
-    /// <summary>Envía la orden; el estado real llega por el hub (el panel la confirma).</summary>
-    private async Task RunAsync(CercoPanelItem? panel, string command, string okMessage)
+    /// <summary>
+    /// Envía la orden; el estado real llega por el hub (el panel la confirma y se ve en la
+    /// tarjeta y en los eventos). Solo se informan los errores: un "orden enviada" fijo
+    /// daría a entender que todavía se espera la respuesta del panel.
+    /// </summary>
+    private async Task RunAsync(CercoPanelItem? panel, string command)
     {
         if (panel is null || panel.IsBusy) return;
         panel.IsBusy = true;
+        StatusMessage = "";
         try
         {
             await _api.SendCercoCommandAsync(panel.Id, command);
-            StatusMessage = $"{panel.Name}: {okMessage}";
         }
         catch (ApiException ex)
         {

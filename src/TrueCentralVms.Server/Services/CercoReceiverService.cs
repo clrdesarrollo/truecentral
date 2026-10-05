@@ -97,6 +97,12 @@ public sealed class CercoReceiverService(
         byte[] nonceC = FromB64((string?)hello["nonce_c"]);
         bool wantsEnroll = (bool?)hello["enroll"] ?? false;
         if (deviceId.Length == 0 || nonceC.Length != 16) return;
+        // Diagnóstico que el firmware (>= 1.4.0) agrega al hello: motivo del último
+        // reinicio, segundos encendido, heap libre, RSSI y sesiones perdidas.
+        if (hello["rst"] is not null)
+            logger.LogInformation("Panel de cerco '{Id}' hello: fw={Fw} rst={Rst} up={Up}s heap={Heap} rssi={Rssi} drops={Drops}",
+                deviceId, (string?)hello["fw"], (string?)hello["rst"], (long?)hello["up"], (long?)hello["heap"],
+                (long?)hello["rssi"], (long?)hello["drops"]);
 
         // ---- panel + PSK (o enrolamiento) ----
         // Enrolamiento: si el panel trae código pendiente y aquí hay un código vigente,

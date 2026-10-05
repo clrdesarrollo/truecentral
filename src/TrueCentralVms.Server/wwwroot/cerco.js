@@ -24,7 +24,7 @@ const CERCO_ENUMS = {
   status: ["Unknown", "Online", "Offline"],
   kind: ["Boot", "Armed", "Disarmed", "Alarm", "FenceCut", "HvFault", "Arc", "SirenOn", "SirenOff",
          "RfRemote", "Tamper", "ArmFailed", "ZoneRestore", "Panic", "RfLearned", "RfLearnTimeout",
-         "PowerLost", "PowerRestored"],
+         "PowerLost", "PowerRestored", "Reconnected"],
   severity: ["Info", "Warning", "Critical"],
   action: ["None", "Arm", "Disarm", "Toggle", "Panic", "Silence"],
 };
@@ -486,6 +486,7 @@ const CERCO_KIND_LABELS = [
   ["Panic", "Pánico"], ["SirenOn", "Sirena activada"], ["SirenOff", "Sirena silenciada"],
   ["RfRemote", "Silenciada desde control"], ["RfLearned", "Control programado"],
   ["RfLearnTimeout", "Programación sin respuesta"], ["Boot", "Arranque del panel"],
+  ["Reconnected", "Reconexión con el servidor"],
 ];
 const CERCO_HIST_PAGE = 50;
 

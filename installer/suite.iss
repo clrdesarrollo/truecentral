@@ -34,6 +34,7 @@
 #define DataDirName    "CLRTrueCentralVMS"
 #define WebPort        "5090"
 #define ArcPort        "5091"
+#define CercoPort      "5092"   ; receptor WebSocket de los paneles de cerco
 #define RtspPort       "8654"
 ; Puerto del PostgreSQL embebido. Es PRIVADO del sistema: escucha solo en
 ; 127.0.0.1 y nunca se comparte, por eso no usa el 5432 de PostgreSQL ni el
@@ -485,9 +486,11 @@ end;
 procedure ConfigureFirewall();
 begin
   DeleteFirewallRules();
-  // Panel web + API + SignalR (5090) y receptor de alarmas SIA DC-09 (5091).
+  // Panel web + API + SignalR (5090), receptor de alarmas SIA DC-09 (5091) y
+  // receptor WebSocket de los paneles de cerco (5092; sin esta regla los paneles
+  // no llegan al servidor desde otro equipo).
   RunHidden(SysTool('netsh.exe'),
-    'advfirewall firewall add rule name="CLR TrueCentral VMS Server" dir=in action=allow protocol=TCP localport={#WebPort},{#ArcPort} profile=any');
+    'advfirewall firewall add rule name="CLR TrueCentral VMS Server" dir=in action=allow protocol=TCP localport={#WebPort},{#ArcPort},{#CercoPort} profile=any');
   // Respuestas del descubrimiento de equipos: SADP (UDP 37020), WS-Discovery
   // (UDP 3702), Dahua (UDP 37810) y ZKTeco (UDP 4370, control de acceso).
   // La regla va POR PROGRAMA, no por puerto: alcanza para cualquier familia
