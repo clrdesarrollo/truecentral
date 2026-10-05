@@ -687,7 +687,7 @@ public sealed class LicenseService : BackgroundService
         int days = Math.Max(0, (int)Math.Ceiling((trialEnds - now).TotalDays));
         return new LicenseSnapshot(LicenseState.Trial, true, "TRIAL",
             $"Período de prueba hasta el {trialEnds:yyyy-MM-dd} ({days} día(s)).",
-            days <= 7 ? $"El período de prueba termina en {days} día(s). Active su licencia para no interrumpir la operación." : null,
+            days <= 30 ? $"El período de prueba termina el {trialEnds:yyyy-MM-dd} ({days} día(s)). Active su licencia para no interrumpir la operación." : null,
             null, new LicenseFeatureSet(LicensingConstants.TrialFeatures), null, null, null, trialEnds, days);
     }
 

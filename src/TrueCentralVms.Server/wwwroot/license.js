@@ -224,3 +224,14 @@ async function refreshLicenseBanner() {
   el.className = `license-banner ${s.operational ? "warn" : "danger"}`;
   el.innerHTML = `<span>${esc(s.warning)}</span> <a href="#/license">Ver licencia</a>`;
 }
+
+let licenseBannerStarted = false;
+
+/** Muestra la franja y la mantiene al día: cambios de licencia por el hub y los días restantes cada hora. */
+function startLicenseBanner() {
+  refreshLicenseBanner();
+  if (licenseBannerStarted) return;
+  licenseBannerStarted = true;
+  VmsHub.on("ConfigChanged", topic => { if (topic === "license") refreshLicenseBanner(); });
+  setInterval(() => { if (Api.token) refreshLicenseBanner(); }, 60 * 60 * 1000);
+}
