@@ -14,7 +14,7 @@ namespace TrueCentralVms.Server.Services;
 public sealed record DahuaDiscoveredDto(
     string Ip, int SdkPort, int HttpPort, string Model, string DeviceClass,
     string Serial, string Mac, string Version, int InitStatus, byte PwdResetWay,
-    string SubnetMask, string Gateway)
+    string SubnetMask, string Gateway, bool Dhcp)
 {
     public bool Uninitialized => InitStatus == 1;
 }
@@ -176,7 +176,8 @@ public static class DahuaDiscovery
                 InitStatus: init & 0x03,
                 PwdResetWay: (byte)((init >> 8) & 0xFF),
                 SubnetMask: Ipv4("SubnetMask"),
-                Gateway: Ipv4("DefaultGateway"));
+                Gateway: Ipv4("DefaultGateway"),
+                Dhcp: v4.TryGetProperty("DhcpEnable", out var dhcpElement) && dhcpElement.ValueKind == JsonValueKind.True);
         }
         catch
         {

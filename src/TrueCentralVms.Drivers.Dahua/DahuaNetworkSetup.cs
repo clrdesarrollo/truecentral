@@ -14,6 +14,7 @@ public sealed class DahuaSdkSearchResult
     public required string Serial { get; init; }
     public required string Version { get; init; }
     public required int HttpPort { get; init; }
+    public required bool Dhcp { get; init; }
     public required byte InitStatus { get; init; }
     public required uint UnLoginFuncMask { get; init; }
     /// <summary>Interfaz local por la que respondió: por ahí hay que mandarle el cambio.</summary>
@@ -73,6 +74,7 @@ public static class DahuaNetworkSetup
                     Serial = ReadString(raw, NetSdk.DevNetInfoEx.SerialNo, 48),
                     Version = ReadString(raw, NetSdk.DevNetInfoEx.SoftVersion, 128),
                     HttpPort = BitConverter.ToUInt16(raw, NetSdk.DevNetInfoEx.HttpPort),
+                    Dhcp = raw[NetSdk.DevNetInfoEx.DhcpEnabled] != 0,
                     InitStatus = raw[NetSdk.DevNetInfoEx.InitStatus],
                     UnLoginFuncMask = BitConverter.ToUInt32(raw, NetSdk.DevNetInfoEx.UnLoginFuncMask),
                     LocalIp = localIp,
@@ -116,18 +118,23 @@ public static class DahuaNetworkSetup
     }
 
     /// <summary>
-    /// Cambia la IP fija del equipo. Pide las credenciales del equipo (el
-    /// cambio se autentica) y desactiva DHCP. Bloquea unos segundos.
+    /// Cambia la red del equipo: IP fija o DHCP. Pide las credenciales del
+    /// equipo (el cambio se autentica). Con DHCP se conservan la IP, máscara y
+    /// puerta de enlace actuales en la estructura (el equipo las ignora).
+    /// Los DNS no viajan acá: esta estructura no los tiene.
     /// </summary>
-    public static async Task<DahuaChangeIpResult> ChangeIpAsync(DahuaSdkSearchResult device, string ip, string mask,
-        string gateway, string username, string password, CancellationToken ct = default)
+    public static async Task<DahuaChangeIpResult> ChangeIpAsync(DahuaSdkSearchResult device, bool dhcp, string ip,
+        string mask, string gateway, string username, string password, CancellationToken ct = default)
     {
         DahuaSdk.EnsureInitialized();
         var raw = (byte[])device.Raw.Clone();
-        WriteString(raw, NetSdk.DevNetInfoEx.IP, 64, ip);
-        WriteString(raw, NetSdk.DevNetInfoEx.Submask, 64, mask);
-        WriteString(raw, NetSdk.DevNetInfoEx.Gateway, 64, gateway);
-        raw[NetSdk.DevNetInfoEx.DhcpEnabled] = 0;
+        if (!dhcp)
+        {
+            WriteString(raw, NetSdk.DevNetInfoEx.IP, 64, ip);
+            WriteString(raw, NetSdk.DevNetInfoEx.Submask, 64, mask);
+            WriteString(raw, NetSdk.DevNetInfoEx.Gateway, 64, gateway);
+        }
+        raw[NetSdk.DevNetInfoEx.DhcpEnabled] = (byte)(dhcp ? 1 : 0);
         // Los campos viejos son de 16 bytes: las contraseñas largas van en los
         // "New", y se llenan siempre (el equipo moderno solo mira esos).
         WriteString(raw, NetSdk.DevNetInfoEx.UserName, 16, username.Length < 16 ? username : "");

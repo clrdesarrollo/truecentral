@@ -1,4 +1,4 @@
-﻿// CLR TrueCentral VMS — panel de administración (SPA sin framework).
+// CLR TrueCentral VMS — panel de administración (SPA sin framework).
 "use strict";
 
 const $ = (sel, root) => (root || document).querySelector(sel);
@@ -724,19 +724,20 @@ function renderOnlineDevices(devices) {
     </table></div>`;
   $$(".scan-use").forEach((b) => b.addEventListener("click", () => opt.onUse(lastScan[Number(b.dataset.i)])));
   $$(".scan-init").forEach((b) => b.addEventListener("click", () => dahuaInitModal(lastScan[Number(b.dataset.i)], devices)));
-  $$(".scan-ip").forEach((b) => b.addEventListener("click", () => dahuaChangeIpModal(lastScan[Number(b.dataset.i)], devices)));
+  $$(".scan-ip").forEach((b) => b.addEventListener("click", () => changeIpModal(lastScan[Number(b.dataset.i)], devices)));
 }
 
 /** Validación rápida de IPv4 en el panel (el servidor revisa lo mismo y más). */
 const isIPv4 = (s) => /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(s);
 
 /**
- * Cambia la IP de un equipo Dahua sin entrar a él (multicast por MAC), como
- * "Change IP" de SmartPSS. Si el equipo está fuera de la subred del servidor
- * se propone una IP de la red del servidor.
+ * Cambia la red de un equipo Dahua o Hikvision sin entrar a él (multicast por
+ * MAC), como "Change IP" de SmartPSS o SADP Tool: IP fija o DHCP, y los DNS
+ * (que el servidor aplica después por la API web del equipo). Si el equipo
+ * está fuera de la subred del servidor se propone una IP de la red del servidor.
  * @param {string} [knownPassword] la que se acaba de elegir al inicializarlo (no se vuelve a pedir).
  */
-async function dahuaChangeIpModal(d, devices, knownPassword) {
+async function changeIpModal(d, devices, knownPassword) {
   const opt = discoveryOptions;
   let networks = [];
   try { networks = await Api.get("/api/discovery/local-networks"); } catch { /* se llena a mano */ }
@@ -747,29 +748,55 @@ async function dahuaChangeIpModal(d, devices, knownPassword) {
   const ip = keep ? d.ip : net.address.split(".").slice(0, 3).join(".") + ".";
   const mask = keep ? (d.subnetMask || "255.255.255.0") : net.mask;
   const gateway = keep ? (d.gateway || "") : net.gateway;
+  // DNS propuestos: la puerta de enlace (casi siempre resuelve) y uno público.
+  const dns1 = gateway || "";
+  const dns2 = "8.8.8.8";
 
   openModal(`
     <h3>Cambiar IP</h3>
     <p class="muted" style="margin-top:0">
-      ${esc(d.model)} · ${esc(d.mac)}<br>
-      IP actual: <b>${esc(d.ip)}</b>${d.reachable === false
+      ${esc(d.brand)} ${esc(d.model)} · ${esc(d.mac)}<br>
+      IP actual: <b>${esc(d.ip)}</b>${d.dhcp ? " (por DHCP)" : ""}${d.reachable === false
         ? ` — fuera de la red de este servidor${net ? ` (${esc(net.address)})` : ""}: no se puede agregar hasta cambiarla.` : ""}
     </p>
     <div id="dip-error"></div>
     <form id="dip-form">
-      <div class="form-grid">
-        <div class="field">
-          <label>IP nueva</label>
-          <input id="dip-ip" required value="${esc(ip)}" placeholder="192.168.10.60">
-        </div>
-        <div class="field">
-          <label>Máscara de subred</label>
-          <input id="dip-mask" required value="${esc(mask)}">
+      <div class="field">
+        <label>Modo</label>
+        <div class="segmented" role="radiogroup">
+          <label><input type="radio" name="dip-mode" value="static" ${d.dhcp ? "" : "checked"}> IP fija</label>
+          <label><input type="radio" name="dip-mode" value="dhcp" ${d.dhcp ? "checked" : ""}> DHCP</label>
         </div>
       </div>
-      <div class="field">
-        <label>Puerta de enlace (opcional)</label>
-        <input id="dip-gw" value="${esc(gateway)}">
+      <div id="dip-static">
+        <div class="form-grid">
+          <div class="field">
+            <label>IP nueva</label>
+            <input id="dip-ip" value="${esc(ip)}" placeholder="192.168.10.60">
+          </div>
+          <div class="field">
+            <label>Máscara de subred</label>
+            <input id="dip-mask" value="${esc(mask)}">
+          </div>
+        </div>
+        <div class="field">
+          <label>Puerta de enlace (opcional)</label>
+          <input id="dip-gw" value="${esc(gateway)}">
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>DNS preferido (opcional)</label>
+            <input id="dip-dns1" value="${esc(dns1)}" placeholder="vacío = no cambiar">
+          </div>
+          <div class="field">
+            <label>DNS alternativo (opcional)</label>
+            <input id="dip-dns2" value="${esc(dns2)}">
+          </div>
+        </div>
+      </div>
+      <div id="dip-dhcp-note" class="muted hidden" style="font-size:12px;margin:-4px 0 12px">
+        El equipo tomará IP, máscara, puerta de enlace y DNS del servidor DHCP de la red. TrueCentral lo
+        busca después por su MAC para mostrar la IP que le tocó.
       </div>
       ${knownPassword ? "" : `
       <div class="form-grid">
@@ -782,53 +809,85 @@ async function dahuaChangeIpModal(d, devices, knownPassword) {
           <input id="dip-pass" type="password" autocomplete="current-password" required>
         </div>
       </div>`}
-      <div class="muted" style="font-size:12px;margin:-4px 0 12px">
-        Se comprueba antes que la IP nueva no esté ocupada. El equipo queda con IP fija (sin DHCP).
+      <label class="check-row" style="display:flex;gap:8px;align-items:flex-start;margin:0 0 12px">
+        <input type="checkbox" id="dip-time" ${knownPassword ? "checked" : ""}>
+        <span>Sincronizar fecha, hora y zona horaria (con horario de verano) con este servidor</span>
+      </label>
+      <div class="muted" style="font-size:12px;margin:-4px 0 12px" id="dip-static-note">
+        Se comprueba antes que la IP nueva no esté ocupada. Los DNS se configuran entrando al equipo
+        una vez que está en su IP nueva (con el mismo usuario y contraseña).
       </div>
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="dip-cancel">Cancelar</button>
-        <button class="btn" type="submit" id="dip-save">Cambiar IP</button>
+        <button class="btn" type="submit" id="dip-save">Aplicar</button>
       </div>
     </form>`);
 
-  // El cursor queda al final de la IP propuesta, listo para completar el último número.
-  const ipInput = $("#dip-ip");
-  ipInput.focus();
-  ipInput.setSelectionRange(ipInput.value.length, ipInput.value.length);
+  const isDhcp = () => $("input[name=dip-mode]:checked").value === "dhcp";
+  const syncMode = () => {
+    $("#dip-static").classList.toggle("hidden", isDhcp());
+    $("#dip-static-note").classList.toggle("hidden", isDhcp());
+    $("#dip-dhcp-note").classList.toggle("hidden", !isDhcp());
+  };
+  $$("input[name=dip-mode]").forEach((r) => r.addEventListener("change", syncMode));
+  syncMode();
+
+  if (!isDhcp()) {
+    // El cursor queda al final de la IP propuesta, listo para completar el último número.
+    const ipInput = $("#dip-ip");
+    ipInput.focus();
+    ipInput.setSelectionRange(ipInput.value.length, ipInput.value.length);
+  }
 
   $("#dip-cancel").addEventListener("click", closeModal);
   $("#dip-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const showError = (msg) => { $("#dip-error").innerHTML = `<div class="error-box">${esc(msg)}</div>`; };
+    const dhcp = isDhcp();
     const body = {
+      brand: d.brand,
       mac: d.mac,
+      dhcp,
       ip: $("#dip-ip").value.trim(),
       mask: $("#dip-mask").value.trim(),
       gateway: $("#dip-gw").value.trim(),
+      dns1: $("#dip-dns1").value.trim(),
+      dns2: $("#dip-dns2").value.trim(),
       username: knownPassword ? "admin" : $("#dip-user").value.trim(),
       password: knownPassword ?? $("#dip-pass").value,
+      syncTime: $("#dip-time").checked,
     };
-    if (!isIPv4(body.ip)) { showError("Escriba la IP nueva completa (por ejemplo 192.168.10.60)."); return; }
-    if (!isIPv4(body.mask)) { showError("La máscara de subred no es válida."); return; }
-    if (body.gateway && !isIPv4(body.gateway)) { showError("La puerta de enlace no es válida."); return; }
+    if (!dhcp) {
+      if (!isIPv4(body.ip)) { showError("Escriba la IP nueva completa (por ejemplo 192.168.10.60)."); return; }
+      if (!isIPv4(body.mask)) { showError("La máscara de subred no es válida."); return; }
+      if (body.gateway && !isIPv4(body.gateway)) { showError("La puerta de enlace no es válida."); return; }
+      if (body.dns1 && !isIPv4(body.dns1)) { showError("El DNS preferido no es válido."); return; }
+      if (body.dns2 && !isIPv4(body.dns2)) { showError("El DNS alternativo no es válido."); return; }
+      if (body.dns2 && !body.dns1) { showError("Indique primero el DNS preferido."); return; }
+    }
 
     const button = $("#dip-save");
     button.disabled = true;
-    button.textContent = "Cambiando… (unos segundos)";
+    button.textContent = "Aplicando… (puede tardar un minuto)";
     $("#dip-error").innerHTML = "";
     try {
-      const r = await Api.post("/api/discovery/dahua/change-ip", body);
+      const r = await Api.post("/api/discovery/change-ip", body);
       lastScan = null;
       runDiscovery(devices, false);
-      const ready = { ...d, ip: r.ip, reachable: r.reachable, username: r.username };
+      const ready = { ...d, ip: r.ip, reachable: r.reachable, dhcp: r.dhcp, username: r.username };
       openModal(`
-        <h3>IP cambiada</h3>
-        <div class="info-box">${esc(r.model)} ahora está en <b>${esc(r.ip)}</b>.</div>
+        <h3>Red del equipo cambiada</h3>
+        <div class="info-box">${esc(r.model)} ${r.dhcp ? "quedó en DHCP y" : "ahora"} está en <b>${esc(r.ip)}</b>.</div>
         ${r.confirmed ? "" : `<div class="warn-box" style="margin-top:10px">
-          El equipo aceptó el cambio pero todavía no responde en la IP nueva; algunos tardan hasta un minuto
-          en reiniciar la red. Si no aparece en la próxima búsqueda, revise el cableado y la IP elegida.</div>`}
+          ${r.dhcp
+            ? "El equipo aceptó el cambio pero todavía no aparece con la IP que le dio el DHCP; búsquelo en la próxima búsqueda por su MAC."
+            : "El equipo aceptó el cambio pero todavía no responde en la IP nueva; algunos tardan hasta un minuto en reiniciar la red. Si no aparece en la próxima búsqueda, revise el cableado y la IP elegida."}</div>`}
+        ${r.dnsApplied ? `<div class="info-box" style="margin-top:10px">DNS configurados.</div>` : ""}
+        ${r.dnsError ? `<div class="warn-box" style="margin-top:10px">No se pudieron configurar los DNS: ${esc(r.dnsError)}</div>` : ""}
+        ${r.timeSynced ? `<div class="info-box" style="margin-top:10px">Fecha, hora y zona horaria sincronizadas con el servidor.</div>` : ""}
+        ${r.timeError ? `<div class="warn-box" style="margin-top:10px">No se pudo sincronizar la fecha y la hora: ${esc(r.timeError)}</div>` : ""}
         ${r.reachable ? "" : `<div class="warn-box" style="margin-top:10px">
-          La IP ${esc(r.ip)} tampoco está en la red de este servidor: no se podrá agregar desde acá.</div>`}
+          La IP ${esc(r.ip)} no está en la red de este servidor: no se podrá agregar desde acá.</div>`}
         <div class="modal-actions">
           <button class="btn ghost" type="button" id="dip-close">Cerrar</button>
           ${r.reachable ? `<button class="btn" type="button" id="dip-add">Agregar ahora</button>` : ""}
@@ -838,7 +897,7 @@ async function dahuaChangeIpModal(d, devices, knownPassword) {
     } catch (err) {
       showError(err.error || "No se pudo cambiar la IP.");
       button.disabled = false;
-      button.textContent = "Cambiar IP";
+      button.textContent = "Aplicar";
     }
   });
 }
@@ -934,7 +993,7 @@ function dahuaInitModal(d, devices) {
       $("#di-add")?.addEventListener("click", () => opt.onUse(ready));
       // La contraseña recién elegida se reutiliza: no se vuelve a pedir.
       $("#di-ip")?.addEventListener("click", () =>
-        dahuaChangeIpModal({ ...ready, reachable: false }, devices, password));
+        changeIpModal({ ...ready, reachable: false }, devices, password));
     } catch (err) {
       showError(err.error || "No se pudo inicializar el equipo.");
       button.disabled = false;

@@ -220,6 +220,12 @@ body {
   font: inherit; text-align: left; padding: 8px 10px; cursor: pointer;
 }
 .user-menu button:hover, .user-menu button:focus-visible { background: var(--panel-2); outline: none; }
+/* Selector de dos o tres opciones en línea (IP fija / DHCP). */
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmented label { display: flex; align-items: center; gap: 6px; padding: 6px 14px; cursor: pointer; margin: 0; white-space: nowrap; }
+.segmented label + label { border-left: 1px solid var(--border); }
+.segmented label:has(input:checked) { background: var(--panel-2); color: var(--text); }
+.segmented input { margin: 0; }
 .user-menu button.danger { color: var(--danger); border-top: 1px solid var(--border); border-radius: 0 0 6px 6px; margin-top: 4px; }
 main#view { padding: 24px; overflow: auto; }
 

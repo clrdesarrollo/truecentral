@@ -54,6 +54,9 @@ async function renderIntercoms() {
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
   const isAdmin = Api.role === "Admin";
+  // El último sondeo es global: solo sirve si es el de ESTA página.
+  const scanReady = discoveryOptions === INTERCOM_DISCOVERY && lastScan;
+  const knownDevices = intercoms.map((i) => ({ host: i.host }));
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Frentes de citofonía <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
@@ -90,6 +93,16 @@ async function renderIntercoms() {
             </tr>`).join("")}
         </tbody>
       </table></div>`}
+    ${isAdmin ? `
+    <div class="toolbar" style="margin-top:22px">
+      <h3>Equipos en línea <span class="muted" style="font-weight:normal;font-size:12px">(SADP en la red local · se actualiza cada 30 s)</span></h3>
+      <button class="btn ghost" id="btn-intercom-scan">Buscar</button>
+    </div>
+    <div id="intercom-online">
+      ${scanReady ? "" : `<div class="info-box">Sondeando el segmento de red del servidor… Solo se listan
+        <b>frentes de videoportero compatibles</b>: Hikvision DS-KD, DS-KV y DS-KB. Los monitores interiores,
+        las cámaras y los equipos de acceso se administran en sus propias páginas.</div>`}
+    </div>` : ""}
     <div class="toolbar" style="margin-top:22px">
       <h3>Historial de llamadas</h3>
       <div class="row-actions">
@@ -109,6 +122,9 @@ async function renderIntercoms() {
 
   const byRow = (e) => intercoms.find((i) => i.id === Number(e.target.closest("tr").dataset.id));
   $("#btn-intercom-new")?.addEventListener("click", () => intercomModal(null));
+  $("#btn-intercom-scan")?.addEventListener("click", () => runDiscovery(knownDevices));
+  if (scanReady) renderOnlineDevices(knownDevices);
+  if (isAdmin) startDiscoveryPolling(knownDevices, INTERCOM_DISCOVERY);
   $$("#view .btn-edit").forEach((b) => b.addEventListener("click", (e) => intercomModal(byRow(e))));
   $$("#view .btn-history").forEach((b) => b.addEventListener("click", (e) => {
     $("#ic-filter-intercom").value = String(byRow(e).id);
@@ -190,10 +206,30 @@ async function renderIntercomHistory(skip) {
   $("#ic-next").addEventListener("click", () => renderIntercomHistory(skip + take));
 }
 
-async function intercomModal(intercom) {
+/** Sondeo de red de la página Citofonía: solo frentes compatibles, alta con el modal del módulo. */
+const INTERCOM_DISCOVERY = {
+  container: "#intercom-online",
+  button: "#btn-intercom-scan",
+  kind: "intercom",
+  emptyText: "No se encontraron frentes de videoportero compatibles en este segmento de red. " +
+    "Los sondeos son de difusión y no cruzan routers ni VPN: solo ven el segmento del servidor. " +
+    "Un frente fuera de él se agrega a mano con su dirección.",
+  onUse: (d) => intercomModal(null, {
+    name: d.model || d.ip,
+    host: d.ip,
+    port: d.commandPort || 8000,
+    httpPort: d.httpPort || 80,
+    driverKey: d.driverKey || "hikvision-intercom",
+    username: d.username,
+  }),
+};
+
+/** @param {object} [prefill] datos del equipo elegido en la tabla de equipos en línea. */
+async function intercomModal(intercom, prefill) {
   const isNew = !intercom;
+  const seed = isNew ? (prefill || {}) : {};
   const [drivers, channels] = await Promise.all([getIntercomDrivers(), Api.get("/api/intercoms/channels").then((c) => c ?? [])]);
-  const driver0 = drivers.find((d) => d.key === intercom?.driverKey) ?? drivers[0];
+  const driver0 = drivers.find((d) => d.key === (intercom?.driverKey ?? seed.driverKey)) ?? drivers[0];
   const channelOptions = (selected) => `<option value="">— Sin video —</option>` + channels.map((c) =>
     `<option value="${c.id}" ${selected === c.id ? "selected" : ""}>${esc(c.name)} (${esc(c.host)})${c.enabled ? "" : " — deshabilitado"}</option>`).join("");
   openModal(`
@@ -203,7 +239,7 @@ async function intercomModal(intercom) {
       <div class="form-grid">
         <div class="field">
           <label>Nombre</label>
-          <input id="ic-name" required maxlength="128" value="${esc(intercom?.name ?? "")}" placeholder="Portería principal, Acceso vehicular...">
+          <input id="ic-name" required maxlength="128" value="${esc(intercom?.name ?? seed.name ?? "")}" placeholder="Portería principal, Acceso vehicular...">
         </div>
         <div class="field">
           <label>Grupo (opcional)</label>
@@ -219,20 +255,20 @@ async function intercomModal(intercom) {
       <div class="form-grid">
         <div class="field">
           <label>Dirección (IP o hostname)</label>
-          <input id="ic-host" required value="${esc(intercom?.host ?? "")}" placeholder="192.168.1.61">
+          <input id="ic-host" required value="${esc(intercom?.host ?? seed.host ?? "")}" placeholder="192.168.1.61">
         </div>
         <div class="field">
           <label>Puerto SDK / Puerto HTTP</label>
           <div style="display:flex;gap:6px">
-            <input id="ic-port" type="number" min="1" max="65535" required value="${intercom?.port ?? driver0?.defaultPort ?? 8000}" title="Puerto del SDK: llamadas y voz">
-            <input id="ic-http-port" type="number" min="1" max="65535" required value="${intercom?.httpPort ?? driver0?.defaultHttpPort ?? 80}" title="Puerto HTTP (ISAPI): estado y apertura de puerta">
+            <input id="ic-port" type="number" min="1" max="65535" required value="${intercom?.port ?? seed.port ?? driver0?.defaultPort ?? 8000}" title="Puerto del SDK: llamadas y voz">
+            <input id="ic-http-port" type="number" min="1" max="65535" required value="${intercom?.httpPort ?? seed.httpPort ?? driver0?.defaultHttpPort ?? 80}" title="Puerto HTTP (ISAPI): estado y apertura de puerta">
           </div>
         </div>
       </div>
       <div class="form-grid">
         <div class="field">
           <label>Usuario del frente</label>
-          <input id="ic-username" required value="${esc(intercom?.username ?? "admin")}" placeholder="admin">
+          <input id="ic-username" required value="${esc(intercom?.username ?? seed.username ?? "admin")}" placeholder="admin">
         </div>
         <div class="field">
           <label>Contraseña${isNew ? "" : " (vacío = no cambiar)"}</label>

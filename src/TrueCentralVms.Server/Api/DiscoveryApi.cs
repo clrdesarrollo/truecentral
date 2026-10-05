@@ -38,6 +38,9 @@ public static partial class DiscoveryApi
             // kind=access: solo equipos de control de acceso COMPATIBLES (los que
             // el módulo sabe administrar); lo usa la página Control de acceso.
             bool accessOnly = string.Equals(kind, "access", StringComparison.OrdinalIgnoreCase);
+            // kind=intercom: solo frentes de videoportero que el módulo de
+            // citofonía sabe manejar (Hikvision); lo usa la página Citofonía.
+            bool intercomOnly = string.Equals(kind, "intercom", StringComparison.OrdinalIgnoreCase);
 
             // El panel repite el sondeo solo cada 30 s mientras la página está
             // abierta: se audita una vez por usuario cada 10 min.
@@ -45,6 +48,8 @@ public static partial class DiscoveryApi
                 await audit.LogAsync(ctx, accessOnly ? "access" : "devices", "discovery-scan",
                     detail: accessOnly
                         ? "Sondeó la red en busca de equipos de control de acceso (SADP)."
+                        : intercomOnly
+                        ? "Sondeó la red en busca de frentes de citofonía (SADP)."
                         : decodersOnly
                             ? "Sondeó la red en busca de decodificadores de muro (SADP, DHDiscover)."
                             : "Sondeó la red en busca de equipos de video (SADP, DHDiscover, WS-Discovery).");
@@ -60,7 +65,9 @@ public static partial class DiscoveryApi
             // Cada familia se pregunta solo donde puede contestar algo útil:
             // WS-Discovery no distingue equipos de control de acceso, y ZKTeco
             // no aparece en ningún otro sondeo (habla su propio protocolo).
-            var onvifTask = accessOnly ? Task.FromResult(new List<OnvifDiscoveredDto>()) : WsDiscovery.ScanAsync(window, logger, ct);
+            // Los frentes de citofonía compatibles son todos Hikvision: basta SADP.
+            var onvifTask = accessOnly || intercomOnly
+                ? Task.FromResult(new List<OnvifDiscoveredDto>()) : WsDiscovery.ScanAsync(window, logger, ct);
             var knownZk = accessOnly
                 ? (await db.AccessDevices.AsNoTracking().Where(d => d.DriverKey == "zkteco-tcp")
                     .Select(d => d.Host).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase)
@@ -74,20 +81,26 @@ public static partial class DiscoveryApi
 
             foreach (var d in sadpTask.Result)
             {
-                string? category = accessOnly ? CategorizeAccess(d.Model) : CategorizeHikvision(d.Model);
+                string? category = accessOnly ? CategorizeAccess(d.Model)
+                    : intercomOnly ? CategorizeIntercom(d.Model)
+                    : CategorizeHikvision(d.Model);
                 if (category is null) continue;
                 if (decodersOnly && category != "Decodificador") continue;
                 rows[d.Ip] = new
                 {
                     d.Ip, Brand = "Hikvision",
                     // El control de acceso se administra por ISAPI (puerto HTTP), no por el SDK.
-                    DriverKey = accessOnly ? "hikvision-isapi" : "hikvision-netsdk",
+                    DriverKey = accessOnly ? "hikvision-isapi" : intercomOnly ? "hikvision-intercom" : "hikvision-netsdk",
                     d.CommandPort, d.HttpPort, d.Model, d.Serial, d.Mac, d.Activated, Category = category,
+                    // Cambio de IP por SADP (POST /api/discovery/change-ip): pide la contraseña, solo si está activado.
+                    CanChangeIp = d.Activated, d.SubnetMask, d.Gateway, d.Dhcp,
+                    Reachable = IsInLocalSubnet(d.Ip),
                 };
             }
 
             foreach (var d in dahuaTask.Result)
             {
+                if (intercomOnly) break;               // sin driver de citofonía Dahua (VTO) todavía
                 string? category = accessOnly
                     ? CategorizeDahuaAccess(d.DeviceClass, d.Model)
                     : CategorizeDahua(d.DeviceClass, d.Model);
@@ -104,9 +117,9 @@ public static partial class DiscoveryApi
                     Activated = !d.Uninitialized, CanInitialize = d.Uninitialized,
                     // Si la recuperación por correo está activa, el equipo exige uno al inicializarse.
                     InitNeedsEmail = d.Uninitialized && (d.PwdResetWay & 0x02) != 0,
-                    // Cambio de IP sin sesión (POST /api/discovery/dahua/change-ip): exige
+                    // Cambio de IP sin sesión (POST /api/discovery/change-ip): exige
                     // la contraseña del equipo, así que solo una vez inicializado.
-                    CanChangeIp = d.InitStatus == 2, d.SubnetMask, d.Gateway,
+                    CanChangeIp = d.InitStatus == 2, d.SubnetMask, d.Gateway, d.Dhcp,
                     Reachable = IsInLocalSubnet(d.Ip),
                     Category = category,
                 };
@@ -216,13 +229,17 @@ public static partial class DiscoveryApi
 
     public sealed record DahuaInitializeRequest(string? Mac, string? Password, string? ConfirmPassword, string? Email);
 
-    public sealed record DahuaChangeIpRequest(string? Mac, string? Ip, string? Mask, string? Gateway,
-        string? Username, string? Password);
+    /// <param name="Brand">"Dahua" o "Hikvision".</param>
+    /// <param name="Dhcp">true = el equipo toma IP y DNS del servidor DHCP (se ignoran IP, máscara, puerta y DNS).</param>
+    /// <param name="Dns1">DNS preferido; vacío = no se tocan los DNS del equipo.</param>
+    public sealed record ChangeIpRequest(string? Brand, string? Mac, bool Dhcp, string? Ip, string? Mask,
+        string? Gateway, string? Dns1, string? Dns2, string? Username, string? Password, bool SyncTime = false);
 
     /// <summary>
-    /// Cambio de IP de un equipo Dahua sin iniciar sesión, por multicast y MAC
-    /// ("Change IP" de SmartPSS). Es lo que saca a un equipo recién
-    /// inicializado de la IP de fábrica para poder agregarlo.
+    /// Cambio de red de un equipo sin iniciar sesión, por multicast y MAC: Dahua
+    /// con CLIENT_ModifyDevice ("Change IP" de SmartPSS) y Hikvision con el SDK
+    /// de SADP (SADP Tool). IP fija o DHCP; los DNS, que ninguno de los dos
+    /// protocolos lleva, se aplican después por la API web del equipo.
     /// </summary>
     private static void MapDahuaChangeIp(WebApplication app)
     {
@@ -256,62 +273,102 @@ public static partial class DiscoveryApi
             return Results.Ok(networks);
         });
 
-        app.MapPost("/api/discovery/dahua/change-ip", async (HttpContext ctx, DahuaChangeIpRequest request,
+        app.MapPost("/api/discovery/change-ip", async (HttpContext ctx, ChangeIpRequest request,
             ILogger<Program> logger, Services.AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
 
+            bool hikvision = string.Equals(request.Brand, "Hikvision", StringComparison.OrdinalIgnoreCase);
+            bool dahua = string.Equals(request.Brand, "Dahua", StringComparison.OrdinalIgnoreCase);
+            string brand = hikvision ? "Hikvision" : "Dahua";
+            bool dhcp = request.Dhcp;
             string mac = (request.Mac ?? "").Trim();
             string target = mac;
             string newIp = (request.Ip ?? "").Trim(), mask = (request.Mask ?? "").Trim(),
                    gateway = (request.Gateway ?? "").Trim();
+            string dns1 = (request.Dns1 ?? "").Trim(), dns2 = (request.Dns2 ?? "").Trim();
             string username = string.IsNullOrWhiteSpace(request.Username) ? DahuaDeviceInitializer.AdminUser
                 : request.Username.Trim();
+            string wanted = dhcp ? "DHCP" : $"IP fija {newIp}";
 
             async Task<IResult> Reject(int status, string error)
             {
                 await audit.LogAsync(ctx, "devices", "device-ip-changed", targetType: "device", targetName: target,
-                    detail: $"No se pudo cambiar la IP del equipo Dahua {target} a {newIp}: {error}", success: false);
+                    detail: $"No se pudo cambiar la red del equipo {brand} {target} ({wanted}): {error}", success: false);
                 return Results.Json(new { error }, statusCode: status);
             }
             const int Invalid = StatusCodes.Status422UnprocessableEntity;
 
+            if (!hikvision && !dahua) return await Reject(Invalid, "Solo se puede cambiar la IP de equipos Dahua y Hikvision.");
             if (mac.Length == 0) return await Reject(Invalid, "Falta la MAC del equipo.");
             if (string.IsNullOrEmpty(request.Password)) return await Reject(Invalid, "Falta la contraseña del equipo.");
-            if (!TryParseV4(newIp, out var ipAddress) || !TryParseV4(mask, out var maskAddress))
-                return await Reject(Invalid, "La IP y la máscara deben ser direcciones IPv4 (por ejemplo 192.168.10.60 y 255.255.255.0).");
-            if (!IsValidMask(maskAddress))
-                return await Reject(Invalid, "La máscara de subred no es válida.");
-            if (IsNetworkOrBroadcast(ipAddress, maskAddress))
-                return await Reject(Invalid, "Esa IP es la dirección de red o de difusión de la subred: elija otra.");
-            if (gateway.Length > 0)
+
+            IPAddress ipAddress = IPAddress.None;
+            if (!dhcp)
             {
-                if (!TryParseV4(gateway, out var gatewayAddress))
-                    return await Reject(Invalid, "La puerta de enlace debe ser una dirección IPv4.");
-                if (!SameSubnet(ipAddress, gatewayAddress, maskAddress))
-                    return await Reject(Invalid, "La puerta de enlace tiene que estar en la misma subred que la IP nueva.");
-                if (gatewayAddress.Equals(ipAddress))
-                    return await Reject(Invalid, "La IP nueva no puede ser igual a la puerta de enlace.");
+                if (!TryParseV4(newIp, out ipAddress) || !TryParseV4(mask, out var maskAddress))
+                    return await Reject(Invalid, "La IP y la máscara deben ser direcciones IPv4 (por ejemplo 192.168.10.60 y 255.255.255.0).");
+                if (!IsValidMask(maskAddress))
+                    return await Reject(Invalid, "La máscara de subred no es válida.");
+                if (IsNetworkOrBroadcast(ipAddress, maskAddress))
+                    return await Reject(Invalid, "Esa IP es la dirección de red o de difusión de la subred: elija otra.");
+                if (gateway.Length > 0)
+                {
+                    if (!TryParseV4(gateway, out var gatewayAddress))
+                        return await Reject(Invalid, "La puerta de enlace debe ser una dirección IPv4.");
+                    if (!SameSubnet(ipAddress, gatewayAddress, maskAddress))
+                        return await Reject(Invalid, "La puerta de enlace tiene que estar en la misma subred que la IP nueva.");
+                    if (gatewayAddress.Equals(ipAddress))
+                        return await Reject(Invalid, "La IP nueva no puede ser igual a la puerta de enlace.");
+                }
+                if (dns1.Length > 0 && !TryParseV4(dns1, out _))
+                    return await Reject(Invalid, "El DNS preferido debe ser una dirección IPv4.");
+                if (dns2.Length > 0 && !TryParseV4(dns2, out _))
+                    return await Reject(Invalid, "El DNS alternativo debe ser una dirección IPv4.");
+                if (dns2.Length > 0 && dns1.Length == 0)
+                    return await Reject(Invalid, "Indique primero el DNS preferido.");
             }
 
-            // La búsqueda del SDK (no DHDiscover) entrega la estructura firmada
-            // que el cambio de IP le tiene que devolver al equipo.
-            var localIps = LocalIPv4().Select(l => l.Address.ToString()).ToList();
-            var found = await DahuaNetworkSetup.SearchAsync(localIps, TimeSpan.FromSeconds(3), ct);
-            var device = found.FirstOrDefault(d => string.Equals(d.Mac, mac, StringComparison.OrdinalIgnoreCase));
-            if (device is null)
-                return await Reject(StatusCodes.Status404NotFound,
-                    "El equipo ya no responde en la red. Vuelva a buscar e intente de nuevo.");
-            target = $"{device.Model} {device.Ip} ({device.Mac})";
-            if ((device.InitStatus & 0x03) == 1)
-                return await Reject(StatusCodes.Status409Conflict,
-                    "El equipo está sin inicializar: inicialícelo primero (la contraseña que elija es la que pide este cambio).");
+            // Estado actual del equipo, desde la búsqueda de su propia marca.
+            string oldIp, model;
+            int httpPort;
+            List<string> ipsInUse;
+            DahuaSdkSearchResult? dahuaDevice = null;
+            if (dahua)
+            {
+                // La búsqueda del SDK (no DHDiscover) entrega la estructura firmada
+                // que el cambio de IP le tiene que devolver al equipo.
+                var localIps = LocalIPv4().Select(l => l.Address.ToString()).ToList();
+                var found = await DahuaNetworkSetup.SearchAsync(localIps, TimeSpan.FromSeconds(3), ct);
+                dahuaDevice = found.FirstOrDefault(d => string.Equals(d.Mac, mac, StringComparison.OrdinalIgnoreCase));
+                if (dahuaDevice is null)
+                    return await Reject(StatusCodes.Status404NotFound,
+                        "El equipo ya no responde en la red. Vuelva a buscar e intente de nuevo.");
+                if ((dahuaDevice.InitStatus & 0x03) == 1)
+                    return await Reject(StatusCodes.Status409Conflict,
+                        "El equipo está sin inicializar: inicialícelo primero (la contraseña que elija es la que pide este cambio).");
+                (oldIp, model, httpPort) = (dahuaDevice.Ip, dahuaDevice.Model, dahuaDevice.HttpPort);
+                ipsInUse = found.Select(d => d.Ip).ToList();
+            }
+            else
+            {
+                var found = await SadpDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, ct);
+                var device = found.FirstOrDefault(d => HikvisionSadp.NormalizeMac(d.Mac) == HikvisionSadp.NormalizeMac(mac));
+                if (device is null)
+                    return await Reject(StatusCodes.Status404NotFound,
+                        "El equipo ya no responde en la red. Vuelva a buscar e intente de nuevo.");
+                if (!device.Activated)
+                    return await Reject(StatusCodes.Status409Conflict, "El equipo no está activado: actívelo antes de cambiarle la IP.");
+                (oldIp, model, httpPort) = (device.Ip, device.Model, device.HttpPort);
+                ipsInUse = found.Select(d => d.Ip).ToList();
+            }
+            target = $"{model} {oldIp} ({mac})";
 
-            if (newIp != device.Ip)
+            if (!dhcp && newIp != oldIp)
             {
                 // Una IP repetida dejaría a dos equipos peleándose la misma
                 // dirección: se rechaza si algo ya responde en ella.
-                bool inUse = found.Any(d => d.Ip == newIp);
+                bool inUse = ipsInUse.Contains(newIp);
                 if (!inUse)
                 {
                     try
@@ -327,30 +384,92 @@ public static partial class DiscoveryApi
                         $"La IP {newIp} ya está en uso por otro equipo de la red. Elija otra.");
             }
 
-            var result = await DahuaNetworkSetup.ChangeIpAsync(device, newIp, mask, gateway, username,
-                request.Password!, ct);
-            if (!result.Success)
-                return await Reject(StatusCodes.Status502BadGateway, result.Error ?? "error desconocido");
+            string? changeError;
+            if (dahua)
+            {
+                var result = await DahuaNetworkSetup.ChangeIpAsync(dahuaDevice!, dhcp, newIp, mask, gateway, username,
+                    request.Password!, ct);
+                changeError = result.Success ? null : result.Error ?? "error desconocido";
+            }
+            else
+            {
+                var result = await HikvisionSadp.ChangeNetworkAsync(mac, request.Password!, dhcp, newIp, mask, gateway, ct);
+                changeError = result.Success ? null : result.Error ?? "error desconocido";
+            }
+            if (changeError is not null)
+                return await Reject(StatusCodes.Status502BadGateway, changeError);
 
             await audit.LogAsync(ctx, "devices", "device-ip-changed", targetType: "device", targetName: target,
-                detail: $"Cambió la IP del equipo Dahua {target}: {device.Ip} → {newIp}, máscara {mask}" +
-                        (gateway.Length > 0 ? $", puerta de enlace {gateway}." : ", sin puerta de enlace."));
-            logger.LogInformation("IP del equipo Dahua {Target} cambiada a {NewIp}.", target, newIp);
+                detail: dhcp
+                    ? $"Pasó el equipo {brand} {target} a DHCP."
+                    : $"Cambió la IP del equipo {brand} {target}: {oldIp} → {newIp}, máscara {mask}" +
+                      (gateway.Length > 0 ? $", puerta de enlace {gateway}." : ", sin puerta de enlace."));
+            logger.LogInformation("Red del equipo {Brand} {Target} cambiada ({Wanted}).", brand, target, wanted);
 
-            // El equipo tarda unos segundos en tomar la IP nueva; se confirma
-            // preguntándole de nuevo para no anunciar un éxito que no fue.
-            bool confirmed = false;
-            for (int attempt = 0; attempt < 3 && !confirmed; attempt++)
+            // El equipo tarda unos segundos en tomar la red nueva; se confirma
+            // preguntándole de nuevo (con DHCP, así se sabe también qué IP le tocó).
+            string? finalIp = null;
+            for (int attempt = 0; attempt < 4 && finalIp is null; attempt++)
             {
-                var check = await DahuaDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, ipAddress, ct);
-                confirmed = check.Any(d => string.Equals(d.Mac, mac, StringComparison.OrdinalIgnoreCase) && d.Ip == newIp);
+                string? seen = dahua
+                    ? (await DahuaDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, dhcp ? null : ipAddress, ct))
+                        .FirstOrDefault(x => string.Equals(x.Mac, mac, StringComparison.OrdinalIgnoreCase))?.Ip
+                    : (await SadpDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, ct))
+                        .FirstOrDefault(x => HikvisionSadp.NormalizeMac(x.Mac) == HikvisionSadp.NormalizeMac(mac))?.Ip;
+                if (seen is not null && (dhcp ? seen != oldIp || attempt >= 2 : seen == newIp)) finalIp = seen;
+            }
+            bool confirmed = finalIp is not null;
+            string ip = finalIp ?? (dhcp ? oldIp : newIp);
+            bool reachable = IsInLocalSubnet(ip);
+
+            // Los DNS no viajan en el cambio por multicast: se aplican por la
+            // API web del equipo, ya en su IP nueva. Con DHCP los entrega el servidor DHCP.
+            bool dnsApplied = false;
+            string? dnsError = null;
+            if (!dhcp && dns1.Length > 0)
+            {
+                if (!reachable)
+                    dnsError = "El equipo no quedó en la red de este servidor: configure los DNS desde el propio equipo.";
+                else
+                {
+                    dnsError = await DeviceWebSetup.ApplyDnsAsync(brand, ip, httpPort > 0 ? httpPort : 80, username,
+                        request.Password!, dns1, dns2, logger, ct);
+                    dnsApplied = dnsError is null;
+                }
+                await audit.LogAsync(ctx, "devices", "device-dns-changed", targetType: "device", targetName: target,
+                    detail: dnsApplied
+                        ? $"Configuró los DNS del equipo {brand} {target}: {dns1}{(dns2.Length > 0 ? ", " + dns2 : "")}."
+                        : $"No se pudieron configurar los DNS del equipo {brand} {target}: {dnsError}",
+                    success: dnsApplied);
+            }
+
+            // Parámetros básicos: fecha, hora y zona horaria iguales a las del
+            // servidor (el equipo de fábrica arranca con otra zona y otra hora).
+            bool timeSynced = false;
+            string? timeError = null;
+            if (request.SyncTime)
+            {
+                if (!reachable || !confirmed)
+                    timeError = "El equipo no quedó accesible desde este servidor: ajuste la fecha y la hora desde el propio equipo.";
+                else
+                {
+                    timeError = await DeviceWebSetup.SyncTimeAsync(brand, ip, httpPort > 0 ? httpPort : 80, username,
+                        request.Password!, logger, ct);
+                    timeSynced = timeError is null;
+                }
+                await audit.LogAsync(ctx, "devices", "device-time-synced", targetType: "device", targetName: target,
+                    detail: timeSynced
+                        ? $"Sincronizó la fecha, la hora y la zona horaria del equipo {brand} {target} con el servidor " +
+                          $"({TimeZoneInfo.Local.DisplayName})."
+                        : $"No se pudo sincronizar la fecha y la hora del equipo {brand} {target}: {timeError}",
+                    success: timeSynced);
             }
 
             return Results.Ok(new
             {
-                Ip = newIp, device.Mac, device.Model, Username = username,
-                Confirmed = confirmed,
-                Reachable = IsInLocalSubnet(newIp),
+                Ip = ip, Mac = mac, Model = model, Username = username, Dhcp = dhcp,
+                TimeSynced = timeSynced, TimeError = timeError,
+                Confirmed = confirmed, Reachable = reachable, DnsApplied = dnsApplied, DnsError = dnsError,
             });
         });
     }
@@ -441,6 +560,18 @@ public static partial class DiscoveryApi
             AccessDeviceKind.Turnstile => "Torniquete",
             _ => null,
         };
+
+    /// <summary>
+    /// Frentes de videoportero Hikvision que maneja el módulo de citofonía:
+    /// DS-KD (modulares), DS-KV (villa) y DS-KB (frentes de puerta). Los
+    /// monitores interiores (DS-KH) no son frentes y quedan fuera.
+    /// </summary>
+    private static string? CategorizeIntercom(string model)
+    {
+        string m = (model ?? "").Trim().ToUpperInvariant();
+        return m.StartsWith("DS-KD") || m.StartsWith("DS-KV") || m.StartsWith("DS-KB") || m.StartsWith("IDS-KD")
+            ? "Frente" : null;
+    }
 
     /// <summary>
     /// Etiqueta del equipo de control de acceso; null = no es de control de

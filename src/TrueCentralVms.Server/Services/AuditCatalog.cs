@@ -40,6 +40,8 @@ public static class AuditCatalog
             new("discovery-scan", "Búsqueda de equipos en la red"),
             new("device-initialized", "Equipo de fábrica inicializado"),
             new("device-ip-changed", "IP de un equipo cambiada"),
+            new("device-dns-changed", "DNS de un equipo configurados"),
+            new("device-time-synced", "Fecha, hora y zona horaria de un equipo sincronizadas"),
         ]),
         new("live", "Video en vivo",
         [

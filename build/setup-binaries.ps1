@@ -111,6 +111,32 @@ if (-not (Test-Path $resources)) {
     }
 }
 
+# SDK de SADP (Hikvision): cambio de IP por multicast y MAC desde la búsqueda de
+# equipos. Es un paquete aparte de HCNetSDK; se toma de Resources\ o, si no está,
+# de una instalación de iVMS-4200 (trae el mismo Sadp.dll x64 con sus OpenSSL 3).
+$sadpDll = $null
+if (Test-Path $resources) {
+    $sadpDll = Get-ChildItem $resources -Recurse -File -Filter 'Sadp.dll' -ErrorAction SilentlyContinue |
+        Where-Object { $_.DirectoryName -notmatch '\\(x86|win32)\b' } | Select-Object -First 1
+}
+if (-not $sadpDll) {
+    $sadpDll = Get-ChildItem "${env:ProgramFiles(x86)}\iVMS-4200*", "$env:ProgramFiles\iVMS-4200*" -Recurse -File -Filter 'Sadp.dll' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+}
+if ($sadpDll) {
+    $dest = Join-Path $repo 'native\hikvision-sadp'
+    New-Item -ItemType Directory -Force $dest | Out-Null
+    Copy-Item $sadpDll.FullName $dest -Force
+    foreach ($dep in 'libcrypto-3-x64.dll', 'libssl-3-x64.dll') {
+        $file = Join-Path $sadpDll.DirectoryName $dep
+        if (Test-Path $file) { Copy-Item $file $dest -Force }
+    }
+    Write-Host "  OK  SDK de SADP ($($sadpDll.FullName)) -> $dest" -ForegroundColor Green
+} else {
+    Write-Warning ("SADP: no se encontró Sadp.dll (x64) en Resources\ ni en iVMS-4200. " +
+        "Sin él no se puede cambiar la IP de equipos Hikvision desde la búsqueda.")
+}
+
 # ---------------------------------------------------------------------------
 # 2. Herramientas redistribuibles (tools\)
 # ---------------------------------------------------------------------------
@@ -178,6 +204,7 @@ $checks = [ordered]@{
     'native\hikvision\HCNetSDK.dll'          = 'Driver Hikvision'
     'native\dahua\dhnetsdk.dll'              = 'Driver Dahua'
     'native\hikvision-fp\FPModule_SDK.dll'   = 'SDK del lector de huellas USB (complemento)'
+    'native\hikvision-sadp\Sadp.dll'         = 'SDK de SADP (cambiar IP de equipos Hikvision)'
     'tools\postgres\pgsql\bin\pg_ctl.exe'    = 'PostgreSQL embebido (servidor)'
     'tools\postgres\pgsql\bin\VCRUNTIME140.dll' = 'Runtime de Visual C++ para PostgreSQL'
     'tools\postgres\pgsql\bin\MSVCP140.dll'     = 'Runtime de Visual C++ para PostgreSQL (C++)'
@@ -202,6 +229,7 @@ if ($missing -gt 0) {
     Write-Host "Faltan $missing componente(s). Dónde obtenerlos:" -ForegroundColor Yellow
     Write-Host "  - SDK Hikvision/Dahua : portal de desarrolladores del fabricante (versión Win64) -> Resources\"
     Write-Host "  - SDK lector de huella: FPModule_SDK V2.2.0 x64 (viene con el DS-K1F820-F) -> Resources\"
+    Write-Host "  - SDK de SADP         : SADP SDK x64 de Hikvision -> Resources\ (o instale iVMS-4200, que lo trae)"
     Write-Host "                          solo hace falta para el complemento de enrolamiento, no para el servidor"
     Write-Host "  - PostgreSQL portable : https://www.enterprisedb.com/download-postgresql-binaries -> tools\postgres\pgsql"
     Write-Host "  - MediaMTX v1.20      : https://github.com/bluenviron/mediamtx/releases -> tools\mediamtx"

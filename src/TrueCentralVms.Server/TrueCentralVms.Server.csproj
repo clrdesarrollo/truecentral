@@ -14,6 +14,8 @@
   <ItemGroup>
     <None Include="..\..\native\hikvision\**\*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\native\dahua\**\*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- SDK de SADP (Hikvision): cambio de IP desde la búsqueda. Lleva OpenSSL 3, distinta de la 1.1 de HCNetSDK. -->
+    <None Include="..\..\native\hikvision-sadp\**\*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
