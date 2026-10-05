@@ -193,7 +193,34 @@ body {
 .topbar h2 { margin: 0; font-size: 17px; }
 .topbar-left { display: flex; align-items: center; gap: 12px; }
 .topbar-menu { display: none; padding: 3px 9px; font-size: 16px; line-height: 1.2; }
-.topbar-user { display: flex; align-items: center; gap: 14px; }
+.topbar-user { display: flex; align-items: center; gap: 14px; position: relative; }
+/* Menú del usuario: el nombre abre la lista (descargar complemento, cerrar sesión). */
+.user-menu-toggle {
+  display: flex; align-items: center; gap: 8px;
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  color: var(--muted); font: inherit; padding: 5px 10px; cursor: pointer;
+}
+.user-menu-toggle:hover, .user-menu-toggle[aria-expanded="true"] {
+  color: var(--text); background: var(--panel-2); border-color: var(--border);
+}
+.user-menu-toggle .caret {
+  width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid currentColor; transition: transform .15s;
+}
+.user-menu-toggle[aria-expanded="true"] .caret { transform: rotate(180deg); }
+.user-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
+  min-width: 230px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  display: flex; flex-direction: column;
+}
+.user-menu button {
+  background: transparent; border: 0; border-radius: 6px; color: var(--text);
+  font: inherit; text-align: left; padding: 8px 10px; cursor: pointer;
+}
+.user-menu button:hover, .user-menu button:focus-visible { background: var(--panel-2); outline: none; }
+.user-menu button.danger { color: var(--danger); border-top: 1px solid var(--border); border-radius: 0 0 6px 6px; margin-top: 4px; }
 main#view { padding: 24px; overflow: auto; }
 
 /* ---------- Tarjetas y tablas ---------- */

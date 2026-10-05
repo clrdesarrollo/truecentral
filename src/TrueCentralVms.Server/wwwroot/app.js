@@ -595,7 +595,8 @@ function anprCell(device, isAdmin) {
 }
 
 let discoveryTimer = null;
-let discoveryBusy = false;
+/** Opciones (página) del sondeo en curso, o null. */
+let discoveryBusy = null;
 let lastScanAt = 0;
 
 /**
@@ -615,6 +616,7 @@ const DEVICE_DISCOVERY = {
     host: d.ip,
     sdkPort: d.commandPort || 8000,
     driverKey: d.driverKey || "hikvision-netsdk",
+    username: d.username, // viene solo si se acaba de inicializar desde acá
   }),
 };
 let discoveryOptions = DEVICE_DISCOVERY;
@@ -638,9 +640,12 @@ function startDiscoveryPolling(devices, options = DEVICE_DISCOVERY) {
 /** @param showProgress muestra el aviso de "sondeando" y los errores; falso en los refrescos automáticos. */
 async function runDiscovery(devices, showProgress = true) {
   const opt = discoveryOptions;
-  if (discoveryBusy) return; // no encimar el sondeo automático con el del botón
+  // No encimar el sondeo automático con el del botón DE LA MISMA página. Uno
+  // de otra página (se cambió de Fuentes de video a Control de acceso a mitad
+  // de sondeo) no bloquea: su resultado se descarta al volver.
+  if (discoveryBusy === opt) return;
   if (!$(opt.container)) return;
-  discoveryBusy = true;
+  discoveryBusy = opt;
   const scanButton = $(opt.button);
   if (scanButton) { scanButton.disabled = true; scanButton.textContent = "Buscando…"; }
   if (showProgress) {
@@ -649,16 +654,21 @@ async function runDiscovery(devices, showProgress = true) {
     box.dataset.signature = ""; // se reemplazó la tabla: hay que volver a pintarla aunque el resultado repita
   }
   try {
-    lastScan = await Api.get(`/api/discovery/scan${opt.kind ? `?kind=${encodeURIComponent(opt.kind)}` : ""}`);
+    const scan = await Api.get(`/api/discovery/scan${opt.kind ? `?kind=${encodeURIComponent(opt.kind)}` : ""}`);
+    // Mientras tanto se cambió de página: este resultado es de otro tipo de
+    // equipos (cámaras en la tabla de control de acceso). Se descarta.
+    if (discoveryOptions !== opt) return;
+    lastScan = scan;
     lastScanAt = Date.now();
     renderOnlineDevices(devices);
   } catch (err) {
+    if (discoveryOptions !== opt) return;
     // En el refresco automático se conserva la última lista buena: un aviso
     // cada 30 s por un sondeo fallido sería solo ruido.
     const box = showProgress ? $(opt.container) : null;
     if (box) { box.innerHTML = `<div class="error-box">${esc(err.error)}</div>`; box.dataset.signature = ""; }
   } finally {
-    discoveryBusy = false;
+    if (discoveryBusy === opt) discoveryBusy = null;
     const btn = $(opt.button);
     if (btn) { btn.disabled = false; btn.textContent = "Buscar"; }
   }
@@ -696,16 +706,241 @@ function renderOnlineDevices(devices) {
           <td class="muted">${opt.portOf ? opt.portOf(d) : d.commandPort}</td>
           <td class="muted">${esc(d.mac)}</td>
           <td>${added ? `<span class="tag on">Agregado</span>`
+                : d.canInitialize ? `<span class="tag off">Sin inicializar</span>`
                 : d.activated === false ? `<span class="tag off">Sin activar</span>`
                 : `<span class="tag operator">Nuevo</span>`}</td>
           <td class="row-actions">
-            <button class="btn ghost scan-use" data-i="${i}" ${added ? "disabled" : ""}>Agregar</button>
+            ${d.canChangeIp && !added
+              ? `<button class="btn ghost scan-ip" data-i="${i}" title="Cambia la IP del equipo sin entrar a él (como Change IP de SmartPSS)">Cambiar IP</button>`
+              : ""}
+            ${d.canInitialize && !added
+              ? `<button class="btn scan-init" data-i="${i}" title="Crea el usuario admin del equipo de fábrica">Inicializar</button>`
+              : `<button class="btn ghost scan-use" data-i="${i}" ${added ? "disabled" : ""}
+                  ${d.reachable === false ? `title="El equipo está en otra subred: cámbiele la IP antes de agregarlo"` : ""}>Agregar</button>`}
           </td>
         </tr>`;
       }).join("")}
       </tbody>
     </table></div>`;
   $$(".scan-use").forEach((b) => b.addEventListener("click", () => opt.onUse(lastScan[Number(b.dataset.i)])));
+  $$(".scan-init").forEach((b) => b.addEventListener("click", () => dahuaInitModal(lastScan[Number(b.dataset.i)], devices)));
+  $$(".scan-ip").forEach((b) => b.addEventListener("click", () => dahuaChangeIpModal(lastScan[Number(b.dataset.i)], devices)));
+}
+
+/** Validación rápida de IPv4 en el panel (el servidor revisa lo mismo y más). */
+const isIPv4 = (s) => /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(s);
+
+/**
+ * Cambia la IP de un equipo Dahua sin entrar a él (multicast por MAC), como
+ * "Change IP" de SmartPSS. Si el equipo está fuera de la subred del servidor
+ * se propone una IP de la red del servidor.
+ * @param {string} [knownPassword] la que se acaba de elegir al inicializarlo (no se vuelve a pedir).
+ */
+async function dahuaChangeIpModal(d, devices, knownPassword) {
+  const opt = discoveryOptions;
+  let networks = [];
+  try { networks = await Api.get("/api/discovery/local-networks"); } catch { /* se llena a mano */ }
+  // Equipo en la red del servidor: se conserva su configuración. Si no, se
+  // propone la red principal del servidor (la que tiene puerta de enlace).
+  const net = networks[0];
+  const keep = d.reachable !== false || !net;
+  const ip = keep ? d.ip : net.address.split(".").slice(0, 3).join(".") + ".";
+  const mask = keep ? (d.subnetMask || "255.255.255.0") : net.mask;
+  const gateway = keep ? (d.gateway || "") : net.gateway;
+
+  openModal(`
+    <h3>Cambiar IP</h3>
+    <p class="muted" style="margin-top:0">
+      ${esc(d.model)} · ${esc(d.mac)}<br>
+      IP actual: <b>${esc(d.ip)}</b>${d.reachable === false
+        ? ` — fuera de la red de este servidor${net ? ` (${esc(net.address)})` : ""}: no se puede agregar hasta cambiarla.` : ""}
+    </p>
+    <div id="dip-error"></div>
+    <form id="dip-form">
+      <div class="form-grid">
+        <div class="field">
+          <label>IP nueva</label>
+          <input id="dip-ip" required value="${esc(ip)}" placeholder="192.168.10.60">
+        </div>
+        <div class="field">
+          <label>Máscara de subred</label>
+          <input id="dip-mask" required value="${esc(mask)}">
+        </div>
+      </div>
+      <div class="field">
+        <label>Puerta de enlace (opcional)</label>
+        <input id="dip-gw" value="${esc(gateway)}">
+      </div>
+      ${knownPassword ? "" : `
+      <div class="form-grid">
+        <div class="field">
+          <label>Usuario del equipo</label>
+          <input id="dip-user" value="admin" required>
+        </div>
+        <div class="field">
+          <label>Contraseña del equipo</label>
+          <input id="dip-pass" type="password" autocomplete="current-password" required>
+        </div>
+      </div>`}
+      <div class="muted" style="font-size:12px;margin:-4px 0 12px">
+        Se comprueba antes que la IP nueva no esté ocupada. El equipo queda con IP fija (sin DHCP).
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" id="dip-cancel">Cancelar</button>
+        <button class="btn" type="submit" id="dip-save">Cambiar IP</button>
+      </div>
+    </form>`);
+
+  // El cursor queda al final de la IP propuesta, listo para completar el último número.
+  const ipInput = $("#dip-ip");
+  ipInput.focus();
+  ipInput.setSelectionRange(ipInput.value.length, ipInput.value.length);
+
+  $("#dip-cancel").addEventListener("click", closeModal);
+  $("#dip-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const showError = (msg) => { $("#dip-error").innerHTML = `<div class="error-box">${esc(msg)}</div>`; };
+    const body = {
+      mac: d.mac,
+      ip: $("#dip-ip").value.trim(),
+      mask: $("#dip-mask").value.trim(),
+      gateway: $("#dip-gw").value.trim(),
+      username: knownPassword ? "admin" : $("#dip-user").value.trim(),
+      password: knownPassword ?? $("#dip-pass").value,
+    };
+    if (!isIPv4(body.ip)) { showError("Escriba la IP nueva completa (por ejemplo 192.168.10.60)."); return; }
+    if (!isIPv4(body.mask)) { showError("La máscara de subred no es válida."); return; }
+    if (body.gateway && !isIPv4(body.gateway)) { showError("La puerta de enlace no es válida."); return; }
+
+    const button = $("#dip-save");
+    button.disabled = true;
+    button.textContent = "Cambiando… (unos segundos)";
+    $("#dip-error").innerHTML = "";
+    try {
+      const r = await Api.post("/api/discovery/dahua/change-ip", body);
+      lastScan = null;
+      runDiscovery(devices, false);
+      const ready = { ...d, ip: r.ip, reachable: r.reachable, username: r.username };
+      openModal(`
+        <h3>IP cambiada</h3>
+        <div class="info-box">${esc(r.model)} ahora está en <b>${esc(r.ip)}</b>.</div>
+        ${r.confirmed ? "" : `<div class="warn-box" style="margin-top:10px">
+          El equipo aceptó el cambio pero todavía no responde en la IP nueva; algunos tardan hasta un minuto
+          en reiniciar la red. Si no aparece en la próxima búsqueda, revise el cableado y la IP elegida.</div>`}
+        ${r.reachable ? "" : `<div class="warn-box" style="margin-top:10px">
+          La IP ${esc(r.ip)} tampoco está en la red de este servidor: no se podrá agregar desde acá.</div>`}
+        <div class="modal-actions">
+          <button class="btn ghost" type="button" id="dip-close">Cerrar</button>
+          ${r.reachable ? `<button class="btn" type="button" id="dip-add">Agregar ahora</button>` : ""}
+        </div>`);
+      $("#dip-close").addEventListener("click", closeModal);
+      $("#dip-add")?.addEventListener("click", () => opt.onUse(ready));
+    } catch (err) {
+      showError(err.error || "No se pudo cambiar la IP.");
+      button.disabled = false;
+      button.textContent = "Cambiar IP";
+    }
+  });
+}
+
+/** Política de contraseñas Dahua (la misma que revisa el servidor). Devuelve el problema o null. */
+function dahuaPasswordProblem(p) {
+  if (!p || p.length < 8 || p.length > 32) return "La contraseña debe tener entre 8 y 32 caracteres.";
+  if (/['";:& ]/.test(p)) return "La contraseña no puede llevar espacios ni los caracteres ' \" ; : &.";
+  const kinds = [/[A-Z]/, /[a-z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((r) => r.test(p)).length;
+  return kinds < 2
+    ? "La contraseña debe combinar al menos dos tipos de caracteres: mayúsculas, minúsculas, números o símbolos."
+    : null;
+}
+
+/**
+ * Inicializa un equipo Dahua de fábrica (le crea el usuario admin), como el
+ * botón "Initialize" de SmartPSS. Al terminar ofrece agregarlo de inmediato.
+ */
+function dahuaInitModal(d, devices) {
+  const opt = discoveryOptions;
+  openModal(`
+    <h3>Inicializar equipo</h3>
+    <p class="muted" style="margin-top:0">
+      ${esc(d.model)} · ${esc(d.ip)} · ${esc(d.mac)}<br>
+      El equipo está de fábrica y no tiene usuarios. Se le creará el usuario <b>admin</b> con esta contraseña.
+    </p>
+    <div id="di-error"></div>
+    <form id="di-form">
+      <div class="field">
+        <label>Usuario</label>
+        <input value="admin" disabled>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Contraseña</label>
+          <input id="di-pass" type="password" autocomplete="new-password" required maxlength="32">
+        </div>
+        <div class="field">
+          <label>Confirmar contraseña</label>
+          <input id="di-pass2" type="password" autocomplete="new-password" required maxlength="32">
+        </div>
+      </div>
+      <div class="muted" style="font-size:12px;margin:-4px 0 12px">
+        8 a 32 caracteres, combinando al menos dos tipos (mayúsculas, minúsculas, números o símbolos), sin ' " ; : &amp; ni espacios.
+      </div>
+      <div class="field">
+        <label>Correo para recuperar la contraseña${d.initNeedsEmail ? "" : " (opcional)"}</label>
+        <input id="di-email" type="email" maxlength="63" ${d.initNeedsEmail ? "required" : ""}>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" id="di-cancel">Cancelar</button>
+        <button class="btn" type="submit" id="di-save">Inicializar</button>
+      </div>
+    </form>`);
+
+  $("#di-cancel").addEventListener("click", closeModal);
+  $("#di-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const password = $("#di-pass").value;
+    const confirmPassword = $("#di-pass2").value;
+    const showError = (msg) => { $("#di-error").innerHTML = `<div class="error-box">${esc(msg)}</div>`; };
+    const problem = dahuaPasswordProblem(password)
+      ?? (password !== confirmPassword ? "Las contraseñas no coinciden." : null);
+    if (problem) { showError(problem); return; }
+
+    const button = $("#di-save");
+    button.disabled = true;
+    button.textContent = "Inicializando…";
+    $("#di-error").innerHTML = "";
+    try {
+      const r = await Api.post("/api/discovery/dahua/initialize", {
+        mac: d.mac, password, confirmPassword, email: $("#di-email").value,
+      });
+      // El equipo ya tiene usuario: la próxima búsqueda lo mostrará como "Nuevo".
+      lastScan = null;
+      runDiscovery(devices, false);
+      const ready = { ...d, activated: true, canInitialize: false, username: r.username };
+      openModal(`
+        <h3>Equipo inicializado</h3>
+        <div class="info-box">
+          ${esc(r.model)} (${esc(r.ip)}) ya tiene el usuario <b>${esc(r.username)}</b> con la contraseña elegida.
+        </div>
+        ${r.reachable ? "" : `<div class="warn-box" style="margin-top:10px">
+          El equipo sigue en la IP ${esc(r.ip)}, que no está en la red de este servidor: para agregarlo
+          hay que cambiarle la IP a una del mismo segmento.</div>`}
+        <div class="modal-actions">
+          <button class="btn ghost" type="button" id="di-close">Cerrar</button>
+          ${r.reachable
+            ? `<button class="btn" type="button" id="di-add">Agregar ahora</button>`
+            : `<button class="btn" type="button" id="di-ip">Cambiar IP ahora</button>`}
+        </div>`);
+      $("#di-close").addEventListener("click", closeModal);
+      $("#di-add")?.addEventListener("click", () => opt.onUse(ready));
+      // La contraseña recién elegida se reutiliza: no se vuelve a pedir.
+      $("#di-ip")?.addEventListener("click", () =>
+        dahuaChangeIpModal({ ...ready, reachable: false }, devices, password));
+    } catch (err) {
+      showError(err.error || "No se pudo inicializar el equipo.");
+      button.disabled = false;
+      button.textContent = "Inicializar";
+    }
+  });
 }
 
 async function deviceModal(device, prefill) {
@@ -743,7 +978,7 @@ async function deviceModal(device, prefill) {
         </div>
         <div class="field">
           <label>Usuario del equipo</label>
-          <input id="df-username" required value="${esc(device?.username ?? "")}" placeholder="admin">
+          <input id="df-username" required value="${esc(device?.username ?? seed.username ?? "")}" placeholder="admin">
         </div>
       </div>
       <div class="field">
@@ -1444,7 +1679,7 @@ function enterApp() {
   showAppShell();
   CercoAlarm.start();          // alarma de cerco con sonido, en cualquier página
   setupNav();
-  refreshLicenseBanner();
+  startLicenseBanner();        // aviso de licencia (prueba o licencia por vencer) en todas las páginas
   if (!location.hash || !routes[location.hash.split("?")[0]]) location.hash = "#/";
   navigate();
 }
@@ -1471,7 +1706,40 @@ $("#btn-menu").addEventListener("click", () => {
   $("#btn-menu").setAttribute("aria-expanded", String(open));
 });
 
+// Menú del usuario: clic en el nombre despliega la lista; clic fuera o Esc la cierra.
+function setUserMenu(open) {
+  $("#user-menu").classList.toggle("hidden", !open);
+  $("#btn-user-menu").setAttribute("aria-expanded", String(open));
+}
+$("#btn-user-menu").addEventListener("click", (e) => {
+  e.stopPropagation();
+  setUserMenu($("#user-menu").classList.contains("hidden"));
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".topbar-user")) setUserMenu(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") setUserMenu(false);
+});
+
+// Instalador del complemento de enrolamiento: lo publica el propio servidor
+// (la descarga queda en la bitácora como access/webcontrol-downloaded).
+$("#btn-download-addon").addEventListener("click", async () => {
+  setUserMenu(false);
+  let info = null;
+  try { info = await Api.get("/api/webcontrol/info"); } catch { /* servidor viejo o caído */ }
+  if (!info?.available) {
+    toast("El instalador del complemento no está publicado en este servidor (carpeta webcontrol).", true);
+    return;
+  }
+  // La descarga la inicia el navegador: el token va por query porque no
+  // puede mandar la cabecera Authorization.
+  window.location.href = `/api/webcontrol/installer?access_token=${encodeURIComponent(Api.token)}`;
+  toast(`Descargando el complemento (${info.sizeMb} MB)…`);
+});
+
 $("#btn-logout").addEventListener("click", async () => {
+  setUserMenu(false);
   try { await Api.post("/api/auth/logout"); } catch { /* la sesión local se limpia igual */ }
   Api.clearSession();
   renderLogin();

@@ -997,8 +997,21 @@ async function loadAccessPersons(levels) {
 /** Solo la fecha, en hora local: la vigencia se piensa en días, no en horas. */
 const accessDay = (iso) => (iso ? new Date(iso).toLocaleDateString("es-CL") : "—");
 
-/** Fecha ISO → "YYYY-MM-DD" para un <input type=date>. */
-const accessDateInput = (iso) => (iso ? new Date(iso) : new Date()).toISOString().slice(0, 10);
+/**
+ * Fecha → "YYYY-MM-DDTHH:mm:ss" en hora LOCAL para un <input type=datetime-local>.
+ * No usar toISOString: va en UTC, y en Chile un fin a las 23:59:59 se leería
+ * como el día siguiente (y cada edición correría la vigencia un día).
+ */
+const accessDateInput = (date) => {
+  const d = new Date(date);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    + `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+
+/** Vigencia por defecto de una persona nueva: hoy 00:00:00 al 31/12/2099 23:59:59. */
+const accessDefaultValidFrom = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+const accessDefaultValidTo = () => new Date(2099, 11, 31, 23, 59, 59);
 
 /**
  * Alta y edición de una persona, en tres pasos: primero QUIÉN ES, después CON
@@ -1021,9 +1034,8 @@ function accessPersonModal(person, levels) {
     email: person?.email ?? "",
     phone: person?.phone ?? "",
     notes: person?.notes ?? "",
-    validFrom: accessDateInput(person?.validFrom),
-    validTo: person ? accessDateInput(person.validTo)
-      : new Date(Date.now() + 10 * 365 * 864e5).toISOString().slice(0, 10),
+    validFrom: accessDateInput(person?.validFrom ?? accessDefaultValidFrom()),
+    validTo: accessDateInput(person?.validTo ?? accessDefaultValidTo()),
     enabled: person ? person.enabled : true,
     pin: "",
     clearPin: false,
@@ -1099,16 +1111,16 @@ function accessPersonModal(person, levels) {
         <label>Correo (opcional)</label>
         <input id="pw-email" type="email" maxlength="255" value="${esc(draft.email)}">
       </div>
-      <div class="field">
-        <label>Vigencia</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input id="pw-from" type="date" value="${esc(draft.validFrom)}">
-          <span class="muted">a</span>
-          <input id="pw-to" type="date" value="${esc(draft.validTo)}">
-        </div>
-        <div class="muted" style="font-size:12px;margin-top:4px">
-          Los equipos la respetan solos: fuera de esas fechas no la dejan pasar.
-        </div>
+    </div>
+    <div class="field">
+      <label>Vigencia</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="pw-from" type="datetime-local" step="1" style="flex:1;min-width:0" value="${esc(draft.validFrom)}">
+        <span class="muted">a</span>
+        <input id="pw-to" type="datetime-local" step="1" style="flex:1;min-width:0" value="${esc(draft.validTo)}">
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:4px">
+        Los equipos la respetan solos: fuera de esas fechas y horas no la dejan pasar.
       </div>
     </div>
     <div class="field">
@@ -1639,8 +1651,8 @@ function accessPersonModal(person, levels) {
       phone: draft.phone || null,
       notes: draft.notes || null,
       // El día de fin se toma completo: vence al terminar esa jornada, no al empezarla.
-      validFrom: new Date(draft.validFrom + "T00:00:00").toISOString(),
-      validTo: new Date(draft.validTo + "T23:59:59").toISOString(),
+      validFrom: new Date(draft.validFrom).toISOString(),
+      validTo: new Date(draft.validTo).toISOString(),
       enabled: draft.enabled,
       pinCode: draft.pin.trim() || null,
       clearPin: draft.clearPin,

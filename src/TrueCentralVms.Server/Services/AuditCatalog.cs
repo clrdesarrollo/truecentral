@@ -38,6 +38,8 @@ public static class AuditCatalog
             new("channel-updated", "Canal modificado"),
             new("channels-enabled-bulk", "Canales con señal habilitados en bloque"),
             new("discovery-scan", "Búsqueda de equipos en la red"),
+            new("device-initialized", "Equipo de fábrica inicializado"),
+            new("device-ip-changed", "IP de un equipo cambiada"),
         ]),
         new("live", "Video en vivo",
         [

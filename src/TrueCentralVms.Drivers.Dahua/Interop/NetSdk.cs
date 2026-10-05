@@ -210,4 +210,138 @@ internal static class NetSdk
 
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
     public static extern bool CLIENT_FindClose(long lFindHandle);
+
+    // ------------------------------------------------------------------
+    // Inicialización de equipos de fábrica (primer usuario y contraseña)
+    // ------------------------------------------------------------------
+
+    /// <summary>NET_ERROR_PWD_ILLEGAL: la contraseña no cumple la política del equipo.</summary>
+    public const uint ErrorPasswordIllegal = 0x800003F8;
+
+    /// <summary>NET_ERROR_DEVICE_ALREADY_INIT.</summary>
+    public const uint ErrorDeviceAlreadyInit = 0x800003F9;
+
+    /// <summary>NET_NETWORK_ERROR: sin respuesta (tiempo agotado).</summary>
+    public const uint ErrorNetwork = 0x80000002;
+
+    /// <summary>NET_ERROR_NEED_ENCRYPTION_PASSWORD: el cambio de IP exige la contraseña correcta.</summary>
+    public const uint ErrorNeedEncryptionPassword = 0x80000207;
+
+    /// <summary>NET_ERROR_INVALID_PASSWORD.</summary>
+    public const uint ErrorInvalidPassword = 0x8000046E;
+
+    /// <summary>
+    /// NET_IN_INIT_DEVICE_ACCOUNT (dhnetsdk.h línea ~101402). Fuera de los
+    /// bloques pragma pack(4): alineación por defecto, y todos los campos
+    /// quedan naturalmente alineados (el enum cae en el offset 400).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public struct NET_IN_INIT_DEVICE_ACCOUNT
+    {
+        public uint dwSize;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 40)] public string szMac;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szUserName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szPwd;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szCellPhone;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szMail;
+        /// <summary>Abandonado por el SDK.</summary>
+        public byte byInitStatus;
+        /// <summary>
+        /// Debe ser el que anunció el equipo en la búsqueda. bit0 = recupera por
+        /// celular (exige szCellPhone), bit1 = por correo (exige szMail), bit2 = por archivo XML.
+        /// </summary>
+        public byte byPwdResetWay;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 2)] public byte[] byReserved;
+        /// <summary>EM_ACCOUNT_PROTOCOL: 0 = normal.</summary>
+        public int emAccountProtocol;
+        public int bAutoAddDevice;
+        public int bIsAutoAddDevice;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szPasswdTip;
+        public int bIs4th;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NET_OUT_INIT_DEVICE_ACCOUNT { public uint dwSize; }
+
+    /// <summary>
+    /// Inicializa por multicast, identificando al equipo por su MAC: sirve
+    /// aunque el equipo esté en otra subred (la IP de fábrica 192.168.1.108),
+    /// siempre que comparta el segmento L2. szLocalIp elige la interfaz de salida.
+    /// </summary>
+    // ------------------------------------------------------------------
+    // Búsqueda por SDK y cambio de IP (lo que hace "Change IP" en SmartPSS)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// DEVICE_NET_INFO_EX (dhnetsdk.h línea ~14257), sin pragma pack. Se maneja
+    /// como bloque de bytes: el SDK exige devolverle en CLIENT_ModifyDevice la
+    /// misma estructura que entregó en la búsqueda (verifyData lleva una firma
+    /// ECC), así que se copia tal cual y se tocan solo los campos de abajo.
+    /// Offsets calculados del header y validados contra la búsqueda real de una
+    /// ITC413 y un XVR4232AN (MAC, serie, versión, puerto HTTP y máscara de
+    /// funciones caen donde corresponde).
+    /// </summary>
+    public static class DevNetInfoEx
+    {
+        public const int Size = 1120;
+        public const int IPVersion = 0;             // int: 4 o 6 (el mismo equipo llega una vez por cada una)
+        public const int IP = 4;                    // char[64]
+        public const int Submask = 72;              // char[64]
+        public const int Gateway = 136;             // char[64]
+        public const int Mac = 200;                 // char[40]
+        public const int DeviceType = 240;          // char[32]: la clase ("ITC", "HCVR"), no el modelo
+        public const int DetailType = 540;          // char[32]: el modelo
+        public const int DhcpEnabled = 274;         // bool (1 byte)
+        public const int SerialNo = 364;            // char[48]
+        public const int SoftVersion = 412;         // char[128]
+        public const int UserName = 764;            // char[16]
+        public const int PassWord = 780;            // char[16]
+        public const int HttpPort = 796;            // unsigned short
+        public const int NewPassWordEnabled = 808;  // BOOL
+        public const int NewPassWord = 812;         // char[64]
+        public const int InitStatus = 876;          // BYTE
+        public const int NewUserNameEnabled = 944;  // BOOL
+        public const int NewUserName = 948;         // char[64]
+        public const int UnLoginFuncMask = 1040;    // DWORD
+    }
+
+    /// <summary>DEVICE_NET_INFO_EX2: tras el DEVICE_NET_INFO_EX viene szLocalIP[64], la interfaz por la que respondió.</summary>
+    public const int DevNetInfoEx2LocalIpOffset = DevNetInfoEx.Size;
+
+    /// <summary>fSearchDevicesCBEx.</summary>
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate void SearchDevicesCallbackEx(long lSearchHandle, IntPtr pDevNetInfo, IntPtr pUserData);
+
+    /// <summary>NET_IN_STARTSERACH_DEVICE (dhnetsdk.h línea ~83915): 112 bytes en x64.</summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public struct NET_IN_STARTSERACH_DEVICE
+    {
+        public uint dwSize;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szLocalIp;
+        public IntPtr cbSearchDevices;
+        public IntPtr pUserData;
+        /// <summary>EM_SEND_SEARCH_TYPE: 0 = multicast y broadcast.</summary>
+        public int emSendType;
+        public IntPtr cbSearchDevicesTTLV;
+        public IntPtr cbSearchDevices4th;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NET_OUT_STARTSERACH_DEVICE { public uint dwSize; }
+
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+    public static extern long CLIENT_StartSearchDevicesEx(ref NET_IN_STARTSERACH_DEVICE pInBuf,
+        ref NET_OUT_STARTSERACH_DEVICE pOutBuf);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool CLIENT_StopSearchDevices(long lSearchHandle);
+
+    /// <summary>Cambia IP, máscara y puerta de enlace. pDevNetInfo = DEVICE_NET_INFO_EX de la búsqueda, retocado.</summary>
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Ansi)]
+    public static extern bool CLIENT_ModifyDevice(IntPtr pDevNetInfo, uint dwWaitTime, out int iError,
+        string? szLocalIp, IntPtr reserved);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Ansi)]
+    public static extern bool CLIENT_InitDevAccount(ref NET_IN_INIT_DEVICE_ACCOUNT pInitAccountIn,
+        ref NET_OUT_INIT_DEVICE_ACCOUNT pInitAccountOut, uint dwWaitTime, string? szLocalIp);
 }

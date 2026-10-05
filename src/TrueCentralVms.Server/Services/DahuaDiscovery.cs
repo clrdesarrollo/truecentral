@@ -7,9 +7,17 @@ using System.Text.Json;
 namespace TrueCentralVms.Server.Services;
 
 /// <summary>Equipo Dahua anunciado por DHDiscover.</summary>
+/// <param name="InitStatus">0 = equipo antiguo (no se inicializa), 1 = de fábrica sin inicializar, 2 = inicializado.</param>
+/// <param name="PwdResetWay">Medios de recuperación de contraseña que admite (bit0 celular, bit1 correo, bit2 XML).</param>
+/// <param name="SubnetMask">Máscara IPv4 con que está configurado (para prellenar "Cambiar IP").</param>
+/// <param name="Gateway">Puerta de enlace IPv4 configurada.</param>
 public sealed record DahuaDiscoveredDto(
     string Ip, int SdkPort, int HttpPort, string Model, string DeviceClass,
-    string Serial, string Mac, string Version);
+    string Serial, string Mac, string Version, int InitStatus, byte PwdResetWay,
+    string SubnetMask, string Gateway)
+{
+    public bool Uninitialized => InitStatus == 1;
+}
 
 /// <summary>
 /// Descubrimiento de equipos Dahua por su protocolo privado "DHDiscover" (el
@@ -147,6 +155,14 @@ public static class DahuaDiscovery
             string model = GetString("DeviceType");
             if (model.Length == 0) model = GetString("MachineName");
 
+            // "Init" empaqueta lo mismo que el SDK entrega por separado: el
+            // byte bajo es byInitStatus (bits 0-1: 0 antiguo, 1 sin inicializar,
+            // 2 inicializado) y el siguiente, byPwdResetWay. Validado contra una
+            // ITC413 de fábrica (3221 → 1) y un XVR4232AN ya inicializado (3734 → 2).
+            int init = info.TryGetProperty("Init", out var initElement) && initElement.TryGetInt32(out int raw) ? raw : 0;
+            string Ipv4(string name) => v4.TryGetProperty(name, out var e) && e.ValueKind == JsonValueKind.String
+                ? e.GetString()!.Trim() : "";
+
             return new DahuaDiscoveredDto(
                 Ip: ip,
                 SdkPort: GetInt("Port", 37777),
@@ -156,7 +172,11 @@ public static class DahuaDiscovery
                 Serial: GetString("SerialNo"),
                 // La MAC viaja en la raíz de la respuesta, no en deviceInfo.
                 Mac: root.TryGetProperty("mac", out var mac) ? mac.GetString() ?? "" : "",
-                Version: GetString("Version"));
+                Version: GetString("Version"),
+                InitStatus: init & 0x03,
+                PwdResetWay: (byte)((init >> 8) & 0xFF),
+                SubnetMask: Ipv4("SubnetMask"),
+                Gateway: Ipv4("DefaultGateway"));
         }
         catch
         {
