@@ -77,7 +77,16 @@ public static partial class DiscoveryApi
                 : Task.FromResult(new List<ZkDiscoveredDto>());
             await Task.WhenAll(sadpTask, dahuaTask, onvifTask, zkTask);
 
-            var rows = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            // Por MAC y no por IP: los equipos de fábrica comparten la misma IP
+            // (192.0.0.64 en Hikvision, 192.168.1.108 en Dahua) y con la IP de
+            // clave se pisaban unos a otros y solo se listaba el último.
+            var rows = new Dictionary<string, (string Ip, object Row)>(StringComparer.OrdinalIgnoreCase);
+            var seenIps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void Add(string ip, string mac, object row)
+            {
+                rows[mac.Length > 0 ? "mac:" + mac.Replace(":", "-") : "ip:" + ip] = (ip, row);
+                seenIps.Add(ip);
+            }
 
             foreach (var d in sadpTask.Result)
             {
@@ -86,7 +95,7 @@ public static partial class DiscoveryApi
                     : CategorizeHikvision(d.Model);
                 if (category is null) continue;
                 if (decodersOnly && category != "Decodificador") continue;
-                rows[d.Ip] = new
+                Add(d.Ip, d.Mac, new
                 {
                     d.Ip, Brand = "Hikvision",
                     // El control de acceso se administra por ISAPI (puerto HTTP), no por el SDK.
@@ -95,7 +104,7 @@ public static partial class DiscoveryApi
                     // Cambio de IP por SADP (POST /api/discovery/change-ip): pide la contraseña, solo si está activado.
                     CanChangeIp = d.Activated, d.SubnetMask, d.Gateway, d.Dhcp,
                     Reachable = IsInLocalSubnet(d.Ip),
-                };
+                });
             }
 
             foreach (var d in dahuaTask.Result)
@@ -106,7 +115,7 @@ public static partial class DiscoveryApi
                     : CategorizeDahua(d.DeviceClass, d.Model);
                 if (category is null) continue;
                 if (decodersOnly && category != "Decodificador") continue;
-                rows[d.Ip] = new
+                Add(d.Ip, d.Mac, new
                 {
                     d.Ip, Brand = "Dahua",
                     // El control de acceso se administra por el CGI HTTP del equipo, no por el SDK.
@@ -122,13 +131,13 @@ public static partial class DiscoveryApi
                     CanChangeIp = d.InitStatus == 2, d.SubnetMask, d.Gateway, d.Dhcp,
                     Reachable = IsInLocalSubnet(d.Ip),
                     Category = category,
-                };
+                });
             }
 
             foreach (var d in zkTask.Result)
             {
-                if (rows.ContainsKey(d.Ip)) continue;   // ya lo anunció su marca
-                rows[d.Ip] = new
+                if (seenIps.Contains(d.Ip)) continue;   // ya lo anunció su marca
+                Add(d.Ip, d.Mac, new
                 {
                     d.Ip, Brand = "ZKTeco", DriverKey = "zkteco-tcp",
                     CommandPort = d.Port, HttpPort = d.Port,
@@ -136,23 +145,24 @@ public static partial class DiscoveryApi
                     // identifica: se lista igual, con lo que se sabe de él.
                     Model = d.Model.Length > 0 ? d.Model : "ZKTeco (sin identificar)",
                     d.Serial, d.Mac, Activated = true, Category = "Terminal",
-                };
+                });
             }
 
             foreach (var d in onvifTask.Result)
             {
                 if (decodersOnly) break;               // WS-Discovery no distingue decodificadores
-                if (rows.ContainsKey(d.Ip)) continue; // ya visto por su protocolo de fábrica
-                rows[d.Ip] = new
+                if (seenIps.Contains(d.Ip)) continue; // ya visto por su protocolo de fábrica
+                Add(d.Ip, "", new
                 {
                     d.Ip, Brand = "ONVIF", DriverKey = "onvif",
                     CommandPort = d.HttpPort, d.HttpPort,
                     Model = d.Hardware.Length > 0 ? d.Hardware : d.Name,
                     Serial = "", Mac = "", Activated = true, Category = "Cámara",
-                };
+                });
             }
 
-            return Results.Ok(rows.OrderBy(r => r.Key, StringComparer.OrdinalIgnoreCase).Select(r => r.Value));
+            return Results.Ok(rows.OrderBy(r => r.Value.Ip, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(r => r.Key, StringComparer.OrdinalIgnoreCase).Select(r => r.Value.Row));
         });
 
         // Inicializar un equipo Dahua de fábrica: crearle el usuario "admin"
