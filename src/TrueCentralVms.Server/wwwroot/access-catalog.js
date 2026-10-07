@@ -1,11 +1,11 @@
 // CLR TrueCentral VMS — panel: control de acceso, operación.
 //
 // Cinco páginas colgadas del mismo módulo, en el orden en que se usan:
-//   #/access-monitor    puertas en vivo + lo que va pasando (el turno del guardia)
+//   #/access-monitor    puertas en vivo (en access-monitor.js)
 //   #/access-persons    padrón: quién es cada uno y con qué entra
 //   #/access-levels     niveles de acceso: por dónde y cuándo
 //   #/access-schedules  horarios: los "cuándo"
-//   #/access-events     historial de accesos
+//   #/access-events     registros de acceso (en access-monitor.js)
 //
 // El administrador de EQUIPOS vive aparte, en access.js (#/access).
 //
@@ -42,6 +42,89 @@ const ACCESS_FINGERS = [
   "Pulgar derecho", "Índice derecho", "Medio derecho", "Anular derecho", "Meñique derecho",
   "Pulgar izquierdo", "Índice izquierdo", "Medio izquierdo", "Anular izquierdo", "Meñique izquierdo",
 ];
+
+// Orden en que conviene enrolar: los índices primero (los más cómodos en un
+// lector), después medio y pulgar, alternando las manos.
+const ACCESS_FINGER_ORDER = [2, 7, 3, 8, 1, 6, 4, 9, 5, 10];
+
+/** El siguiente dedo sugerido que todavía no tiene huella (a partir del que sigue a `after`). */
+function accessSuggestedFinger(fingerprints, after) {
+  const has = new Set(fingerprints.map((f) => f.number));
+  const start = after == null ? 0 : ACCESS_FINGER_ORDER.indexOf(after) + 1;
+  const order = [...ACCESS_FINGER_ORDER.slice(start), ...ACCESS_FINGER_ORDER.slice(0, start)];
+  return order.find((n) => !has.has(n)) ?? null;
+}
+
+// Las manos del enrolamiento, palmas hacia abajo como apoyadas en la mesa
+// (la izquierda, a la izquierda). Cada dedo se dibuja como una cápsula que
+// nace de la palma: base, largo y giro, en el dibujo de la mano IZQUIERDA; la
+// derecha es la misma figura reflejada. `left`/`right` son los números de dedo
+// de los equipos (ACCESS_FINGERS).
+const ACCESS_HAND_FINGERS = [
+  { left: 10, right: 5, x: 34, y: 104, len: 44, angle: -14 }, // meñique
+  { left: 9, right: 4, x: 57, y: 98, len: 58, angle: -5 },    // anular
+  { left: 8, right: 3, x: 81, y: 96, len: 64, angle: 2 },     // medio
+  { left: 7, right: 2, x: 104, y: 100, len: 56, angle: 9 },   // índice
+  { left: 6, right: 1, x: 114, y: 142, len: 44, angle: 60 },  // pulgar
+];
+
+/** Calidad de una plantilla: "buena" desde 60, "regular" desde 40 (el mismo criterio de la captura). */
+const accessFingerQuality = (q) => q == null ? null : q >= 60 ? ["ok", "buena"] : q >= 40 ? ["warn", "regular"] : ["bad", "baja"];
+
+/** Las dos manos con el estado de cada dedo: sin huella, enrolada, recién capturada, elegido. */
+function accessHandsSvg(fingerprints, selected) {
+  const W = 19;
+  const finger = (number, f) => {
+    const fp = fingerprints.find((x) => x.number === number);
+    const weak = fp?.quality != null && fp.quality < 60;
+    const cls = ["hand-finger", fp ? (fp.isNew ? "new" : "has") : "", weak ? "low" : "", number === selected ? "sel" : ""]
+      .filter(Boolean).join(" ");
+    const name = ACCESS_FINGERS[number - 1];
+    const state = !fp ? "sin huella"
+      : `${fp.isNew ? "recién capturada" : "enrolada"}${fp.quality != null ? `, calidad ${fp.quality}/100` : ""}`;
+    const top = f.y - f.len;
+    return `
+      <g class="${cls}" data-finger="${number}" tabindex="0" role="button" aria-pressed="${number === selected}"
+         aria-label="${esc(name)}: ${esc(state)}" transform="rotate(${f.angle} ${f.x} ${f.y})">
+        <title>${esc(name)}: ${esc(state)}</title>
+        <rect x="${f.x - W / 2}" y="${top}" width="${W}" height="${f.len + 14}" rx="${W / 2}"/>
+        ${fp ? `<ellipse class="print" cx="${f.x}" cy="${top + 13}" rx="5" ry="6.5"/>
+                <ellipse class="print" cx="${f.x}" cy="${top + 13}" rx="2.2" ry="3"/>` : ""}
+        ${weak ? `<circle class="warn-dot" cx="${f.x + W / 2 - 2}" cy="${top + 4}" r="3.8"/>` : ""}
+      </g>`;
+  };
+  // La palma (ancha en los nudillos, angosta hacia la muñeca) va encima:
+  // tapa el nacimiento de los dedos.
+  const hand = (side) => ACCESS_HAND_FINGERS.map((f) => finger(f[side], f)).join("") +
+    `<path class="hand-palm" d="M 34 94 C 24 94 21 101 22 112 L 25 146 C 27 166 40 176 60 177 L 84 177
+       C 104 176 116 166 118 148 L 121 112 C 122 101 117 94 108 94 Z"/>`;
+  return `
+    <svg class="hands" viewBox="0 0 340 196" role="group" aria-label="Huellas, dedo por dedo">
+      <g>${hand("left")}</g>
+      <g transform="translate(340 0) scale(-1 1)">${hand("right")}</g>
+      <text x="71" y="191" text-anchor="middle">Mano izquierda</text>
+      <text x="269" y="191" text-anchor="middle">Mano derecha</text>
+    </svg>`;
+}
+
+/** Ficha del dedo elegido: su estado, la calidad y sus dos órdenes. */
+function accessFingerDetailHtml(fingerprints, number) {
+  const fp = fingerprints.find((f) => f.number === number);
+  const quality = accessFingerQuality(fp?.quality);
+  return `
+    <div class="hand-detail-name">${esc(ACCESS_FINGERS[number - 1])}</div>
+    <div>${!fp ? `<span class="muted">Sin huella enrolada.</span>`
+      : fp.isNew ? `<span class="tag on">nueva</span> <span class="muted">se guarda al terminar</span>`
+      : `<span class="tag admin">enrolada</span>`}</div>
+    ${quality ? `
+      <div class="hand-quality ${quality[0]}"><span style="width:${Math.max(4, Math.min(100, fp.quality))}%"></span></div>
+      <div class="muted hand-quality-text">Calidad ${fp.quality}/100 · ${quality[1]}${fp.quality < 60
+        ? ": conviene recapturarla con el dedo limpio y bien centrado." : "."}</div>` : ""}
+    <div class="row-actions" style="margin-top:12px">
+      <button type="button" class="btn ${fp ? "ghost" : ""} pw-finger-capture">${fp ? "Recapturar" : "Capturar"}</button>
+      ${fp ? `<button type="button" class="btn ghost pw-finger-del" title="Quitarle esta huella">Quitar</button>` : ""}
+    </div>`;
+}
 
 const ACCESS_SYNC_STATES = {
   Synced: { label: "Al día", tag: "on" },
@@ -104,130 +187,8 @@ function accessPollGuard(hash, timer) {
 // Monitoreo en tiempo real: puertas + lo que va pasando
 // ===========================================================================
 
-const ACCESS_DOOR_MODES = {
-  Normal: { label: "Normal", tag: "on", hint: "Abre solo con credencial válida" },
-  RemainOpen: { label: "Mantenida abierta", tag: "operator", hint: "Pasa cualquiera sin identificarse" },
-  RemainLocked: { label: "Bloqueada", tag: "off", hint: "No entra nadie, ni con credencial válida" },
-  Unknown: { label: "—", tag: "operator", hint: "El equipo no informa en qué modo está" },
-};
-
-function accessDoorCard(door, isAdmin) {
-  const mode = ACCESS_DOOR_MODES[door.mode] ?? ACCESS_DOOR_MODES.Unknown;
-  const offline = door.deviceStatus !== "Online";
-  const sensor = door.open === true ? `<span class="tag off">Hoja abierta</span>`
-    : door.open === false ? `<span class="tag on">Hoja cerrada</span>`
-    : "";
-  // Sin apertura remota no se ofrecen botones que el equipo va a rechazar.
-  const canCommand = door.supportsRemoteControl && !offline && door.enabled;
-  return `
-    <div class="card access-door" data-id="${door.id}">
-      <div class="card-label">${esc(door.deviceName)}${door.location ? ` · ${esc(door.location)}` : ""}</div>
-      <div class="card-value small">${esc(door.name)}</div>
-      <div class="chip-row" style="margin-top:8px">
-        ${offline ? `<span class="tag off" title="${esc(door.deviceStatus)}">Equipo sin conexión</span>`
-          : `<span class="tag ${mode.tag}" title="${esc(mode.hint)}">${esc(mode.label)}</span>`}
-        ${door.enabled ? "" : `<span class="tag operator">Puerta pausada</span>`}
-        ${sensor}
-      </div>
-      <div class="row-actions" style="margin-top:12px;flex-wrap:wrap">
-        <button class="btn btn-door" data-cmd="Open" ${canCommand ? "" : "disabled"}
-          title="Pulso de apertura: abre y se cierra sola">Abrir</button>
-        <button class="btn ghost btn-door" data-cmd="RemainOpen" ${canCommand ? "" : "disabled"}
-          title="Deja la puerta abierta hasta nueva orden">Mantener abierta</button>
-        <button class="btn ghost btn-door" data-cmd="Close" ${canCommand ? "" : "disabled"}
-          title="Vuelve al modo normal">Normal</button>
-        ${isAdmin ? `<button class="btn danger btn-door" data-cmd="RemainLocked" ${canCommand ? "" : "disabled"}
-          title="Bloquea la puerta: no entra nadie">Bloquear</button>` : ""}
-      </div>
-      ${isAdmin ? `<div class="row-actions" style="margin-top:8px">
-        <button class="btn ghost btn-door-edit" title="Renombrar o pausar esta puerta">Editar</button>
-      </div>` : ""}
-    </div>`;
-}
-
-async function renderAccessMonitor() {
-  $("#page-title").textContent = "Control de acceso · Monitoreo";
-  const isAdmin = Api.role === "Admin";
-  let doors;
-  try { doors = await Api.get("/api/access/doors"); }
-  catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
-
-  if (!doors.length) {
-    $("#view").innerHTML = `<div class="info-box">
-      Todavía no hay puertas. Las puertas las declaran los propios equipos: agregue uno en
-      <a href="#/access">Dispositivos → Control de acceso</a> y aparecerán solas.</div>`;
-    return;
-  }
-
-  $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Puertas <span class="muted" style="font-weight:normal;font-size:12px">
-        (${doors.length} · el estado se actualiza solo)</span></h3>
-    </div>
-    <div class="cards" id="access-door-cards">
-      ${doors.map((d) => accessDoorCard(d, isAdmin)).join("")}
-    </div>
-    <div class="toolbar" style="margin-top:8px">
-      <h3>Lo que va pasando <span class="muted" style="font-weight:normal;font-size:12px">
-        (últimos accesos, en vivo)</span></h3>
-      <a class="btn ghost" href="#/access-events">Ver el historial completo</a>
-    </div>
-    <div id="access-live"><div class="info-box">Cargando…</div></div>`;
-
-  bindAccessDoorButtons(doors, isAdmin);
-  await refreshAccessLive();
-
-  clearInterval(accessDoorsTimer);
-  accessDoorsTimer = setInterval(async () => {
-    if (!accessPollGuard("#/access-monitor", accessDoorsTimer)) return;
-    try {
-      const fresh = await Api.get("/api/access/doors");
-      if (fresh.length !== doors.length) { renderAccessMonitor(); return; }
-      // Se repintan solo las tarjetas que cambiaron: si no, el operador
-      // perdería el botón bajo el cursor cada cinco segundos.
-      for (const door of fresh) {
-        const card = $(`#access-door-cards .access-door[data-id="${door.id}"]`);
-        const html = accessDoorCard(door, isAdmin);
-        if (card && card.outerHTML !== html) card.outerHTML = html;
-      }
-      doors = fresh;
-      bindAccessDoorButtons(doors, isAdmin);
-      await refreshAccessLive();
-    } catch { /* un refresco fallido no molesta: se reintenta */ }
-  }, 5000);
-}
-
-function bindAccessDoorButtons(doors, isAdmin) {
-  const doorOf = (e) => doors.find((d) => d.id === Number(e.target.closest(".access-door").dataset.id));
-  $$("#view .btn-door").forEach((b) => b.addEventListener("click", async (e) => {
-    const door = doorOf(e);
-    const button = e.currentTarget;
-    const command = button.dataset.cmd;
-    if (command === "RemainOpen" &&
-        !confirm(`¿Dejar "${door.name}" abierta hasta nueva orden? Va a poder pasar cualquiera sin identificarse.`))
-      return;
-    if (command === "RemainLocked" &&
-        !confirm(`¿Bloquear "${door.name}"? No va a entrar nadie, ni con credencial válida.`))
-      return;
-
-    const label = button.textContent;
-    button.disabled = true;
-    button.textContent = "Enviando…";
-    try {
-      const updated = await Api.post(`/api/access/doors/${door.id}/command`, { command });
-      Object.assign(door, updated);
-      const card = $(`#access-door-cards .access-door[data-id="${door.id}"]`);
-      if (card) card.outerHTML = accessDoorCard(door, isAdmin);
-      bindAccessDoorButtons(doors, isAdmin);
-      toast(command === "Open" ? `Puerta "${door.name}" abierta.` : `Puerta "${door.name}" actualizada.`);
-    } catch (err) {
-      toast(err.error, true);
-      button.disabled = false;
-      button.textContent = label;
-    }
-  }));
-  $$("#view .btn-door-edit").forEach((b) => b.addEventListener("click", (e) => accessDoorModal(doorOf(e))));
-}
+// El monitoreo en vivo (tarjetas, órdenes por lote, lo que va pasando) vive
+// en access-monitor.js; acá queda solo el diálogo para editar una puerta.
 
 function accessDoorModal(door) {
   openModal(`
@@ -265,44 +226,6 @@ function accessDoorModal(door) {
       renderAccessMonitor();
     } catch (err) { $("#ad-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; }
   });
-}
-
-/** Tira de últimos accesos del monitoreo (la misma que la portada del módulo). */
-async function refreshAccessLive() {
-  const box = $("#access-live");
-  if (!box) return;
-  let data;
-  try { data = await Api.get("/api/access/events?page=1&pageSize=12"); }
-  catch { return; }
-  box.innerHTML = data.items.length
-    ? accessEventsTable(data.items, { compact: true })
-    : `<div class="info-box">Todavía no hay accesos registrados. Aparecen acá apenas alguien pase por una puerta.</div>`;
-}
-
-function accessEventsTable(items, options = {}) {
-  return `
-    <div class="table-scroll"><table class="grid">
-      <thead><tr>
-        <th>Fecha</th><th>Persona</th><th>Identificador</th><th>Puerta</th>
-        <th>Credencial</th><th>Resultado</th>${options.compact ? "" : "<th>Detalle</th>"}
-      </tr></thead>
-      <tbody>
-        ${items.map((e) => {
-          const kind = ACCESS_EVENT_KINDS[e.kind] ?? ACCESS_EVENT_KINDS.Other;
-          return `
-          <tr>
-            <td class="muted" style="white-space:nowrap">${formatDateTime(e.timestamp)}</td>
-            <td>${esc(e.personName || "—")}</td>
-            <td class="muted">${esc(e.employeeNo || e.cardNumber || "—")}</td>
-            <td>${esc(e.doorName || (e.doorNumber ? `Puerta ${e.doorNumber}` : "—"))}
-              <div class="muted" style="font-size:11px">${esc(e.deviceName)}</div></td>
-            <td class="muted">${esc(ACCESS_CREDENTIALS[e.credential] ?? e.credential)}</td>
-            <td><span class="tag ${kind.tag}">${esc(kind.label)}</span></td>
-            ${options.compact ? "" : `<td class="muted" style="max-width:320px">${esc(e.description)}</td>`}
-          </tr>`;
-        }).join("")}
-      </tbody>
-    </table></div>`;
 }
 
 // ===========================================================================
@@ -715,8 +638,139 @@ const accessPersonState = { page: 1, q: "", department: "", levelId: "", state: 
 
 function accessSyncTag(person) {
   const state = ACCESS_SYNC_STATES[person.syncState] ?? ACCESS_SYNC_STATES.NotApplicable;
-  const detail = person.syncError ? ` title="${esc(person.syncError)}"` : "";
-  return `<span class="tag ${state.tag}"${detail}>${esc(state.label)}</span>`;
+  // Sin equipos de por medio no hay nada que mostrar: el estado queda quieto.
+  if (!person.devices?.length) {
+    const detail = person.syncError ? ` title="${esc(person.syncError)}"` : "";
+    return `<span class="tag ${state.tag}"${detail}>${esc(state.label)}</span>`;
+  }
+  // Con equipos, el estado se abre: es la pregunta que sigue a un "Con
+  // problemas" —¿en cuál y por qué?—, y la respuesta no cabe en un tooltip.
+  return `<button type="button" class="tag ${state.tag} tag-link btn-person-sync-detail"
+    title="Ver qué pasó en cada equipo">${esc(state.label)} ›</button>`;
+}
+
+/**
+ * Un error del sincronizador partido en dos: lo que le pasó a la persona, en
+ * palabras, y lo que contestó el equipo, tal cual. El driver deja la respuesta
+ * del equipo entre paréntesis y con sus partes separadas por "·"
+ * ("(Invalid Content · badJsonContent · …)"); juntas en un solo párrafo, el
+ * motivo técnico tapaba la explicación.
+ */
+function accessSplitSyncError(error) {
+  if (!error) return { text: "", raw: [] };
+  const raw = [];
+  const text = error
+    .replace(/\(([^()]*·[^()]*)\)/g, (_, inner) => { raw.push(inner.trim()); return ""; })
+    .replace(/\s+([.,:;])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return { text, raw };
+}
+
+/** Las credenciales que lleva la persona, en una línea: lo que se intentó escribir. */
+function accessCredentialSummary(person) {
+  const parts = [
+    person.cards.length ? `${person.cards.length} tarjeta${person.cards.length === 1 ? "" : "s"}` : null,
+    person.fingerprints.length
+      ? `${person.fingerprints.length} huella${person.fingerprints.length === 1 ? "" : "s"}` : null,
+    person.face ? "rostro" : null,
+    person.hasPin ? "clave" : null,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+/**
+ * Detalle de la escritura de una persona en cada uno de sus equipos: el estado
+ * de cada uno, qué pasó y qué contestó el equipo. Es a donde lleva el estado
+ * de la lista ("Con problemas"); antes había que abrir la edición y bajar
+ * hasta el tercer paso para encontrar el motivo.
+ */
+function accessPersonSyncModal(person, levels) {
+  const isAdmin = Api.role === "Admin";
+  // Primero lo que falla, después lo que espera y al final lo que está al día.
+  const ORDER = { Failed: 0, Pending: 1, NotApplicable: 2, Synced: 3 };
+
+  const deviceBlock = (d) => {
+    const state = ACCESS_SYNC_STATES[d.state] ?? ACCESS_SYNC_STATES.NotApplicable;
+    const { text, raw } = accessSplitSyncError(d.error);
+    const body = d.state === "Synced"
+      ? `<div class="muted">Quedó escrita con todas sus credenciales.</div>`
+      : `<div>${esc(text || "Sin detalle del equipo.")}</div>`;
+    return `
+      <div class="sync-device ${d.state === "Failed" ? "failed" : d.state === "Pending" ? "pending" : ""}">
+        <div class="sync-device-head">
+          <strong>${esc(d.deviceName)}</strong>
+          <span class="tag ${state.tag}">${esc(state.label)}</span>
+          <span class="muted sync-device-when">Última escritura correcta:
+            ${d.syncedAt ? formatDateTime(d.syncedAt) : "nunca"}</span>
+        </div>
+        ${body}
+        ${raw.length ? `
+          <div class="sync-device-raw">
+            <div class="muted">Respuesta del equipo</div>
+            ${raw.map((r) => `<code>${esc(r)}</code>`).join("")}
+          </div>` : ""}
+      </div>`;
+  };
+
+  const render = (p) => {
+    const state = ACCESS_SYNC_STATES[p.syncState] ?? ACCESS_SYNC_STATES.NotApplicable;
+    const devices = [...p.devices].sort((a, b) =>
+      (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9) || a.deviceName.localeCompare(b.deviceName));
+    const failed = devices.filter((d) => d.state === "Failed").length;
+    const credentials = accessCredentialSummary(p);
+
+    openModal(`
+      <h3>Escritura en los equipos</h3>
+      <div class="sync-person-head">
+        <div>
+          <strong>${esc(p.fullName)}</strong> <span class="muted">· identificador ${esc(p.employeeNo)}</span>
+          <div class="muted" style="font-size:12px;margin-top:2px">
+            ${credentials ? `Lleva ${esc(credentials)}` : "No tiene credenciales"} ·
+            vigente hasta ${accessDay(p.validTo)}${p.levelNames.length ? ` · ${esc(p.levelNames.join(", "))}` : ""}
+          </div>
+        </div>
+        <span class="tag ${state.tag}">${esc(state.label)}</span>
+      </div>
+      ${failed ? `<div class="muted" style="font-size:12px;margin-bottom:10px">
+        ${failed === 1 ? "Un equipo no aceptó" : `${failed} equipos no aceptaron`} todo lo que se le mandó.
+        Corrija lo que indique el equipo y vuelva a escribirla.</div>` : ""}
+      <div id="psd-error"></div>
+      <div class="sync-device-list">${devices.map(deviceBlock).join("")}</div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" id="psd-close">Cerrar</button>
+        <div style="flex:1"></div>
+        ${isAdmin ? `
+          <button class="btn ghost" type="button" id="psd-edit">Editar persona</button>
+          <button class="btn" type="button" id="psd-retry"
+            title="Volver a escribirla ahora en todos sus equipos">Volver a escribir</button>` : ""}
+      </div>`, "wider");
+
+    $("#psd-close").addEventListener("click", closeModal);
+    $("#psd-edit")?.addEventListener("click", () => {
+      closeModal();
+      accessPersonModal(p, levels);
+    });
+    $("#psd-retry")?.addEventListener("click", async (e) => {
+      const button = e.currentTarget;
+      button.disabled = true;
+      button.textContent = "Escribiendo…";
+      try {
+        const updated = await Api.post(`/api/access/persons/${p.id}/sync`);
+        render(updated);
+        toast(updated.syncState === "Synced"
+          ? `${updated.fullName} quedó al día en sus equipos.`
+          : "Se volvió a escribir; revise el detalle de cada equipo.", updated.syncState === "Failed");
+        loadAccessPersons(levels);
+      } catch (err) {
+        $("#psd-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+        button.disabled = false;
+        button.textContent = "Volver a escribir";
+      }
+    });
+  };
+
+  render(person);
 }
 
 async function renderAccessPersons() {
@@ -938,10 +992,7 @@ async function loadAccessPersons(levels) {
               ${p.position ? `<div class="muted" style="font-size:11px">${esc(p.position)}</div>` : ""}</td>
             <td class="muted">${esc(p.employeeNo)}</td>
             <td class="muted">${esc(p.department ?? "—")}</td>
-            <td class="muted">${[
-              p.cards.length ? `${p.cards.length} tarjeta${p.cards.length === 1 ? "" : "s"}` : null,
-              p.hasPin ? "clave" : null,
-            ].filter(Boolean).join(" · ") || "—"}</td>
+            <td class="muted">${esc(accessCredentialSummary(p)) || "—"}</td>
             <td>${p.levelNames.length
               ? `<span title="${esc(p.levelNames.join(", "))}">${esc(p.levelNames.join(", "))}</span>`
               : `<span class="tag off" title="Sin niveles no entra por ninguna puerta">ninguno</span>`}</td>
@@ -970,6 +1021,8 @@ async function loadAccessPersons(levels) {
   $("#person-next")?.addEventListener("click", () => { accessPersonState.page++; loadAccessPersons(levels); });
   $$("#access-person-results .btn-person-edit").forEach((b) =>
     b.addEventListener("click", (e) => accessPersonModal(byRow(e), levels)));
+  $$("#access-person-results .btn-person-sync-detail").forEach((b) =>
+    b.addEventListener("click", (e) => accessPersonSyncModal(byRow(e), levels)));
   $$("#access-person-results .btn-person-retry").forEach((b) => b.addEventListener("click", async (e) => {
     const person = byRow(e);
     const button = e.currentTarget;
@@ -1067,6 +1120,9 @@ function accessPersonModal(person, levels) {
   const LAST = STEPS.length - 1;
   let step = 0;
   let visited = 0;   // hasta qué paso llegó: no se salta a uno que no vio
+  // Dedo elegido en las manos de "Credenciales" (el que muestra la ficha):
+  // de entrada, el primero sugerido que falta.
+  let selectedFinger = accessSuggestedFinger(draft.fingerprints, null) ?? ACCESS_FINGER_ORDER[0];
 
   // ---- Cuerpo de cada paso ------------------------------------------------
 
@@ -1121,6 +1177,7 @@ function accessPersonModal(person, levels) {
       </div>
       <div class="muted" style="font-size:12px;margin-top:4px">
         Los equipos la respetan solos: fuera de esas fechas y horas no la dejan pasar.
+        Los terminales Hikvision llegan hasta el 31-12-2037: una vigencia posterior queda en ese tope.
       </div>
     </div>
     <div class="field">
@@ -1216,26 +1273,20 @@ function accessPersonModal(person, levels) {
       </div>`;
   };
 
-  /** Los diez dedos, con el estado de cada uno y su botón de captura. */
+  /** Las dos manos (se elige el dedo en el dibujo) y la ficha del dedo elegido. */
   const fingerRows = () => `
-    <div class="wf-check-grid" style="max-height:none;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">
-      ${ACCESS_FINGERS.map((name, i) => {
-        const number = i + 1;
-        const finger = draft.fingerprints.find((f) => f.number === number);
-        const tag = !finger ? ""
-          : finger.isNew ? `<span class="tag on" title="Capturada recién; se guarda al terminar">nueva</span>`
-          : `<span class="tag admin" title="Ya enrolada">enrolada</span>`;
-        const quality = finger?.quality != null ? `<span class="muted"> · ${finger.quality}/100</span>` : "";
-        return `
-          <div class="access-finger" data-finger="${number}">
-            <div>${esc(name)} ${tag}${quality}</div>
-            <div class="row-actions">
-              <button type="button" class="btn ghost pw-finger-capture">${finger ? "Recapturar" : "Capturar"}</button>
-              ${finger ? `<button type="button" class="btn ghost pw-finger-del" title="Quitarle esta huella">✕</button>` : ""}
-            </div>
-          </div>`;
-      }).join("")}
-    </div>`;
+    <div class="hands-box">
+      <div>
+        ${accessHandsSvg(draft.fingerprints, selectedFinger)}
+        <div class="hands-legend">
+          <span><i class="has"></i>enrolada</span><span><i class="new"></i>recién capturada</span>
+          <span><i></i>sin huella</span><span><i class="low"></i>calidad para mejorar</span>
+        </div>
+      </div>
+      <div class="hand-detail" id="pw-finger-detail">${accessFingerDetailHtml(draft.fingerprints, selectedFinger)}</div>
+    </div>
+    ${draft.fingerprints.length < 2 ? `<div class="muted" style="font-size:12px;margin-top:8px">
+      Conviene enrolar al menos dos dedos, uno de cada mano: si se lastima uno, la persona igual puede pasar.</div>` : ""}`;
 
   const stepAccesos = () => {
     const chosen = levels.filter((l) => draft.levelIds.has(l.id));
@@ -1246,10 +1297,12 @@ function accessPersonModal(person, levels) {
           <thead><tr><th>Equipo</th><th>Estado</th><th>Detalle</th><th>Última escritura</th></tr></thead>
           <tbody>${person.devices.map((d) => {
             const state = ACCESS_SYNC_STATES[d.state] ?? ACCESS_SYNC_STATES.NotApplicable;
+            const { text, raw } = accessSplitSyncError(d.error);
             return `<tr>
               <td>${esc(d.deviceName)}</td>
               <td><span class="tag ${state.tag}">${esc(state.label)}</span></td>
-              <td class="muted" style="max-width:280px">${esc(d.error ?? "—")}</td>
+              <td class="muted" style="max-width:280px">${esc(text || "—")}
+                ${raw.map((r) => `<code class="sync-raw-inline">${esc(r)}</code>`).join("")}</td>
               <td class="muted">${d.syncedAt ? formatDateTime(d.syncedAt) : "—"}</td>
             </tr>`;
           }).join("")}</tbody>
@@ -1410,29 +1463,60 @@ function accessPersonModal(person, levels) {
     bindFingers();
   };
 
-  const bindFingers = () => {
-    $$("#pw-fingers .pw-finger-capture").forEach((b) => b.addEventListener("click", (e) => {
-      const number = Number(e.target.closest(".access-finger").dataset.finger);
-      const name = ACCESS_FINGERS[number - 1];
-      const who = `${draft.firstName} ${draft.lastName}`.trim() || "la persona";
-      // La captura abre su propia capa por encima del asistente: lo que ya se
-      // llenó tiene que seguir ahí cuando el diálogo se cierre.
-      fingerprintCaptureDialog(who, number, name, (result) => {
-        readStep();
-        const finger = { number, name, quality: result.quality, source: result.source,
-                         template: result.template, isNew: true };
-        const at = draft.fingerprints.findIndex((f) => f.number === number);
-        if (at >= 0) draft.fingerprints[at] = finger; else draft.fingerprints.push(finger);
-        draft.fingerprints.sort((a, b) => a.number - b.number);
-        redrawFingers();
-        toast(`${name} capturada (calidad ${result.quality}/100).`);
-      });
-    }));
-    $$("#pw-fingers .pw-finger-del").forEach((b) => b.addEventListener("click", (e) => {
-      const number = Number(e.target.closest(".access-finger").dataset.finger);
-      draft.fingerprints = draft.fingerprints.filter((f) => f.number !== number);
+  const captureFinger = (number) => {
+    const name = ACCESS_FINGERS[number - 1];
+    const who = `${draft.firstName} ${draft.lastName}`.trim() || "la persona";
+    // La captura abre su propia capa por encima del asistente: lo que ya se
+    // llenó tiene que seguir ahí cuando el diálogo se cierre.
+    fingerprintCaptureDialog(who, number, name, (result) => {
+      readStep();
+      const finger = { number, name, quality: result.quality, source: result.source,
+                       template: result.template, isNew: true };
+      const at = draft.fingerprints.findIndex((f) => f.number === number);
+      if (at >= 0) draft.fingerprints[at] = finger; else draft.fingerprints.push(finger);
+      draft.fingerprints.sort((a, b) => a.number - b.number);
+      // Queda elegido el siguiente dedo sugerido que falta: se puede seguir
+      // enrolando sin buscarlo. Con calidad baja se queda en el mismo, para
+      // recapturarlo.
+      if (result.quality >= 60) selectedFinger = accessSuggestedFinger(draft.fingerprints, number) ?? number;
       redrawFingers();
-    }));
+      toast(`${name} capturada (calidad ${result.quality}/100).`);
+    });
+  };
+
+  /** Cambia el dedo elegido sin redibujar las manos (así el doble clic llega al mismo dedo). */
+  const selectFinger = (number) => {
+    selectedFinger = number;
+    $$("#pw-fingers .hand-finger").forEach((g) => {
+      const on = Number(g.dataset.finger) === number;
+      g.classList.toggle("sel", on);
+      g.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    $("#pw-finger-detail").innerHTML = accessFingerDetailHtml(draft.fingerprints, number);
+    bindFingerDetail();
+  };
+
+  const bindFingerDetail = () => {
+    $("#pw-finger-detail .pw-finger-capture")?.addEventListener("click", () => captureFinger(selectedFinger));
+    $("#pw-finger-detail .pw-finger-del")?.addEventListener("click", () => {
+      draft.fingerprints = draft.fingerprints.filter((f) => f.number !== selectedFinger);
+      redrawFingers();
+    });
+  };
+
+  const bindFingers = () => {
+    $$("#pw-fingers .hand-finger").forEach((g) => {
+      const number = Number(g.dataset.finger);
+      g.addEventListener("click", () => selectFinger(number));
+      g.addEventListener("dblclick", () => { selectFinger(number); captureFinger(number); });
+      g.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        // Enter sobre el dedo ya elegido abre la captura; si no, lo elige.
+        if (e.key === "Enter" && number === selectedFinger) captureFinger(number); else selectFinger(number);
+      });
+    });
+    bindFingerDetail();
   };
 
   const redrawFace = () => {
@@ -1688,107 +1772,5 @@ function accessPersonModal(person, levels) {
   });
 }
 
-// ===========================================================================
-// Historial de accesos
-// ===========================================================================
-
-const accessEventState = { page: 1, from: "", to: "", doorId: "", kind: "", q: "" };
-
-async function renderAccessEvents() {
-  $("#page-title").textContent = "Control de acceso · Historial";
-  let doors;
-  try { doors = await Api.get("/api/access/doors"); }
-  catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
-
-  $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Historial de accesos</h3>
-      <label class="checkbox-row" style="margin:0">
-        <input type="checkbox" id="ae-auto" checked> Actualizar solo
-      </label>
-    </div>
-    <div class="filter-bar">
-      <div class="field"><label>Desde</label>
-        <input type="datetime-local" id="ae-from" value="${esc(accessEventState.from)}"></div>
-      <div class="field"><label>Hasta</label>
-        <input type="datetime-local" id="ae-to" value="${esc(accessEventState.to)}"></div>
-      <div class="field"><label>Puerta</label>
-        <select id="ae-door"><option value="">Todas</option>
-          ${doors.map((d) => `<option value="${d.id}" ${String(accessEventState.doorId) === String(d.id) ? "selected" : ""}
-            >${esc(d.deviceName)} · ${esc(d.name)}</option>`).join("")}
-        </select></div>
-      <div class="field"><label>Resultado</label>
-        <select id="ae-kind"><option value="">Todos</option>
-          ${Object.entries(ACCESS_EVENT_KINDS).map(([key, k]) =>
-            `<option value="${key}" ${accessEventState.kind === key ? "selected" : ""}>${esc(k.label)}</option>`).join("")}
-        </select></div>
-      <div class="field"><label>Buscar</label>
-        <input id="ae-q" placeholder="persona, identificador o tarjeta…" value="${esc(accessEventState.q)}"></div>
-      <div class="filter-actions">
-        <button class="btn" id="ae-search">Buscar</button>
-        <button class="btn ghost" id="ae-clear">Limpiar</button>
-      </div>
-    </div>
-    <div id="access-event-results"><div class="info-box">Cargando…</div></div>`;
-
-  const readFilters = () => {
-    accessEventState.from = $("#ae-from").value || "";
-    accessEventState.to = $("#ae-to").value || "";
-    accessEventState.doorId = $("#ae-door").value;
-    accessEventState.kind = $("#ae-kind").value;
-    accessEventState.q = $("#ae-q").value.trim();
-    accessEventState.page = 1;
-  };
-  $("#ae-search").addEventListener("click", () => { readFilters(); loadAccessEvents(); });
-  $("#ae-q").addEventListener("keydown", (e) => { if (e.key === "Enter") { readFilters(); loadAccessEvents(); } });
-  $("#ae-clear").addEventListener("click", () => {
-    Object.assign(accessEventState, { page: 1, from: "", to: "", doorId: "", kind: "", q: "" });
-    renderAccessEvents();
-  });
-
-  await loadAccessEvents();
-
-  // El refresco se detiene solo al pasar de la primera página: nadie quiere
-  // que le muevan la página 4 mientras la está leyendo.
-  clearInterval(accessEventsTimer);
-  accessEventsTimer = setInterval(() => {
-    if (!accessPollGuard("#/access-events", accessEventsTimer)) return;
-    if (!$("#ae-auto")?.checked || accessEventState.page !== 1) return;
-    loadAccessEvents({ quiet: true });
-  }, 10000);
-}
-
-async function loadAccessEvents(options = {}) {
-  const box = $("#access-event-results");
-  if (!box) return;
-  const query = new URLSearchParams({ page: accessEventState.page, pageSize: 50 });
-  if (accessEventState.from) query.set("from", new Date(accessEventState.from).toISOString());
-  if (accessEventState.to) query.set("to", new Date(accessEventState.to).toISOString());
-  if (accessEventState.doorId) query.set("doorId", accessEventState.doorId);
-  if (accessEventState.kind) query.set("kind", accessEventState.kind);
-  if (accessEventState.q) query.set("q", accessEventState.q);
-
-  let data;
-  try { data = await Api.get(`/api/access/events?${query}`); }
-  catch (err) {
-    if (!options.quiet) box.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
-    return;
-  }
-
-  if (!data.items.length) {
-    box.innerHTML = `<div class="info-box">No hay accesos que coincidan con los filtros.</div>`;
-    return;
-  }
-
-  const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
-  box.innerHTML = accessEventsTable(data.items) + `
-    <div class="audit-pager">
-      <span class="muted">${data.total} evento${data.total === 1 ? "" : "s"} · página ${data.page} de ${totalPages}</span>
-      <div style="display:flex;gap:8px">
-        <button class="btn ghost" id="ae-prev" ${data.page <= 1 ? "disabled" : ""}>« Anterior</button>
-        <button class="btn ghost" id="ae-next" ${data.page >= totalPages ? "disabled" : ""}>Siguiente »</button>
-      </div>
-    </div>`;
-  $("#ae-prev")?.addEventListener("click", () => { accessEventState.page--; loadAccessEvents(); });
-  $("#ae-next")?.addEventListener("click", () => { accessEventState.page++; loadAccessEvents(); });
-}
+// El historial (buscador de registros de acceso y reportes) vive en
+// access-monitor.js.

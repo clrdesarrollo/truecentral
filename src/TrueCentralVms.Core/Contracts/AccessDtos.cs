@@ -44,7 +44,7 @@ public sealed record AccessDeviceDto(
     int Port,
     bool UseHttps,
     string Username,
-    /// <summary>Ubicación libre para el operador ("Portería", "Bodega 2"); opcional.</summary>
+    /// <summary>Ruta de su ubicación en el árbol de Recursos ("Casa matriz › Portería"); null = por ubicar.</summary>
     string? Location,
     AccessDeviceKind Kind,
     string? Model,
@@ -67,7 +67,9 @@ public sealed record AccessDeviceDto(
     DateTime? LastSeenAt,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    IReadOnlyList<AccessDoorDto> Doors);
+    IReadOnlyList<AccessDoorDto> Doors,
+    /// <summary>Ubicación del equipo (null = por ubicar): la heredan sus puertas.</summary>
+    int? LocationId = null);
 
 public sealed record AccessDeviceWriteDto(
     string Name,
@@ -79,7 +81,9 @@ public sealed record AccessDeviceWriteDto(
     /// <summary>Al editar, vacío = conservar la actual.</summary>
     string? Password,
     bool Enabled = true,
-    string? Location = null);
+    /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
+    /// por ubicar); 0 = por ubicar. Las puertas que seguían al equipo se mueven con él.</summary>
+    int? LocationId = null);
 
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record AccessProbeResultDto(
@@ -168,6 +172,7 @@ public sealed record AccessDoorStateDto(
     int DeviceId,
     string DeviceName,
     string DriverKey,
+    /// <summary>Ruta de la ubicación de la puerta (o la del equipo si la puerta no tiene); null = por ubicar.</summary>
     string? Location,
     int Number,
     string Name,
@@ -180,7 +185,9 @@ public sealed record AccessDoorStateDto(
     bool? Open,
     bool SupportsRemoteControl,
     bool SupportsDoorStatus,
-    DateTime? StateReadAt);
+    DateTime? StateReadAt,
+    /// <summary>Cerradura trabada; null si el equipo no lo informa.</summary>
+    bool? Locked = null);
 
 /// <summary>Orden sobre una puerta: "Open", "Close", "RemainOpen", "RemainLocked".</summary>
 public sealed record AccessDoorCommandDto(string Command);
@@ -414,7 +421,12 @@ public sealed record AccessEventDto(
     string? EmployeeNo,
     string? PersonName,
     int? PersonId,
-    string? CardNumber);
+    string? CardNumber,
+    /// <summary>Área y cargo de la persona del padrón (si el evento se ató a una).</summary>
+    string? Department = null,
+    string? Position = null,
+    /// <summary>La persona tiene foto enrolada (se pide a /api/access/persons/{id}/face).</summary>
+    bool HasFace = false);
 
 public sealed record AccessEventPageDto(int Total, int Page, int PageSize, IReadOnlyList<AccessEventDto> Items);
 

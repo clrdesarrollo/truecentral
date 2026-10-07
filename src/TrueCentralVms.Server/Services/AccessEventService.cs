@@ -35,7 +35,7 @@ public sealed class AccessEventService(
     IServiceScopeFactory scopeFactory,
     AccessControlService access,
     IConfiguration config,
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     ILogger<AccessEventService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
@@ -217,14 +217,20 @@ public sealed class AccessEventService(
                                k.MinorType == record.MinorType && k.DoorNumber == record.DoorNumber))
                 continue;
 
-            var door = record.DoorNumber is int number
+            // Los terminales de UNA puerta (los faciales) a menudo no informan
+            // el número de puerta en sus accesos: si el evento es de paso por
+            // la puerta, no puede ser de otra.
+            int? doorNumber = record.DoorNumber;
+            if (doorNumber is null && tracked.Doors.Count == 1 && IsDoorEvent(record.Kind))
+                doorNumber = tracked.Doors[0].Number;
+            var door = doorNumber is int number
                 ? tracked.Doors.FirstOrDefault(d => d.Number == number)
                 : null;
             var entity = new AccessEvent
             {
                 AccessDeviceId = tracked.Id,
                 DeviceName = tracked.Name,
-                DoorNumber = record.DoorNumber,
+                DoorNumber = doorNumber,
                 DoorName = door?.Name,
                 Timestamp = record.Timestamp,
                 ReceivedAt = DateTime.UtcNow,
@@ -255,11 +261,37 @@ public sealed class AccessEventService(
         // Resuelto al vuelo: el motor contiene la acción de puertas, que usa
         // el servicio de acceso del que este depende.
         var workflows = scope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>();
+        var people = await PersonInfoAsync(db, stored.Select(e => e.AccessPersonId), ct);
         foreach (var entity in stored)
         {
-            await hub.Clients.All.SendAsync(VmsHubContract.AccessEventReceived, ToDto(entity), ct);
+            await hub.SendAsync(VmsHubContract.AccessEventReceived,
+                ToDto(entity, entity.AccessPersonId is int id ? people.GetValueOrDefault(id) : null),
+                s => s.CanViewAccessEvent(entity.AccessDeviceId, entity.DoorNumber), ct);
             workflows.Publish(Workflows.WorkflowTrigger.FromAccessEvent(entity));
         }
+
+        // Un paso, una puerta que se abre o se cierra, o una alarma cambian el
+        // estado de la hoja y de la cerradura: se relee ya en vez de esperar
+        // el sondeo de un minuto.
+        if (stored.Any(e => IsDoorEvent(e.Kind))) access.RequestDoorRefresh(deviceId);
+    }
+
+    private static bool IsDoorEvent(AccessEventKind kind) =>
+        kind is AccessEventKind.Granted or AccessEventKind.Denied or AccessEventKind.DoorOpen
+            or AccessEventKind.DoorClose or AccessEventKind.Alarm;
+
+    /// <summary>Lo que el monitoreo muestra de la persona junto al evento (área, cargo, si tiene foto).</summary>
+    public sealed record PersonInfo(string? Department, string? Position, bool HasFace);
+
+    public static async Task<Dictionary<int, PersonInfo>> PersonInfoAsync(VmsDbContext db, IEnumerable<int?> ids,
+        CancellationToken ct)
+    {
+        var wanted = ids.OfType<int>().Distinct().ToList();
+        if (wanted.Count == 0) return [];
+        return await db.AccessPersons.AsNoTracking()
+            .Where(p => wanted.Contains(p.Id))
+            .Select(p => new { p.Id, p.Department, p.Position, HasFace = p.Face != null })
+            .ToDictionaryAsync(p => p.Id, p => new PersonInfo(p.Department, p.Position, p.HasFace), ct);
     }
 
     /// <summary>
@@ -318,7 +350,10 @@ public sealed class AccessEventService(
 
     private static string Shorten(string text, int max) => text.Length <= max ? text : text[..max];
 
-    public static AccessEventDto ToDto(AccessEvent e) => new(
+    public static AccessEventDto ToDto(AccessEvent e) => ToDto(e, null);
+
+    public static AccessEventDto ToDto(AccessEvent e, PersonInfo? person) => new(
         e.Id, e.AccessDeviceId, e.DeviceName, e.DoorNumber, e.DoorName, e.Timestamp, e.ReceivedAt,
-        e.Kind, e.Credential, e.Description, e.EmployeeNo, e.PersonName, e.AccessPersonId, e.CardNumber);
+        e.Kind, e.Credential, e.Description, e.EmployeeNo, e.PersonName, e.AccessPersonId, e.CardNumber,
+        person?.Department, person?.Position, person?.HasFace ?? false);
 }

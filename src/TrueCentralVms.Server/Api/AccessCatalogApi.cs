@@ -161,7 +161,7 @@ public static class AccessCatalogApi
         MapSchedules(app);
         MapLevels(app);
         MapPersons(app);
-        MapEvents(app);
+        // El historial (buscador y reportes) vive en AccessRecordsApi.
 
         // ------------------------------------------------------------------
         // Resumen del módulo (la portada de Control de acceso)
@@ -169,16 +169,22 @@ public static class AccessCatalogApi
         app.MapGet("/api/access/overview", async (HttpContext ctx, VmsDbContext db, LicenseService license,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var since = DateTime.UtcNow.Date;
+            // Alcance por ubicación: puertas, equipos y eventos de sus ubicaciones
+            // (el padrón de personas, niveles y horarios es común a todo el sistema).
+            var scope = await ctx.ScopeAsync(session);
+            var events = ScopeQueries.AccessEvents(db, db.AccessEvents.AsNoTracking(), scope);
 
-            var doors = await db.AccessDoors.AsNoTracking().Where(d => d.Enabled).ToListAsync(ct);
-            var recent = await db.AccessEvents.AsNoTracking()
-                .OrderByDescending(e => e.Timestamp).Take(15).ToListAsync(ct);
+            var doors = (await db.AccessDoors.AsNoTracking().Where(d => d.Enabled).ToListAsync(ct))
+                .Where(d => scope.CanView(d.LocationId)).ToList();
+            var devices = (await db.AccessDevices.AsNoTracking().Select(d => new { d.Id, d.Status }).ToListAsync(ct))
+                .Where(d => scope.CanViewAccessDevice(d.Id)).ToList();
+            var recent = await events.OrderByDescending(e => e.Timestamp).Take(15).ToListAsync(ct);
 
             return Results.Ok(new AccessOverviewDto(
-                Devices: await db.AccessDevices.CountAsync(ct),
-                DevicesOnline: await db.AccessDevices.CountAsync(d => d.Status == AccessDeviceStatus.Online, ct),
+                Devices: devices.Count,
+                DevicesOnline: devices.Count(d => d.Status == AccessDeviceStatus.Online),
                 Doors: doors.Count,
                 DoorsRemainOpen: doors.Count(d => d.Mode == AccessDoorMode.RemainOpen),
                 DoorsRemainLocked: doors.Count(d => d.Mode == AccessDoorMode.RemainLocked),
@@ -188,8 +194,8 @@ public static class AccessCatalogApi
                 PersonsFailedSync: await db.AccessPersons.CountAsync(p => p.SyncState == AccessSyncState.Failed, ct),
                 Levels: await db.AccessLevels.CountAsync(ct),
                 Schedules: await db.AccessSchedules.CountAsync(ct),
-                EventsToday: await db.AccessEvents.CountAsync(e => e.Timestamp >= since, ct),
-                DeniedToday: await db.AccessEvents.CountAsync(e => e.Timestamp >= since && e.Kind == AccessEventKind.Denied, ct),
+                EventsToday: await events.CountAsync(e => e.Timestamp >= since, ct),
+                DeniedToday: await events.CountAsync(e => e.Timestamp >= since && e.Kind == AccessEventKind.Denied, ct),
                 DoorLimit: license.Quota(LicenseFeatures.AccessDoors),
                 RecentEvents: recent.Select(AccessEventService.ToDto).ToList()));
         });
@@ -327,17 +333,20 @@ public static class AccessCatalogApi
         app.MapGet("/api/access/doors", async (HttpContext ctx, VmsDbContext db, AccessControlService service,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            var doors = await db.AccessDoors.AsNoTracking().Include(d => d.AccessDevice)
-                .OrderBy(d => d.AccessDevice!.Location).ThenBy(d => d.AccessDevice!.Name).ThenBy(d => d.Number)
-                .ToListAsync(ct);
-            return Results.Ok(doors.Select(service.ToDoorDto));
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            // Agrupadas por equipo: por la ruta de su ubicación (los por ubicar al final) y por nombre.
+            var doors = (await db.AccessDoors.AsNoTracking().Include(d => d.AccessDevice).ToListAsync(ct))
+                .OrderBy(d => LocationPaths.Of(d.AccessDevice!.LocationId) ?? "￿", StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(d => d.AccessDevice!.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(d => d.Number)
+                .ToList();
+            var scope = await ctx.ScopeAsync(session);
+            return Results.Ok(doors.Where(d => scope.CanView(d.LocationId)).Select(service.ToDoorDto));
         });
 
         // Renombrar o pausar una puerta. El nombre es del VMS: una revalidación
         // del equipo no lo pisa, porque el operador lo puso a propósito.
         app.MapPut("/api/access/doors/{id:int}", async (HttpContext ctx, int id, AccessDoorWriteDto request,
-            VmsDbContext db, AccessControlService service, IHubContext<VmsHub> hub, AccessSyncService sync,
+            VmsDbContext db, AccessControlService service, ScopedHub hub, AccessSyncService sync,
             AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
@@ -366,7 +375,7 @@ public static class AccessCatalogApi
                 targetName: $"{door.AccessDevice?.Name} · {door.Name}",
                 detail: $"Modificó la puerta '{door.Name}' del equipo '{door.AccessDevice?.Name}': " +
                         (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
-            await hub.Clients.All.SendAsync(VmsHubContract.AccessDoorStateChanged, service.ToDoorDto(door), ct);
+            await hub.SendAsync(VmsHubContract.AccessDoorStateChanged, service.ToDoorDto(door), s => s.CanViewDoor(door.Id), ct);
             return Results.Ok(service.ToDoorDto(door));
         });
 
@@ -380,9 +389,11 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/devices/{id:int}/capture-card", async (HttpContext ctx, int id,
             int? cardReaderNo, VmsDbContext db, AccessControlService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var device = await db.AccessDevices.FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanOperateAccessDevice(id))
+                return await ctx.OutOfScopeAsync(session, "access-device", id.ToString(), device.Name, "leer una tarjeta en");
             if (!device.Enabled) return Error($"El equipo '{device.Name}' está pausado.");
             if (!service.SupportsCardCapture(device.DriverKey))
                 return Error($"El equipo '{device.Name}' no sabe leer una tarjeta a pedido.");
@@ -400,7 +411,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/doors/{id:int}/command", async (HttpContext ctx, int id, AccessDoorCommandDto request,
             VmsDbContext db, AccessControlService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             if (!Enum.TryParse<AccessDoorCommand>(request.Command, ignoreCase: true, out var command))
                 return Error($"Orden desconocida: '{request.Command}'.");
 
@@ -409,6 +420,14 @@ public static class AccessCatalogApi
             var device = door.AccessDevice!;
             string target = $"{device.Name} · {door.Name}";
             string action = CommandAudit(command);
+            if (!(await ctx.ScopeAsync(session)).CanOperate(door.LocationId))
+                return await ctx.OutOfScopeAsync(session, "access-door", door.Id.ToString(), target, command switch
+                {
+                    AccessDoorCommand.Open => "abrir",
+                    AccessDoorCommand.Close => "cerrar",
+                    AccessDoorCommand.RemainOpen => "dejar abierta",
+                    _ => "bloquear",
+                });
 
             if (!door.Enabled) return Error("La puerta está desactivada en el VMS.");
             if (!device.Enabled) return Error($"El equipo '{device.Name}' está pausado.");
@@ -1161,58 +1180,5 @@ public static class AccessCatalogApi
         foreach (string value in existing)
             if (int.TryParse(value, out int number) && number > highest) highest = number;
         return (highest + 1).ToString();
-    }
-
-    // ==================================================================
-    // Historial
-    // ==================================================================
-
-    private static void MapEvents(WebApplication app)
-    {
-        app.MapGet("/api/access/events", async (HttpContext ctx, VmsDbContext db, AuditService audit,
-            DateTime? from, DateTime? to, int? deviceId, int? doorId, int? personId, string? kind, string? q,
-            int? page, int? pageSize, CancellationToken ct) =>
-        {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            (int pageNumber, int size) = Paging(page, pageSize);
-
-            var query = db.AccessEvents.AsNoTracking().AsQueryable();
-            if (from is { } start) query = query.Where(e => e.Timestamp >= start);
-            if (to is { } end) query = query.Where(e => e.Timestamp <= end);
-            if (deviceId is int device) query = query.Where(e => e.AccessDeviceId == device);
-            if (personId is int person) query = query.Where(e => e.AccessPersonId == person);
-            if (Enum.TryParse<AccessEventKind>(kind, ignoreCase: true, out var eventKind))
-                query = query.Where(e => e.Kind == eventKind);
-            if (doorId is int door)
-            {
-                // La puerta se identifica en el historial por equipo + número,
-                // no por su Id: el historial sobrevive a que se borre la puerta.
-                var target = await db.AccessDoors.AsNoTracking().FirstOrDefaultAsync(d => d.Id == door, ct);
-                if (target is null) return Error("La puerta indicada ya no existe.");
-                query = query.Where(e => e.AccessDeviceId == target.AccessDeviceId && e.DoorNumber == target.Number);
-            }
-            if (!string.IsNullOrWhiteSpace(q))
-            {
-                string term = q.Trim();
-                query = query.Where(e => (e.PersonName != null && EF.Functions.ILike(e.PersonName, $"%{term}%")) ||
-                                         (e.EmployeeNo != null && EF.Functions.ILike(e.EmployeeNo, $"%{term}%")) ||
-                                         (e.CardNumber != null && EF.Functions.ILike(e.CardNumber, $"%{term}%")) ||
-                                         EF.Functions.ILike(e.Description, $"%{term}%"));
-            }
-
-            int total = await query.CountAsync(ct);
-            var items = await query.OrderByDescending(e => e.Timestamp)
-                .Skip((pageNumber - 1) * size).Take(size).ToListAsync(ct);
-
-            // Solo se audita la búsqueda con filtros: el refresco automático de
-            // la pantalla llenaría la bitácora de ruido.
-            if (pageNumber == 1 && (from is not null || personId is not null || !string.IsNullOrWhiteSpace(q)))
-                await audit.LogAsync(ctx, "access", "search",
-                    detail: $"Consultó el historial de accesos ({total} resultado(s))" +
-                            (q is { Length: > 0 } ? $" buscando '{q}'." : "."));
-
-            return Results.Ok(new AccessEventPageDto(total, pageNumber, size,
-                items.Select(AccessEventService.ToDto).ToList()));
-        });
     }
 }

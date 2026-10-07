@@ -25,7 +25,7 @@ public sealed class AccessControlService(
     IServiceScopeFactory scopeFactory,
     AccessDriverRegistry drivers,
     CredentialProtector credentials,
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     AuditService audit,
     ILogger<AccessControlService> logger) : BackgroundService
 {
@@ -58,13 +58,14 @@ public sealed class AccessControlService(
     }
 
     public AccessDeviceDto ToDto(AccessDevice d) => new(
-        d.Id, d.Name, d.DriverKey, d.Host, d.Port, d.UseHttps, d.Username, d.Location, d.Kind,
+        d.Id, d.Name, d.DriverKey, d.Host, d.Port, d.UseHttps, d.Username, Auth.LocationPaths.Of(d.LocationId), d.Kind,
         d.Model, d.SerialNumber, d.FirmwareVersion, d.MacAddress, d.Doors.Count,
         d.SupportsRemoteControl, d.SupportsEvents, d.SupportsCards, d.SupportsFingerprint, d.SupportsFace,
         d.UserCapacity, d.CardCapacity, d.Enabled, d.Status, d.LastError, d.LastSeenAt, d.CreatedAt, d.UpdatedAt,
         d.Doors.OrderBy(door => door.Number)
             .Select(door => new AccessDoorDto(door.Id, door.AccessDeviceId, door.Number, door.Name, door.Enabled))
-            .ToList());
+            .ToList(),
+        d.LocationId);
 
     /// <summary>Puerta con su equipo, para el monitoreo en vivo y los niveles de acceso.</summary>
     public AccessDoorStateDto ToDoorDto(AccessDoor door)
@@ -72,9 +73,10 @@ public sealed class AccessControlService(
         var device = door.AccessDevice
                      ?? throw new InvalidOperationException("La puerta se cargó sin su equipo.");
         return new AccessDoorStateDto(
-            door.Id, device.Id, device.Name, device.DriverKey, device.Location, door.Number, door.Name, door.Enabled,
+            door.Id, device.Id, device.Name, device.DriverKey,
+            Auth.LocationPaths.Of(door.LocationId ?? device.LocationId), door.Number, door.Name, door.Enabled,
             device.Status, door.Mode.ToString(), door.IsOpen,
-            device.SupportsRemoteControl, SupportsDoorStatus(device.DriverKey), door.StateReadAt);
+            device.SupportsRemoteControl, SupportsDoorStatus(device.DriverKey), door.StateReadAt, door.IsLocked);
     }
 
     /// <summary>¿El driver de esa marca sabe leer el modo de las puertas?</summary>
@@ -150,7 +152,55 @@ public sealed class AccessControlService(
         door.StateReadAt = DateTime.UtcNow;
         door.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-        await hub.Clients.All.SendAsync(VmsHubContract.AccessDoorStateChanged, ToDoorDto(door), ct);
+        await hub.SendAsync(VmsHubContract.AccessDoorStateChanged, ToDoorDto(door), s => s.CanViewDoor(door.Id), ct);
+
+        // Lo anotado es lo que se ORDENÓ; el estado real (sensor, cerradura)
+        // se relee enseguida para que el monitoreo no espere al próximo sondeo.
+        RequestDoorRefresh(device.Id);
+    }
+
+    // ------------------------------------------------------------------
+    // Relectura inmediata del estado de las puertas
+    // ------------------------------------------------------------------
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> _doorRefreshPending = new();
+
+    /// <summary>
+    /// Pide releer YA el estado de las puertas de un equipo: tras una orden o
+    /// cuando llega un evento de puerta (abierta, cerrada, forzada). Las
+    /// peticiones que llegan juntas se agrupan en una sola lectura, un segundo
+    /// después (lo que tarda el equipo en actualizar su propio estado).
+    /// </summary>
+    public void RequestDoorRefresh(int deviceId)
+    {
+        if (!_doorRefreshPending.TryAdd(deviceId, 0)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                _doorRefreshPending.TryRemove(deviceId, out _);
+                await RefreshDoorsAsync(deviceId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _doorRefreshPending.TryRemove(deviceId, out _);
+                logger.LogDebug(ex, "No se pudo releer el estado de las puertas del equipo {DeviceId}.", deviceId);
+            }
+        });
+    }
+
+    private async Task RefreshDoorsAsync(int deviceId, CancellationToken ct)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+        var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == deviceId, ct);
+        if (device is null || !device.Enabled || device.Doors.Count == 0) return;
+        var driver = DriverOf(device);
+        if (!driver.SupportsDoorStatus) return;
+        var statuses = await driver.ReadDoorStatusAsync(ConnectionOf(device), device.Doors.Count, ct);
+        await ApplyDoorStatusAsync(db, device, statuses, ct);
+        await db.SaveChangesAsync(ct);
     }
 
     // ------------------------------------------------------------------
@@ -180,7 +230,10 @@ public sealed class AccessControlService(
         using (var scope = scopeFactory.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
-            devices = await db.AccessDevices.AsNoTracking().Where(d => d.Enabled).ToListAsync(ct);
+            // Con sus puertas: sin ellas PollOneAsync ve cero puertas y nunca
+            // le pregunta al equipo en qué estado están (el monitoreo quedaba en "—").
+            devices = await db.AccessDevices.AsNoTracking().Include(d => d.Doors)
+                .Where(d => d.Enabled).ToListAsync(ct);
         }
         if (devices.Count == 0) return;
 
@@ -215,7 +268,7 @@ public sealed class AccessControlService(
                     targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
                     detail: $"El equipo de control de acceso '{device.Name}' ({device.Host}) no responde: {result.Error}",
                     success: false);
-            await hub.Clients.All.SendAsync(VmsHubContract.AccessDeviceStatusChanged, ToDto(device), ct);
+            await hub.SendTrimmedAsync(VmsHubContract.AccessDeviceStatusChanged, ToDto(device), (s, d) => s.Visible(d), ct);
 
             // Automatizaciones ("terminal sin conexión → avisar"). Resuelto al
             // vuelo: el motor contiene la acción de puertas, que usa este servicio.
@@ -272,13 +325,17 @@ public sealed class AccessControlService(
         {
             var door = device.Doors.FirstOrDefault(d => d.Number == status.Number);
             if (door is null) continue;
-            if (door.Mode == status.Mode && door.IsOpen == status.Open)
+            // Un equipo que no informa el modo no debe borrar el que dejó
+            // anotado la última orden del operador.
+            var mode = status.Mode == AccessDoorMode.Unknown ? door.Mode : status.Mode;
+            if (door.Mode == mode && door.IsOpen == status.Open && door.IsLocked == status.Locked)
             {
                 door.StateReadAt = DateTime.UtcNow;
                 continue;
             }
-            door.Mode = status.Mode;
+            door.Mode = mode;
             door.IsOpen = status.Open;
+            door.IsLocked = status.Locked;
             door.StateReadAt = DateTime.UtcNow;
             changed.Add(door);
         }
@@ -287,7 +344,7 @@ public sealed class AccessControlService(
         foreach (var door in changed)
         {
             door.AccessDevice = device;
-            await hub.Clients.All.SendAsync(VmsHubContract.AccessDoorStateChanged, ToDoorDto(door), ct);
+            await hub.SendAsync(VmsHubContract.AccessDoorStateChanged, ToDoorDto(door), s => s.CanViewDoor(door.Id), ct);
         }
     }
 }

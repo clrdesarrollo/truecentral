@@ -78,9 +78,42 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         new(Transport(info), digestOnly: true, deviceNoun: Noun);
 
     /// <summary>Olvida la conexión cacheada (credenciales cambiadas o equipo eliminado).</summary>
-    public static void Forget(AccessConnectionInfo info) => HikvisionIsapiClient.Forget(Transport(info));
+    public static void Forget(AccessConnectionInfo info)
+    {
+        HikvisionIsapiClient.Forget(Transport(info));
+        // Lo aprendido de sus lectores también: puede ser otro equipo en la misma dirección.
+        AcceptedReaders.TryRemove($"{(info.UseHttps ? "https" : "http")}://{info.Host}:{info.Port}", out _);
+    }
 
     public void ForgetCachedSession(AccessConnectionInfo info) => Forget(info);
+
+    // ------------------------------------------------------------------
+    // Hora y mantenimiento (las mismas rutas ISAPI que el resto de la marca)
+    // ------------------------------------------------------------------
+
+    public bool SupportsClock => true;
+    public bool SupportsNtp => true;
+    public bool SupportsReboot => true;
+    public DeviceResetModes SupportedResets => DeviceResetModes.KeepNetwork | DeviceResetModes.Full;
+
+    public Task<DeviceClock> GetClockAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+        HikvisionMaintenance.GetClockAsync(Client(info), ct);
+
+    public Task<string?> SetClockAsync(AccessConnectionInfo info, DeviceClockSetting setting, CancellationToken ct = default) =>
+        HikvisionMaintenance.SetClockAsync(Client(info), setting, ct);
+
+    public async Task RebootAsync(AccessConnectionInfo info, CancellationToken ct = default)
+    {
+        await HikvisionMaintenance.RebootAsync(Client(info), ct);
+        Forget(info);
+    }
+
+    public async Task ResetAsync(AccessConnectionInfo info, DeviceResetMode mode, CancellationToken ct = default)
+    {
+        await HikvisionMaintenance.ResetAsync(Client(info), mode, ct);
+        // Lo aprendido del equipo (sesión, lectores de huella) ya no vale.
+        Forget(info);
+    }
 
     // Esta familia sí acepta el padrón del VMS y sí informa el estado de sus puertas.
     public bool SupportsPersonSync => true;
@@ -244,7 +277,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
     /// <summary>
     /// <c>@max</c> del campo indicado, cuando el equipo lo declara como rango
-    /// (<c>"enableCardReader": { "@min": 1, "@max": 1 }</c>).
+    /// (<c>"cardReaderNum": { "@min": 1, "@max": 2 }</c>).
     /// </summary>
     private static int? MaxOf(JsonElement element, string[] names, int depth)
     {
@@ -354,10 +387,12 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// <summary>
     /// Modo de cada puerta según <c>/ISAPI/AccessControl/AcsWorkStatus</c>, que
     /// entrega arreglos paralelos indexados por número de puerta:
-    /// <c>doorStatus</c> (1 dormida, 2 mantenida abierta, 3 bloqueada, 4 normal)
-    /// y <c>magneticStatus</c> (0 cerrada, 1 abierta), que es el sensor de la
-    /// hoja. Un equipo que no expone la ruta devuelve la lista vacía y el
-    /// servidor se queda con el modo que él mismo dejó anotado.
+    /// <c>doorStatus</c> (1 dormida, 2 mantenida abierta, 3 bloqueada, 4 normal),
+    /// <c>magneticStatus</c> (0 cerrada, 1 abierta; 2-4 son alarmas del
+    /// cableado: cortocircuito, corte, excepción), que es el sensor de la hoja,
+    /// y <c>doorLockStatus</c> (0 cerradura trabada, 1 destrabada; 2-4 alarmas),
+    /// que es el relé de la cerradura. Un equipo que no expone la ruta devuelve
+    /// la lista vacía y el servidor se queda con el modo que él mismo dejó anotado.
     /// </summary>
     public async Task<IReadOnlyList<AccessDoorStatus>> ReadDoorStatusAsync(AccessConnectionInfo info, int doorCount,
         CancellationToken ct = default)
@@ -368,16 +403,17 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         catch (DriverException) { return []; }
         if (json is null) return [];
 
-        int[]? doorStatus, magnetic;
+        int[]? doorStatus, magnetic, lockStatus;
         try
         {
             using var doc = JsonDocument.Parse(json);
             var status = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "AcsWorkStatus") ?? doc.RootElement;
             doorStatus = IntArray(status, "doorStatus");
             magnetic = IntArray(status, "magneticStatus");
+            lockStatus = IntArray(status, "doorLockStatus");
         }
         catch (JsonException) { return []; }
-        if (doorStatus is null && magnetic is null) return [];
+        if (doorStatus is null && magnetic is null && lockStatus is null) return [];
 
         var result = new List<AccessDoorStatus>();
         for (int number = 1; number <= doorCount; number++)
@@ -392,8 +428,13 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                     _ => AccessDoorMode.Unknown,
                 }
                 : AccessDoorMode.Unknown;
-            bool? open = magnetic is not null && index < magnetic.Length ? magnetic[index] != 0 : null;
-            result.Add(new AccessDoorStatus(number, mode, open));
+            // Solo 0 y 1 son estados; los demás son alarmas del cableado y no
+            // dicen si la hoja está abierta o cerrada.
+            static bool? Binary(int[]? values, int i) =>
+                values is not null && i < values.Length && values[i] is 0 or 1 ? values[i] == 1 : null;
+            bool? open = Binary(magnetic, index);
+            bool? unlocked = Binary(lockStatus, index);
+            result.Add(new AccessDoorStatus(number, mode, open, unlocked is null ? null : !unlocked.Value));
         }
         return result;
     }
@@ -468,7 +509,8 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             {
                 using var doc = JsonDocument.Parse(json);
                 var search = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "AcsEvent") ?? doc.RootElement;
-                foreach (var item in InfoList(search)) events.Add(ParseEvent(item));
+                foreach (var item in InfoList(search))
+                    if (ParseEvent(item) is var record && !IsOwnSessionNoise(record)) events.Add(record);
                 status = HikvisionAlarmPanelDriver.GetString(search, "responseStatusStrg") ?? "OK";
                 matches = HikvisionAlarmPanelDriver.GetInt(search, "numOfMatches") ?? 0;
             }
@@ -498,6 +540,16 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// <summary>Rango de tiempo como lo espera ISAPI: hora local del servidor con su desfase ("2026-09-09T08:00:00-03:00").</summary>
     private static string IsapiTime(DateTime utc) =>
         new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToLocalTime().ToString("yyyy-MM-ddTHH:mm:sszzz");
+
+    /// <summary>
+    /// Ingreso y salida remota al equipo (operación 0x70/0x71): los genera
+    /// cada consulta ISAPI, incluidas las del propio VMS (estado de puertas
+    /// cada minuto, historial cada 15 s), así que llenarían el historial y el
+    /// monitoreo de renglones "Otro" sin valor para el guardia. Quedan en el
+    /// registro del propio equipo.
+    /// </summary>
+    private static bool IsOwnSessionNoise(AccessEventRecord record) =>
+        record.MajorType == 3 && record.MinorType is 0x70 or 0x71;
 
     private static AccessEventRecord ParseEvent(JsonElement item)
     {
@@ -967,6 +1019,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             if (HikvisionAlarmPanelDriver.FindObject(root, "AccessControllerEvent") is not { } acs) return null;
 
             var record = ParseEvent(acs);
+            if (IsOwnSessionNoise(record)) return null;
             // La hora del evento va en la envoltura, no en el objeto interno.
             var cuando = ParseTime(HikvisionAlarmPanelDriver.GetString(root, "dateTime"));
             return record with { Timestamp = cuando, RawJson = json };
@@ -1114,8 +1167,8 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             ["Valid"] = new
             {
                 enable = true,
-                beginTime = LocalStamp(plan.ValidFrom),
-                endTime = LocalStamp(plan.ValidTo),
+                beginTime = ValidityStamp(plan.ValidFrom),
+                endTime = ValidityStamp(plan.ValidTo),
                 timeType = "local",
             },
             // Los firmware viejos solo entienden doorRight (la lista de
@@ -1167,7 +1220,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
         if (problemas.Count == 0) return;
         throw new DriverException(
-            $"La persona quedó escrita en el equipo, pero {(problemas.Count == 1 ? "faltó" : "faltaron")} " +
+            "La persona quedó escrita en el equipo, pero falló la escritura de " +
             $"{string.Join(" · ", problemas)} " +
             "El resto de sus credenciales sí quedó, así que puede entrar con las que sí entraron.");
     }
@@ -1428,8 +1481,9 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// se le quitó).
     ///
     /// <c>enableCardReader</c> dice en qué lectores del equipo queda grabada.
-    /// Se le mandan todos los que el equipo declare tener; si no lo dice, uno
-    /// por puerta, que es la configuración de un terminal.
+    /// Se le manda el rango que el equipo declara para ese campo (que no
+    /// siempre empieza en 1); si no lo dice, uno por puerta, que es la
+    /// configuración de un terminal.
     /// </summary>
     private static async Task ApplyFingerprintsAsync(HikvisionIsapiClient client, AccessPersonPlan plan,
         CancellationToken ct)
@@ -1459,7 +1513,9 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             // para el equipo ocupado de verdad, no para el ruido que hacemos
             // nosotros mismos.
             if (i > 0) await Task.Delay(TimeSpan.FromMilliseconds(FingerprintSettleMs), ct);
-            await DownloadFingerprintAsync(client, plan.EmployeeNo, readers, plan.Fingerprints[i], ct);
+            // Si el equipo tuvo que bajar a menos lectores, las huellas que
+            // siguen ya van con los que aceptó.
+            readers = await DownloadFingerprintAsync(client, plan.EmployeeNo, readers, plan.Fingerprints[i], ct);
         }
 
         await VerifyFingerprintsAsync(client, plan, ct);
@@ -1560,8 +1616,30 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// <summary>
     /// Baja UNA huella al equipo. Va por POST: con PUT el equipo contesta
     /// <c>methodNotAllowed</c> (verificado contra un DS-K1T321MFWX).
+    ///
+    /// Devuelve los lectores con los que el equipo la aceptó, que pueden ser
+    /// menos que los pedidos: si rechaza <c>enableCardReader</c> por fuera de
+    /// rango se reintenta con menos (ver <see cref="FewerReaders"/>).
     /// </summary>
-    private static async Task DownloadFingerprintAsync(HikvisionIsapiClient client, string employeeNo,
+    private static async Task<int[]> DownloadFingerprintAsync(HikvisionIsapiClient client, string employeeNo,
+        int[] readers, AccessFingerprintData finger, CancellationToken ct)
+    {
+        while (true)
+        {
+            try
+            {
+                await DownloadFingerprintWithAsync(client, employeeNo, readers, finger, ct);
+                return readers;
+            }
+            catch (DriverException ex) when (RejectsReaders(ex.Message) && FewerReaders(readers) is { } fewer)
+            {
+                readers = fewer;
+                AcceptedReaders[client.BaseUrl] = readers;
+            }
+        }
+    }
+
+    private static async Task DownloadFingerprintWithAsync(HikvisionIsapiClient client, string employeeNo,
         int[] readers, AccessFingerprintData finger, CancellationToken ct)
     {
         string? lastError = null;
@@ -1595,6 +1673,36 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         }
         throw new DriverException(lastError ?? $"No se pudo grabar la huella de {FingerName(finger.Number)}.");
     }
+
+    /// <summary>
+    /// El equipo rechazó la lista de lectores, no la huella. Lo dice nombrando
+    /// el campo en el motivo del rechazo (el DS-K1T323MBWX-QRE1 contestó
+    /// <c>badJsonContent · … Exceeding the parameter range limit … enableCardReader</c>).
+    /// Un "ocupado" que lo nombre no cuenta: ese nombra campos al azar.
+    /// </summary>
+    private static bool RejectsReaders(string message) =>
+        message.Contains("enableCardReader", StringComparison.OrdinalIgnoreCase) && !IsBusy(message);
+
+    /// <summary>
+    /// La lista de lectores siguiente, más corta, para reintentar después de que
+    /// el equipo rechazara la actual; null cuando ya no hay a dónde bajar.
+    ///
+    /// Es el respaldo para cuando el rango declarado es más ancho que los
+    /// lectores que de verdad hay (un firmware que declara 1..512, o el lector
+    /// externo Wiegand/RS-485 sin nada conectado). Se baja a la mitad
+    /// conservando el PRIMERO del rango, que es el propio del terminal.
+    /// </summary>
+    private static int[]? FewerReaders(int[] readers) =>
+        readers.Length > 1 ? readers[..(readers.Length / 2)] : null;
+
+    /// <summary>
+    /// Lectores con los que cada equipo terminó aceptando las huellas (por URL
+    /// del equipo). Aprenderlo una vez ahorra el rechazo en cada huella y en
+    /// cada persona siguiente, y le da al borrado detallado los lectores
+    /// buenos. Vive en memoria: tras un reinicio se vuelve a aprender, lo que
+    /// también recoge un lector que se haya conectado mientras tanto.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int[]> AcceptedReaders = new();
 
     /// <summary>
     /// Escritura de configuración con reintento cuando el equipo contesta
@@ -1862,34 +1970,79 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     };
 
     /// <summary>
-    /// Números de lector de tarjeta del equipo. Se leen de sus capacidades; si
-    /// no las expone, se asume uno por puerta (lo normal en un terminal) y como
-    /// mínimo el 1, para no mandar una lista vacía que el equipo rechazaría.
+    /// Lectores en los que se graba la huella. Se leen de las capacidades del
+    /// equipo; si no las expone, se asume uno por puerta (lo normal en un
+    /// terminal) y como mínimo el 1, para no mandar una lista vacía que el
+    /// equipo rechazaría.
     /// </summary>
     private static async Task<int[]> CardReadersAsync(HikvisionIsapiClient client, int doorCount, CancellationToken ct)
     {
-        int count = 0;
-        // El esquema de huellas del propio equipo trae enableCardReader con su
-        // máximo: es exactamente lo que hay que mandar y lo dice él mismo.
-        foreach (var (path, names) in new (string, string[])[]
-                 {
-                     ("/ISAPI/AccessControl/FingerPrintCfg/capabilities?format=json", ["enableCardReader"]),
-                     ("/ISAPI/AccessControl/CardReaderCfg/capabilities?format=json", ["cardReaderNum", "readerNum", "maxCardReaderNum"]),
-                 })
-        {
-            try
-            {
-                if (await client.RequestAsync(HttpMethod.Get, path, ct: ct) is not { } json) continue;
-                using var doc = JsonDocument.Parse(json);
-                count = MaxOf(doc.RootElement, names, depth: 4) ?? FirstInt(doc.RootElement, names, depth: 4) ?? 0;
-                if (count > 0) break;
-            }
-            catch (DriverException) { /* firmware sin esa ruta */ }
-            catch (JsonException) { /* respuesta que no se entiende */ }
-        }
+        // Si el equipo ya dijo con cuáles acepta las huellas, manda eso por
+        // sobre lo que declaran sus capacidades.
+        if (AcceptedReaders.TryGetValue(client.BaseUrl, out var accepted)) return accepted;
 
-        if (count <= 0) count = Math.Max(doorCount, 1);
-        return Enumerable.Range(1, Math.Clamp(count, 1, MaxCardReaders)).ToArray();
+        // El esquema de huellas del propio equipo trae enableCardReader con su
+        // RANGO, y el rango entero es la respuesta: no siempre empieza en 1.
+        // En el DS-K1T323MBWX-QRE1 (V4.23.41) el lector 1 es el de rostro y
+        // tarjeta y el de huella es el 2: declara {"@min": 2, "@max": 2} y
+        // rechaza cualquier lista que incluya el 1 ("Exceeding the parameter
+        // range limit … enableCardReader"). Tomar solo el @max como cantidad
+        // —1..@max— fue lo que dejó a sus personas sin huellas.
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get,
+                    "/ISAPI/AccessControl/FingerPrintCfg/capabilities?format=json", ct: ct) is { } json)
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (RangeOf(doc.RootElement, "enableCardReader", depth: 4) is { } range)
+                    return ReaderRange(range.Min, range.Max);
+            }
+        }
+        catch (DriverException) { /* firmware sin esa ruta */ }
+        catch (JsonException) { /* respuesta que no se entiende */ }
+
+        int count = 0;
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get,
+                    "/ISAPI/AccessControl/CardReaderCfg/capabilities?format=json", ct: ct) is { } json)
+            {
+                using var doc = JsonDocument.Parse(json);
+                string[] names = ["cardReaderNum", "readerNum", "maxCardReaderNum"];
+                count = MaxOf(doc.RootElement, names, depth: 4) ?? FirstInt(doc.RootElement, names, depth: 4) ?? 0;
+            }
+        }
+        catch (DriverException) { /* firmware sin esa ruta */ }
+        catch (JsonException) { /* respuesta que no se entiende */ }
+
+        return ReaderRange(1, count > 0 ? count : Math.Max(doorCount, 1));
+    }
+
+    /// <summary>Lectores <paramref name="first"/>..<paramref name="last"/>, a lo sumo <see cref="MaxCardReaders"/>.</summary>
+    private static int[] ReaderRange(int first, int last)
+    {
+        first = Math.Max(first, 1);
+        last = Math.Clamp(last, first, first + MaxCardReaders - 1);
+        return Enumerable.Range(first, last - first + 1).ToArray();
+    }
+
+    /// <summary>
+    /// Rango declarado de un campo (<c>"enableCardReader": { "@min": 2, "@max": 2 }</c>),
+    /// buscándolo en el árbol; sin <c>@min</c> se toma 1. Null si el campo no
+    /// está o no declara <c>@max</c>.
+    /// </summary>
+    private static (int Min, int Max)? RangeOf(JsonElement element, string name, int depth)
+    {
+        if (depth < 0 || element.ValueKind != JsonValueKind.Object) return null;
+        if (element.TryGetProperty(name, out var field) && field.ValueKind == JsonValueKind.Object &&
+            HikvisionAlarmPanelDriver.GetInt(field, "@max") is { } max)
+            return (HikvisionAlarmPanelDriver.GetInt(field, "@min") ?? 1, max);
+        foreach (var property in element.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.Object) continue;
+            if (RangeOf(property.Value, name, depth - 1) is { } nested) return nested;
+        }
+        return null;
     }
 
     /// <summary>Tope de lectores que se le declaran al equipo (la controladora más grande tiene 8).</summary>
@@ -1980,9 +2133,23 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         }
     }
 
-    /// <summary>Vigencia como la escribe ISAPI: hora local del equipo, sin desfase.</summary>
-    private static string LocalStamp(DateTime utc) =>
-        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-ddTHH:mm:ss");
+    /// <summary>
+    /// Rango de fechas que aceptan los terminales en la vigencia de una persona:
+    /// guardan la fecha en 32 bits y rechazan lo que se sale con "timeFormatError"
+    /// (0x60000041), lo que deja a la persona sin escribir. Una vigencia "sin fin"
+    /// del VMS (p. ej. hasta el 31-12-2099) queda en el equipo hasta el tope.
+    /// </summary>
+    private static readonly DateTime ValidityMin = new(2000, 1, 1, 0, 0, 0);
+    private static readonly DateTime ValidityMax = new(2037, 12, 31, 23, 59, 59);
+
+    /// <summary>Vigencia como la escribe ISAPI: hora local del equipo, sin desfase, dentro de su rango.</summary>
+    private static string ValidityStamp(DateTime utc)
+    {
+        var local = DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime();
+        if (local > ValidityMax) local = ValidityMax;
+        if (local < ValidityMin) local = ValidityMin;
+        return local.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// Borra la persona del equipo. Se borran también sus tarjetas: hay

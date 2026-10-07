@@ -119,7 +119,7 @@ async function renderAccessDevices() {
           ${devices.map((d) => `
             <tr data-id="${d.id}">
               <td>${esc(d.name)}${d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</td>
-              <td class="muted">${esc(d.location ?? "—")}</td>
+              <td class="muted">${d.location ? esc(d.location) : `<span class="loc-line none">Por ubicar</span>`}</td>
               <td class="muted">${esc(accessBrandOf(d.driverKey))}</td>
               <td>${esc(ACCESS_KIND_LABELS[d.kind] ?? d.kind)}</td>
               <td class="muted">${d.useHttps ? "https://" : ""}${esc(d.host)}:${d.port}</td>
@@ -276,8 +276,8 @@ const accessPortLabel = (driver) => driver?.authMode === "CommKey" ? "Puerto del
 async function accessDeviceModal(device, prefill) {
   const isNew = !device;
   const seed = isNew ? (prefill || {}) : {};
-  let drivers;
-  try { drivers = await getAccessDrivers(); }
+  let drivers, places;
+  try { [drivers, places] = await Promise.all([getAccessDrivers(), loadLocationChoices()]); }
   catch (err) { toast(err.error, true); return; }
   const driver0 = drivers.find((d) => d.key === (device?.driverKey ?? seed.driverKey)) ?? drivers[0];
 
@@ -285,16 +285,12 @@ async function accessDeviceModal(device, prefill) {
     <h3>${isNew ? "Agregar equipo de control de acceso" : "Editar equipo de control de acceso"}</h3>
     <div id="ac-modal-error"></div>
     <form id="access-form">
-      <div class="form-grid">
-        <div class="field">
-          <label>Nombre</label>
-          <input id="ac-name" required maxlength="128" value="${esc(device?.name ?? seed.name ?? "")}" placeholder="Portería principal, Torniquete casino…">
-        </div>
-        <div class="field">
-          <label>Ubicación (opcional)</label>
-          <input id="ac-location" maxlength="128" value="${esc(device?.location ?? "")}" placeholder="Edificio A, Planta 2…">
-        </div>
+      <div class="field">
+        <label>Nombre</label>
+        <input id="ac-name" required maxlength="128" value="${esc(device?.name ?? seed.name ?? "")}" placeholder="Portería principal, Torniquete casino…">
       </div>
+      ${locationFieldHtml("ac-location", places, device?.locationId ?? null,
+        "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.")}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="ac-driver">
@@ -315,6 +311,7 @@ async function accessDeviceModal(device, prefill) {
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${device ? (device.enabled ? "checked" : "") : "checked"}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
       <div class="info-box" style="margin-top:10px">Al guardar se leen del equipo el modelo, el firmware, las capacidades y las puertas que administra.</div>
       <div id="ac-probe-result"></div>
+      ${isNew ? "" : maintDeviceSectionHtml()}
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="ac-cancel">Cancelar</button>
         <button class="btn ghost" type="button" id="ac-probe">Probar conexión</button>
@@ -323,6 +320,7 @@ async function accessDeviceModal(device, prefill) {
     </form>`);
 
   $("#ac-cancel").addEventListener("click", closeModal);
+  if (!isNew) maintFillDeviceSection("access", device.id);
   $("#ac-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#ac-driver").value);
     if (!dr) return;
@@ -342,7 +340,7 @@ async function accessDeviceModal(device, prefill) {
     username: $("#ac-username")?.value.trim() ?? "",
     password: $("#ac-password").value || null,
     enabled: $("#ac-enabled").checked,
-    location: $("#ac-location").value.trim() || null,
+    locationId: locationFieldValue("ac-location"),
   });
 
   $("#ac-probe").addEventListener("click", async () => {
