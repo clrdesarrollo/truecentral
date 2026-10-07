@@ -108,8 +108,22 @@
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
                 Visibility="{Binding IsGridFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
             <DockPanel>
-                <TextBlock DockPanel.Dock="Top" Text="GRABACIONES" Margin="14,12,14,8" FontSize="11"
-                           FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"/>
+                <!-- Encabezado: mismo selector que la Vista en Vivo (el árbol es el mismo) -->
+                <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8">
+                    <Border DockPanel.Dock="Right" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            CornerRadius="6" Padding="2">
+                        <StackPanel Orientation="Horizontal">
+                            <Button Style="{StaticResource SegmentButton}" Content="Equipo"
+                                    Tag="{Binding IsTreeByDevice}" Command="{Binding ShowTreeByDeviceCommand}"
+                                    ToolTip="Cámaras agrupadas por equipo (DVR, NVR, cámara)"/>
+                            <Button Style="{StaticResource SegmentButton}" Content="Ubicación"
+                                    Tag="{Binding IsTreeByLocation}" Command="{Binding ShowTreeByLocationCommand}"
+                                    ToolTip="Cámaras agrupadas por ubicación (sitio, edificio, sector…), como en Recursos del panel web"/>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="GRABACIONES" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                               Foreground="{StaticResource MutedBrush}"/>
+                </DockPanel>
                 <!-- Buscador del árbol (filtra canales y equipos, sin tildes).
                      Comparte el filtro con la Vista en Vivo: el árbol es el mismo. -->
                 <Grid DockPanel.Dock="Top" Margin="10,0,10,8">
@@ -130,7 +144,7 @@
                         </TextBlock.Style>
                     </TextBlock>
                 </Grid>
-                <TreeView x:Name="PlaybackTree" ItemsSource="{Binding Devices}"
+                <TreeView x:Name="PlaybackTree" ItemsSource="{Binding TreeItems}"
                           Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
                           MouseDoubleClick="OnTreeDoubleClick"
                           PreviewMouseLeftButtonDown="OnTreeMouseDown"
@@ -147,6 +161,15 @@
                     <TreeView.Resources>
                         <HierarchicalDataTemplate DataType="{x:Type vm:DeviceNode}" ItemsSource="{Binding Channels}">
                             <TextBlock Text="{Binding Header}" FontWeight="SemiBold" Margin="0,2"/>
+                        </HierarchicalDataTemplate>
+                        <HierarchicalDataTemplate DataType="{x:Type vm:LocationNode}" ItemsSource="{Binding Children}">
+                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                           Foreground="{StaticResource MutedBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding ChannelCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                           Margin="7,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
                         </HierarchicalDataTemplate>
                         <DataTemplate DataType="{x:Type vm:ChannelNode}">
                             <StackPanel Orientation="Horizontal" Margin="0,1"

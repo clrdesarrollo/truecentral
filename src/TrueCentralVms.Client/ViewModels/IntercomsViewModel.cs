@@ -23,6 +23,12 @@ public sealed partial class IntercomItemViewModel(IntercomDto intercom) : Observ
     public bool HasVideo => Intercom.ChannelId is not null;
     public bool IsRinging => Intercom.ActiveCall?.State == IntercomCallState.Ringing;
 
+    /// <summary>El frente está en el alcance de este usuario: puede contestar, hablar y abrir.</summary>
+    public bool CanOperate => OperableScope.Current.CanOperateIntercom(Intercom.Id);
+
+    /// <summary>Cambió lo que esta sesión puede operar.</summary>
+    public void RefreshOperable() => OnPropertyChanged(nameof(CanOperate));
+
     public string StatusText => Intercom.Status switch
     {
         IntercomStatus.Online => "En línea",
@@ -129,12 +135,20 @@ public sealed partial class IntercomsViewModel : ObservableObject
         });
         hub.ConfigChanged += entity =>
         {
-            if (entity == "intercoms") Application.Current.Dispatcher.InvokeAsync(() => _ = LoadIntercomsAsync());
+            if (entity is "intercoms" or "locations") Application.Current.Dispatcher.InvokeAsync(() => _ = LoadIntercomsAsync());
         };
         hub.ConnectionStateChanged += ok =>
         {
             // Al reconectar puede haber quedado una llamada sonando que no llegó por el hub.
             if (ok && _loaded) Application.Current.Dispatcher.InvokeAsync(() => _ = LoadActiveCallsAsync());
+        };
+        // Cambió lo que esta sesión puede operar: botones de la lista y llamadas que suenan.
+        OperableScope.Current.Changed += () =>
+        {
+            foreach (var item in Intercoms) item.RefreshOperable();
+            foreach (var id in _ringing.Where(r => !OperableScope.Current.CanOperateIntercom(r.Value.IntercomId)).Select(r => r.Key).ToList())
+                _ringing.Remove(id);
+            UpdateRinger();
         };
     }
 
@@ -195,7 +209,9 @@ public sealed partial class IntercomsViewModel : ObservableObject
         Intercoms.FirstOrDefault(i => i.Id == call.IntercomId)?.ApplyCall(call);
 
         bool isNew = !_ringing.ContainsKey(call.Id);
-        if (call.State == IntercomCallState.Ringing)
+        // Alcance por ubicación: la llamada de un frente ajeno se ve en la lista,
+        // pero no suena ni abre su ventana (este puesto no la puede contestar).
+        if (call.State == IntercomCallState.Ringing && OperableScope.Current.CanOperateIntercom(call.IntercomId))
         {
             _ringing[call.Id] = call;
             if (isNew)
@@ -247,7 +263,7 @@ public sealed partial class IntercomsViewModel : ObservableObject
     private async Task OpenDoorAsync(IntercomItemViewModel? item)
     {
         item ??= Selected;
-        if (item is null) return;
+        if (item is null || !item.CanOperate) return;
         var answer = MessageBox.Show(Application.Current.MainWindow,
             $"¿Abrir la puerta de «{item.Name}»?", "Citofonía", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return;

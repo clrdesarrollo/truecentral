@@ -116,7 +116,7 @@
                                 <TextBlock Text="Contestar" VerticalAlignment="Center"/>
                             </StackPanel>
                         </Button>
-                        <Button Style="{StaticResource HangButton}" Click="OnRejectClick">
+                        <Button x:Name="RejectButton" Style="{StaticResource HangButton}" Click="OnRejectClick">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE778;" Margin="0,0,8,0" VerticalAlignment="Center"/>
                                 <TextBlock Text="Rechazar" VerticalAlignment="Center"/>
@@ -164,6 +164,10 @@
                             </StackPanel>
                         </Button>
                     </StackPanel>
+
+                    <!-- Alcance por ubicación: de un frente ajeno se ve el video, nada más -->
+                    <TextBlock x:Name="ReadOnlyText" Visibility="Collapsed" TextWrapping="Wrap" FontSize="12"
+                               Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10"/>
 
                     <!-- Puertas (siempre disponibles mientras el frente esté en la ventana) -->
                     <ItemsControl x:Name="DoorButtons">

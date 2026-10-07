@@ -205,22 +205,27 @@ public static class AlarmsApi
         // ------------------------------------------------------------------
         app.MapGet("/api/alarms/panels", async (HttpContext ctx, VmsDbContext db, AlarmPanelService service) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var panels = await db.AlarmPanels.AsNoTracking()
                 .Include(p => p.Areas).Include(p => p.Zones).AsSplitQuery()
                 .OrderBy(p => p.Name)
                 .ToListAsync();
-            return Results.Ok(panels.Select(p => AlarmMapper.ToDto(p, service.IsLive(p.Id), service.LastErrorOf(p.Id))));
+            // Alcance por ubicación: cada panel con solo sus áreas y zonas; sin ninguna, no aparece.
+            var scope = await ctx.ScopeAsync(session);
+            return Results.Ok(panels.Select(p => scope.Visible(AlarmMapper.ToDto(p, service.IsLive(p.Id), service.LastErrorOf(p.Id))))
+                .Where(p => p is not null));
         });
 
         app.MapGet("/api/alarms/panels/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, AlarmPanelService service) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var panel = await db.AlarmPanels.AsNoTracking()
                 .Include(p => p.Areas).Include(p => p.Zones).AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == id);
             if (panel is null) return Results.NotFound();
-            return Results.Ok(AlarmMapper.ToDto(panel, service.IsLive(id), service.LastErrorOf(id)));
+            return (await ctx.ScopeAsync(session)).Visible(AlarmMapper.ToDto(panel, service.IsLive(id), service.LastErrorOf(id))) is { } dto
+                ? Results.Ok(dto)
+                : Results.NotFound();
         });
 
         app.MapPost("/api/alarms/panels", async (HttpContext ctx, AlarmPanelWriteDto request, VmsDbContext db, LicenseService license,
@@ -243,6 +248,8 @@ public static class AlarmsApi
             // que no puede repetirse es el equipo dentro de ella.
             if (await db.AlarmPanels.AnyAsync(p => p.Host == request.Host.Trim() && p.Port == request.Port && p.GatewayDeviceId == deviceId, ct))
                 return Error(DuplicateMessage(deviceId), StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
 
             var conn = new AlarmConnectionInfo(request.Host.Trim(), request.Port, request.UseHttps, request.Username, request.Password, deviceId);
             string? deviceKey = DeviceKeyOf(request);
@@ -292,6 +299,8 @@ public static class AlarmsApi
                 FirmwareVersion = info.FirmwareVersion,
                 Status = AlarmPanelStatus.Online,
                 LastSeenAt = DateTime.UtcNow,
+                // Antes de sembrar: sus áreas y zonas entran en la misma ubicación.
+                LocationId = locationId,
             };
             if (state is not null) SeedState(panel, state);
             db.AlarmPanels.Add(panel);
@@ -320,8 +329,10 @@ public static class AlarmsApi
                             GatewayRegistrationOutcome.Registered or GatewayRegistrationOutcome.RegisteredOffline => ", ya registrado en la receptora",
                             _ => "",
                         }) +
-                        $", {panel.Areas.Count} áreas, {panel.Zones.Count} zonas).",
-                data: new { panel.Host, panel.Port, panel.UseHttps, panel.DriverKey, panel.GatewayDeviceId, panel.Model, panel.SerialNumber });
+                        $", {panel.Areas.Count} áreas, {panel.Zones.Count} zonas" +
+                        (panel.LocationId is null ? "" : $", en {EquipmentLocation.Describe(panel.LocationId)}") + ").",
+                data: new { panel.Host, panel.Port, panel.UseHttps, panel.DriverKey, panel.GatewayDeviceId, panel.Model, panel.SerialNumber, panel.LocationId });
+            EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "alarm-panels", cancellationToken: ct);
             return Results.Ok(AlarmMapper.ToDto(panel, false, null));
@@ -340,6 +351,11 @@ public static class AlarmsApi
             string? deviceId = DeviceIdOf(request);
             if (await db.AlarmPanels.AnyAsync(p => p.Id != id && p.Host == request.Host.Trim() && p.Port == request.Port && p.GatewayDeviceId == deviceId, ct))
                 return Error(DuplicateMessage(deviceId, other: true), StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, panel.LocationId, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
+            // Antes de releer el panel: las áreas y zonas nuevas entran ya en la ubicación nueva.
+            int? previousLocation = panel.LocationId;
+            panel.LocationId = locationId;
 
             string password = string.IsNullOrEmpty(request.Password)
                 ? protector.Unprotect(panel.PasswordCiphertext)
@@ -388,6 +404,11 @@ public static class AlarmsApi
             if (deviceKey is not null) changes.Add("clave del equipo cambiada (re-registrado en la receptora)");
             if (panel.GatewayProtocol != deviceProtocol) changes.Add($"protocolo del equipo '{panel.GatewayProtocol}' → '{deviceProtocol}'");
             if (panel.Enabled != request.Enabled) changes.Add(request.Enabled ? "monitoreo activado" : "monitoreo desactivado");
+            if (locationId != previousLocation)
+                changes.Add(EquipmentLocation.Change(previousLocation, locationId));
+            // Las áreas y zonas que estaban con el panel lo siguen; las ubicadas aparte se quedan.
+            var movedAreas = EquipmentLocation.Follow(panel.Areas, previousLocation, locationId);
+            var movedZones = EquipmentLocation.Follow(panel.Zones, previousLocation, locationId);
 
             panel.Name = request.Name.Trim();
             panel.DriverKey = request.DriverKey;
@@ -425,6 +446,11 @@ public static class AlarmsApi
             await audit.LogAsync(ctx, "alarms", "panel-updated",
                 targetType: "alarm-panel", targetId: panel.Id.ToString(), targetName: panel.Name,
                 detail: $"Modificó el panel '{panel.Name}': " + (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
+            await EquipmentLocation.LogFollowersAsync(ctx, audit, "alarm-panel", panel.Id, panel.Name, locationId,
+                movedAreas.Where(x => x.Id != 0).Select(x => (ResourceKind.Partition, x.Id, x.Name))
+                    .Concat(movedZones.Where(x => x.Id != 0).Select(x => (ResourceKind.Zone, x.Id, x.Name))).ToList());
+            if (locationId != previousLocation) await EquipmentLocation.MovedAsync(ctx, ct);
+            else if (connectionChanged) EquipmentLocation.Changed(ctx);
 
             if (connectionChanged || !panel.Enabled) await service.DetachAsync(panel.Id);
             service.RequestReconcile();
@@ -470,6 +496,7 @@ public static class AlarmsApi
             await audit.LogAsync(ctx, "alarms", "panel-deleted",
                 targetType: "alarm-panel", targetId: id.ToString(), targetName: panel.Name,
                 detail: $"Eliminó el panel de alarma '{panel.Name}' ({panel.Host}:{panel.Port}). El historial de eventos se conserva.");
+            EquipmentLocation.Changed(ctx);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "alarm-panels", cancellationToken: ct);
             return Results.Ok();
         });
@@ -736,6 +763,9 @@ public static class AlarmsApi
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var panel = await db.AlarmPanels.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
+            var scope = await ctx.ScopeAsync(session);
+            if (!scope.CanViewPanel(id))
+                return await ctx.OutOfScopeAsync(session, "alarm-panel", id.ToString(), panel.Name, "actualizar el estado de");
             if (!panel.Enabled) return Error("El panel tiene el monitoreo desactivado.");
 
             if (audit.ShouldLog($"alarm-refresh:{session.UserId}:{id}", TimeSpan.FromMinutes(5)))
@@ -745,7 +775,7 @@ public static class AlarmsApi
             var dto = await service.RefreshAsync(id, ct);
             if (dto is null)
                 return Error(service.LastErrorOf(id) ?? "El panel no respondió.", StatusCodes.Status502BadGateway);
-            return Results.Ok(dto);
+            return Results.Ok(scope.Visible(dto));
         });
 
         // ------------------------------------------------------------------
@@ -814,6 +844,7 @@ public static class AlarmsApi
             var panel = await LoadForCommandAsync(db, id, ct);
             if (panel is null) return Results.NotFound();
             if (area > 0 && panel.Areas.All(a => a.Number != area)) return Error("El área no existe en el panel.");
+            if (await AreaOutOfScopeAsync(ctx, session, panel, area, "armar") is { } outOfScope) return outOfScope;
             if (panel.PanelTamper)
                 return Error("No se puede armar: la tapa del panel está abierta (sabotaje). Ciérrela antes de armar.");
             string areaName = AreaLabel(panel, area);
@@ -826,7 +857,7 @@ public static class AlarmsApi
                 await audit.LogAsync(ctx, "alarms", "area-armed",
                     targetType: "alarm-area", targetId: $"{id}/{area}", targetName: $"{panel.Name} · {areaName}",
                     detail: $"Armó ({modeLabel}) {areaName} del panel '{panel.Name}'.");
-                return Results.Ok(dto);
+                return Results.Ok((await ctx.ScopeAsync(session)).Visible(dto));
             }
             catch (DriverException ex)
             {
@@ -844,6 +875,7 @@ public static class AlarmsApi
             var panel = await LoadForCommandAsync(db, id, ct);
             if (panel is null) return Results.NotFound();
             if (area > 0 && panel.Areas.All(a => a.Number != area)) return Error("El área no existe en el panel.");
+            if (await AreaOutOfScopeAsync(ctx, session, panel, area, "desarmar") is { } outOfScope) return outOfScope;
             string areaName = AreaLabel(panel, area);
             try
             {
@@ -853,7 +885,7 @@ public static class AlarmsApi
                 await audit.LogAsync(ctx, "alarms", "area-disarmed",
                     targetType: "alarm-area", targetId: $"{id}/{area}", targetName: $"{panel.Name} · {areaName}",
                     detail: $"Desarmó {areaName} del panel '{panel.Name}'.");
-                return Results.Ok(dto);
+                return Results.Ok((await ctx.ScopeAsync(session)).Visible(dto));
             }
             catch (DriverException ex)
             {
@@ -871,6 +903,7 @@ public static class AlarmsApi
             var panel = await LoadForCommandAsync(db, id, ct);
             if (panel is null) return Results.NotFound();
             if (area > 0 && panel.Areas.All(a => a.Number != area)) return Error("El área no existe en el panel.");
+            if (await AreaOutOfScopeAsync(ctx, session, panel, area, "borrar la alarma de") is { } outOfScope) return outOfScope;
             string areaName = AreaLabel(panel, area);
             try
             {
@@ -880,7 +913,7 @@ public static class AlarmsApi
                 await audit.LogAsync(ctx, "alarms", "alarm-cleared",
                     targetType: "alarm-area", targetId: $"{id}/{area}", targetName: $"{panel.Name} · {areaName}",
                     detail: $"Borró/silenció la alarma de {areaName} del panel '{panel.Name}'.");
-                return Results.Ok(dto);
+                return Results.Ok((await ctx.ScopeAsync(session)).Visible(dto));
             }
             catch (DriverException ex)
             {
@@ -903,6 +936,9 @@ public static class AlarmsApi
             if (panel is null) return Results.NotFound();
             var target = panel.Zones.FirstOrDefault(z => z.Number == zone);
             if (target is null) return Error("La zona no existe en el panel.");
+            if (!(await ctx.ScopeAsync(session)).CanOperate(ZoneLocation(panel, target)))
+                return await ctx.OutOfScopeAsync(session, "alarm-zone", $"{id}/{zone}", $"{panel.Name} · {target.Name}",
+                    request.Bypassed ? "anular" : "restituir");
             string action = request.Bypassed ? "zone-bypassed" : "zone-restored";
             try
             {
@@ -914,7 +950,7 @@ public static class AlarmsApi
                 await audit.LogAsync(ctx, "alarms", action,
                     targetType: "alarm-zone", targetId: $"{id}/{zone}", targetName: $"{panel.Name} · {target.Name}",
                     detail: $"{(request.Bypassed ? "Anuló" : "Restituyó")} la zona '{target.Name}' del panel '{panel.Name}'.");
-                return Results.Ok(dto);
+                return Results.Ok((await ctx.ScopeAsync(session)).Visible(dto));
             }
             catch (DriverException ex)
             {
@@ -971,6 +1007,18 @@ public static class AlarmsApi
                                          || (e.AreaName != null && EF.Functions.ILike(e.AreaName, needle))
                                          || (e.Operator != null && EF.Functions.ILike(e.Operator, needle)));
             }
+            // Alcance por ubicación: el evento de una zona va con su zona, el de un
+            // área con su área y el del panel entero (corriente, sabotaje) con el
+            // panel. En la consulta, para que el tope de filas cuente solo los suyos.
+            var scope = await ctx.ScopeAsync(session);
+            if (scope.FiltersView)
+            {
+                var (areaKeys, zoneKeys, panelIds) = scope.VisibleAlarmKeys();
+                query = query.Where(e =>
+                    (e.ZoneNumber != null && zoneKeys.Contains((long)e.AlarmPanelId * 100_000 + e.ZoneNumber.Value)) ||
+                    (e.ZoneNumber == null && e.AreaNumber != null && areaKeys.Contains((long)e.AlarmPanelId * 100_000 + e.AreaNumber.Value)) ||
+                    (e.ZoneNumber == null && e.AreaNumber == null && panelIds.Contains(e.AlarmPanelId)));
+            }
 
             var events = await query
                 .OrderByDescending(e => e.ReceivedAt)
@@ -983,24 +1031,77 @@ public static class AlarmsApi
     private static Task<AlarmPanel?> LoadForCommandAsync(VmsDbContext db, int id, CancellationToken ct) =>
         db.AlarmPanels.AsNoTracking().Include(p => p.Areas).Include(p => p.Zones).AsSplitQuery().FirstOrDefaultAsync(p => p.Id == id, ct);
 
+    /// <summary>
+    /// Alcance por ubicación de una orden sobre un área. El área 0 ("todas")
+    /// exige poder operar todas las del panel: un operador de un edificio no
+    /// arma el panel entero si comparte áreas con otro.
+    /// </summary>
+    private static async Task<IResult?> AreaOutOfScopeAsync(HttpContext ctx, SessionInfo session, AlarmPanel panel, int area,
+        string attempted)
+    {
+        var scope = await ctx.ScopeAsync(session);
+        bool allowed = scope.Unrestricted || (area == 0
+            ? panel.Areas.Count > 0 && panel.Areas.All(a => scope.CanOperate(a.LocationId))
+            : panel.Areas.FirstOrDefault(a => a.Number == area) is { } target && scope.CanOperate(target.LocationId));
+        return allowed
+            ? null
+            : await ctx.OutOfScopeAsync(session, "alarm-area", $"{panel.Id}/{area}", $"{panel.Name} · {AreaLabel(panel, area)}", attempted);
+    }
+
+    /// <summary>La ubicación que vale para una zona: la suya o, si no tiene, la de su área.</summary>
+    private static int? ZoneLocation(AlarmPanel panel, AlarmZone zone) =>
+        zone.LocationId ?? panel.Areas.FirstOrDefault(a => a.Number == zone.AreaNumber)?.LocationId;
+
     private static string AreaLabel(AlarmPanel panel, int area) =>
         area <= 0 ? "todas las áreas" : $"el área '{panel.Areas.First(a => a.Number == area).Name}'";
 
-    /// <summary>Carga áreas y zonas leídas en el sondeo de alta/edición.</summary>
+    /// <summary>
+    /// Carga áreas y zonas leídas en el sondeo de alta/edición. Las que ya
+    /// existían se actualizan EN SU LUGAR (por número) en vez de recrearse: así
+    /// cada una conserva su id y, con él, lo que un administrador le asignó en
+    /// Recursos (ubicación, ficha, cámaras asociadas).
+    /// </summary>
     private static void SeedState(AlarmPanel panel, AlarmPanelState state)
     {
-        panel.Areas.Clear();
-        panel.Zones.Clear();
+        var now = DateTime.UtcNow;
+        var areas = panel.Areas.ToDictionary(a => a.Number);
+        var seenAreas = new HashSet<int>();
         foreach (var a in state.Areas)
-            panel.Areas.Add(new AlarmArea { Number = a.Number, Name = a.Name, Enabled = a.Enabled, ArmState = a.ArmState, InAlarm = a.InAlarm });
+        {
+            if (!seenAreas.Add(a.Number)) continue; // número repetido en la lectura: vale el primero
+            if (!areas.TryGetValue(a.Number, out var area))
+                panel.Areas.Add(area = new AlarmArea { Number = a.Number, LocationId = panel.LocationId });
+            area.Name = a.Name;
+            area.Enabled = a.Enabled;
+            area.ArmState = a.ArmState;
+            area.InAlarm = a.InAlarm;
+            area.UpdatedAt = now;
+        }
+        panel.Areas.RemoveAll(a => !seenAreas.Contains(a.Number));
+
+        var zones = panel.Zones.ToDictionary(z => z.Number);
+        var seenZones = new HashSet<int>();
         foreach (var z in state.Zones)
-            panel.Zones.Add(new AlarmZone
-            {
-                Number = z.Number, AreaNumber = z.AreaNumber, Name = z.Name, ZoneType = z.ZoneType, DetectorType = z.DetectorType,
-                Status = z.Status, Bypassed = z.Bypassed, Armed = z.Armed, InAlarm = z.InAlarm, Tamper = z.Tamper,
-                LowBattery = z.LowBattery, Signal = z.Signal, Model = z.Model,
-            });
-        panel.LastStateAt = DateTime.UtcNow;
+        {
+            if (!seenZones.Add(z.Number)) continue;
+            if (!zones.TryGetValue(z.Number, out var zone))
+                panel.Zones.Add(zone = new AlarmZone { Number = z.Number, LocationId = panel.LocationForNewZone(z.AreaNumber) });
+            zone.AreaNumber = z.AreaNumber;
+            zone.Name = z.Name;
+            zone.ZoneType = z.ZoneType;
+            zone.DetectorType = z.DetectorType;
+            zone.Status = z.Status;
+            zone.Bypassed = z.Bypassed;
+            zone.Armed = z.Armed;
+            zone.InAlarm = z.InAlarm;
+            zone.Tamper = z.Tamper;
+            zone.LowBattery = z.LowBattery;
+            zone.Signal = z.Signal;
+            zone.Model = z.Model;
+            zone.UpdatedAt = now;
+        }
+        panel.Zones.RemoveAll(z => !seenZones.Contains(z.Number));
+        panel.LastStateAt = now;
     }
 
     /// <summary>Olvida la conexión HTTP cacheada del driver Hikvision (credenciales cambiadas / panel eliminado).</summary>

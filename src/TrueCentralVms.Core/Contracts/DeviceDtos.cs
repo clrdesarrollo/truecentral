@@ -33,7 +33,11 @@ public sealed record DeviceDto(
     string? Warning = null,
     /// <summary>Canales deshabilitados que SÍ tienen señal (cámaras que los operadores
     /// no ven). 0 si el equipo no está en línea. Las entradas sin cámara no cuentan.</summary>
-    int DisabledWithSignalCount = 0);
+    int DisabledWithSignalCount = 0,
+    /// <summary>Ubicación del equipo en el árbol de Recursos (null = por ubicar): la heredan sus canales.</summary>
+    int? LocationId = null,
+    /// <summary>Ruta legible de esa ubicación ("Casa matriz › Bodega").</summary>
+    string? Location = null);
 
 /// <summary>
 /// Alta/edición de dispositivo. En edición, Password null o vacía = mantener
@@ -51,7 +55,10 @@ public sealed record DeviceWriteDto(
     /// <summary>Solo en el alta: números de canal que quedan habilitados. Null = todos
     /// los que el equipo reporta activos, siempre que quepan en el cupo de la licencia;
     /// si no caben, el servidor exige esta selección (a lo sumo los canales disponibles).</summary>
-    IReadOnlyList<int>? EnabledChannels = null);
+    IReadOnlyList<int>? EnabledChannels = null,
+    /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
+    /// por ubicar); 0 = por ubicar. Los canales que seguían al equipo se mueven con él.</summary>
+    int? LocationId = null);
 
 /// <summary>Resultado del botón "Probar conexión" del asistente (no persiste nada).</summary>
 public sealed record DeviceProbeResultDto(
@@ -74,8 +81,9 @@ public sealed record DeviceProbeResultDto(
 
 public sealed record ProbedChannelDto(int ChannelNumber, int RtspChannel, string Name, bool IsOnline);
 
-/// <summary>Canal de un equipo. DisabledByLicense: quedó deshabilitado por el cupo de canales de la licencia (se habilita solo al haber cupo).</summary>
-public sealed record ChannelDto(int Id, int DeviceId, int ChannelNumber, int RtspChannel, string Name, bool Enabled, bool IsOnline, bool SupportsPtz, bool UseFfmpegProxy = false, bool DisabledByLicense = false);
+/// <summary>Canal de un equipo. DisabledByLicense: quedó deshabilitado por el cupo de canales de la licencia (se habilita solo al haber cupo).
+/// LocationId: ubicación del canal en el árbol de Recursos (null = por ubicar).</summary>
+public sealed record ChannelDto(int Id, int DeviceId, int ChannelNumber, int RtspChannel, string Name, bool Enabled, bool IsOnline, bool SupportsPtz, bool UseFfmpegProxy = false, bool DisabledByLicense = false, int? LocationId = null);
 
 /// <summary>Resultado de "Habilitar canales con señal": cuántos se habilitaron y cuántos quedaron fuera por cupo.</summary>
 public sealed record ChannelBulkEnableResultDto(int Enabled, int LeftWithoutQuota, string Message);

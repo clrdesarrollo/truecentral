@@ -10,7 +10,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// VMS (<see cref="ChannelId"/>): el frente se da de alta también como cámara.
 /// La contraseña se guarda cifrada con AES-256-GCM (ver <see cref="CredentialProtector"/>).
 /// </summary>
-public class Intercom
+public class Intercom : ILocatable
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -25,6 +25,9 @@ public class Intercom
     public byte[] PasswordCiphertext { get; set; } = [];
     /// <summary>Grupo lógico (portería, acceso norte...); libre.</summary>
     public string? GroupName { get; set; }
+
+    /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
+    public int? LocationId { get; set; }
 
     /// <summary>Canal de video que muestra la cámara del frente (null = sin video).</summary>
     public int? ChannelId { get; set; }

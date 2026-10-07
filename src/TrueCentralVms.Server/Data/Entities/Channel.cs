@@ -5,7 +5,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// <see cref="ChannelNumber"/> es el número interno del SDK;
 /// <see cref="RtspChannel"/> es el índice que usan las URL RTSP del fabricante.
 /// </summary>
-public class Channel
+public class Channel : ILocatable
 {
     public int Id { get; set; }
     public int DeviceId { get; set; }
@@ -40,4 +40,7 @@ public class Channel
     /// el SDP y republica SOLO el video (sin audio). Marcable en el panel.
     /// </summary>
     public bool UseFfmpegProxy { get; set; }
+
+    /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
+    public int? LocationId { get; set; }
 }

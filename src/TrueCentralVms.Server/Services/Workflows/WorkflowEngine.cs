@@ -39,7 +39,7 @@ public sealed class WorkflowEngine : BackgroundService
     private readonly Dictionary<string, IWorkflowActionExecutor> _executors;
     private readonly CredentialProtector _credentials;
     private readonly WorkflowStore _store;
-    private readonly IHubContext<VmsHub> _hub;
+    private readonly ScopedHub _hub;
     private readonly AuditService _audit;
     private readonly IConfiguration _config;
     private readonly ILogger<WorkflowEngine> _logger;
@@ -50,7 +50,7 @@ public sealed class WorkflowEngine : BackgroundService
         IEnumerable<IWorkflowActionExecutor> executors,
         CredentialProtector credentials,
         WorkflowStore store,
-        IHubContext<VmsHub> hub,
+        ScopedHub hub,
         AuditService audit,
         IConfiguration config,
         ILogger<WorkflowEngine> logger)
@@ -945,7 +945,8 @@ public sealed class WorkflowEngine : BackgroundService
         }
 
         var dto = WorkflowMapper.ToDto(run, state.Steps);
-        try { await _hub.Clients.All.SendAsync(VmsHubContract.WorkflowRunCompleted, dto, CancellationToken.None); }
+        // Ejecución completa (su disparo nombra recursos): a quien no tiene la vista filtrada.
+        try { await _hub.SendToAsync(VmsHubContract.WorkflowRunCompleted, dto, s => !s.FiltersView, CancellationToken.None); }
         catch (Exception ex) { _logger.LogDebug(ex, "No se pudo publicar la ejecución por el hub."); }
 
         // La prueba manual la audita la API (tiene el usuario y su IP); aquí

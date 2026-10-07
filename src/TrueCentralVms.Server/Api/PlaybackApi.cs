@@ -35,6 +35,9 @@ public static class PlaybackApi
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.ChannelNumber == channelNumber, ct);
             if (channel is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+                return await ctx.OutOfScopeAsync(session, "channel", $"{deviceId}/{channelNumber}",
+                    $"{channel.Device.Name} · {channel.Name}", "buscar grabaciones de");
 
             var device = channel.Device;
             if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
@@ -106,7 +109,7 @@ public static class PlaybackApi
             async (HttpContext ctx, int deviceId, int channelNumber, int? year, int? month, VmsDbContext db,
                 DriverRegistry drivers, CredentialProtector protector, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
 
             var now = DateTime.Now;
             int y = year ?? now.Year, m = month ?? now.Month;
@@ -116,6 +119,9 @@ public static class PlaybackApi
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.ChannelNumber == channelNumber, ct);
             if (channel is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+                return await ctx.OutOfScopeAsync(session, "channel", $"{deviceId}/{channelNumber}",
+                    $"{channel.Device.Name} · {channel.Name}", "buscar grabaciones de");
 
             var device = channel.Device;
             if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
@@ -161,6 +167,9 @@ public static class PlaybackApi
             if (!channel.Enabled)
                 return Results.Json(new { error = "El canal está deshabilitado." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
+            if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+                return await ctx.OutOfScopeAsync(session, "channel", $"{request.DeviceId}/{request.RtspChannel}",
+                    $"{channel.Device.Name} · {channel.Name}", "reproducir grabaciones de");
 
             var device = channel.Device;
             if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
@@ -232,7 +241,11 @@ public static class PlaybackApi
         // ------------------------------------------------------------------
         app.MapGet("/api/playback/failure/{path}", (HttpContext ctx, string path, MediaMtxManager mtx) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            // La ruta es "pb-{equipo}-{canal}-{usuario}-{azar}": el motivo es de quien la pidió.
+            if (session.Role != Core.Domain.Roles.Admin &&
+                path.Split('-') is { Length: >= 4 } parts && int.TryParse(parts[3], out int owner) && owner != session.UserId)
+                return Results.NotFound();
             if (mtx.LastSourceError(path) is not { } error)
                 return Results.Ok(new { code = 0, reason = (string?)null, message = (string?)null });
 
@@ -272,6 +285,10 @@ public static class PlaybackApi
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.RtspChannel == rtspChannel, ct);
             if (channel is null) return Results.NotFound();
+            // La descarga no pasa por MediaMTX: el alcance se valida aquí.
+            if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+                return await ctx.OutOfScopeAsync(session, "channel", $"{deviceId}/{rtspChannel}",
+                    $"{channel.Device.Name} · {channel.Name}", "descargar grabaciones de");
 
             var device = channel.Device;
             if (drivers.Find(device.DriverKey)?.Create() is not { } driver)

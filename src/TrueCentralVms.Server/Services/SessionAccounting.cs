@@ -16,7 +16,7 @@ namespace TrueCentralVms.Server.Services;
 public sealed class SessionAccounting(
     IServiceScopeFactory scopeFactory,
     MediaMtxManager mtx,
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     AuditService audit,
     ILogger<SessionAccounting> logger) : BackgroundService
 {
@@ -122,14 +122,43 @@ public sealed class SessionAccounting(
         return ids;
     }
 
-    /// <summary>Publica la lista de sesiones activas (compartido con el callback de autorización).</summary>
-    public static async Task BroadcastActiveSessionsAsync(VmsDbContext db, IHubContext<VmsHub> hub, CancellationToken ct = default)
+    /// <summary>
+    /// Publica la lista de sesiones activas (compartido con el callback de
+    /// autorización). Solo a los administradores: es lo mismo que entrega
+    /// /api/streams/active, que es solo de ellos.
+    /// </summary>
+    public static async Task BroadcastActiveSessionsAsync(VmsDbContext db, ScopedHub hub, CancellationToken ct = default)
     {
         var active = await db.StreamSessions
             .Where(s => s.EndedAt == null)
             .OrderBy(s => s.StartedAt)
             .Select(s => new ActiveSessionDto(s.Id, s.Username, s.DeviceName, s.RtspChannel, s.Profile, s.ClientIp, s.StartedAt))
             .ToListAsync(ct);
-        await hub.Clients.All.SendAsync(VmsHubContract.SessionsChanged, active, ct);
+        await hub.ToAdminsAsync(VmsHubContract.SessionsChanged, active, ct);
+    }
+
+    /// <summary>
+    /// Su alcance cambió: corta las sesiones de video (vivo y reproducción) de
+    /// ese usuario sobre canales que ya no puede ver. Las demás siguen.
+    /// Devuelve cuántas cortó.
+    /// </summary>
+    public static async Task<int> KickOutOfScopeAsync(VmsDbContext db, MediaMtxManager mtx, ScopedHub hub,
+        Auth.UserScope scope, CancellationToken ct = default)
+    {
+        if (!scope.FiltersView) return 0;
+        var open = await db.StreamSessions.Where(s => s.UserId == scope.UserId && s.EndedAt == null).ToListAsync(ct);
+        int kicked = 0;
+        foreach (var session in open.Where(s => !scope.CanViewRtsp(s.DeviceId, s.RtspChannel)))
+        {
+            await mtx.KickSessionAsync(session.MtxSessionId);
+            session.EndedAt = DateTime.UtcNow;
+            kicked++;
+        }
+        if (kicked > 0)
+        {
+            await db.SaveChangesAsync(ct);
+            await BroadcastActiveSessionsAsync(db, hub, ct);
+        }
+        return kicked;
     }
 }

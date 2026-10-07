@@ -115,6 +115,7 @@
                                                           RelativeSource={RelativeSource AncestorType=ListBox}}"
                                                 CommandParameter="{Binding}"/>
                                         <Button Style="{StaticResource SmallGhost}" Content="Abrir puerta"
+                                                IsEnabled="{Binding CanOperate}"
                                                 Command="{Binding DataContext.OpenDoorCommand,
                                                           RelativeSource={RelativeSource AncestorType=ListBox}}"
                                                 CommandParameter="{Binding}"/>

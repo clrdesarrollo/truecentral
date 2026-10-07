@@ -220,6 +220,13 @@ public partial class IntercomCallWindow : Window
                 }
                 break;
         }
+        // Alcance por ubicación: de un frente ajeno se ve el video, pero no se
+        // contesta, ni se le habla, ni se abre su puerta (el servidor lo rechazaría).
+        bool canOperate = OperableScope.Current.CanOperateIntercom(_intercom.Id);
+        AnswerButton.IsEnabled = RejectButton.IsEnabled = TalkButton.IsEnabled = DoorButtons.IsEnabled = canOperate;
+        ReadOnlyText.Text = canOperate ? "" : OperableScope.DeniedHint;
+        ReadOnlyText.Visibility = canOperate ? Visibility.Collapsed : Visibility.Visible;
+
         StateText.Text = state;
         StateText.Foreground = new SolidColorBrush(color);
         StateBadge.Background = new SolidColorBrush(Color.FromArgb(0x33, color.R, color.G, color.B));

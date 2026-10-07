@@ -23,7 +23,7 @@ public static class StreamingAuthApi
     public static void MapStreamingAuthApi(this WebApplication app)
     {
         app.MapPost("/api/streaming/auth", async (HttpContext ctx, StreamTokenService streamTokens,
-            VmsDbContext db, IHubContext<VmsHub> hub, Services.MediaMtxManager mtx,
+            VmsDbContext db, ScopedHub hub, UserScopeService scopes, Services.MediaMtxManager mtx,
             AuditService audit, ILogger<Program> logger) =>
         {
             if (!ApiSecurity.IsLoopback(ctx))
@@ -75,6 +75,12 @@ public static class StreamingAuthApi
             if (token is null || streamTokens.Validate(token, path) is not { } grant)
             {
                 logger.LogWarning("MediaMTX: lectura rechazada en '{Path}' desde {Ip} (token ausente, vencido o de otra ruta).", path, ip);
+                return Results.Unauthorized();
+            }
+            // El alcance por ubicación pudo cambiar después de emitir el token (vive 60 s).
+            if (!(await scopes.ForUserAsync(grant.UserId)).CanViewRtsp(grant.DeviceId, grant.RtspChannel))
+            {
+                logger.LogWarning("MediaMTX: lectura rechazada en '{Path}': el canal quedó fuera del alcance de {User}.", path, grant.Username);
                 return Results.Unauthorized();
             }
 

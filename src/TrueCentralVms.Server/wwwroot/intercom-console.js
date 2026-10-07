@@ -263,8 +263,10 @@ async function icaPoll() {
       icaIntercoms.map((i) => `<option value="${i.id}" ${String(i.id) === icaState.intercomId ? "selected" : ""}>${esc(i.name)}</option>`).join("");
   }
 
-  // Timbre: mientras alguna llamada suene y no se haya silenciado aquí.
-  const ringing = icaIntercoms.filter((i) => i.activeCall?.state === "Ringing");
+  // Timbre: mientras alguna llamada suene y no se haya silenciado aquí. Las de
+  // frentes fuera del alcance se ven en la lista, pero no suenan ni se abren
+  // solas: este puesto no las puede contestar.
+  const ringing = icaIntercoms.filter((i) => i.activeCall?.state === "Ringing" && Operable.can("intercom", i.id));
   if (ringing.some((i) => !icaSilenced.has(i.activeCall.id))) icaRinger.start(); else icaRinger.stop();
 
   // Una llamada que empieza a sonar abre su ventana (como el cliente).
@@ -304,7 +306,7 @@ function icaRenderList() {
           <div class="muted ica-small">${status}${i.lastError ? ` · ${esc(i.lastError)}` : ""}</div>
           <div class="ica-item-actions">
             <button class="btn ${cls === "ringing" ? "" : "ghost"} ica-open">${cls === "ringing" ? "Atender" : "Ver y hablar"}</button>
-            ${i.doorCount > 0 ? `<button class="btn ghost ica-door">Abrir puerta</button>` : ""}
+            ${i.doorCount > 0 ? `<button class="btn ghost ica-door" data-op="intercom:${i.id}">Abrir puerta</button>` : ""}
           </div>
         </div>
       </div>`;
@@ -440,12 +442,14 @@ function icaRenderCall() {
   icaCallRenderKey = key;
 
   let badge, badgeCls, panel;
+  // Alcance por ubicación: de un frente ajeno se ve el video, pero no se contesta, habla ni abre.
+  const op = `data-op="intercom:${i.id}"`;
   if (call?.state === "Ringing") {
     badge = "LLAMADA ENTRANTE"; badgeCls = "ringing";
     panel = `
       <div class="ica-actions">
-        <button class="btn ica-answer" id="ica-answer">Contestar</button>
-        <button class="btn danger" id="ica-reject">Rechazar</button>
+        <button class="btn ica-answer" id="ica-answer" ${op}>Contestar</button>
+        <button class="btn danger" id="ica-reject" ${op}>Rechazar</button>
       </div>
       <label class="ica-check"><input type="checkbox" id="ica-silence" ${icaSilenced.has(call.id) ? "checked" : ""}> Silenciar timbre en este puesto</label>`;
   } else if (call?.state === "InCall" && !mine) {
@@ -460,7 +464,7 @@ function icaRenderCall() {
     badge = "EN CONVERSACIÓN"; badgeCls = "incall";
     panel = `
       <div class="ica-actions">
-        <button class="btn danger" id="ica-hangup">Colgar</button>
+        <button class="btn danger" id="ica-hangup" ${op}>Colgar</button>
         <button class="btn ghost ${icaVoice.muted ? "on" : ""}" id="ica-mute" ${icaVoice.micAvailable ? "" : "disabled"}>${icaVoice.muted ? "🎤 Micrófono silenciado" : "🎤 Silenciar micrófono"}</button>
       </div>
       <div class="ica-meters">
@@ -472,12 +476,12 @@ function icaRenderCall() {
     badge = i.status === "Online" ? "EN VIVO" : "SIN CONEXIÓN"; badgeCls = i.status === "Online" ? "live" : "offline";
     panel = `
       <div class="ica-actions">
-        <button class="btn" id="ica-talk" ${i.status === "Online" ? "" : "disabled"}>Hablar con el frente</button>
+        <button class="btn" id="ica-talk" ${op} ${i.status === "Online" ? "" : "disabled"}>Hablar con el frente</button>
       </div>`;
   }
 
   const doors = Array.from({ length: i.doorCount }, (_, k) =>
-    `<button class="btn ghost ica-door-btn" data-door="${k + 1}">🔓 Abrir puerta ${k + 1}</button>`).join("");
+    `<button class="btn ghost ica-door-btn" ${op} data-door="${k + 1}">🔓 Abrir puerta ${k + 1}</button>`).join("");
   side.innerHTML = `
     <div class="ica-side-head">
       <span class="ica-badge ${badgeCls}">${badge}</span>

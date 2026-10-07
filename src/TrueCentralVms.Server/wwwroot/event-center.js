@@ -274,7 +274,8 @@ function renderEvcDetail(a) {
   const sameAlert = a && evcDetailKey && JSON.parse(evcDetailKey).id === a.id;
   evcDetailKey = key;
   if (!a) { box.innerHTML = `<div class="evc-empty muted">Seleccione una alerta para ver el detalle.</div>`; return; }
-  if (!sameAlert) { evcPhotoIndex = 0; evcTab = "photos"; }
+  // Sin fotos pero con cámaras (p. ej. las asociadas al recurso): se abre en el vivo.
+  if (!sameAlert) { evcPhotoIndex = 0; evcTab = evcPhotos(a).length || !a.channelIds?.length ? "photos" : "cameras"; }
 
   const critical = a.severity !== "Info";
   const [ackState, ackCls] = evcAckState(a);
@@ -295,10 +296,14 @@ function renderEvcDetail(a) {
     </div>
     <div class="evc-detail-body">
       <div class="evc-info">
+        ${a.instructions ? `<div class="evc-section">Consignas para el operador</div>
+        <div class="evc-box consignas">${esc(a.instructions)}</div>` : ""}
         <div class="evc-section">Origen</div>
         <dl class="evc-facts">
           <dt>Automatización</dt><dd>${esc(a.workflowName)}</dd>
           <dt>Qué la disparó</dt><dd>${esc(a.triggerSummary || "—")}</dd>
+          ${a.locationPath || a.resourceKey ? `<dt>Ubicación</dt><dd>${esc(a.locationPath || "sin ubicación")}${a.resourceKey
+            ? ` · <a href="#/resources?r=${encodeURIComponent(a.resourceKey)}">ficha del recurso</a>` : ""}</dd>` : ""}
           <dt>Severidad</dt><dd>${EVC_SEVERITY[a.severity] ?? esc(a.severity)}</dd>
           <dt>Hora del evento</dt><dd>${wfDate(a.raisedAt)}</dd>
           <dt>Ejecución</dt><dd>${a.runId ? `N° ${a.runId}` : "—"}</dd>

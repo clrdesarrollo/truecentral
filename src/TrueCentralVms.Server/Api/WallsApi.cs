@@ -55,6 +55,9 @@ public static class WallsApi
         {
             string? channelName = await db.Channels.Where(c => c.Id == cid)
                 .Select(c => c.Device.Name + " · " + c.Name).FirstOrDefaultAsync();
+            // El muro es compartido, pero solo se le envían cámaras del propio alcance.
+            if (ApiSecurity.CurrentSession(ctx) is { } session && !(await ctx.ScopeAsync(session)).CanViewChannel(cid))
+                return await ctx.OutOfScopeAsync(session, "channel", cid.ToString(), channelName, "enviar al muro");
             detail = detail.Replace("{channel}", channelName ?? $"canal id {cid}");
         }
         detail = $"{detail} en el muro '{wallName}'";
@@ -520,9 +523,19 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/layouts/{layoutId:int}/apply",
             async (HttpContext ctx, int id, int layoutId, WallService walls, VmsDbContext db, AuditService audit) =>
             {
-                if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+                if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
                 string layoutName = await db.WallLayouts.Where(l => l.Id == layoutId && l.VideoWallId == id)
                     .Select(l => l.Name).FirstOrDefaultAsync() ?? $"layout {layoutId}";
+                // Un layout con cámaras fuera del alcance no se aplica (pondría en el muro lo que no puede ver).
+                var scope = await ctx.ScopeAsync(session);
+                if (scope.FiltersView)
+                {
+                    var channels = await db.WallLayouts.Where(l => l.Id == layoutId && l.VideoWallId == id)
+                        .SelectMany(l => l.Items.Select(i => i.ChannelId)).ToListAsync();
+                    if (channels.Any(c => !scope.CanViewChannel(c)))
+                        return await ctx.OutOfScopeAsync(session, "wall-layout", layoutId.ToString(), layoutName,
+                            "aplicar el layout (tiene cámaras fuera de su alcance)");
+                }
                 return await RunAuditedAsync(ctx, audit, db, id, "layout-applied",
                     $"Aplicó el layout '{layoutName}'",
                     () => walls.ApplyLayoutAsync(id, layoutId));

@@ -25,10 +25,11 @@ public static class LiveViewsApi
     private static bool CanEdit(LiveView view, SessionInfo session) =>
         view.OwnerUserId == session.UserId || session.Role == Roles.Admin;
 
-    private static LiveViewDto ToDto(LiveView view, SessionInfo session) => new(
+    /// <summary>Una vista compartida puede tener cámaras de otras ubicaciones: cada uno ve las de su alcance.</summary>
+    private static LiveViewDto ToDto(LiveView view, SessionInfo session, UserScope scope) => new(
         view.Id, view.Name, view.LayoutName, view.Columns, view.Rows,
         view.Shared, view.OwnerName, CanEdit(view, session), view.UpdatedAt,
-        view.Items.OrderBy(i => i.CellIndex)
+        view.Items.Where(i => scope.CanViewChannel(i.ChannelId)).OrderBy(i => i.CellIndex)
             .Select(i => new LiveViewItemDto(i.CellIndex, i.ChannelId, i.StreamType))
             .ToList());
 
@@ -41,12 +42,12 @@ public static class LiveViewsApi
 
     /// <summary>
     /// Deja la petición en una lista de cuadros utilizable: sin índices fuera
-    /// de la grilla, sin dos cámaras en el mismo cuadro y sin canales que ya no
+    /// de la grilla, sin dos cámaras en el mismo cuadro, sin canales que ya no
     /// estén en el inventario (el operador pudo guardar la vista con un equipo
-    /// que después se dio de baja).
+    /// que después se dio de baja) y sin cámaras fuera de su alcance.
     /// </summary>
     private static async Task<List<LiveViewItem>> BuildItemsAsync(
-        LiveViewSaveRequest request, int cellCount, VmsDbContext db, CancellationToken ct)
+        LiveViewSaveRequest request, int cellCount, VmsDbContext db, UserScope scope, CancellationToken ct)
     {
         var wanted = (request.Items ?? [])
             .Where(i => i.CellIndex >= 0 && i.CellIndex < cellCount)
@@ -58,7 +59,7 @@ public static class LiveViewsApi
         var ids = wanted.Select(i => i.ChannelId).Distinct().ToList();
         var known = await db.Channels.Where(c => ids.Contains(c.Id)).Select(c => c.Id).ToListAsync(ct);
         return wanted
-            .Where(i => known.Contains(i.ChannelId))
+            .Where(i => known.Contains(i.ChannelId) && scope.CanViewChannel(i.ChannelId))
             .Select(i => new LiveViewItem
             {
                 CellIndex = i.CellIndex,
@@ -88,6 +89,7 @@ public static class LiveViewsApi
         app.MapGet("/api/live-views", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             var views = await db.LiveViews
                 .Include(v => v.Items)
                 .Where(v => v.OwnerUserId == session.UserId || v.Shared)
@@ -95,13 +97,14 @@ public static class LiveViewsApi
                 .AsSplitQuery()
                 .AsNoTracking()
                 .ToListAsync(ct);
-            return Results.Ok(views.Select(v => ToDto(v, session)));
+            return Results.Ok(views.Select(v => ToDto(v, session, scope)));
         });
 
         app.MapPost("/api/live-views", async (HttpContext ctx, LiveViewSaveRequest request,
             VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             if (Validate(request, out int cellCount) is { } invalid) return invalid;
 
             string name = request.Name.Trim();
@@ -117,7 +120,7 @@ public static class LiveViewsApi
                 LayoutName = LayoutNameOf(request),
                 Columns = request.Columns,
                 Rows = request.Rows,
-                Items = await BuildItemsAsync(request, cellCount, db, ct),
+                Items = await BuildItemsAsync(request, cellCount, db, scope, ct),
             };
             db.LiveViews.Add(view);
             await db.SaveChangesAsync(ct);
@@ -126,7 +129,7 @@ public static class LiveViewsApi
                 detail: $"Guardó la vista \"{view.Name}\" (división {view.LayoutName}, " +
                         $"{view.Items.Count} cámara(s))" +
                         (view.Shared ? ", compartida con todos los puestos." : "."));
-            return Results.Ok(ToDto(view, session));
+            return Results.Ok(ToDto(view, session, scope));
         });
 
         // Reemplaza el contenido de una vista: sirve para renombrarla y para
@@ -135,6 +138,7 @@ public static class LiveViewsApi
             VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             if (Validate(request, out int cellCount) is { } invalid) return invalid;
 
             var view = await db.LiveViews.Include(v => v.Items).FirstOrDefaultAsync(v => v.Id == id, ct);
@@ -153,13 +157,13 @@ public static class LiveViewsApi
             view.Rows = request.Rows;
             view.UpdatedAt = DateTime.UtcNow;
             db.LiveViewItems.RemoveRange(view.Items);
-            view.Items = await BuildItemsAsync(request, cellCount, db, ct);
+            view.Items = await BuildItemsAsync(request, cellCount, db, scope, ct);
             await db.SaveChangesAsync(ct);
             await audit.LogAsync(ctx, "live", "custom-view-updated",
                 targetType: "live-view", targetId: view.Id.ToString(), targetName: view.Name,
                 detail: $"Actualizó la vista \"{view.Name}\" (división {view.LayoutName}, " +
                         $"{view.Items.Count} cámara(s)).");
-            return Results.Ok(ToDto(view, session));
+            return Results.Ok(ToDto(view, session, scope));
         });
 
         app.MapDelete("/api/live-views/{id:int}", async (HttpContext ctx, int id,
@@ -186,6 +190,7 @@ public static class LiveViewsApi
             VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             var view = await db.LiveViews.Include(v => v.Items)
                 .AsSplitQuery().AsNoTracking()
                 .FirstOrDefaultAsync(v => v.Id == id && (v.OwnerUserId == session.UserId || v.Shared), ct);
@@ -193,7 +198,7 @@ public static class LiveViewsApi
             await audit.LogAsync(ctx, "live", "custom-view-applied",
                 targetType: "live-view", targetId: view.Id.ToString(), targetName: view.Name,
                 detail: $"Cargó la vista \"{view.Name}\" ({view.Items.Count} cámara(s)).");
-            return Results.Ok(ToDto(view, session));
+            return Results.Ok(ToDto(view, session, scope));
         });
     }
 }

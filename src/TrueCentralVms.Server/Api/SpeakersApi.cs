@@ -103,6 +103,16 @@ public static class SpeakersApi
         _ => $"origen '{request.Source}'",
     };
 
+    /// <summary>Alcance por ubicación de una orden sobre varios parlantes: si alguno queda fuera, no se ejecuta.</summary>
+    private static async Task<IResult?> SpeakersOutOfScopeAsync(HttpContext ctx, SessionInfo session, IEnumerable<int> ids, string attempted)
+    {
+        var scope = await ctx.ScopeAsync(session);
+        var denied = ids.Where(id => !scope.CanOperateSpeaker(id)).Distinct().ToList();
+        return denied.Count == 0
+            ? null
+            : await ctx.OutOfScopeAsync(session, "speaker", string.Join(",", denied), null, attempted);
+    }
+
     public static void MapSpeakersApi(this WebApplication app)
     {
         // ------------------------------------------------------------------
@@ -132,16 +142,19 @@ public static class SpeakersApi
         // ------------------------------------------------------------------
         app.MapGet("/api/speakers", async (HttpContext ctx, VmsDbContext db, SpeakerService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.GroupName).ThenBy(s => s.Name).ToListAsync(ct);
-            return Results.Ok(speakers.Select(service.ToDto));
+            return Results.Ok(speakers.Where(s => scope.CanView(s.LocationId)).Select(service.ToDto));
         });
 
         app.MapGet("/api/speakers/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, SpeakerService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var speaker = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
-            return speaker is null ? Results.NotFound() : Results.Ok(service.ToDto(speaker));
+            return speaker is null || !(await ctx.ScopeAsync(session)).CanView(speaker.LocationId)
+                ? Results.NotFound()
+                : Results.Ok(service.ToDto(speaker));
         });
 
         app.MapPost("/api/speakers", async (HttpContext ctx, SpeakerWriteDto request, VmsDbContext db, SpeakerDriverRegistry drivers, LicenseService license,
@@ -156,6 +169,8 @@ public static class SpeakersApi
             string host = request.Host.Trim();
             if (await db.Speakers.AnyAsync(s => s.Host == host && s.Port == request.Port, ct))
                 return Error("Ya existe un parlante con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
 
             var conn = new SpeakerConnectionInfo(host, request.Port, request.UseHttps, request.Username, request.Password);
             var (info, libraryCount, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
@@ -176,6 +191,7 @@ public static class SpeakersApi
                 Username = request.Username,
                 PasswordCiphertext = protector.Protect(request.Password),
                 GroupName = GroupOf(request),
+                LocationId = locationId,
                 Enabled = request.Enabled,
             };
             ApplyProbe(speaker, info);
@@ -186,8 +202,10 @@ public static class SpeakersApi
                 targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
                 detail: $"Agregó el parlante '{speaker.Name}' ({speaker.DriverKey}, {speaker.Host}:{speaker.Port}, {speaker.Model ?? "modelo desconocido"}" +
                         (speaker.GroupName is null ? "" : $", grupo '{speaker.GroupName}'") +
+                        (speaker.LocationId is null ? "" : $", en {EquipmentLocation.Describe(speaker.LocationId)}") +
                         $", biblioteca: {libraryCount} audios).",
-                data: new { speaker.Host, speaker.Port, speaker.UseHttps, speaker.DriverKey, speaker.Model, speaker.SerialNumber, speaker.GroupName });
+                data: new { speaker.Host, speaker.Port, speaker.UseHttps, speaker.DriverKey, speaker.Model, speaker.SerialNumber, speaker.GroupName, speaker.LocationId });
+            EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", cancellationToken: ct);
             return Results.Ok(service.ToDto(speaker));
@@ -204,6 +222,9 @@ public static class SpeakersApi
             string host = request.Host.Trim();
             if (await db.Speakers.AnyAsync(s => s.Id != id && s.Host == host && s.Port == request.Port, ct))
                 return Error("Ya existe otro parlante con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, speaker.LocationId, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
+            int? previousLocation = speaker.LocationId;
 
             string password = string.IsNullOrEmpty(request.Password) ? protector.Unprotect(speaker.PasswordCiphertext) : request.Password;
             bool connectionChanged = speaker.Host != host || speaker.Port != request.Port || speaker.UseHttps != request.UseHttps ||
@@ -225,6 +246,8 @@ public static class SpeakersApi
             if (speaker.Username != request.Username) changes.Add($"usuario '{speaker.Username}' → '{request.Username}'");
             if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
             if (speaker.GroupName != GroupOf(request)) changes.Add($"grupo '{speaker.GroupName}' → '{GroupOf(request)}'");
+            if (locationId != previousLocation)
+                changes.Add(EquipmentLocation.Change(previousLocation, locationId));
             if (speaker.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
 
             speaker.Name = request.Name.Trim();
@@ -235,6 +258,7 @@ public static class SpeakersApi
             speaker.Username = request.Username;
             speaker.PasswordCiphertext = protector.Protect(password);
             speaker.GroupName = GroupOf(request);
+            speaker.LocationId = locationId;
             if (!speaker.Enabled && request.Enabled
                 && license.Deny(LicenseFeatures.ModuleSpeakers, LicenseFeatures.SpeakerChannels,
                     await db.Speakers.CountAsync(s => s.Enabled && s.Id != id, ct)) is { } denied)
@@ -246,6 +270,7 @@ public static class SpeakersApi
             await audit.LogAsync(ctx, "speakers", "speaker-updated",
                 targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
                 detail: $"Modificó el parlante '{speaker.Name}': " + (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
+            if (locationId != previousLocation) await EquipmentLocation.MovedAsync(ctx, ct);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", cancellationToken: ct);
             return Results.Ok(service.ToDto(speaker));
@@ -265,6 +290,7 @@ public static class SpeakersApi
             await audit.LogAsync(ctx, "speakers", "speaker-deleted",
                 targetType: "speaker", targetId: id.ToString(), targetName: speaker.Name,
                 detail: $"Eliminó el parlante '{speaker.Name}' ({speaker.Host}:{speaker.Port}).");
+            EquipmentLocation.Changed(ctx);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", cancellationToken: ct);
             return Results.Ok();
         });
@@ -299,9 +325,9 @@ public static class SpeakersApi
         // ------------------------------------------------------------------
         app.MapGet("/api/speakers/{id:int}/library", async (HttpContext ctx, int id, VmsDbContext db, SpeakerService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var speaker = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
-            if (speaker is null) return Results.NotFound();
+            if (speaker is null || !(await ctx.ScopeAsync(session)).CanView(speaker.LocationId)) return Results.NotFound();
             if (!speaker.SupportsLibrary) return Results.Ok(Array.Empty<SpeakerAudioItemDto>());
             try
             {
@@ -317,9 +343,9 @@ public static class SpeakersApi
         app.MapGet("/api/speakers/{id:int}/library/{audioId:long}/file", async (HttpContext ctx, int id, long audioId, VmsDbContext db,
             SpeakerService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var speaker = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
-            if (speaker is null) return Results.NotFound();
+            if (speaker is null || !(await ctx.ScopeAsync(session)).CanView(speaker.LocationId)) return Results.NotFound();
             if (!speaker.SupportsLibrary) return Error("El parlante no tiene biblioteca de audios.");
             try
             {
@@ -425,9 +451,9 @@ public static class SpeakersApi
         // ------------------------------------------------------------------
         app.MapGet("/api/speakers/{id:int}/status", async (HttpContext ctx, int id, VmsDbContext db, SpeakerService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var speaker = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
-            if (speaker is null) return Results.NotFound();
+            if (speaker is null || !(await ctx.ScopeAsync(session)).CanView(speaker.LocationId)) return Results.NotFound();
             try
             {
                 var state = await service.DriverOf(speaker).GetPlaybackStateAsync(service.ConnectionOf(speaker), ct);
@@ -437,12 +463,14 @@ public static class SpeakersApi
         });
 
         app.MapPut("/api/speakers/{id:int}/volume", async (HttpContext ctx, int id, SpeakerVolumeRequestDto request, VmsDbContext db,
-            SpeakerService service, IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
+            SpeakerService service, ScopedHub hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             if (request.Volume is < 0 or > 100) return Error("El volumen debe estar entre 0 y 100.");
             var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.Id == id, ct);
             if (speaker is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanOperate(speaker.LocationId))
+                return await ctx.OutOfScopeAsync(session, "speaker", id.ToString(), speaker.Name, "cambiar el volumen de");
             try
             {
                 await service.DriverOf(speaker).SetVolumeAsync(service.ConnectionOf(speaker), request.Volume, ct);
@@ -454,7 +482,7 @@ public static class SpeakersApi
                 await db.SaveChangesAsync(ct);
                 await audit.LogAsync(ctx, "speakers", "volume-changed", targetType: "speaker", targetId: id.ToString(), targetName: speaker.Name,
                     detail: $"Cambió el volumen del parlante '{speaker.Name}' de {previous?.ToString() ?? "?"} a {request.Volume}.");
-                await hub.Clients.All.SendAsync(VmsHubContract.SpeakerStatusChanged, service.ToDto(speaker), ct);
+                await hub.SendAsync(VmsHubContract.SpeakerStatusChanged, service.ToDto(speaker), s => s.CanViewSpeaker(id), ct);
                 return Results.Ok(service.ToDto(speaker));
             }
             catch (DriverException ex)
@@ -473,6 +501,7 @@ public static class SpeakersApi
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             if (request.SpeakerIds is not { Count: > 0 }) return Error("Elija al menos un parlante.");
+            if (await SpeakersOutOfScopeAsync(ctx, session, request.SpeakerIds, "hacer sonar") is { } outOfScope) return outOfScope;
             string label = SourceLabel(request);
 
             // Un sonido del servidor dura lo que dura el audio (hasta 2 min):
@@ -510,8 +539,9 @@ public static class SpeakersApi
         app.MapPost("/api/speakers/stop", async (HttpContext ctx, SpeakerStopRequestDto request, SpeakerService service, AuditService audit,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             if (request.SpeakerIds is not { Count: > 0 }) return Error("Elija al menos un parlante.");
+            if (await SpeakersOutOfScopeAsync(ctx, session, request.SpeakerIds, "detener") is { } outOfScope) return outOfScope;
             var result = await service.StopAsync(request.SpeakerIds, ct);
             foreach (var item in result.Results)
                 await audit.LogAsync(ctx, "speakers", "stop", targetType: "speaker", targetId: item.SpeakerId.ToString(), targetName: item.SpeakerName,
@@ -532,6 +562,7 @@ public static class SpeakersApi
             var speakerIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(x => int.TryParse(x, out int id) ? id : 0).Where(id => id > 0).Distinct().ToList();
             if (speakerIds.Count == 0) return Error("Indique los parlantes (?ids=1,2).", StatusCodes.Status400BadRequest);
+            if (await SpeakersOutOfScopeAsync(ctx, session, speakerIds, "hablar por") is { } outOfScope) return outOfScope;
 
             var log = loggers.CreateLogger("TrueCentralVms.Server.Api.SpeakersTalk");
             SpeakerService.TalkSession talk;

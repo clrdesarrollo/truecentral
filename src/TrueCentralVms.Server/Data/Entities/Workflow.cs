@@ -152,6 +152,20 @@ public class WorkflowAlert
     /// <summary>Qué la disparó, para que el registro se entienda solo.</summary>
     public string TriggerSummary { get; set; } = "";
 
+    /// <summary>
+    /// Recurso que dio origen al aviso ("Zone:3"), resuelto con su ficha en
+    /// Recursos. Con él los puestos saben que esta alerta ya cubre la
+    /// verificación de ese recurso y no abren otra ventana por lo mismo.
+    /// </summary>
+    public string? ResourceKey { get; set; }
+    /// <summary>Ubicación del recurso al momento del aviso ("Casa matriz › Edificio A").</summary>
+    public string? LocationPath { get; set; }
+    /// <summary>
+    /// Consignas de la ficha del recurso tal como estaban al avisar: quedan
+    /// con la alerta como constancia de lo que se le indicó al operador.
+    /// </summary>
+    public string? Instructions { get; set; }
+
     /// <summary>Exige acuse de recibo (queda pendiente hasta que alguien la confirme).</summary>
     public bool RequiresAck { get; set; } = true;
 

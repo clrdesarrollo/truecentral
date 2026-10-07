@@ -344,6 +344,10 @@
                                                    FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                                         <TextBlock Text="{Binding RoleLabel}" Foreground="{StaticResource MutedBrush}"
                                                    FontSize="11" Margin="0,2,0,0"/>
+                                        <!-- Alcance por ubicación (solo si está restringido) -->
+                                        <TextBlock Text="{Binding ScopeLabel}" Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" MaxWidth="260"
+                                                   Visibility="{Binding HasScopeLabel, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                     </StackPanel>
                                     <Border Height="1" Background="{StaticResource BorderBrush}"/>
                                     <!-- Servidor de esta sesión (informativo, no cliqueable) -->

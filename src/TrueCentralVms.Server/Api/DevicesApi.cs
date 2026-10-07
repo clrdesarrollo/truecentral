@@ -28,7 +28,8 @@ public static class DevicesApi
         d.Model, d.SerialNumber, d.FirmwareVersion, channelCount, d.Status, d.LastSeenAt, d.CreatedAt,
         d.AnprEnabled, enabledChannelCount, warning,
         // Mismo criterio que ToDto(Channel): sin el equipo en línea no hay señal.
-        d.Status == DeviceStatus.Online ? disabledWithSignal : 0);
+        d.Status == DeviceStatus.Online ? disabledWithSignal : 0,
+        d.LocationId, LocationPaths.Of(d.LocationId));
 
     /// <summary>DTO de un equipo con sus canales ya cargados (respuestas de alta/edición/revalidación).</summary>
     private static DeviceDto ToDto(Device d, int trimmedByQuota = 0) =>
@@ -42,7 +43,8 @@ public static class DevicesApi
     /// </summary>
     private static ChannelDto ToDto(Channel c, DeviceStatus deviceStatus) =>
         new(c.Id, c.DeviceId, c.ChannelNumber, c.RtspChannel, c.Name, c.Enabled,
-            c.IsOnline && deviceStatus == DeviceStatus.Online, c.SupportsPtz, c.UseFfmpegProxy, c.DisabledByLicense);
+            c.IsOnline && deviceStatus == DeviceStatus.Online, c.SupportsPtz, c.UseFfmpegProxy, c.DisabledByLicense,
+            c.LocationId);
 
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
@@ -134,6 +136,8 @@ public static class DevicesApi
                     RtspMainUrl = probed.MainStreamUrl,
                     RtspSubUrl = probed.SubStreamUrl,
                     SupportsPtz = probed.SupportsPtz,
+                    // El canal nuevo queda donde está su equipo.
+                    LocationId = device.LocationId,
                 });
             }
         }
@@ -251,7 +255,9 @@ public static class DevicesApi
         // ------------------------------------------------------------------
         app.MapGet("/api/devices", async (HttpContext ctx, VmsDbContext db) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            // Alcance por ubicación: un equipo aparece si se ve alguno de sus canales.
+            var scope = await ctx.ScopeAsync(session);
             var devices = await db.Devices
                 .Select(d => new
                 {
@@ -262,7 +268,8 @@ public static class DevicesApi
                 })
                 .OrderBy(x => x.Device.Name)
                 .ToListAsync();
-            return Results.Ok(devices.Select(x => ToDto(x.Device, x.ChannelCount, x.EnabledCount, x.DisabledWithSignal)));
+            return Results.Ok(devices.Where(x => scope.CanViewDevice(x.Device.Id))
+                .Select(x => ToDto(x.Device, x.ChannelCount, x.EnabledCount, x.DisabledWithSignal)));
         });
 
         app.MapPost("/api/devices", async (HttpContext ctx, DeviceWriteDto request, VmsDbContext db,
@@ -285,6 +292,8 @@ public static class DevicesApi
                 return Error("La contraseña del dispositivo es obligatoria.");
             if (await db.Devices.AnyAsync(d => d.Host == request.Host && d.SdkPort == request.SdkPort, ct))
                 return Error("Ya existe un dispositivo con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
 
             // Validación real contra el equipo: login + datos + canales.
             var conn = new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, request.Password);
@@ -307,6 +316,7 @@ public static class DevicesApi
                 RtspPort = request.RtspPort,
                 Username = request.Username,
                 PasswordCiphertext = protector.Protect(request.Password),
+                LocationId = locationId,
             };
             ApplyProbe(device, info);
             if (ApplyChannelSelection(device, request.EnabledChannels, budget) is { } selectionError)
@@ -324,8 +334,10 @@ public static class DevicesApi
             await audit.LogAsync(ctx, "devices", "device-created",
                 targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
                 detail: $"Agregó el dispositivo '{device.Name}' ({device.DriverKey}, {device.Host}:{device.SdkPort}, " +
-                        $"{device.Channels.Count} canales, {device.Channels.Count(c => c.Enabled)} habilitados).",
-                data: new { device.Host, device.SdkPort, device.RtspPort, device.DriverKey, device.Model, device.SerialNumber });
+                        $"{device.Channels.Count} canales, {device.Channels.Count(c => c.Enabled)} habilitados" +
+                        (device.LocationId is null ? "" : $", en {EquipmentLocation.Describe(device.LocationId)}") + ").",
+                data: new { device.Host, device.SdkPort, device.RtspPort, device.DriverKey, device.Model, device.SerialNumber, device.LocationId });
+            EquipmentLocation.Changed(ctx);
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
             return Results.Ok(ToDto(device));
@@ -343,6 +355,11 @@ public static class DevicesApi
             if (device is null) return Results.NotFound();
             if (await db.Devices.AnyAsync(d => d.Id != id && d.Host == request.Host && d.SdkPort == request.SdkPort, ct))
                 return Error("Ya existe otro dispositivo con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, device.LocationId, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
+            // Antes de revalidar: los canales nuevos que aparezcan entran ya en la ubicación nueva.
+            int? previousLocation = device.LocationId;
+            device.LocationId = locationId;
 
             string password = string.IsNullOrEmpty(request.Password)
                 ? protector.Unprotect(device.PasswordCiphertext)
@@ -374,6 +391,10 @@ public static class DevicesApi
             if (device.Username != request.Username) changes.Add($"usuario del equipo '{device.Username}' → '{request.Username}'");
             if (device.DriverKey != request.DriverKey) changes.Add($"driver {device.DriverKey} → {request.DriverKey}");
             if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña del equipo cambiada");
+            if (locationId != previousLocation)
+                changes.Add(EquipmentLocation.Change(previousLocation, locationId));
+            // Los canales que estaban con el equipo lo siguen; los ubicados aparte se quedan.
+            var followers = EquipmentLocation.Follow(device.Channels, previousLocation, locationId);
 
             device.Name = request.Name.Trim();
             device.DriverKey = request.DriverKey;
@@ -389,6 +410,10 @@ public static class DevicesApi
                 targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
                 detail: $"Modificó el dispositivo '{device.Name}': " +
                         (changes.Count > 0 ? string.Join(", ", changes) : "sin cambios de conexión") + QuotaNote(trimmed) + ".");
+            await EquipmentLocation.LogFollowersAsync(ctx, audit, "device", device.Id, device.Name, locationId,
+                followers.Select(c => (ResourceKind.Camera, c.Id, c.Name)).ToList());
+            if (locationId != previousLocation) await EquipmentLocation.MovedAsync(ctx, ct);
+            else if (connectionChanged) EquipmentLocation.Changed(ctx);
 
             // El canal de eventos de patentes cuelga de estas credenciales: si
             // la conexión cambió hay que rehacerlo con las nuevas.
@@ -426,6 +451,7 @@ public static class DevicesApi
             await audit.LogAsync(ctx, "devices", "device-deleted",
                 targetType: "device", targetId: id.ToString(), targetName: device.Name,
                 detail: $"Eliminó el dispositivo '{device.Name}' ({device.Host}:{device.SdkPort}) y todos sus canales.");
+            EquipmentLocation.Changed(ctx);
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
             return Results.Ok();
@@ -457,6 +483,8 @@ public static class DevicesApi
             ApplyProbe(device, info);
             int trimmed = await EnforceChannelQuotaAsync(license, db, device, ct);
             await db.SaveChangesAsync(ct);
+            // Pudieron aparecer canales nuevos (ya ubicados donde está el equipo).
+            EquipmentLocation.Changed(ctx);
             await audit.LogAsync(ctx, "devices", "device-revalidated",
                 targetType: "device", targetId: id.ToString(), targetName: device.Name,
                 detail: $"Revalidó '{device.Name}': {device.Channels.Count} canales, firmware {device.FirmwareVersion ?? "—"}{QuotaNote(trimmed)}.");
@@ -508,13 +536,20 @@ public static class DevicesApi
         // ------------------------------------------------------------------
         app.MapGet("/api/devices/{id:int}/channels", async (HttpContext ctx, int id, VmsDbContext db) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var device = await db.Devices.FindAsync(id);
             if (device is null) return Results.NotFound();
             var channels = await db.Channels
                 .Where(c => c.DeviceId == id)
                 .OrderBy(c => c.ChannelNumber)
                 .ToListAsync();
+            // Alcance por ubicación: solo sus canales; un equipo sin ninguno "no existe" para él.
+            var scope = await ctx.ScopeAsync(session);
+            if (scope.FiltersView)
+            {
+                channels = channels.Where(c => scope.CanView(c.LocationId)).ToList();
+                if (channels.Count == 0) return Results.NotFound();
+            }
             return Results.Ok(channels.Select(c => ToDto(c, device.Status)));
         });
 
@@ -628,6 +663,9 @@ public static class DevicesApi
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == id && c.ChannelNumber == channelNumber, ct);
             if (channel is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanOperate(channel.LocationId))
+                return await ctx.OutOfScopeAsync(session, "channel", $"{id}/{channelNumber}",
+                    $"{channel.Device.Name} · {channel.Name}", "mover el PTZ de");
             if (!channel.SupportsPtz)
                 return Error("Este canal no tiene PTZ.");
             var factory = drivers.Find(channel.Device.DriverKey);
@@ -667,13 +705,16 @@ public static class DevicesApi
             int channelNumber, PtzPresetRequestDto request, VmsDbContext db, DriverRegistry drivers,
             CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             if (request.Index is < 1 or > 300)
                 return Error("El preset debe estar entre 1 y 300.");
 
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == id && c.ChannelNumber == channelNumber, ct);
             if (channel is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanOperate(channel.LocationId))
+                return await ctx.OutOfScopeAsync(session, "channel", $"{id}/{channelNumber}",
+                    $"{channel.Device.Name} · {channel.Name}", "usar los presets de");
             if (!channel.SupportsPtz)
                 return Error("Este canal no tiene PTZ.");
             var factory = drivers.Find(channel.Device.DriverKey);
@@ -716,6 +757,9 @@ public static class DevicesApi
             AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            // Alcance por ubicación, ANTES de la caché (que comparten todos los usuarios).
+            if (!(await ctx.ScopeAsync(session)).CanViewChannel(id, channelNumber))
+                return await ctx.OutOfScopeAsync(session, "channel", $"{id}/{channelNumber}", null, "ver la imagen de");
 
             // Las miniaturas se piden solas por tandas (mantenedor de canales,
             // muro): se audita una vez por usuario/equipo cada 5 min.

@@ -417,6 +417,11 @@
                                 </StackPanel>
                             </DockPanel>
 
+                            <!-- Alcance por ubicación: lo que se ve pero no se opera -->
+                            <TextBlock Text="{Binding ReadOnlyHint}" FontSize="11.5" Margin="0,10,0,0" TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       Visibility="{Binding ReadOnlyHint, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+
                             <!-- Órdenes globales -->
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0"
                                         IsEnabled="{Binding IsOnline}">
@@ -462,6 +467,7 @@
                                     </StackPanel>
                                 </Button>
                                 <Button Style="{StaticResource SmallDanger}" Content="Silenciar alarmas"
+                                        IsEnabled="{Binding CanClearAll}"
                                         Visibility="{Binding InAlarm, Converter={x:Static vm:BoolToVisibility.Instance}}"
                                         ToolTip="Borra la alarma activa de todas las áreas sin cambiar el armado"
                                         Command="{Binding DataContext.ClearAllAlarmsCommand,
@@ -535,6 +541,7 @@
                                                         </Button.Style>
                                                     </Button>
                                                     <Button Style="{StaticResource SmallDanger}" Content="Silenciar"
+                                                            IsEnabled="{Binding CanOperate}"
                                                             Visibility="{Binding InAlarm, Converter={x:Static vm:BoolToVisibility.Instance}}"
                                                             Command="{Binding DataContext.ClearAreaAlarmCommand,
                                                                       RelativeSource={RelativeSource AncestorType=UserControl}}"
@@ -577,6 +584,7 @@
                                                            Foreground="{StaticResource MutedBrush}"
                                                            Visibility="{Binding Detail, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
                                                 <Button Style="{StaticResource SmallGhost}" Content="{Binding BypassLabel}"
+                                                        IsEnabled="{Binding CanOperate}"
                                                         HorizontalAlignment="Left" Margin="0,7,0,0"
                                                         ToolTip="Anular (bypass) deja la zona fuera del armado; restituir la vuelve a incluir"
                                                         Command="{Binding DataContext.ToggleZoneBypassCommand,

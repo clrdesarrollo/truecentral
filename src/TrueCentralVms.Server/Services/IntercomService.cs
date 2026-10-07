@@ -34,7 +34,7 @@ public sealed class IntercomService(
     IServiceScopeFactory scopeFactory,
     IntercomDriverRegistry drivers,
     CredentialProtector credentials,
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     AuditService audit,
     IConfiguration config,
     ILogger<IntercomService> logger) : BackgroundService
@@ -99,7 +99,8 @@ public sealed class IntercomService(
     public IntercomDto ToDto(Intercom i) => new(i.Id, i.Name, i.DriverKey, i.Host, i.Port, i.HttpPort, i.Username,
         i.Model, i.SerialNumber, i.FirmwareVersion, i.GroupName, i.Enabled, i.Status, i.LastError, i.LastSeenAt,
         i.ChannelId, i.Channel is { } ch ? (ch.Device is { } d ? $"{d.Name} · {ch.Name}" : ch.Name) : null,
-        i.DoorCount, i.CallCenterEnabled, ActiveCallOf(i.Id), i.CreatedAt, i.UpdatedAt);
+        i.DoorCount, i.CallCenterEnabled, ActiveCallOf(i.Id), i.CreatedAt, i.UpdatedAt,
+        i.LocationId, Auth.LocationPaths.Of(i.LocationId));
 
     public static IntercomCallDto ToDto(IntercomCall c, Intercom? intercom) => new(c.Id, c.IntercomId, c.IntercomName, c.State,
         c.StartedAt, c.AnsweredAt, c.EndedAt, c.AnsweredBy, c.AnsweredByUserId, c.Origin, c.EndReason, c.DoorOpened, c.DoorOpenedBy,
@@ -350,7 +351,7 @@ public sealed class IntercomService(
                 await audit.LogSystemAsync("intercom", "intercom-offline", targetType: "intercom", targetId: intercom.Id.ToString(),
                     targetName: intercom.Name, detail: $"El frente '{intercom.Name}' ({intercom.Host}) no responde: {error}", success: false);
         }
-        await hub.Clients.All.SendAsync(VmsHubContract.IntercomStatusChanged, ToDto(intercom), ct);
+        await hub.SendAsync(VmsHubContract.IntercomStatusChanged, ToDto(intercom), sc => sc.CanViewIntercom(intercom.Id), ct);
     }
 
     // ------------------------------------------------------------------
@@ -469,7 +470,7 @@ public sealed class IntercomService(
             }
             else await voice.CloseAsync(reason);
         }
-        await hub.Clients.All.SendAsync(VmsHubContract.IntercomCallChanged, ToDto(call, line.Intercom), ct);
+        await hub.SendAsync(VmsHubContract.IntercomCallChanged, ToDto(call, line.Intercom), sc => sc.CanViewIntercom(line.Intercom.Id), ct);
 
         if (final == IntercomCallState.Missed)
             await audit.LogSystemAsync("intercom", "call-missed", targetType: "intercom", targetId: line.Intercom.Id.ToString(),
@@ -496,7 +497,7 @@ public sealed class IntercomService(
     private async Task PublishAsync(Line line, CancellationToken ct)
     {
         if (line.Call is { } call)
-            await hub.Clients.All.SendAsync(VmsHubContract.IntercomCallChanged, ToDto(call, line.Intercom), ct);
+            await hub.SendAsync(VmsHubContract.IntercomCallChanged, ToDto(call, line.Intercom), sc => sc.CanViewIntercom(line.Intercom.Id), ct);
     }
 
     /// <summary>Envía la orden por el enlace; si está cortado o la rechaza, reintenta por ISAPI.</summary>

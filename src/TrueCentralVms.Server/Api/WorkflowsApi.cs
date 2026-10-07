@@ -36,15 +36,37 @@ public static class WorkflowsApi
     /// <summary>
     /// Alertas que puede ver una sesión: todas para el administrador; para el
     /// resto, las dirigidas a todos (sin destinatarios) o las que lo incluyen
-    /// (los ids se guardan como ",3,5," justamente para buscar ",id,").
+    /// (los ids se guardan como ",3,5," justamente para buscar ",id,"). Con
+    /// alcance por ubicación, una alerta para todos se ve solo si el recurso
+    /// que la originó está en su alcance (o no tiene recurso); la dirigida a
+    /// él la ve igual: la eligió quien configuró la automatización.
     /// </summary>
-    private static IQueryable<WorkflowAlert> VisibleAlerts(VmsDbContext db, SessionInfo session)
+    private static async Task<IQueryable<WorkflowAlert>> VisibleAlertsAsync(HttpContext ctx, VmsDbContext db, SessionInfo session)
     {
         var alerts = db.WorkflowAlerts.AsNoTracking();
         if (session.Role == Core.Domain.Roles.Admin) return alerts;
         string me = $",{session.UserId},";
-        return alerts.Where(a => a.RecipientUserIds == null || a.RecipientUserIds.Contains(me));
+        var scope = await ctx.ScopeAsync(session);
+        if (!scope.FiltersView)
+            return alerts.Where(a => a.RecipientUserIds == null || a.RecipientUserIds.Contains(me));
+        var keys = scope.VisibleResourceKeys();
+        return alerts.Where(a => (a.RecipientUserIds != null && a.RecipientUserIds.Contains(me)) ||
+                                 (a.RecipientUserIds == null && (a.ResourceKey == null || keys.Contains(a.ResourceKey))));
     }
+
+    /// <summary>La alerta tal como la ve el usuario: sin cámaras fuera de su alcance (no podría abrirlas).</summary>
+    private static WorkflowAlertDto ScopedDto(WorkflowAlert alert, UserScope scope)
+    {
+        var dto = WorkflowMapper.ToDto(alert);
+        return scope.FiltersView ? dto with { ChannelIds = dto.ChannelIds.Where(id => scope.CanViewChannel(id)).ToList() } : dto;
+    }
+
+    /// <summary>Quién recibe una alerta por el hub: los destinatarios elegidos o, si es para todos, quien ve su recurso.</summary>
+    public static bool ReceivesAlert(UserScope scope, string? recipientUserIds, string? resourceKey) =>
+        scope.IsAdmin
+        || (recipientUserIds is not null
+            ? recipientUserIds.Contains($",{scope.UserId},")
+            : scope.CanViewResourceKey(resourceKey));
 
     /// <summary>Marcas comunes a todos los disparadores.</summary>
     private static readonly WorkflowPlaceholderDto[] Placeholders =
@@ -173,13 +195,14 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/cameras", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             var channels = await db.Channels.AsNoTracking().Include(c => c.Device)
                 .Where(c => c.Enabled)
                 .OrderBy(c => c.Device.Name).ThenBy(c => c.ChannelNumber)
                 .Select(c => new { c.Id, c.DeviceId, DeviceName = c.Device.Name, c.Name, c.Device.DriverKey, c.SupportsPtz, c.ChannelNumber })
                 .ToListAsync(ct);
-            return Results.Ok(channels.Select(c => new
+            return Results.Ok(channels.Where(c => scope.CanViewChannel(c.Id)).Select(c => new
             {
                 channelId = c.Id,
                 deviceId = c.DeviceId,
@@ -199,7 +222,8 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/analytics-rules", async (HttpContext ctx, string? channelIds, string? deviceIds,
             string? kinds, VmsDbContext db, DriverRegistry drivers, CredentialProtector protector, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             static List<int> Ids(string? csv) => (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(v => int.TryParse(v, out int n) ? n : 0).Where(n => n > 0).Distinct().ToList();
             var channelList = Ids(channelIds);
@@ -212,6 +236,7 @@ public static class WorkflowsApi
             var channels = await db.Channels.AsNoTracking().Include(c => c.Device)
                 .Where(c => c.Enabled && (channelList.Contains(c.Id) || deviceList.Contains(c.DeviceId)))
                 .OrderBy(c => c.Id).Take(16).ToListAsync(ct);
+            channels = channels.Where(c => scope.CanView(c.LocationId)).ToList();
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
@@ -242,9 +267,10 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/devices", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             var devices = await db.Devices.AsNoTracking().OrderBy(d => d.Name).ToListAsync(ct);
-            return Results.Ok(devices.Select(d =>
+            return Results.Ok(devices.Where(d => scope.CanViewDevice(d.Id)).Select(d =>
             {
                 var caps = drivers.Find(d.DriverKey)?.Capabilities;
                 return new WorkflowDeviceDto(d.Id, d.Name, d.DriverKey, caps?.SupportsEvents ?? false,
@@ -255,18 +281,20 @@ public static class WorkflowsApi
         // Puertas del control de acceso (acción "orden a una puerta" y filtros).
         app.MapGet("/api/workflows/doors", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             var doors = await db.AccessDoors.AsNoTracking().Include(d => d.AccessDevice)
                 .OrderBy(d => d.AccessDevice!.Name).ThenBy(d => d.Number).ToListAsync(ct);
-            return Results.Ok(doors.Select(d => new WorkflowDoorDto(d.Id, d.AccessDeviceId, d.AccessDevice!.Name, d.Number, d.Name, d.Enabled)));
+            return Results.Ok(doors.Where(d => scope.CanView(d.LocationId)).Select(d => new WorkflowDoorDto(d.Id, d.AccessDeviceId, d.AccessDevice!.Name, d.Number, d.Name, d.Enabled)));
         });
 
         // Parlantes elegibles en la acción "sonar parlante IP" (inventario del módulo Parlantes).
         app.MapGet("/api/workflows/speakers", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.GroupName).ThenBy(s => s.Name).ToListAsync(ct);
-            return Results.Ok(speakers.Select(s => new WorkflowSpeakerDto(s.Id, s.Name, s.GroupName, s.Enabled,
+            return Results.Ok(speakers.Where(s => scope.CanView(s.LocationId)).Select(s => new WorkflowSpeakerDto(s.Id, s.Name, s.GroupName, s.Enabled,
                 s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio)));
         });
 
@@ -521,6 +549,11 @@ public static class WorkflowsApi
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
 
             var query = db.WorkflowRuns.AsNoTracking().AsQueryable();
+            if ((await ctx.ScopeAsync(session)).FiltersView)
+            {
+                var visible = await VisibleAlertsAsync(ctx, db, session);
+                query = query.Where(r => visible.Any(a => a.RunId == r.Id));
+            }
             if (workflowId is { } id) query = query.Where(r => r.WorkflowId == id);
             if (onlyErrors == true) query = query.Where(r => !r.Success);
 
@@ -541,15 +574,24 @@ public static class WorkflowsApi
 
         app.MapGet("/api/workflows/runs/{id:long}", async (HttpContext ctx, long id, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var run = await db.WorkflowRuns.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
-            return run is null ? Results.NotFound() : Results.Ok(WorkflowMapper.ToDto(run));
+            if (run is null) return Results.NotFound();
+            if ((await ctx.ScopeAsync(session)).FiltersView &&
+                !await (await VisibleAlertsAsync(ctx, db, session)).AnyAsync(a => a.RunId == id, ct))
+                return Results.NotFound();
+            return Results.Ok(WorkflowMapper.ToDto(run));
         });
 
         // Foto capturada por una ejecución (la ruta viene del propio historial).
-        app.MapGet("/api/workflows/files/{**path}", (HttpContext ctx, string path, WorkflowStore store) =>
+        app.MapGet("/api/workflows/files/{**path}", async (HttpContext ctx, string path, WorkflowStore store, VmsDbContext db) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            // Con la vista filtrada, solo las fotos de alertas que puede ver.
+            if ((await ctx.ScopeAsync(session)).FiltersView &&
+                !await (await VisibleAlertsAsync(ctx, db, session)).AnyAsync(a =>
+                    a.ImagePath == path || (a.ImagePathsJson != null && a.ImagePathsJson.Contains(path))))
+                return Results.NotFound();
             if (store.FullPath(path) is not { } full || !File.Exists(full)) return Results.NotFound();
             return Results.File(full, Path.GetExtension(full).Equals(".jpg", StringComparison.OrdinalIgnoreCase)
                 ? "image/jpeg" : "application/octet-stream");
@@ -565,7 +607,8 @@ public static class WorkflowsApi
 
             // Un operador ve las alertas dirigidas a todos o a él; el
             // administrador las ve todas (es quien responde "quién la vio").
-            var visible = VisibleAlerts(db, session);
+            var visible = await VisibleAlertsAsync(ctx, db, session);
+            var scope = await ctx.ScopeAsync(session);
             var query = visible;
             if (pending == true) query = query.Where(a => a.RequiresAck && a.AcknowledgedAt == null);
 
@@ -577,24 +620,27 @@ public static class WorkflowsApi
                 .ToListAsync(ct);
 
             return Results.Ok(new WorkflowAlertListDto(total, pendingCount,
-                alerts.Select(WorkflowMapper.ToDto).ToList()));
+                alerts.Select(a => ScopedDto(a, scope)).ToList()));
         });
 
         app.MapGet("/api/workflows/alerts/{id:long}", async (HttpContext ctx, long id, VmsDbContext db, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
-            var alert = await VisibleAlerts(db, session).FirstOrDefaultAsync(a => a.Id == id, ct);
-            return alert is null ? Results.NotFound() : Results.Ok(WorkflowMapper.ToDto(alert));
+            var alert = await (await VisibleAlertsAsync(ctx, db, session)).FirstOrDefaultAsync(a => a.Id == id, ct);
+            return alert is null ? Results.NotFound() : Results.Ok(ScopedDto(alert, await ctx.ScopeAsync(session)));
         });
 
         // Darse por enterado. Cualquier usuario con sesión puede hacerlo (el
         // que esté frente al puesto); la PRIMERA confirmación es la que queda:
         // el registro no se puede reescribir ni "mejorar" después.
         app.MapPost("/api/workflows/alerts/{id:long}/ack", async (HttpContext ctx, long id, VmsDbContext db,
-            IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
+            ScopedHub hub, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
 
+            // Solo puede darse por enterado de lo que puede ver (destinatarios y alcance).
+            if (!await (await VisibleAlertsAsync(ctx, db, session)).AnyAsync(a => a.Id == id, ct))
+                return Results.NotFound();
             var alert = await db.WorkflowAlerts.FirstOrDefaultAsync(a => a.Id == id, ct);
             if (alert is null) return Results.NotFound();
 
@@ -612,7 +658,9 @@ public static class WorkflowsApi
             await db.SaveChangesAsync(ct);
 
             var dto = WorkflowMapper.ToDto(alert);
-            await hub.Clients.All.SendAsync(VmsHubContract.WorkflowAlertAcknowledged, dto, ct);
+            // A quienes recibieron la alerta (no a todos: puede ser dirigida o de un recurso ajeno).
+            await hub.SendToAsync(VmsHubContract.WorkflowAlertAcknowledged, dto,
+                s => ReceivesAlert(s, alert.RecipientUserIds, alert.ResourceKey), ct);
 
             await audit.LogAsync(ctx, "workflows", "alert-acknowledged",
                 targetType: "workflow-alert", targetId: alert.Id.ToString(), targetName: alert.WorkflowName,

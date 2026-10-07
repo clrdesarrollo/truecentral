@@ -29,10 +29,47 @@ public sealed record SetupAdminRequest(string Username, string Password);
 // Usuarios
 // ---------------------------------------------------------------------------
 
-public sealed record UserDto(int Id, string Username, string Role, bool Enabled, DateTime CreatedAt, DateTime PasswordChangedAt);
+/// <param name="RestrictToLocations">Alcance por ubicación (solo operadores): false = todas las ubicaciones.</param>
+/// <param name="ViewOutsideScope">Con alcance restringido: ve el resto sin poder operarlo.</param>
+/// <param name="LocationIds">Ubicaciones de su alcance (cada una incluye sus sububicaciones).</param>
+public sealed record UserDto(int Id, string Username, string Role, bool Enabled, DateTime CreatedAt, DateTime PasswordChangedAt,
+    bool RestrictToLocations = false, bool ViewOutsideScope = false, IReadOnlyList<int>? LocationIds = null);
 
-/// <summary>Alta/edición de usuario. En edición, Password null o vacía = no cambiar.</summary>
-public sealed record UserWriteDto(string Username, string? Password, string Role, bool Enabled);
+/// <summary>
+/// Alta/edición de usuario. En edición, Password null o vacía = no cambiar; los
+/// campos del alcance en null = no cambiar (un cliente anterior no lo borra).
+/// </summary>
+public sealed record UserWriteDto(string Username, string? Password, string Role, bool Enabled,
+    bool? RestrictToLocations = null, bool? ViewOutsideScope = null, IReadOnlyList<int>? LocationIds = null);
+
+/// <summary>Alcance del usuario conectado (para mostrarlo y adaptar la interfaz).</summary>
+/// <param name="Restricted">true = solo opera (y salvo <paramref name="ViewOutsideScope"/>, solo ve) sus ubicaciones.</param>
+/// <param name="Locations">Nombres (con su ruta) de las ubicaciones asignadas.</param>
+public sealed record UserScopeDto(bool Restricted, bool ViewOutsideScope, IReadOnlyList<int> LocationIds, IReadOnlyList<string> Locations);
+
+/// <summary>
+/// Qué puede OPERAR la sesión (armar, abrir una puerta, mover un PTZ, hablar…),
+/// no solo ver. Lo arma el servidor con las mismas reglas con que valida cada
+/// orden; la interfaz lo consulta para deshabilitar lo que respondería 403. Con
+/// <paramref name="All"/> opera todo lo que ve y las listas van vacías.
+/// </summary>
+/// <param name="Locations">Ubicaciones sobre las que puede dar órdenes (con sus sububicaciones).</param>
+/// <param name="Channels">Canales (PTZ y presets), por id.</param>
+/// <param name="Areas">Áreas de alarma como "panel/número".</param>
+/// <param name="Zones">Zonas de alarma como "panel/número" (anular / restituir).</param>
+/// <param name="WholePanels">Paneles cuyas áreas puede operar todas: las órdenes de "todo el panel".</param>
+/// <param name="Doors">Puertas de control de acceso, por id.</param>
+public sealed record OperableDto(
+    bool All,
+    IReadOnlyList<int> Locations,
+    IReadOnlyList<int> Channels,
+    IReadOnlyList<string> Areas,
+    IReadOnlyList<string> Zones,
+    IReadOnlyList<int> WholePanels,
+    IReadOnlyList<int> Doors,
+    IReadOnlyList<int> Fences,
+    IReadOnlyList<int> Speakers,
+    IReadOnlyList<int> Intercoms);
 
 // ---------------------------------------------------------------------------
 // Salud del sistema
@@ -165,4 +202,7 @@ public static class VmsHubContract
 
     /// <summary>Llegó un evento de un panel de cerco (payload: CercoEventDto).</summary>
     public const string CercoEventReceived = nameof(CercoEventReceived);
+
+    /// <summary>Avance de una actualización de firmware (OTA) de un panel de cerco (payload: { panelId, state, pct, err }).</summary>
+    public const string CercoOtaProgress = nameof(CercoOtaProgress);
 }

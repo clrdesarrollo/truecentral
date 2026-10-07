@@ -15,7 +15,7 @@ namespace TrueCentralVms.Server.Services;
 /// </summary>
 public sealed class DeviceStatusMonitor(
     IServiceScopeFactory scopeFactory,
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     ILogger<DeviceStatusMonitor> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
@@ -82,7 +82,8 @@ public sealed class DeviceStatusMonitor(
         foreach (var (dto, previous) in changed)
         {
             logger.LogInformation("Dispositivo '{Name}' ({Host}) ahora está {Status}.", dto.Name, dto.Host, dto.Status);
-            await hub.Clients.All.SendAsync(VmsHubContract.DeviceStatusChanged, dto, ct);
+            // Solo a quien ve alguno de sus canales (alcance por ubicación).
+            await hub.SendAsync(VmsHubContract.DeviceStatusChanged, dto, s => s.CanViewDevice(dto.Id), ct);
             // La primera lectura tras arrancar (Desconocido → En línea) no es
             // una recuperación: no dispara automatizaciones.
             if (previous != DeviceStatus.Unknown || dto.Status != DeviceStatus.Online)

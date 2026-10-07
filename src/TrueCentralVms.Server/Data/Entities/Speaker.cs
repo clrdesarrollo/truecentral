@@ -8,7 +8,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// una biblioteca de audios propia y un canal de audio en vivo. La contraseña
 /// se guarda cifrada con AES-256-GCM (ver <see cref="CredentialProtector"/>).
 /// </summary>
-public class Speaker
+public class Speaker : ILocatable
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -21,6 +21,9 @@ public class Speaker
     public byte[] PasswordCiphertext { get; set; } = [];
     /// <summary>Grupo lógico (sector) para elegir varios parlantes de una vez; libre.</summary>
     public string? GroupName { get; set; }
+
+    /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
+    public int? LocationId { get; set; }
 
     // Datos obtenidos del parlante al validar credenciales.
     public string? Model { get; set; }

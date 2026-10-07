@@ -64,6 +64,15 @@ public static class AnprApi
                 query = query.Where(p => p.CapturedAt >= fromValue);
             if (to is { } toValue)
                 query = query.Where(p => p.CapturedAt <= toValue);
+            // Alcance por ubicación: solo lecturas de cámaras de sus ubicaciones
+            // (en la consulta, para que el tope de filas cuente solo las suyas).
+            var scope = await ctx.ScopeAsync(session);
+            if (scope.FiltersView)
+            {
+                var allowed = scope.Locations.ToList();
+                query = query.Where(p => db.Channels.Any(c => c.DeviceId == p.DeviceId && c.ChannelNumber == p.ChannelNumber
+                                                              && c.LocationId != null && allowed.Contains(c.LocationId.Value)));
+            }
 
             var events = await query
                 .OrderByDescending(p => p.ReceivedAt)
@@ -89,15 +98,15 @@ public static class AnprApi
         app.MapGet("/api/anpr/events/{id:long}/{kind}", async (HttpContext ctx, VmsDbContext db, AnprStore store,
             long id, string kind) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             if (kind is not ("scene" or "plate"))
                 return Error("Imagen desconocida: use 'scene' o 'plate'.", StatusCodes.Status404NotFound);
 
             var record = await db.PlateEvents.AsNoTracking()
                 .Where(p => p.Id == id)
-                .Select(p => new { p.SceneImagePath, p.PlateImagePath })
+                .Select(p => new { p.SceneImagePath, p.PlateImagePath, p.DeviceId, p.ChannelNumber })
                 .FirstOrDefaultAsync();
-            if (record is null)
+            if (record is null || !(await ctx.ScopeAsync(session)).CanViewChannel(record.DeviceId, record.ChannelNumber))
                 return Error("El reconocimiento no existe.", StatusCodes.Status404NotFound);
 
             string? relative = kind == "scene" ? record.SceneImagePath : record.PlateImagePath;
@@ -114,7 +123,8 @@ public static class AnprApi
         // ------------------------------------------------------------------
         app.MapGet("/api/anpr/sources", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers, AnprService anpr) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
 
             var capableKeys = drivers.All
                 .Where(f => f.Capabilities.SupportsAnpr)
@@ -131,7 +141,7 @@ public static class AnprApi
                 .Select(g => new { DeviceId = g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.DeviceId, x => x.Count);
 
-            return Results.Ok(devices.Select(d => new AnprSourceDto(
+            return Results.Ok(devices.Where(d => scope.CanViewDevice(d.Id)).Select(d => new AnprSourceDto(
                 d.Id, d.Name, d.DriverKey, d.Host, d.Status,
                 d.AnprEnabled, anpr.IsLive(d.Id), anpr.LastErrorOf(d.Id), anpr.LastEventAtOf(d.Id),
                 counts.GetValueOrDefault(d.Id))));

@@ -95,6 +95,58 @@ public partial class LiveView : UserControl
             await Vm.OpenChannelAsync(node);
         else if (DeviceTree.SelectedItem is DeviceNode device)
             await Vm.OpenDeviceAsync(device);
+        else if (DeviceTree.SelectedItem is LocationNode location)
+            await Vm.OpenLocationAsync(location);
+    }
+
+    // Menú contextual de una ubicación del árbol: el MenuItem hereda como
+    // DataContext el nodo sobre el que se abrió el menú.
+    private static LocationNode? LocationOf(object sender) => (sender as FrameworkElement)?.DataContext as LocationNode;
+
+    private async void OnLocationOpenCameras(object sender, RoutedEventArgs e)
+    {
+        if (LocationOf(sender) is { } location) await Vm.OpenLocationAsync(location);
+    }
+
+    private async void OnLocationArmAway(object sender, RoutedEventArgs e)
+    {
+        if (LocationOf(sender) is { } location) await Vm.RunLocationCommandAsync(location, "arm-away");
+    }
+
+    private async void OnLocationArmStay(object sender, RoutedEventArgs e)
+    {
+        if (LocationOf(sender) is { } location) await Vm.RunLocationCommandAsync(location, "arm-stay");
+    }
+
+    private async void OnLocationDisarm(object sender, RoutedEventArgs e)
+    {
+        if (LocationOf(sender) is { } location) await Vm.RunLocationCommandAsync(location, "disarm");
+    }
+
+    /// <summary>
+    /// Mayús+F10 o la tecla Menú sobre una ubicación: el pedido de teclado
+    /// llega al TreeViewItem, pero el menú vive en el contenido del nodo (que
+    /// es donde lo alcanza el clic derecho); se abre a mano bajo el nombre.
+    /// </summary>
+    private void OnTreeContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (e.OriginalSource is not TreeViewItem { DataContext: LocationNode } item) return;
+        if (item.Template?.FindName("PART_Header", item) is not ContentPresenter presenter ||
+            System.Windows.Media.VisualTreeHelper.GetChildrenCount(presenter) == 0 ||
+            System.Windows.Media.VisualTreeHelper.GetChild(presenter, 0) is not FrameworkElement { ContextMenu: { } menu } header)
+            return;
+        menu.PlacementTarget = header;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        // Al cerrarse vuelve a lo normal: el clic derecho lo abre donde está el mouse.
+        void Restore(object? s, RoutedEventArgs a)
+        {
+            menu.Closed -= Restore;
+            menu.ClearValue(ContextMenu.PlacementProperty);
+            menu.ClearValue(ContextMenu.PlacementTargetProperty);
+        }
+        menu.Closed += Restore;
+        menu.IsOpen = true;
+        e.Handled = true;
     }
 
     /// <summary>El nodo seleccionado (por clic o desde la grilla) queda a la

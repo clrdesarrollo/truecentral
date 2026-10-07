@@ -24,6 +24,8 @@ public sealed partial class EventCenterViewModel : ObservableObject
         _api = api;
         hub.WorkflowNotification += _ => Refresh();
         hub.WorkflowAlertAcknowledged += OnAcknowledged;
+        // Cambió el alcance por ubicación de este usuario: otras alertas a la vista.
+        hub.ConfigChanged += entity => { if (entity == "scope") Refresh(); };
     }
 
     /// <summary>Alertas listadas (de la más reciente a la más antigua).</summary>

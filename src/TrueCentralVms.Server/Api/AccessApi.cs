@@ -34,8 +34,6 @@ public static class AccessApi
             return "La dirección (IP o hostname) es obligatoria.";
         if (request.Port is < 1 or > 65535)
             return "El puerto debe estar entre 1 y 65535.";
-        if (request.Location is { Length: > 128 })
-            return "La ubicación no puede superar los 128 caracteres.";
         if (drivers.Find(request.DriverKey) is not { } factory)
             return $"Driver desconocido: '{request.DriverKey}'.";
         // ZKTeco no tiene usuario: su credencial es la clave de comunicación,
@@ -55,9 +53,6 @@ public static class AccessApi
         catch (DriverException ex) { return (null, ex.Message); }
         catch (Exception ex) { return (null, $"Error inesperado al comunicarse con el equipo: {ex.Message}"); }
     }
-
-    private static string? LocationOf(AccessDeviceWriteDto request) =>
-        string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim();
 
     private static void ApplyProbe(AccessDevice device, AccessDeviceInfo info)
     {
@@ -93,7 +88,8 @@ public static class AccessApi
             var existing = device.Doors.FirstOrDefault(d => d.Number == door.Number);
             if (existing is null)
             {
-                device.Doors.Add(new AccessDoor { Number = door.Number, Name = door.Name });
+                // La puerta nueva queda donde está su equipo.
+                device.Doors.Add(new AccessDoor { Number = door.Number, Name = door.Name, LocationId = device.LocationId });
                 added++;
             }
             else if (existing.NameFromDevice && existing.Name != door.Name)
@@ -139,18 +135,24 @@ public static class AccessApi
         // ------------------------------------------------------------------
         app.MapGet("/api/access/devices", async (HttpContext ctx, VmsDbContext db, AccessControlService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            var devices = await db.AccessDevices.AsNoTracking().Include(d => d.Doors)
-                .OrderBy(d => d.Location).ThenBy(d => d.Name).ToListAsync(ct);
-            return Results.Ok(devices.Select(service.ToDto));
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            // Ordenados por la ruta de su ubicación (los por ubicar al final) y por nombre.
+            var devices = (await db.AccessDevices.AsNoTracking().Include(d => d.Doors).ToListAsync(ct))
+                .OrderBy(d => LocationPaths.Of(d.LocationId) ?? "\uffff", StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            // Alcance por ubicación: cada equipo con solo sus puertas; sin ninguna, no aparece.
+            var scope = await ctx.ScopeAsync(session);
+            return Results.Ok(devices.Select(service.ToDto).Select(scope.Visible).Where(d => d is not null));
         });
 
         app.MapGet("/api/access/devices/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             AccessControlService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var device = await db.AccessDevices.AsNoTracking().Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
-            return device is null ? Results.NotFound() : Results.Ok(service.ToDto(device));
+            return device is not null && (await ctx.ScopeAsync(session)).Visible(service.ToDto(device)) is { } dto
+                ? Results.Ok(dto)
+                : Results.NotFound();
         });
 
         app.MapPost("/api/access/devices", async (HttpContext ctx, AccessDeviceWriteDto request, VmsDbContext db,
@@ -171,6 +173,8 @@ public static class AccessApi
             string host = request.Host.Trim();
             if (await db.AccessDevices.AnyAsync(d => d.Host == host && d.Port == request.Port, ct))
                 return Error("Ya existe un equipo de control de acceso con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
 
             // Sin clave = cadena vacía, no null: los equipos con clave de
             // comunicación (ZKTeco) se dan de alta sin contraseña y "vacío"
@@ -199,7 +203,7 @@ public static class AccessApi
                 UseHttps = request.UseHttps,
                 Username = request.Username,
                 PasswordCiphertext = protector.Protect(request.Password),
-                Location = LocationOf(request),
+                LocationId = locationId,
                 Enabled = request.Enabled,
             };
             ApplyProbe(device, info);
@@ -211,9 +215,10 @@ public static class AccessApi
                 targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
                 detail: $"Agregó el equipo de control de acceso '{device.Name}' ({device.DriverKey}, {device.Host}:{device.Port}, " +
                         $"{device.Model ?? "modelo desconocido"}" +
-                        (device.Location is null ? "" : $", ubicación '{device.Location}'") +
+                        (device.LocationId is null ? "" : $", en {EquipmentLocation.Describe(device.LocationId)}") +
                         $", {device.Doors.Count} puerta(s)).",
-                data: new { device.Host, device.Port, device.UseHttps, device.DriverKey, device.Model, device.SerialNumber, device.Location });
+                data: new { device.Host, device.Port, device.UseHttps, device.DriverKey, device.Model, device.SerialNumber, device.LocationId });
+            EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
             return Results.Ok(service.ToDto(device));
@@ -231,6 +236,9 @@ public static class AccessApi
             string host = request.Host.Trim();
             if (await db.AccessDevices.AnyAsync(d => d.Host == host && d.Port == request.Port && d.Id != id, ct))
                 return Error("Ya existe otro equipo de control de acceso con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, device.LocationId, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
+            int? previousLocation = device.LocationId;
 
             string password = string.IsNullOrEmpty(request.Password)
                 ? protector.Unprotect(device.PasswordCiphertext)
@@ -259,7 +267,8 @@ public static class AccessApi
             if (device.UseHttps != request.UseHttps) changes.Add(request.UseHttps ? "HTTPS activado" : "HTTPS desactivado");
             if (device.Username != request.Username) changes.Add($"usuario '{device.Username}' → '{request.Username}'");
             if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
-            if (device.Location != LocationOf(request)) changes.Add($"ubicación '{device.Location}' → '{LocationOf(request)}'");
+            if (locationId != previousLocation)
+                changes.Add(EquipmentLocation.Change(previousLocation, locationId));
             if (device.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
 
             // La sesión cacheada del driver queda con las credenciales viejas.
@@ -272,9 +281,11 @@ public static class AccessApi
             device.UseHttps = request.UseHttps;
             device.Username = request.Username;
             device.PasswordCiphertext = protector.Protect(password);
-            device.Location = LocationOf(request);
             device.Enabled = request.Enabled;
             device.UpdatedAt = DateTime.UtcNow;
+            // Las puertas que estaban con el equipo lo siguen; las ubicadas aparte se quedan.
+            var followers = EquipmentLocation.Follow(device.Doors, previousLocation, locationId);
+            device.LocationId = locationId;
             if (info is not null)
             {
                 ApplyProbe(device, info);
@@ -287,6 +298,11 @@ public static class AccessApi
                 targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
                 detail: $"Modificó el equipo de control de acceso '{device.Name}': " +
                         (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
+            // Solo las que siguen existiendo (una puerta que el equipo dejó de declarar se borró).
+            await EquipmentLocation.LogFollowersAsync(ctx, audit, "access-device", device.Id, device.Name, locationId,
+                followers.Where(d => device.Doors.Contains(d)).Select(d => (ResourceKind.Door, d.Id, d.Name)).ToList());
+            if (locationId != previousLocation) await EquipmentLocation.MovedAsync(ctx, ct);
+            else if (info is not null) EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
             return Results.Ok(service.ToDto(device));
@@ -305,6 +321,7 @@ public static class AccessApi
             await audit.LogAsync(ctx, "access", "device-deleted",
                 targetType: "access-device", targetId: id.ToString(), targetName: device.Name,
                 detail: $"Eliminó el equipo de control de acceso '{device.Name}' ({device.Host}:{device.Port}) y sus {doors} puerta(s).");
+            EquipmentLocation.Changed(ctx);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
             return Results.Ok();
         });
@@ -333,6 +350,8 @@ public static class AccessApi
             ApplyProbe(device, info);
             string doorChanges = SyncDoors(device, info.Doors);
             await db.SaveChangesAsync(ct);
+            // Pudieron aparecer puertas nuevas (ya ubicadas donde está el equipo).
+            EquipmentLocation.Changed(ctx);
             await audit.LogAsync(ctx, "access", "device-revalidated",
                 targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
                 detail: $"Revalidó el equipo de control de acceso '{device.Name}' ({device.Host}): " +

@@ -1,0 +1,187 @@
+<Window x:Class="TrueCentralVms.Client.Views.VerificationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:fl="clr-namespace:FlyleafLib.Controls.WPF;assembly=FlyleafLib"
+        xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
+        Title="Verificación del aviso" Height="660" Width="1080"
+        MinHeight="480" MinWidth="820"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ShowInTaskbar="True"
+        Icon="/TrueCentralVms.Client;component/Assets/logo.png"
+        Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="38" ResizeBorderThickness="6"
+                      GlassFrameThickness="0,0,0,1" CornerRadius="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    <!-- Verificación de un aviso: qué recurso avisó, dónde está, qué hacer
+         (las consignas de su ficha en Recursos) y el vivo de sus cámaras
+         asociadas, la principal primero. Cerrarla no cambia nada en el equipo. -->
+    <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Barra de título del producto (sin el cromo de Windows) -->
+        <Border Grid.Row="0" Height="38" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="10,0,14,0">
+                    <Image Source="/TrueCentralVms.Client;component/Assets/logo.png" Width="22" Height="22"
+                           VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <TextBlock Margin="9,0,0,0" VerticalAlignment="Center" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}">
+                        TrueCentral <Run Foreground="{StaticResource AccentBrush}">VMS</Run>
+                        <Run Foreground="{StaticResource MutedBrush}" Text="— Verificación del aviso"/>
+                    </TextBlock>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource TitleBarButton}" Click="OnMinimizeClick"
+                            Content="&#xE921;" ToolTip="Minimizar"/>
+                    <Button Style="{StaticResource TitleBarButton}" Click="OnMaxRestoreClick" ToolTip="Maximizar">
+                        <TextBlock x:Name="MaxGlyph" Text="&#xE922;"/>
+                    </Button>
+                    <Button Style="{StaticResource TitleBarCloseButton}" Click="OnClose"
+                            Content="&#xE8BB;" ToolTip="Cerrar"/>
+                </StackPanel>
+                <Border/>
+            </DockPanel>
+        </Border>
+
+        <!-- Encabezado: el aviso y el recurso que lo dio -->
+        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1" Padding="18,12">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="SeverityGlyph" FontFamily="Segoe MDL2 Assets" FontSize="20"
+                           Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <StackPanel>
+                    <TextBlock x:Name="TitleText" FontSize="16" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="SubtitleText" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="360" MinWidth="300"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Qué es, dónde está y qué hacer -->
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Padding="18,14">
+                <StackPanel>
+                    <TextBlock Text="CONSIGNAS PARA EL OPERADOR" Style="{StaticResource FieldLabel}"
+                               FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <Border Background="{StaticResource Panel2Brush}" BorderBrush="{StaticResource AccentBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="0,0,0,16">
+                        <TextBlock x:Name="InstructionsText" TextWrapping="Wrap" FontSize="13.5" LineHeight="20"/>
+                    </Border>
+
+                    <TextBlock Text="RECURSO" Style="{StaticResource FieldLabel}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="ResourceText" TextWrapping="Wrap" FontSize="12.5" Margin="0,0,0,12"/>
+
+                    <TextBlock Text="UBICACIÓN" Style="{StaticResource FieldLabel}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="LocationText" TextWrapping="Wrap" FontSize="12.5" Margin="0,0,0,12"/>
+
+                    <StackPanel x:Name="DescriptionPanel">
+                        <TextBlock Text="DESCRIPCIÓN" Style="{StaticResource FieldLabel}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock x:Name="DescriptionText" TextWrapping="Wrap" FontSize="12.5" Margin="0,0,0,12"/>
+                    </StackPanel>
+
+                    <TextBlock Text="AVISO" Style="{StaticResource FieldLabel}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="EventText" TextWrapping="Wrap" FontSize="12.5"/>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Vivo de las cámaras asociadas (la principal arriba a la izquierda) -->
+            <Border Grid.Column="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1,0,0,0" Padding="10">
+                <Border Background="Black" CornerRadius="6">
+                    <Grid>
+                        <ItemsControl x:Name="VideoGrid" Margin="2">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Columns="{Binding VideoColumns,
+                                                 RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="2" Background="Black"
+                                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                            CornerRadius="4">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="*"/>
+                                            </Grid.RowDefinitions>
+                                            <!-- Barra del cuadro (número, cámara, estado). Va aparte, como en la
+                                                 Vista en vivo: Flyleaf pinta el video en ventanas propias que
+                                                 taparían cualquier cosa superpuesta. El 1 es la principal. -->
+                                            <DockPanel Grid.Row="0" Background="#151D26">
+                                                <Border DockPanel.Dock="Left" Background="{StaticResource Panel2Brush}"
+                                                        CornerRadius="4" Margin="5,3" Padding="6,1">
+                                                    <TextBlock Text="{Binding Index}" Foreground="{StaticResource MutedBrush}"
+                                                               FontSize="10.5" FontWeight="Bold"/>
+                                                </Border>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Status}" ToolTip="{Binding Status}" Foreground="#FCD34D"
+                                                           FontSize="10.5" Margin="6,0" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis" MaxWidth="220"/>
+                                                <Ellipse Style="{StaticResource LoadingSpinner}" Width="11" Height="11"
+                                                         Margin="4,0,0,0" VerticalAlignment="Center"
+                                                         ToolTip="Conectando con la cámara…"
+                                                         Visibility="{Binding IsConnecting,
+                                                                      Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                                    <Ellipse.RenderTransform><RotateTransform/></Ellipse.RenderTransform>
+                                                </Ellipse>
+                                                <TextBlock Text="{Binding Title}" ToolTip="{Binding Title}" Foreground="{StaticResource TextBrush}"
+                                                           FontSize="11.5" Margin="4,3" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </DockPanel>
+                                            <fl:FlyleafHost Grid.Row="1" Player="{Binding Player}"
+                                                            AttachedDragMove="None" KeyBindings="None"
+                                                            OpenOnDrop="None" SwapOnDrop="None"
+                                                            ToggleFullScreenOnDoubleClick="None"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock x:Name="NoVideoText" Foreground="{StaticResource MutedBrush}"
+                                   FontSize="12.5" TextWrapping="Wrap" TextAlignment="Center"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20"/>
+                    </Grid>
+                </Border>
+            </Border>
+        </Grid>
+
+        <!-- Acciones -->
+        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,1,0,0" Padding="18,12">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <TextBlock x:Name="PagerText" VerticalAlignment="Center" Margin="0,0,12,0"
+                               FontSize="12" Foreground="{StaticResource MutedBrush}"/>
+                    <Button x:Name="PrevButton" Content="&#xE76B;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                            Style="{StaticResource GhostButton}" Click="OnPrevious" ToolTip="Aviso anterior" Margin="0,0,6,0"/>
+                    <Button x:Name="NextButton" Content="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                            Style="{StaticResource GhostButton}" Click="OnNext" ToolTip="Aviso siguiente" Margin="0,0,14,0"/>
+                    <Button Content="Cerrar" Style="{StaticResource GhostButton}" Click="OnClose"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="OpenLiveButton" Content="Abrir en la Vista en vivo" Click="OnOpenLive"
+                            Style="{StaticResource PrimaryButton}" Padding="16,8"
+                            ToolTip="Lleva estas cámaras a la grilla principal (stream principal según su configuración)"/>
+                    <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11.5"
+                               Foreground="{StaticResource MutedBrush}"
+                               Text="Las consignas y las cámaras se configuran en la ficha del recurso (panel web → Recursos)."/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+    </Border>
+</Window>

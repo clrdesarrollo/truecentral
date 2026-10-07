@@ -12,8 +12,9 @@ namespace TrueCentralVms.Client.Views;
 
 /// <summary>
 /// Ventana de alarma: el hecho a la izquierda (qué lo disparó, cuándo, con qué
-/// severidad), las fotos que capturó la automatización a la derecha, lo que
-/// hizo el sistema en la otra pestaña, y abajo el acuse de recibo.
+/// severidad y, si el recurso que la originó tiene ficha en Recursos, sus
+/// consignas arriba de todo), las fotos que capturó la automatización a la
+/// derecha, lo que hizo el sistema en la otra pestaña, y abajo el acuse de recibo.
 ///
 /// Es una sola ventana para todas las alertas pendientes: se navega entre
 /// ellas con el paginador, igual que en una central de monitoreo. Cerrarla NO
@@ -39,6 +40,10 @@ public partial class AlertWindow : Window
     private int _index;
     private List<string> _photos = [];
     private int _photo;
+    /// <summary>Alerta pintada por última vez: al pasar a otra se elige su pestaña inicial.</summary>
+    private long _shownAlertId;
+    /// <summary>La pestaña la está eligiendo el pintado (el vivo lo abre RenderCameras, no el cambio de pestaña).</summary>
+    private bool _choosingTab;
 
     private AlertWindow(ApiClient api, ClientSettings settings, AlertSoundPlayer sound,
         Func<int, ChannelNode?> findChannel)
@@ -153,6 +158,23 @@ public partial class AlertWindow : Window
               (alert.SoundRepeat > 1 ? $" (×{alert.SoundRepeat})" : "")
             : "Sin sonido";
         MessageText.Text = alert.Message;
+        // Consignas y ubicación del recurso que la originó (su ficha en Recursos).
+        InstructionsPanel.Visibility = string.IsNullOrWhiteSpace(alert.Instructions) ? Visibility.Collapsed : Visibility.Visible;
+        InstructionsText.Text = alert.Instructions ?? "";
+        LocationLabel.Visibility = LocationText.Visibility =
+            string.IsNullOrWhiteSpace(alert.LocationPath) ? Visibility.Collapsed : Visibility.Visible;
+        LocationText.Text = alert.LocationPath ?? "";
+
+        // Pestaña inicial de cada alerta: sus fotos o, si no tiene pero sí
+        // cámaras (p. ej. las asociadas al recurso), directo el vivo.
+        if (_shownAlertId != alert.Id)
+        {
+            _shownAlertId = alert.Id;
+            bool hasPhotos = alert.ImagePaths.Count > 0 || alert.ImagePath is { Length: > 0 };
+            _choosingTab = true;
+            try { Tabs.SelectedItem = !hasPhotos && alert.ChannelIds.Count > 0 ? VideoTab : PhotosTab; }
+            finally { _choosingTab = false; }
+        }
 
         RenderAck(alert);
         RenderPager();
@@ -193,7 +215,7 @@ public partial class AlertWindow : Window
             _cells.RemoveAt(_cells.Count - 1);
         }
         while (_cells.Count < _cameras.Count)
-            _cells.Add(new VideoCellViewModel(_api, _settings));
+            _cells.Add(new VideoCellViewModel(_api, _settings) { Index = _cells.Count + 1 });
 
         VideoGrid.ItemsSource = null;
         VideoGrid.ItemsSource = _cells;
@@ -231,7 +253,7 @@ public partial class AlertWindow : Window
 
     private void OnTabChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!ReferenceEquals(e.OriginalSource, Tabs)) return;
+        if (!ReferenceEquals(e.OriginalSource, Tabs) || _choosingTab) return;
         _ = OpenVideoAsync();
     }
 

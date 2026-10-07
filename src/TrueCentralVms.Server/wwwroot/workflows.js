@@ -177,7 +177,8 @@ const WF_FIELDS = {
   ],
   notify: [
     { k: "title", t: "text", label: "Título", def: "{tipo}: {equipo}" },
-    { k: "message", t: "text", label: "Mensaje", def: "{evento} · {fechahora}" },
+    { k: "message", t: "text", label: "Mensaje", def: "{evento} · {fechahora}",
+      help: "Además de las marcas del disparador admite {ubicacion} (dónde está, según Recursos) y {consignas} (lo que debe hacer el operador con ese recurso)." },
     { k: "severity", t: "select", label: "Importancia", def: "Warning",
       options: [["Critical", "Crítica"], ["Warning", "Advertencia"], ["Info", "Informativa"]] },
     { k: "userIds", t: "users", label: "Destinatarios",
@@ -186,7 +187,7 @@ const WF_FIELDS = {
     { k: "requireAck", t: "check", label: "Exigir que un operador se dé por enterado", def: true,
       help: "El aviso queda en pantalla y en la lista de alertas hasta que alguien lo confirme; se registra quién y cuándo." },
     { k: "channelIds", t: "cameras", label: "Cámaras del video en vivo de la ventana de alarma",
-      help: "Si no marca ninguna, se usan las que capturaron foto en la misma ejecución." },
+      help: "Si no marca ninguna, se usan las que capturaron foto en la misma ejecución y, si tampoco hubo fotos, las cámaras asociadas al recurso que la disparó (su ficha en Recursos)." },
     { k: "sound", t: "audio", label: "Alarma sonora en el equipo del operador", optional: true, system: true,
       def: "", rerender: true, help: "Los sonidos son los mismos que se cargan con el botón «Sonidos»." },
     { k: "soundRepeat", t: "number", label: "Repeticiones del sonido", def: 1, min: 0, max: 5,

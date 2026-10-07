@@ -133,7 +133,11 @@ public sealed record AlarmPanelDto(
     /// <summary>El servidor guarda la clave ISUP/OTAP del panel (puede re-registrarlo solo en la receptora).</summary>
     bool HasDeviceKey = false,
     /// <summary>"isup" u "otap" (drivers de pasarela).</summary>
-    string? DeviceProtocol = null)
+    string? DeviceProtocol = null,
+    /// <summary>Ubicación del panel en el árbol de Recursos (null = por ubicar): la heredan sus áreas y zonas.</summary>
+    int? LocationId = null,
+    /// <summary>Ruta legible de esa ubicación ("Casa matriz › Bodega").</summary>
+    string? Location = null)
 {
     /// <summary>Alguna área o zona del panel está en alarma ahora.</summary>
     public bool InAlarm => Areas.Any(a => a.InAlarm) || Zones.Any(z => z.InAlarm);
@@ -159,7 +163,10 @@ public sealed record AlarmPanelWriteDto(
     /// </summary>
     string? DeviceKey = null,
     /// <summary>"isup" (por defecto) u "otap": protocolo con que el panel reporta a la receptora.</summary>
-    string? DeviceProtocol = null);
+    string? DeviceProtocol = null,
+    /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
+    /// por ubicar); 0 = por ubicar. Las áreas y zonas que seguían al panel se mueven con él.</summary>
+    int? LocationId = null);
 
 // ---------------------------------------------------------------------------
 // Equipos DENTRO de la receptora (Hik IP Receiver Pro)

@@ -48,6 +48,13 @@ public class AlarmPanel
     /// <summary>Falla de corriente de red (el panel está en batería).</summary>
     public bool AcLoss { get; set; }
 
+    /// <summary>
+    /// Ubicación del panel en el árbol de Recursos (null = por ubicar). La
+    /// reciben sus áreas y zonas nuevas; al cambiarla se mueven las que estaban
+    /// con el panel (las ubicadas aparte se quedan donde están).
+    /// </summary>
+    public int? LocationId { get; set; }
+
     public AlarmPanelStatus Status { get; set; } = AlarmPanelStatus.Unknown;
     public string? LastError { get; set; }
     public DateTime? LastSeenAt { get; set; }
@@ -58,10 +65,14 @@ public class AlarmPanel
 
     public List<AlarmArea> Areas { get; set; } = [];
     public List<AlarmZone> Zones { get; set; } = [];
+
+    /// <summary>Dónde entra una zona nueva: con su área si el área está ubicada, si no con el panel.</summary>
+    public int? LocationForNewZone(int? areaNumber) =>
+        Areas.FirstOrDefault(a => a.Number == areaNumber)?.LocationId ?? LocationId;
 }
 
 /// <summary>Área (partición / subsistema) de un panel, con su estado de armado.</summary>
-public class AlarmArea
+public class AlarmArea : ILocatable
 {
     public int Id { get; set; }
     public int AlarmPanelId { get; set; }
@@ -75,11 +86,13 @@ public class AlarmArea
     /// <summary>Retardo de salida en curso (s) durante el armado; transitorio, no se persiste.</summary>
     [System.ComponentModel.DataAnnotations.Schema.NotMapped]
     public int ExitDelaySeconds { get; set; }
+    /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
+    public int? LocationId { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
 /// <summary>Zona (detector) de un panel, con su último estado conocido.</summary>
-public class AlarmZone
+public class AlarmZone : ILocatable
 {
     public int Id { get; set; }
     public int AlarmPanelId { get; set; }
@@ -98,6 +111,8 @@ public class AlarmZone
     public bool LowBattery { get; set; }
     public int? Signal { get; set; }
     public string? Model { get; set; }
+    /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
+    public int? LocationId { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 

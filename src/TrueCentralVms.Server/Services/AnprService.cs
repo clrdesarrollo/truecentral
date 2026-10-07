@@ -29,7 +29,7 @@ public sealed class AnprService(
     DriverRegistry drivers,
     CredentialProtector credentials,
     AnprStore store,
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     IConfiguration config,
     ILogger<AnprService> logger) : BackgroundService
 {
@@ -293,7 +293,8 @@ public sealed class AnprService(
         await db.SaveChangesAsync(ct);
 
         var dto = AnprMapper.ToDto(entity, device.Name, channel?.Name ?? $"Canal {entity.ChannelNumber}");
-        await hub.Clients.All.SendAsync(VmsHubContract.PlateRecognized, dto, ct);
+        int channelNumber = entity.ChannelNumber;
+        await hub.SendAsync(VmsHubContract.PlateRecognized, dto, s => s.CanViewChannel(entity.DeviceId, channelNumber), ct);
         logger.LogInformation("Patente {Plate} reconocida en '{Device}' ({Confidence}%).",
             entity.PlateNumber, device.Name, entity.Confidence);
 

@@ -77,7 +77,7 @@ async function renderIntercoms() {
         <tbody>
           ${intercoms.map((i) => `
             <tr data-id="${i.id}">
-              <td>${esc(i.name)}${i.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</td>
+              <td>${esc(i.name)}${i.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${locationLineHtml(i.location)}</td>
               <td class="muted">${esc(i.groupName ?? "—")}</td>
               <td class="muted">${esc(i.host)}:${i.port} · HTTP ${i.httpPort}</td>
               <td>${esc(i.model ?? "—")}<div class="muted" style="font-size:11px">${esc(i.firmwareVersion ?? "")}</div></td>
@@ -228,7 +228,8 @@ const INTERCOM_DISCOVERY = {
 async function intercomModal(intercom, prefill) {
   const isNew = !intercom;
   const seed = isNew ? (prefill || {}) : {};
-  const [drivers, channels] = await Promise.all([getIntercomDrivers(), Api.get("/api/intercoms/channels").then((c) => c ?? [])]);
+  const [drivers, channels, places] = await Promise.all([getIntercomDrivers(),
+    Api.get("/api/intercoms/channels").then((c) => c ?? []), loadLocationChoices()]);
   const driver0 = drivers.find((d) => d.key === (intercom?.driverKey ?? seed.driverKey)) ?? drivers[0];
   const channelOptions = (selected) => `<option value="">— Sin video —</option>` + channels.map((c) =>
     `<option value="${c.id}" ${selected === c.id ? "selected" : ""}>${esc(c.name)} (${esc(c.host)})${c.enabled ? "" : " — deshabilitado"}</option>`).join("");
@@ -246,6 +247,7 @@ async function intercomModal(intercom, prefill) {
           <input id="ic-group" maxlength="64" value="${esc(intercom?.groupName ?? "")}" placeholder="Portería, Torre A…">
         </div>
       </div>
+      ${locationFieldHtml("ic-location", places, intercom?.locationId ?? null)}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="ic-driver">
@@ -307,6 +309,7 @@ async function intercomModal(intercom, prefill) {
     password: $("#ic-password").value || null,
     enabled: $("#ic-enabled").checked,
     groupName: $("#ic-group").value.trim() || null,
+    locationId: locationFieldValue("ic-location"),
     channelId: $("#ic-channel").value ? Number($("#ic-channel").value) : null,
     configureCallCenter: $("#ic-callcenter").checked,
     optimizeVideo: $("#ic-optimize").checked,

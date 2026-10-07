@@ -36,7 +36,11 @@ public sealed record SpeakerDto(
     /// <summary>Qué está ocupando el parlante ahora ("Voz: admin", "Sonido: sirena") o null si está libre.</summary>
     string? BusyWith,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    /// <summary>Ubicación en el árbol de Recursos (null = por ubicar).</summary>
+    int? LocationId = null,
+    /// <summary>Ruta legible de esa ubicación ("Casa matriz › Patio").</summary>
+    string? Location = null);
 
 public sealed record SpeakerWriteDto(
     string Name,
@@ -48,7 +52,10 @@ public sealed record SpeakerWriteDto(
     /// <summary>Al editar, vacío = conservar la actual.</summary>
     string? Password,
     bool Enabled = true,
-    string? GroupName = null);
+    string? GroupName = null,
+    /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
+    /// por ubicar); 0 = por ubicar.</summary>
+    int? LocationId = null);
 
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record SpeakerProbeResultDto(

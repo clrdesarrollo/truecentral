@@ -51,7 +51,11 @@ public sealed record IntercomDto(
     /// <summary>La llamada en curso (sonando o en conversación), si hay.</summary>
     IntercomCallDto? ActiveCall,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    /// <summary>Ubicación en el árbol de Recursos (null = por ubicar).</summary>
+    int? LocationId = null,
+    /// <summary>Ruta legible de esa ubicación ("Casa matriz › Portería").</summary>
+    string? Location = null);
 
 public sealed record IntercomWriteDto(
     string Name,
@@ -68,7 +72,10 @@ public sealed record IntercomWriteDto(
     /// <summary>Configurar el botón del frente para que llame a la central al guardar.</summary>
     bool ConfigureCallCenter = true,
     /// <summary>Si el stream principal manda cuadros completos cada más de 2 s, dejarlo en 1 s al guardar.</summary>
-    bool OptimizeVideo = true);
+    bool OptimizeVideo = true,
+    /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
+    /// por ubicar); 0 = por ubicar.</summary>
+    int? LocationId = null);
 
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record IntercomProbeResultDto(

@@ -32,7 +32,7 @@ public sealed class SpeakerService(
     IServiceScopeFactory scopeFactory,
     SpeakerDriverRegistry drivers,
     CredentialProtector credentials,
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     AuditService audit,
     WorkflowStore store,
     IConfiguration config,
@@ -72,7 +72,8 @@ public sealed class SpeakerService(
 
     public SpeakerDto ToDto(Speaker s) => new(s.Id, s.Name, s.DriverKey, s.Host, s.Port, s.UseHttps, s.Username,
         s.Model, s.SerialNumber, s.FirmwareVersion, s.GroupName, s.Enabled, s.Status, s.LastError, s.LastSeenAt, s.Volume,
-        s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio, BusyOf(s.Id), s.CreatedAt, s.UpdatedAt);
+        s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio, BusyOf(s.Id), s.CreatedAt, s.UpdatedAt,
+        s.LocationId, Auth.LocationPaths.Of(s.LocationId));
 
     // ------------------------------------------------------------------
     // Sondeo de estado
@@ -139,7 +140,7 @@ public sealed class SpeakerService(
                 await audit.LogSystemAsync("speakers", "speaker-offline",
                     targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
                     detail: $"El parlante '{speaker.Name}' ({speaker.Host}) no responde: {result.Error}", success: false);
-            await hub.Clients.All.SendAsync(VmsHubContract.SpeakerStatusChanged, ToDto(speaker), ct);
+            await hub.SendAsync(VmsHubContract.SpeakerStatusChanged, ToDto(speaker), sc => sc.CanViewSpeaker(speaker.Id), ct);
 
             // Automatizaciones ("parlante sin conexión → avisar"). Resuelto al
             // vuelo: el motor contiene la acción de parlantes, que usa este servicio.
@@ -181,7 +182,7 @@ public sealed class SpeakerService(
         speaker.LastError = null;
         speaker.LastSeenAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-        if (changed) await hub.Clients.All.SendAsync(VmsHubContract.SpeakerStatusChanged, ToDto(speaker), ct);
+        if (changed) await hub.SendAsync(VmsHubContract.SpeakerStatusChanged, ToDto(speaker), sc => sc.CanViewSpeaker(speaker.Id), ct);
     }
 
     // ------------------------------------------------------------------

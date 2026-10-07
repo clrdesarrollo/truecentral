@@ -91,7 +91,7 @@ async function renderAlarmPanels() {
         <tbody>
           ${panels.map((p) => `
             <tr data-id="${p.id}">
-              <td>${esc(p.name)}${p.enabled ? "" : ` <span class="tag operator" title="Monitoreo desactivado">pausado</span>`}</td>
+              <td>${esc(p.name)}${p.enabled ? "" : ` <span class="tag operator" title="Monitoreo desactivado">pausado</span>`}${locationLineHtml(p.location)}</td>
               <td class="muted" title="${esc(alarmAddressHint(p))}">${alarmAddress(p)}</td>
               <td>${esc(p.model ?? "—")}</td>
               <td class="muted">${esc(p.serialNumber ?? "—")}</td>
@@ -254,13 +254,14 @@ function renderAlarmDetail(panel) {
     return `<span class="chip" title="${esc([z.detectorType, z.zoneType, z.model].filter(Boolean).join(" · "))}">
       ${esc(z.name)} <span class="tag ${z.inAlarm ? "off" : cls}" style="margin-left:4px">${z.inAlarm ? "¡Alarma!" : label}</span>
       ${flags ? `<span class="muted" style="margin-left:4px">${esc(flags)}</span>` : ""}
-      <button class="btn ghost btn-bypass" data-zone="${z.number}" data-on="${z.bypassed ? 1 : 0}"
+      <button class="btn ghost btn-bypass" data-op="zone:${panel.id}/${z.number}" data-zone="${z.number}" data-on="${z.bypassed ? 1 : 0}"
               style="padding:1px 7px;font-size:11px;margin-left:6px" title="${z.bypassed ? "Restituir la zona" : "Anular (bypass) la zona"}">${z.bypassed ? "Restituir" : "Anular"}</button>
     </span>`;
   };
 
   const areaBlock = (a) => {
     const [label, cls] = ARM_LABELS[a.armState] ?? ARM_LABELS.Unknown;
+    const op = `data-op="area:${panel.id}/${a.number}"`;
     return `
       <div class="probe-box" style="margin-bottom:10px">
         <div class="toolbar" style="margin-bottom:8px">
@@ -270,10 +271,10 @@ function renderAlarmDetail(panel) {
             ${a.enabled ? "" : `<span class="tag operator" style="margin-left:6px">deshabilitada</span>`}
           </div>
           <div class="row-actions">
-            <button class="btn btn-arm" data-area="${a.number}" data-mode="Away">Armar total</button>
-            <button class="btn ghost btn-arm" data-area="${a.number}" data-mode="Stay">Armar parcial</button>
-            <button class="btn ghost btn-disarm" data-area="${a.number}">Desarmar</button>
-            ${a.inAlarm ? `<button class="btn danger btn-clear" data-area="${a.number}">Silenciar alarma</button>` : ""}
+            <button class="btn btn-arm" ${op} data-area="${a.number}" data-mode="Away">Armar total</button>
+            <button class="btn ghost btn-arm" ${op} data-area="${a.number}" data-mode="Stay">Armar parcial</button>
+            <button class="btn ghost btn-disarm" ${op} data-area="${a.number}">Desarmar</button>
+            ${a.inAlarm ? `<button class="btn danger btn-clear" ${op} data-area="${a.number}">Silenciar alarma</button>` : ""}
           </div>
         </div>
         <div class="chip-row">${zoneRows(a.number).map(zoneChip).join("") || `<span class="muted">Sin zonas asociadas</span>`}</div>
@@ -286,8 +287,8 @@ function renderAlarmDetail(panel) {
       ${panel.areas.length === 0 ? `<div class="info-box">El panel no reportó áreas todavía.</div>` : ""}
       ${panel.areas.length > 1 ? `
         <div class="row-actions" style="margin-bottom:10px">
-          <button class="btn btn-arm" data-area="0" data-mode="Away">Armar todo</button>
-          <button class="btn ghost btn-disarm" data-area="0">Desarmar todo</button>
+          <button class="btn btn-arm" data-op="panel:${panel.id}" data-area="0" data-mode="Away">Armar todo</button>
+          <button class="btn ghost btn-disarm" data-op="panel:${panel.id}" data-area="0">Desarmar todo</button>
         </div>` : ""}
       ${panel.areas.map(areaBlock).join("")}
       ${orphanZones.length ? `<div class="probe-box"><div class="muted" style="margin-bottom:6px">Zonas sin área</div>
@@ -325,7 +326,7 @@ function renderAlarmDetail(panel) {
 
 async function alarmPanelModal(panel, prefill = null) {
   const isNew = !panel;
-  const drivers = await getAlarmDrivers();
+  const [drivers, places] = await Promise.all([getAlarmDrivers(), loadLocationChoices()]);
   const driver0 = drivers.find((d) => d.key === panel?.driverKey) ?? drivers[0];
   // Ancho "wide": el formulario tiene grilla de dos columnas y, con la
   // receptora local, el alta del panel dentro del propio formulario.
@@ -337,6 +338,8 @@ async function alarmPanelModal(panel, prefill = null) {
         <label>Nombre</label>
         <input id="al-name" required maxlength="128" value="${esc(panel?.name ?? prefill?.name ?? "")}" placeholder="Panel bodega, Central oficina...">
       </div>
+      ${locationFieldHtml("al-location", places, panel?.locationId ?? null,
+        "Sus áreas y zonas la heredan; las que ubique aparte en Recursos se quedan donde están.")}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="al-driver">
@@ -461,6 +464,7 @@ async function alarmPanelModal(panel, prefill = null) {
     // poder re-registrarlo solo si desaparece.
     deviceKey: usingLocalReceiver() ? ($("#al-isup-key").value || null) : null,
     deviceProtocol: usingLocalReceiver() ? $("#al-isup-proto").value : null,
+    locationId: locationFieldValue("al-location"),
   });
 
   const usingLocalReceiver = () => !!($("#al-local")?.checked && localReceiver);

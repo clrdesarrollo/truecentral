@@ -30,6 +30,11 @@ public static class StreamsApi
             if (!channel.Enabled)
                 return Results.Json(new { error = "El canal está deshabilitado." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
+            // Alcance por ubicación: es el único paso antes de MediaMTX (que solo
+            // acepta tokens emitidos aquí), así que basta con validarlo aquí.
+            if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+                return await ctx.OutOfScopeAsync(session, "channel", $"{channel.DeviceId}/{channel.RtspChannel}",
+                    $"{channel.Device.Name} · {channel.Name}", "ver en vivo");
 
             string profile = request.Profile == StreamProfile.Main ? "main" : "sub";
             string path = MediaMtxManager.PathName(request.DeviceId, request.RtspChannel, request.Profile);
@@ -49,8 +54,7 @@ public static class StreamsApi
         // auditoría. No bloquea al usuario (puede volver a conectarse).
         // ------------------------------------------------------------------
         app.MapPost("/api/streams/{id:int}/kick", async (HttpContext ctx, int id, VmsDbContext db,
-            MediaMtxManager mtx, Microsoft.AspNetCore.SignalR.IHubContext<Hubs.VmsHub> hub,
-            AuditService audit, ILogger<Program> logger) =>
+            MediaMtxManager mtx, Hubs.ScopedHub hub, AuditService audit, ILogger<Program> logger) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out var admin) is { } failure) return failure;
 

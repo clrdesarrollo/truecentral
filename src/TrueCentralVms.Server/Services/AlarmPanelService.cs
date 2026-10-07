@@ -27,10 +27,11 @@ public sealed class AlarmPanelService(
     IServiceScopeFactory scopeFactory,
     AlarmDriverRegistry drivers,
     CredentialProtector credentials,
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     AuditService audit,
     Workflows.WorkflowEngine workflows,
     IConfiguration config,
+    Auth.UserScopeService scopes,
     ILogger<AlarmPanelService> logger) : BackgroundService
 {
     private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(20);
@@ -247,7 +248,7 @@ public sealed class AlarmPanelService(
             db.AlarmEvents.Add(entity);
             await db.SaveChangesAsync(ct);
         }
-        await hub.Clients.All.SendAsync(VmsHubContract.AlarmEventReceived, AlarmMapper.ToDto(entity), ct);
+        await SendEventAsync(AlarmMapper.ToDto(entity), ct);
         workflows.Publish(Workflows.WorkflowTrigger.FromAlarmEvent(entity));
 
         // Los paneles aplican la orden con un pequeño retardo: leer de
@@ -504,8 +505,8 @@ public sealed class AlarmPanelService(
                     await audit.LogSystemAsync("alarms", "panel-offline",
                         targetType: "alarm-panel", targetId: panel.Id.ToString(), targetName: panel.Name,
                         detail: $"El panel '{panel.Name}' ({panel.Host}) no responde: {message}", success: false, origin: "panel");
-                    await hub.Clients.All.SendAsync(VmsHubContract.AlarmPanelStateChanged,
-                        AlarmMapper.ToDto(panel, false, message), ct);
+                    await hub.SendTrimmedAsync(VmsHubContract.AlarmPanelStateChanged,
+                        AlarmMapper.ToDto(panel, false, message), (scope, d) => scope.Visible(d), ct);
                     workflows.Publish(Workflows.WorkflowTrigger.FromPanelStatus(panel, newStatus, message));
                     logger.LogWarning("Panel '{Name}' ({Host}) sin conexión: {Error}", panel.Name, panel.Host, message);
                 }
@@ -515,6 +516,7 @@ public sealed class AlarmPanelService(
             worker.LastError = null;
             worker.NextRetryAt = DateTime.MinValue;
             bool wasDown = panel.Status != AlarmPanelStatus.Online;
+            string structure = StructureOf(panel);
             var events = ApplyState(panel, state, worker);
             panel.Status = AlarmPanelStatus.Online;
             panel.LastError = null;
@@ -523,6 +525,14 @@ public sealed class AlarmPanelService(
             panel.UpdatedAt = DateTime.UtcNow;
             db.AlarmEvents.AddRange(events);
             await db.SaveChangesAsync(ct);
+            // Áreas o zonas nuevas (ya ubicadas con su panel) o que desaparecieron:
+            // los alcances por ubicación se rehacen antes de avisar por el hub, y
+            // los puestos recargan el panel, Recursos y lo que cada uno puede operar.
+            if (StructureOf(panel) != structure)
+            {
+                scopes.Invalidate();
+                await hub.SendAsync(VmsHubContract.ConfigChanged, "alarm-panels", _ => true, ct);
+            }
 
             if (wasDown && panel.LastSeenAt is not null)
             {
@@ -540,11 +550,11 @@ public sealed class AlarmPanelService(
             if (wasDown || events.Count > 0 || signature != worker.StateSignature)
             {
                 worker.StateSignature = signature;
-                await hub.Clients.All.SendAsync(VmsHubContract.AlarmPanelStateChanged, dto, ct);
+                await hub.SendTrimmedAsync(VmsHubContract.AlarmPanelStateChanged, dto, (scope, d) => scope.Visible(d), ct);
             }
             foreach (var evt in events)
             {
-                await hub.Clients.All.SendAsync(VmsHubContract.AlarmEventReceived, AlarmMapper.ToDto(evt), ct);
+                await SendEventAsync(AlarmMapper.ToDto(evt), ct);
                 await AuditAlarmAsync(evt);
                 workflows.Publish(Workflows.WorkflowTrigger.FromAlarmEvent(evt));
             }
@@ -555,6 +565,11 @@ public sealed class AlarmPanelService(
             worker.PollLock.Release();
         }
     }
+
+    /// <summary>Qué áreas y zonas tiene el panel (para saber si cambiaron, no su estado).</summary>
+    private static string StructureOf(AlarmPanel panel) =>
+        string.Join(',', panel.Areas.Select(a => a.Number).Order()) + "|" +
+        string.Join(',', panel.Zones.Select(z => z.Number).Order());
 
     private async Task<AlarmPanelDto?> ReadDtoAsync(int panelId, CancellationToken ct)
     {
@@ -584,7 +599,8 @@ public sealed class AlarmPanelService(
             seenAreas.Add(read.Number);
             if (!areasByNumber.TryGetValue(read.Number, out var area))
             {
-                area = new AlarmArea { Number = read.Number };
+                // El área nueva queda donde está su panel.
+                area = new AlarmArea { Number = read.Number, LocationId = panel.LocationId };
                 panel.Areas.Add(area);
                 areasByNumber[read.Number] = area;
                 area.ArmState = read.ArmState;
@@ -659,7 +675,7 @@ public sealed class AlarmPanelService(
             string? areaName = read.AreaNumber is { } an && areasByNumber.TryGetValue(an, out var owner) ? owner.Name : null;
             if (!zonesByNumber.TryGetValue(read.Number, out var zone))
             {
-                zone = new AlarmZone { Number = read.Number };
+                zone = new AlarmZone { Number = read.Number, LocationId = panel.LocationForNewZone(read.AreaNumber) };
                 panel.Zones.Add(zone);
                 zonesByNumber[read.Number] = zone;
             }
@@ -896,7 +912,7 @@ public sealed class AlarmPanelService(
             }
         }
 
-        await hub.Clients.All.SendAsync(VmsHubContract.AlarmEventReceived, AlarmMapper.ToDto(entity), ct);
+        await SendEventAsync(AlarmMapper.ToDto(entity), ct);
         await AuditAlarmAsync(entity);
         // Automatizaciones: el evento ya está en el historial y con sus
         // nombres de área y zona resueltos, que es lo que verán los correos.
@@ -981,6 +997,11 @@ public sealed class AlarmPanelService(
         if (removed > 0)
             logger.LogInformation("Purga de eventos de alarma: {Count} eliminados.", removed);
     }
+
+    /// <summary>Evento de panel: solo a quien ve su zona, su área o (si es del panel entero) el panel.</summary>
+    private Task SendEventAsync(AlarmEventDto dto, CancellationToken ct) =>
+        hub.SendAsync(VmsHubContract.AlarmEventReceived, dto,
+            scope => scope.CanViewAlarmEvent(dto.PanelId, dto.AreaNumber, dto.ZoneNumber), ct);
 }
 
 /// <summary>Conversión entidad → DTO compartida por el servicio y la API.</summary>
@@ -994,7 +1015,8 @@ public static class AlarmMapper
         p.Areas.OrderBy(a => a.Number).Select(a => new AlarmAreaDto(a.Number, a.Name, a.Enabled, a.ArmState, a.InAlarm,
             p.Zones.Count(z => z.AreaNumber == a.Number), a.ExitDelaySeconds)).ToList(),
         p.Zones.OrderBy(z => z.Number).Select(ToDto).ToList(),
-        p.GatewayKeyCiphertext is { Length: > 0 }, p.GatewayProtocol);
+        p.GatewayKeyCiphertext is { Length: > 0 }, p.GatewayProtocol,
+        p.LocationId, Auth.LocationPaths.Of(p.LocationId));
 
     public static AlarmZoneDto ToDto(AlarmZone z) => new(
         z.Number, z.AreaNumber, z.Name, z.ZoneType, z.DetectorType, z.Status,

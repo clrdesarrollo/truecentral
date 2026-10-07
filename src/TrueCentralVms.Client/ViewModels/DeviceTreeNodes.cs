@@ -43,6 +43,10 @@ public sealed partial class ChannelNode(DeviceNode deviceNode, ChannelDto channe
     public ChannelDto Channel { get; } = channel;
     public string Header => Channel.Name;
 
+    /// <summary>Tooltip del nodo: en el árbol por ubicación se mezclan cámaras de
+    /// varios equipos, así que dice de cuál es.</summary>
+    public string TreeToolTip => $"{Device.Name}, canal {Channel.ChannelNumber}. Doble clic para ver en vivo";
+
     /// <summary>Visible según el buscador del árbol (vacío = todos).</summary>
     [ObservableProperty] private bool _isVisible = true;
 

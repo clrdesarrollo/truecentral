@@ -98,18 +98,18 @@ async function renderSpeakers() {
         <tbody>
           ${speakers.map((s) => `
             <tr data-id="${s.id}">
-              <td>${esc(s.name)}${s.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</td>
+              <td>${esc(s.name)}${s.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${locationLineHtml(s.location)}</td>
               <td class="muted">${esc(s.groupName ?? "—")}</td>
               <td class="muted">${s.useHttps ? "https://" : ""}${esc(s.host)}:${s.port}</td>
               <td>${esc(s.model ?? "—")}<div class="muted" style="font-size:11px">${esc(s.serialNumber ?? "")}</div></td>
               <td class="muted">${esc(s.firmwareVersion ?? "—")}</td>
               <td>${speakerCapsTags(s)}</td>
-              <td><button class="btn ghost sp-volume-btn" data-volume="${s.volume ?? 100}" title="Volumen de salida del parlante" style="padding:4px 9px">🔊 <span class="sp-volume-label">${s.volume ?? "—"}</span></button></td>
+              <td><button class="btn ghost sp-volume-btn" data-op="speaker:${s.id}" data-volume="${s.volume ?? 100}" title="Volumen de salida del parlante" style="padding:4px 9px">🔊 <span class="sp-volume-label">${s.volume ?? "—"}</span></button></td>
               <td class="sp-status">${speakerStatusCell(s)}</td>
               <td class="sp-busy">${speakerBusyCell(s)}</td>
               <td><div class="row-actions" style="flex-wrap:wrap">
-                <button class="btn ghost btn-play" title="Reproducir un sonido, un audio del equipo o un texto">Reproducir</button>
-                <button class="btn ghost btn-stop" title="Detener lo que esté sonando">Detener</button>
+                <button class="btn ghost btn-play" data-op="speaker:${s.id}" title="Reproducir un sonido, un audio del equipo o un texto">Reproducir</button>
+                <button class="btn ghost btn-stop" data-op="speaker:${s.id}" title="Detener lo que esté sonando">Detener</button>
                 ${s.supportsLibrary ? `<button class="btn ghost btn-library" title="Audios guardados en el propio parlante">Biblioteca</button>` : ""}
                 ${isAdmin ? `<button class="btn ghost btn-edit">Editar</button>
                 <button class="btn danger btn-delete">Eliminar</button>` : ""}
@@ -251,7 +251,7 @@ async function renderSpeakerLibrary(speaker) {
               <a class="btn ghost" title="Descargar el archivo desde el parlante a este equipo"
                  href="/api/speakers/${speaker.id}/library/${a.id}/file?access_token=${encodeURIComponent(Api.token || "")}"
                  download="${esc(a.name.includes(".") ? a.name : a.name + "." + a.format)}">⬇ Descargar</a>
-              <button class="btn ghost btn-lib-play" title="Reproducir EN EL PARLANTE">▶ Reproducir</button>
+              <button class="btn ghost btn-lib-play" data-op="speaker:${speaker.id}" title="Reproducir EN EL PARLANTE">▶ Reproducir</button>
               ${isAdmin ? `<button class="btn ghost btn-lib-rename" title="Cambiar el nombre con que el parlante muestra este audio">Renombrar</button>` : ""}
               ${isAdmin && !a.builtIn ? `<button class="btn danger btn-lib-delete">Borrar</button>` : ""}
             </div></td>
@@ -437,7 +437,7 @@ async function speakerPlayModal(speakers, fixed) {
       <div class="field">
         <label>Parlantes (los sonidos del servidor suenan sincronizados)</label>
         <div class="wf-check-grid" id="sp-play-targets">
-          ${targets.map((s) => `<label class="checkbox-row"><input type="checkbox" data-speaker="${s.id}" checked> ${esc(s.name)}${s.groupName ? ` <span class="muted">· ${esc(s.groupName)}</span>` : ""}</label>`).join("")}
+          ${targets.map((s) => `<label class="checkbox-row"><input type="checkbox" data-speaker="${s.id}" data-op="speaker:${s.id}" ${Operable.can("speaker", s.id) ? "checked" : ""}> ${esc(s.name)}${s.groupName ? ` <span class="muted">· ${esc(s.groupName)}</span>` : ""}</label>`).join("")}
         </div>
       </div>`}
       <div class="field">
@@ -515,7 +515,7 @@ async function speakerPlayModal(speakers, fixed) {
     });
   }
   const chosen = () => fixed ? [fixed.id]
-    : Array.from(document.querySelectorAll("#sp-play-targets [data-speaker]")).filter((c) => c.checked).map((c) => Number(c.dataset.speaker));
+    : Array.from(document.querySelectorAll("#sp-play-targets [data-speaker]")).filter((c) => c.checked && !c.disabled).map((c) => Number(c.dataset.speaker));
   const show = (r) => {
     $("#sp-play-result").innerHTML = `<div class="${r.success ? "probe-box" : "error-box"}"><div class="probe-title">${esc(r.message)}</div>
       ${r.results.map((x) => `<div>${x.success ? "✔" : "✖"} ${esc(x.speakerName)}: ${esc(x.message)}</div>`).join("")}</div>`;
@@ -548,7 +548,7 @@ async function speakerPlayModal(speakers, fixed) {
 /** Alta / edición de un parlante. */
 async function speakerModal(speaker) {
   const isNew = !speaker;
-  const drivers = await getSpeakerDrivers();
+  const [drivers, places] = await Promise.all([getSpeakerDrivers(), loadLocationChoices()]);
   const driver0 = drivers.find((d) => d.key === speaker?.driverKey) ?? drivers[0];
   openModal(`
     <h3>${isNew ? "Agregar parlante IP" : "Editar parlante IP"}</h3>
@@ -564,6 +564,7 @@ async function speakerModal(speaker) {
           <input id="sp-group" maxlength="64" value="${esc(speaker?.groupName ?? "")}" placeholder="Perímetro, Bodega…">
         </div>
       </div>
+      ${locationFieldHtml("sp-location", places, speaker?.locationId ?? null)}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="sp-driver">
@@ -617,6 +618,7 @@ async function speakerModal(speaker) {
     password: $("#sp-password").value || null,
     enabled: $("#sp-enabled").checked,
     groupName: $("#sp-group").value.trim() || null,
+    locationId: locationFieldValue("sp-location"),
   });
 
   $("#sp-probe").addEventListener("click", async () => {

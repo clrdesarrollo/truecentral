@@ -32,6 +32,13 @@ public class Device
     /// </summary>
     public bool AnprEnabled { get; set; }
 
+    /// <summary>
+    /// Ubicación del equipo en el árbol de Recursos (null = por ubicar). La
+    /// reciben sus canales nuevos; al cambiarla se mueven los canales que
+    /// estaban con el equipo (los ubicados aparte se quedan donde están).
+    /// </summary>
+    public int? LocationId { get; set; }
+
     public DeviceStatus Status { get; set; } = DeviceStatus.Unknown;
     public DateTime? LastSeenAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

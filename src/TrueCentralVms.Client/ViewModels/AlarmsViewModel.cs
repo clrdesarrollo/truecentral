@@ -31,8 +31,15 @@ public sealed partial class AlarmsViewModel : ObservableObject
         hub.AlarmEventReceived += dto => Application.Current.Dispatcher.InvokeAsync(() => OnEvent(dto));
         hub.ConfigChanged += entity =>
         {
-            if (entity == "alarm-panels")
+            // "locations": áreas o zonas que cambiaron de ubicación (un operador
+            // restringido puede ganar o perder algunas).
+            if (entity is "alarm-panels" or "locations")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadPanelsAsync());
+        };
+        // Cambió lo que esta sesión puede operar: se re-evalúan los botones.
+        OperableScope.Current.Changed += () =>
+        {
+            foreach (var panel in Panels) panel.RefreshOperable();
         };
 
         // Cuenta regresiva del retardo de salida ("Armando…"): actualiza cada
@@ -384,15 +391,39 @@ public sealed partial class AlarmPanelItem : ObservableObject
     /// <summary>Alguna área está en conteo de salida ("Armando…").</summary>
     public bool HasArming => Dto.Areas.Any(a => a.ArmState == AlarmArmState.Arming);
 
+    /// <summary>
+    /// Las órdenes de "todo el panel" exigen poder operar todas sus áreas
+    /// (alcance por ubicación); el servidor las rechazaría si no.
+    /// </summary>
+    public bool CanOperateAll => OperableScope.Current.CanOperateWholePanel(Dto.Id);
     /// <summary>Base para armar: en línea, sin tapa abierta y sin un armado en curso.</summary>
-    private bool CanArmBase => IsOnline && !Dto.PanelTamper && !HasArming;
+    private bool CanArmBase => IsOnline && !Dto.PanelTamper && !HasArming && CanOperateAll;
     /// <summary>Armar todo (total): solo si alguna área habilitada no está ya en total.</summary>
     public bool CanArmAllAway => CanArmBase && Dto.Areas.Any(a => a.Enabled && a.ArmState != AlarmArmState.Away);
     /// <summary>Armar todo (parcial): solo si alguna área habilitada no está ya en parcial.</summary>
     public bool CanArmAllStay => CanArmBase && Dto.Areas.Any(a => a.Enabled && a.ArmState != AlarmArmState.Stay);
     /// <summary>Desarmar todo: solo si alguna área está armada o en conteo.</summary>
-    public bool CanDisarmAll => IsOnline && Dto.Areas.Any(a =>
+    public bool CanDisarmAll => IsOnline && CanOperateAll && Dto.Areas.Any(a =>
         a.ArmState is AlarmArmState.Away or AlarmArmState.Stay or AlarmArmState.Vacation or AlarmArmState.Arming);
+    /// <summary>Silenciar las alarmas de todas las áreas.</summary>
+    public bool CanClearAll => CanOperateAll;
+
+    /// <summary>Qué parte del panel se ve pero no se opera (null = se opera entero).</summary>
+    public string? ReadOnlyHint
+    {
+        get
+        {
+            if (CanOperateAll) return null;
+            bool some = Dto.Areas.Any(a => OperableScope.Current.CanOperateArea(Dto.Id, a.Number))
+                        || Dto.Zones.Any(z => OperableScope.Current.CanOperateZone(Dto.Id, z.Number));
+            return some
+                ? "Parte de este panel está fuera de su alcance: solo puede operar lo que no aparece deshabilitado."
+                : OperableScope.DeniedHint;
+        }
+    }
+
+    /// <summary>Cambió lo que esta sesión puede operar: se rehacen áreas y zonas con sus botones.</summary>
+    public void RefreshOperable() => Apply(Dto);
 
     private void Rebuild()
     {
@@ -405,23 +436,29 @@ public sealed partial class AlarmPanelItem : ObservableObject
                 ArmingSince.Remove(a.Number);
         }
 
+        var operable = OperableScope.Current;
         Areas.Clear();
         foreach (var a in Dto.Areas)
-            Areas.Add(new AlarmAreaItem(a, Dto.PanelTamper));
+            Areas.Add(new AlarmAreaItem(a, Dto.PanelTamper, operable.CanOperateArea(Dto.Id, a.Number)));
         Zones.Clear();
         foreach (var z in Dto.Zones)
-            Zones.Add(new AlarmZoneItem(z, Dto.Areas.FirstOrDefault(a => a.Number == z.AreaNumber)?.Name));
+            Zones.Add(new AlarmZoneItem(z, Dto.Areas.FirstOrDefault(a => a.Number == z.AreaNumber)?.Name,
+                operable.CanOperateZone(Dto.Id, z.Number)));
     }
 }
 
 public sealed partial class AlarmAreaItem : ObservableObject
 {
     private readonly bool _panelTamper;
-    public AlarmAreaItem(AlarmAreaDto dto, bool panelTamper = false)
+    public AlarmAreaItem(AlarmAreaDto dto, bool panelTamper = false, bool canOperate = true)
     {
         Dto = dto;
         _panelTamper = panelTamper;
+        CanOperate = canOperate;
     }
+
+    /// <summary>El área está en el alcance de este usuario (si no, se ve pero no se opera).</summary>
+    public bool CanOperate { get; }
 
     public AlarmAreaDto Dto { get; }
     public int Number => Dto.Number;
@@ -430,14 +467,14 @@ public sealed partial class AlarmAreaItem : ObservableObject
     public bool IsArmed => Dto.ArmState is AlarmArmState.Away or AlarmArmState.Stay or AlarmArmState.Vacation;
     public bool IsArming => Dto.ArmState == AlarmArmState.Arming;
     public bool IsEnabled => Dto.Enabled;
-    /// <summary>Base para armar el área: habilitada, sin conteo en curso y sin tapa abierta.</summary>
-    private bool CanArmBase => Dto.Enabled && !IsArming && !_panelTamper;
+    /// <summary>Base para armar el área: habilitada, sin conteo en curso, sin tapa abierta y en su alcance.</summary>
+    private bool CanArmBase => Dto.Enabled && !IsArming && !_panelTamper && CanOperate;
     /// <summary>Armar total: solo si no está ya en total.</summary>
     public bool CanArmAway => CanArmBase && Dto.ArmState != AlarmArmState.Away;
     /// <summary>Armar parcial: solo si no está ya en parcial.</summary>
     public bool CanArmStay => CanArmBase && Dto.ArmState != AlarmArmState.Stay;
     /// <summary>Desarmar / cancelar: solo si el área está armada o en conteo.</summary>
-    public bool CanDisarm => IsArmed || IsArming;
+    public bool CanDisarm => CanOperate && (IsArmed || IsArming);
     public string ZoneCountText => $"{Dto.ZoneCount} zona(s)";
 
     /// <summary>Segundos restantes del retardo de salida (null = sin conteo o ya venció).</summary>
@@ -464,9 +501,11 @@ public sealed partial class AlarmAreaItem : ObservableObject
     public string Glyph => InAlarm ? "\uE814" : (IsArmed || Dto.ArmState == AlarmArmState.Arming) ? "\uE72E" : "\uE785";
 }
 
-public sealed class AlarmZoneItem(AlarmZoneDto dto, string? areaName)
+public sealed class AlarmZoneItem(AlarmZoneDto dto, string? areaName, bool canOperate = true)
 {
     public AlarmZoneDto Dto { get; } = dto;
+    /// <summary>La zona está en el alcance de este usuario: puede anularla o restituirla.</summary>
+    public bool CanOperate => canOperate;
     public int Number => Dto.Number;
     public string Name => Dto.Name;
     public bool Bypassed => Dto.Bypassed;

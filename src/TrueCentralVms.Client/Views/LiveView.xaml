@@ -52,6 +52,28 @@
             <Border BorderBrush="{StaticResource MutedBrush}" BorderThickness="0.8" Margin="0.8"/>
         </DataTemplate>
 
+        <!-- Una división dentro del popup: miniatura + cantidad de cuadros -->
+        <DataTemplate x:Key="LayoutPresetItem">
+            <Button Style="{StaticResource LayoutPresetButton}" Click="OnLayoutPicked" ToolTip="{Binding Key}"
+                    Command="{Binding DataContext.SelectLayoutCommand,
+                              RelativeSource={RelativeSource AncestorType=UserControl}}"
+                    CommandParameter="{Binding}">
+                <StackPanel>
+                    <ItemsControl ItemsSource="{Binding Cells}" Width="36" Height="26"
+                                  IsHitTestVisible="False" HorizontalAlignment="Center"
+                                  ItemTemplate="{StaticResource LayoutPreview}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <views:VideoLayoutPanel Layout="{Binding}"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                    <TextBlock Text="{Binding Name}" FontSize="10.5"
+                               HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Button>
+        </DataTemplate>
+
         <!-- Fila de una vista guardada dentro del desplegable -->
         <Style x:Key="SavedViewRow" TargetType="Button">
             <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
@@ -169,8 +191,22 @@
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
                 Visibility="{Binding IsTreeCollapsed, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
             <DockPanel>
-                <TextBlock DockPanel.Dock="Top" Text="DISPOSITIVOS" Margin="14,12,14,8" FontSize="11"
-                           FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"/>
+                <!-- Encabezado: el árbol agrupa por equipo o por ubicación (Recursos) -->
+                <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8">
+                    <Border DockPanel.Dock="Right" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            CornerRadius="6" Padding="2">
+                        <StackPanel Orientation="Horizontal">
+                            <Button Style="{StaticResource SegmentButton}" Content="Equipo"
+                                    Tag="{Binding IsTreeByDevice}" Command="{Binding ShowTreeByDeviceCommand}"
+                                    ToolTip="Cámaras agrupadas por equipo (DVR, NVR, cámara)"/>
+                            <Button Style="{StaticResource SegmentButton}" Content="Ubicación"
+                                    Tag="{Binding IsTreeByLocation}" Command="{Binding ShowTreeByLocationCommand}"
+                                    ToolTip="Cámaras agrupadas por ubicación (sitio, edificio, sector…), como en Recursos del panel web"/>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="CÁMARAS" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                               Foreground="{StaticResource MutedBrush}"/>
+                </DockPanel>
                 <!-- Buscador del árbol (filtra canales y equipos, sin tildes) -->
                 <Grid DockPanel.Dock="Top" Margin="10,0,10,8">
                     <TextBox x:Name="SearchBox" Style="{StaticResource DarkTextBox}" Padding="9,6" FontSize="12"
@@ -356,6 +392,7 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <CheckBox IsChecked="{Binding IsSelected}" Style="{StaticResource DarkCheckBox}"
+                                                      IsEnabled="{Binding CanOperate}" ToolTipService.ShowOnDisabled="True"
                                                       Margin="0,1" ToolTip="{Binding Tooltip}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <Ellipse Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center">
@@ -505,11 +542,12 @@
                         </StackPanel>
                     </StackPanel>
                 </Border>
-                <TreeView x:Name="DeviceTree" ItemsSource="{Binding Devices}"
+                <TreeView x:Name="DeviceTree" ItemsSource="{Binding TreeItems}"
                           Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
                           MouseDoubleClick="OnTreeDoubleClick"
                           PreviewMouseLeftButtonDown="OnTreeMouseDown"
                           PreviewMouseMove="OnTreeMouseMove"
+                          ContextMenuOpening="OnTreeContextMenuOpening"
                           TreeViewItem.Selected="OnTreeItemSelected">
                     <TreeView.ItemContainerStyle>
                         <Style TargetType="TreeViewItem">
@@ -542,11 +580,38 @@
                                 <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
                             </StackPanel>
                         </HierarchicalDataTemplate>
+                        <!-- Ubicación (árbol por ubicación): doble clic abre todas sus cámaras -->
+                        <HierarchicalDataTemplate DataType="{x:Type vm:LocationNode}" ItemsSource="{Binding Children}">
+                            <StackPanel Orientation="Horizontal" Margin="0,2" ToolTip="{Binding ToolTipText}">
+                                <!-- Órdenes sobre la ubicación entera (con sus sububicaciones) -->
+                                <StackPanel.ContextMenu>
+                                    <ContextMenu Style="{StaticResource DarkContextMenu}">
+                                        <MenuItem Header="Abrir sus cámaras" Click="OnLocationOpenCameras"/>
+                                        <Separator/>
+                                        <MenuItem Header="Armar total sus áreas de alarma…" Click="OnLocationArmAway"
+                                                  IsEnabled="{Binding CanCommand}" ToolTip="{Binding CommandHint}"
+                                                  ToolTipService.ShowOnDisabled="True"/>
+                                        <MenuItem Header="Armar parcial sus áreas de alarma…" Click="OnLocationArmStay"
+                                                  IsEnabled="{Binding CanCommand}" ToolTip="{Binding CommandHint}"
+                                                  ToolTipService.ShowOnDisabled="True"/>
+                                        <MenuItem Header="Desarmar sus áreas de alarma…" Click="OnLocationDisarm"
+                                                  IsEnabled="{Binding CanCommand}" ToolTip="{Binding CommandHint}"
+                                                  ToolTipService.ShowOnDisabled="True"/>
+                                    </ContextMenu>
+                                </StackPanel.ContextMenu>
+                                <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                           Foreground="{StaticResource MutedBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding ChannelCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                           Margin="7,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </HierarchicalDataTemplate>
                         <DataTemplate DataType="{x:Type vm:ChannelNode}">
                             <StackPanel Orientation="Horizontal" Margin="0,1">
                                 <StackPanel.Style>
                                     <Style TargetType="StackPanel">
-                                        <Setter Property="ToolTip" Value="Doble clic para ver en vivo"/>
+                                        <!-- Dice de qué equipo es: por ubicación se mezclan cámaras de varios -->
+                                        <Setter Property="ToolTip" Value="{Binding TreeToolTip}"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsLive}" Value="True">
                                                 <Setter Property="ToolTip" Value="{Binding LiveLocation}"/>
@@ -630,7 +695,8 @@
                            Foreground="{StaticResource MutedBrush}"/>
                 <!-- Selector de división estilo iVMS-4200: botón con la
                      miniatura actual; el popup lista todas las divisiones. -->
-                <ToggleButton x:Name="LayoutPickerToggle" Style="{StaticResource GhostToggle}" Margin="0,0,6,0">
+                <ToggleButton x:Name="LayoutPickerToggle" Style="{StaticResource GhostToggle}" Margin="0,0,6,0"
+                              ToolTip="{Binding CurrentLayout.Key}">
                     <StackPanel Orientation="Horizontal">
                         <ItemsControl ItemsSource="{Binding CurrentLayout.Cells}" Width="24" Height="17"
                                       IsHitTestVisible="False" ItemTemplate="{StaticResource LayoutPreview}"
@@ -654,32 +720,23 @@
                         <StackPanel>
                             <TextBlock Text="División de pantalla" FontSize="11" FontWeight="SemiBold"
                                        Foreground="{StaticResource MutedBrush}" Margin="2,0,0,8"/>
-                            <ItemsControl ItemsSource="{Binding Layouts}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <UniformGrid Columns="5"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
+                            <!-- Una fila por familia; 7 columnas fijas para que las
+                                 miniaturas queden alineadas entre familias. -->
+                            <ItemsControl ItemsSource="{Binding LayoutGroups}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Button Style="{StaticResource LayoutPresetButton}" Click="OnLayoutPicked"
-                                                Command="{Binding DataContext.SelectLayoutCommand,
-                                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding}">
-                                            <StackPanel>
-                                                <ItemsControl ItemsSource="{Binding Cells}" Width="36" Height="26"
-                                                              IsHitTestVisible="False" HorizontalAlignment="Center"
-                                                              ItemTemplate="{StaticResource LayoutPreview}">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate>
-                                                            <views:VideoLayoutPanel Layout="{Binding}"/>
-                                                        </ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                </ItemsControl>
-                                                <TextBlock Text="{Binding Name}" FontSize="10.5"
-                                                           HorizontalAlignment="Center" Margin="0,4,0,0"/>
-                                            </StackPanel>
-                                        </Button>
+                                        <StackPanel Margin="0,0,0,6">
+                                            <TextBlock Text="{Binding Title}" FontSize="10.5"
+                                                       Foreground="{StaticResource MutedBrush}" Margin="4,0,0,2"/>
+                                            <ItemsControl ItemsSource="{Binding Layouts}"
+                                                          ItemTemplate="{StaticResource LayoutPresetItem}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <UniformGrid Columns="7"/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                            </ItemsControl>
+                                        </StackPanel>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>

@@ -22,10 +22,15 @@ namespace TrueCentralVms.Server.Services.Workflows.Actions;
 /// Configuración: <c>{ "title":"...", "message":"...", "severity":"Critical",
 /// "attachSnapshot":true, "sound":"sirena", "soundRepeat":2, "requireAck":true,
 /// "channelIds":[4] }</c> (sin <c>channelIds</c>, la ventana muestra el vivo de
-/// las cámaras que capturaron foto en la misma ejecución).
+/// las cámaras que capturaron foto en la misma ejecución o, si no hubo, el de
+/// las cámaras asociadas al recurso que disparó).
+///
+/// Si el recurso que disparó tiene ficha en Recursos, la alerta guarda su
+/// ubicación y sus consignas: la ventana del operador las muestra (así el
+/// puesto no abre además la verificación de ese recurso).
 /// </summary>
 public sealed class NotifyAction(
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     WorkflowStore store,
     IServiceScopeFactory scopeFactory,
     ILogger<NotifyAction> logger) : IWorkflowActionExecutor
@@ -74,6 +79,17 @@ public sealed class NotifyAction(
         var channels = context.Numbers("channelIds").ToList();
         if (channels.Count == 0) channels = [.. context.Channels];
 
+        // El recurso que disparó (su ficha en Recursos): su ubicación y sus
+        // consignas viajan con la alerta (la ventana del operador las muestra
+        // y quedan como constancia), completan las marcas {ubicacion} y
+        // {consignas} y, si no hubo cámaras de las anteriores, pone sus
+        // cámaras asociadas (la principal primero).
+        var briefing = await BriefingAsync(context, ct);
+        if (channels.Count == 0 && briefing is not null)
+            channels = briefing.Cameras.Select(c => c.ChannelId).ToList();
+        title = ResourceMarks(title, briefing);
+        message = ResourceMarks(message, briefing);
+
         // Destinatarios: usuarios concretos (userIds) o, sin ninguno, todos
         // los operadores conectados. Se resuelven contra la base en cada
         // aviso: un usuario borrado o desactivado deja de recibirlos.
@@ -120,6 +136,13 @@ public sealed class NotifyAction(
             Sound = sound.Length == 0 ? null : sound,
             SoundRepeat = repeat,
             TriggerSummary = Cut(context.Trigger.Summary, 256),
+            // El recurso que ORIGINÓ el evento (decide quién ve la alerta), que
+            // puede no ser el de las consignas (una zona sin ficha usa las de su área).
+            ResourceKey = briefing is null ? null : briefing.OriginKey ?? ResourceCatalog.Key(briefing.Kind, briefing.Id),
+            LocationPath = briefing?.LocationPath is { } path ? Cut(path, 1100) : null,
+            Instructions = briefing?.Instructions is { } instructions && !string.IsNullOrWhiteSpace(instructions)
+                ? Cut(instructions.Trim(), 4000)
+                : null,
             RequiresAck = requireAck,
             RecipientUserIds = recipients.Count > 0 ? "," + string.Join(",", recipients.Select(r => r.Id)) + "," : null,
             Recipients = recipients.Count > 0 ? Cut(string.Join(", ", recipients.Select(r => r.Username)), 512) : null,
@@ -162,12 +185,46 @@ public sealed class NotifyAction(
         long alertId, bool requireAck, CancellationToken ct)
     {
         var dto = new WorkflowNotificationDto(context.Workflow.Id, context.Workflow.Name, alert.Title, alert.Message,
-            alert.Severity, alert.RaisedAt, alert.ImagePath, alert.Sound, alert.SoundRepeat, alertId, requireAck);
-        var target = recipients.Count == 0
-            ? hub.Clients.All
-            : hub.Clients.Groups(recipients.Select(r => VmsHub.UserGroup(r.Id)).ToList());
-        return target.SendAsync(VmsHubContract.WorkflowNotification, dto, ct);
+            alert.Severity, alert.RaisedAt, alert.ImagePath, alert.Sound, alert.SoundRepeat, alertId, requireAck,
+            alert.ResourceKey);
+        // Dirigido: solo a sus destinatarios. Para todos: a quien ve el recurso
+        // que lo originó (alcance por ubicación), o a todos si no tiene recurso.
+        var ids = recipients.Select(r => r.Id).ToHashSet();
+        string? resourceKey = alert.ResourceKey;
+        return hub.SendToAsync(VmsHubContract.WorkflowNotification, dto,
+            s => ids.Count > 0 ? ids.Contains(s.UserId) : s.CanViewResourceKey(resourceKey), ct);
     }
 
     private static string Cut(string value, int max) => value.Length <= max ? value : value[..max];
+
+    private static bool UsesResourceMarks(string text) =>
+        text.Contains("{ubicacion}", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("{consignas}", StringComparison.OrdinalIgnoreCase);
+
+    private static string ResourceMarks(string text, ResourceBriefingDto? briefing) => !UsesResourceMarks(text)
+        ? text
+        : text.Replace("{ubicacion}", briefing?.LocationPath ?? "sin ubicación", StringComparison.OrdinalIgnoreCase)
+              .Replace("{consignas}", briefing?.Instructions ?? "", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Ficha del recurso que disparó la automatización (zona o área, puerta, cámara), si la tiene.</summary>
+    private async Task<ResourceBriefingDto?> BriefingAsync(WorkflowActionContext context, CancellationToken ct)
+    {
+        var t = context.Trigger;
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            return await ResourceBriefings.ForEventAsync(db, new ResourceBriefings.EventRef(
+                AlarmPanelId: t.Type == WorkflowTriggerTypes.AlarmEvent ? t.PanelId : null,
+                AreaNumber: t.AreaNumber, ZoneNumber: t.ZoneNumber,
+                AccessDeviceId: t.AccessDeviceId, DoorNumber: t.DoorNumber,
+                ChannelId: t.ChannelId), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Sin la ficha el aviso sale igual, solo sin esos datos.
+            logger.LogDebug(ex, "No se pudo leer la ficha del recurso que disparó '{Name}'.", context.Workflow.Name);
+            return null;
+        }
+    }
 }

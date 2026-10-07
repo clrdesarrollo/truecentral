@@ -48,9 +48,11 @@ public sealed partial class SpeakersViewModel : ObservableObject
 
         hub.ConfigChanged += entity =>
         {
-            if (entity == "speakers")
+            if (entity is "speakers" or "locations")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadAsync());
         };
+        // Cambió lo que esta sesión puede operar: los parlantes ajenos no se eligen.
+        OperableScope.Current.Changed += OnOperableChanged;
         hub.SpeakerStatusChanged += dto => Application.Current.Dispatcher.InvokeAsync(() =>
         {
             var item = Speakers.FirstOrDefault(s => s.Dto.Id == dto.Id);
@@ -90,7 +92,8 @@ public sealed partial class SpeakersViewModel : ObservableObject
     /// <summary>Hay una escucha local en curso (sonido del servidor o de la biblioteca).</summary>
     [ObservableProperty] private bool _isPreviewing;
 
-    public IReadOnlyList<int> SelectedIds => Speakers.Where(s => s.IsSelected).Select(s => s.Dto.Id).ToList();
+    /// <summary>Los marcados que esta sesión puede operar (los de fuera de su alcance no se marcan).</summary>
+    public IReadOnlyList<int> SelectedIds => Speakers.Where(s => s.IsSelected && s.CanOperate).Select(s => s.Dto.Id).ToList();
 
     // ------------------------------------------------------------------
     // Volumen de salida de los parlantes marcados (se aplica con un pequeño
@@ -116,7 +119,7 @@ public sealed partial class SpeakersViewModel : ObservableObject
     {
         _volumeTimer?.Stop();
         int volume = Volume;
-        var targets = Speakers.Where(s => s.IsSelected).ToList();
+        var targets = Speakers.Where(s => s.IsSelected && s.CanOperate).ToList();
         if (targets.Count == 0) return;
         var failed = new List<string>();
         foreach (var target in targets)
@@ -187,12 +190,13 @@ public sealed partial class SpeakersViewModel : ObservableObject
             Speakers.Clear();
             foreach (var dto in speakers.Where(s => s.Enabled))
             {
-                var item = new SpeakerItem(dto) { IsSelected = selected.Contains(dto.Id) };
+                var item = new SpeakerItem(dto);
+                item.IsSelected = item.CanOperate && selected.Contains(dto.Id);
                 item.SelectionChanged += OnSelectionChanged;
                 Speakers.Add(item);
             }
-            // Con un solo parlante no hay nada que elegir: queda marcado.
-            if (Speakers.Count == 1 && selected.Count == 0) Speakers[0].IsSelected = true;
+            // Con un solo parlante no hay nada que elegir: queda marcado (si lo puede operar).
+            if (Speakers.Count == 1 && selected.Count == 0 && Speakers[0].CanOperate) Speakers[0].IsSelected = true;
             HasSpeakers = Speakers.Count > 0;
 
             var sounds = await _api.GetSpeakerSoundsAsync();
@@ -211,9 +215,10 @@ public sealed partial class SpeakersViewModel : ObservableObject
 
     private void OnSelectionChanged()
     {
-        var chosen = Speakers.Where(s => s.IsSelected).ToList();
+        var chosen = Speakers.Where(s => s.IsSelected && s.CanOperate).ToList();
         HasSelection = chosen.Count > 0;
-        AllSelected = Speakers.Count > 0 && chosen.Count == Speakers.Count;
+        int operable = Speakers.Count(s => s.CanOperate);
+        AllSelected = operable > 0 && chosen.Count == operable;
         SelectionSummary = chosen.Count switch
         {
             0 => "ninguno",
@@ -320,12 +325,24 @@ public sealed partial class SpeakersViewModel : ObservableObject
     [RelayCommand]
     private Task Refresh() => LoadAsync();
 
-    /// <summary>Marca todos los parlantes; si ya están todos marcados, los desmarca.</summary>
+    /// <summary>Marca todos los parlantes que puede operar; si ya están todos marcados, los desmarca.</summary>
     [RelayCommand]
     private void ToggleSelectAll()
     {
-        bool all = Speakers.Count > 0 && Speakers.All(s => s.IsSelected);
-        foreach (var speaker in Speakers) speaker.IsSelected = !all;
+        var operable = Speakers.Where(s => s.CanOperate).ToList();
+        bool all = operable.Count > 0 && operable.All(s => s.IsSelected);
+        foreach (var speaker in operable) speaker.IsSelected = !all;
+    }
+
+    /// <summary>Cambió lo que esta sesión puede operar: los parlantes ajenos se desmarcan.</summary>
+    private void OnOperableChanged()
+    {
+        foreach (var speaker in Speakers)
+        {
+            speaker.RefreshOperable();
+            if (!speaker.CanOperate) speaker.IsSelected = false;
+        }
+        OnSelectionChanged();
     }
 
     [ObservableProperty] private bool _allSelected;
@@ -481,6 +498,16 @@ public sealed partial class SpeakerItem : ObservableObject
 
     partial void OnIsSelectedChanged(bool value) => SelectionChanged?.Invoke();
 
+    /// <summary>El parlante está en el alcance de este usuario (si no, se ve pero no se elige).</summary>
+    public bool CanOperate => OperableScope.Current.CanOperateSpeaker(Dto.Id);
+
+    /// <summary>Cambió lo que esta sesión puede operar.</summary>
+    public void RefreshOperable()
+    {
+        OnPropertyChanged(nameof(CanOperate));
+        OnPropertyChanged(nameof(Tooltip));
+    }
+
     public string Name => Dto.Name;
     public bool IsOnline => Dto.Status == SpeakerStatus.Online;
     public string BusyWith => Dto.BusyWith is { Length: > 0 } busy ? $"({busy})" : "";
@@ -499,6 +526,7 @@ public sealed partial class SpeakerItem : ObservableObject
                 _ => "Estado desconocido",
             });
             if (Dto.Volume is { } volume) parts.Add($"Volumen {volume}");
+            if (!CanOperate) parts.Add(OperableScope.DeniedHint);
             return string.Join("\n", parts);
         }
     }

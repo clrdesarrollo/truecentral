@@ -116,6 +116,21 @@ public static class IntercomsApi
             ? Results.Ok(new IntercomActionResultDto(true, result.Message, result.Call))
             : Results.Json(new { error = result.Message, call = result.Call }, statusCode: result.StatusCode);
 
+    /// <summary>
+    /// Alcance por ubicación de una orden sobre una llamada: vale el del frente
+    /// que llama (se busca antes de actuar). Si la llamada no existe, lo dice el servicio.
+    /// </summary>
+    private static async Task<IResult?> CallOutOfScopeAsync(HttpContext ctx, SessionInfo session, long callId, string attempted)
+    {
+        var db = ctx.RequestServices.GetRequiredService<VmsDbContext>();
+        if (await db.IntercomCalls.AsNoTracking().Where(c => c.Id == callId).Select(c => (int?)c.IntercomId)
+                .FirstOrDefaultAsync(ctx.RequestAborted) is not { } intercomId)
+            return null;
+        return (await ctx.ScopeAsync(session)).CanOperateIntercom(intercomId)
+            ? null
+            : await ctx.OutOfScopeAsync(session, "intercom", intercomId.ToString(), null, attempted);
+    }
+
     public static void MapIntercomsApi(this WebApplication app)
     {
         // ------------------------------------------------------------------
@@ -140,17 +155,20 @@ public static class IntercomsApi
 
         app.MapGet("/api/intercoms", async (HttpContext ctx, VmsDbContext db, IntercomService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             var intercoms = await db.Intercoms.AsNoTracking().Include(i => i.Channel).ThenInclude(c => c!.Device)
                 .OrderBy(i => i.GroupName).ThenBy(i => i.Name).ToListAsync(ct);
-            return Results.Ok(intercoms.Select(service.ToDto));
+            return Results.Ok(intercoms.Where(i => scope.CanView(i.LocationId)).Select(service.ToDto));
         });
 
         app.MapGet("/api/intercoms/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, IntercomService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var intercom = await LoadAsync(db, id, ct);
-            return intercom is null ? Results.NotFound() : Results.Ok(service.ToDto(intercom));
+            return intercom is null || !(await ctx.ScopeAsync(session)).CanView(intercom.LocationId)
+                ? Results.NotFound()
+                : Results.Ok(service.ToDto(intercom));
         });
 
         app.MapPost("/api/intercoms", async (HttpContext ctx, IntercomWriteDto request, VmsDbContext db, IntercomDriverRegistry drivers,
@@ -167,6 +185,8 @@ public static class IntercomsApi
             string host = request.Host.Trim();
             if (await db.Intercoms.AnyAsync(i => i.Host == host && i.Port == request.Port, ct))
                 return Error("Ya existe un frente con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
 
             var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, request.Password);
             var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
@@ -188,6 +208,7 @@ public static class IntercomsApi
                 PasswordCiphertext = protector.Protect(request.Password),
                 GroupName = GroupOf(request),
                 ChannelId = request.ChannelId,
+                LocationId = locationId,
                 Enabled = request.Enabled,
             };
             ApplyProbe(intercom, info);
@@ -201,8 +222,10 @@ public static class IntercomsApi
                 targetType: "intercom", targetId: intercom.Id.ToString(), targetName: intercom.Name,
                 detail: $"Agregó el frente de citofonía '{intercom.Name}' ({intercom.DriverKey}, {intercom.Host}:{intercom.Port}, " +
                         $"{intercom.Model ?? "modelo desconocido"}, {intercom.DoorCount} puerta(s)" +
-                        (intercom.GroupName is null ? "" : $", grupo '{intercom.GroupName}'") + ").",
-                data: new { intercom.Host, intercom.Port, intercom.HttpPort, intercom.DriverKey, intercom.Model, intercom.SerialNumber, intercom.ChannelId });
+                        (intercom.GroupName is null ? "" : $", grupo '{intercom.GroupName}'") +
+                        (intercom.LocationId is null ? "" : $", en {EquipmentLocation.Describe(intercom.LocationId)}") + ").",
+                data: new { intercom.Host, intercom.Port, intercom.HttpPort, intercom.DriverKey, intercom.Model, intercom.SerialNumber, intercom.ChannelId, intercom.LocationId });
+            EquipmentLocation.Changed(ctx);
             if (request.ConfigureCallCenter && !info.CallCenterEnabled)
                 await audit.LogAsync(ctx, "intercom", "call-center-configured", targetType: "intercom", targetId: intercom.Id.ToString(),
                     targetName: intercom.Name, success: callCenterError is null,
@@ -228,6 +251,9 @@ public static class IntercomsApi
             string host = request.Host.Trim();
             if (await db.Intercoms.AnyAsync(i => i.Id != id && i.Host == host && i.Port == request.Port, ct))
                 return Error("Ya existe otro frente con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, intercom.LocationId, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
+            int? previousLocation = intercom.LocationId;
 
             string password = string.IsNullOrEmpty(request.Password) ? protector.Unprotect(intercom.PasswordCiphertext) : request.Password;
             bool connectionChanged = intercom.Host != host || intercom.Port != request.Port || intercom.HttpPort != request.HttpPort ||
@@ -257,6 +283,8 @@ public static class IntercomsApi
             if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
             if (intercom.GroupName != GroupOf(request)) changes.Add($"grupo '{intercom.GroupName}' → '{GroupOf(request)}'");
             if (intercom.ChannelId != request.ChannelId) changes.Add($"canal de video {intercom.ChannelId?.ToString() ?? "ninguno"} → {request.ChannelId?.ToString() ?? "ninguno"}");
+            if (locationId != previousLocation)
+                changes.Add(EquipmentLocation.Change(previousLocation, locationId));
             if (intercom.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
 
             intercom.Name = request.Name.Trim();
@@ -268,6 +296,7 @@ public static class IntercomsApi
             intercom.PasswordCiphertext = protector.Protect(password);
             intercom.GroupName = GroupOf(request);
             intercom.ChannelId = request.ChannelId;
+            intercom.LocationId = locationId;
             if (!intercom.Enabled && request.Enabled
                 && license.Deny(LicenseFeatures.ModuleIntercom, LicenseFeatures.IntercomDevices,
                     await db.Intercoms.CountAsync(i => i.Enabled && i.Id != id, ct)) is { } denied)
@@ -283,6 +312,7 @@ public static class IntercomsApi
             await audit.LogAsync(ctx, "intercom", "intercom-updated",
                 targetType: "intercom", targetId: intercom.Id.ToString(), targetName: intercom.Name,
                 detail: $"Modificó el frente de citofonía '{intercom.Name}': " + (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
+            if (locationId != previousLocation) await EquipmentLocation.MovedAsync(ctx, ct);
             if (request.ConfigureCallCenter && !wasCallCenter)
                 await audit.LogAsync(ctx, "intercom", "call-center-configured", targetType: "intercom", targetId: intercom.Id.ToString(),
                     targetName: intercom.Name, success: callCenterError is null,
@@ -310,6 +340,7 @@ public static class IntercomsApi
             await audit.LogAsync(ctx, "intercom", "intercom-deleted",
                 targetType: "intercom", targetId: id.ToString(), targetName: intercom.Name,
                 detail: $"Eliminó el frente de citofonía '{intercom.Name}' ({intercom.Host}:{intercom.Port}). Su historial de llamadas se conserva.");
+            EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "intercoms", cancellationToken: ct);
             return Results.Ok();
@@ -348,10 +379,11 @@ public static class IntercomsApi
         // ------------------------------------------------------------------
         // Llamadas
         // ------------------------------------------------------------------
-        app.MapGet("/api/intercoms/calls/active", (HttpContext ctx, IntercomService service) =>
+        app.MapGet("/api/intercoms/calls/active", async (HttpContext ctx, IntercomService service) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            return Results.Ok(service.ActiveCalls());
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
+            return Results.Ok(service.ActiveCalls().Where(c => scope.CanViewIntercom(c.IntercomId)));
         });
 
         app.MapGet("/api/intercoms/calls", async (HttpContext ctx, VmsDbContext db, AuditService audit, int? intercomId, string? state,
@@ -359,6 +391,14 @@ public static class IntercomsApi
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var query = db.IntercomCalls.AsNoTracking();
+            // Alcance por ubicación: solo llamadas de frentes de sus ubicaciones (en la consulta).
+            var scope = await ctx.ScopeAsync(session);
+            if (scope.FiltersView)
+            {
+                var allowed = scope.Locations.ToList();
+                query = query.Where(c => db.Intercoms.Any(i => i.Id == c.IntercomId && i.LocationId != null
+                                                               && allowed.Contains(i.LocationId.Value)));
+            }
             if (intercomId is int iid) query = query.Where(c => c.IntercomId == iid);
             if (!string.IsNullOrWhiteSpace(state) && Enum.TryParse<IntercomCallState>(state, true, out var parsed))
                 query = query.Where(c => c.State == parsed);
@@ -380,6 +420,7 @@ public static class IntercomsApi
             AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (await CallOutOfScopeAsync(ctx, session, callId, "contestar la llamada de") is { } outOfScope) return outOfScope;
             var result = await service.AnswerAsync(callId, session.UserId, session.Username, ct);
             await audit.LogAsync(ctx, "intercom", result.Success ? "call-answered" : "call-command-failed", targetType: "intercom",
                 targetId: result.Call?.IntercomId.ToString(), targetName: result.IntercomName,
@@ -394,6 +435,7 @@ public static class IntercomsApi
             AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (await CallOutOfScopeAsync(ctx, session, callId, "rechazar la llamada de") is { } outOfScope) return outOfScope;
             var result = await service.RejectAsync(callId, session.UserId, session.Username, ct);
             await audit.LogAsync(ctx, "intercom", result.Success ? "call-rejected" : "call-command-failed", targetType: "intercom",
                 targetId: result.Call?.IntercomId.ToString(), targetName: result.IntercomName,
@@ -408,6 +450,7 @@ public static class IntercomsApi
             AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (await CallOutOfScopeAsync(ctx, session, callId, "colgar la llamada de") is { } outOfScope) return outOfScope;
             var result = await service.HangUpAsync(callId, session.UserId, session.Username, session.Role == Roles.Admin, ct);
             if (!result.Success)
                 await audit.LogAsync(ctx, "intercom", "call-command-failed", targetType: "intercom",
@@ -421,6 +464,8 @@ public static class IntercomsApi
             AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (!(await ctx.ScopeAsync(session)).CanOperateIntercom(id))
+                return await ctx.OutOfScopeAsync(session, "intercom", id.ToString(), null, $"abrir la puerta {door} de");
             var result = await service.OpenDoorAsync(id, door, session.Username, ct);
             await audit.LogAsync(ctx, "intercom", result.Success ? "door-opened" : "door-open-failed", targetType: "intercom",
                 targetId: id.ToString(), targetName: result.IntercomName,
@@ -443,6 +488,8 @@ public static class IntercomsApi
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             if (!ctx.WebSockets.IsWebSocketRequest) return Error("Este recurso solo acepta WebSocket.", StatusCodes.Status400BadRequest);
+            if (!(await ctx.ScopeAsync(session)).CanOperateIntercom(id))
+                return await ctx.OutOfScopeAsync(session, "intercom", id.ToString(), null, "hablar por");
 
             var log = loggers.CreateLogger("TrueCentralVms.Server.Api.IntercomVoice");
             var (voice, error, name, call) = await service.OpenVoiceAsync(id, session.UserId, ctx.RequestAborted);

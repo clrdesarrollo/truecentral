@@ -544,7 +544,13 @@ public sealed record WorkflowAlertDto(
     /// <summary>Segundos entre el aviso y la confirmación.</summary>
     int? ResponseSeconds,
     /// <summary>A quién se dirigió ("admin, guardia"); null = a todos los operadores.</summary>
-    string? Recipients = null)
+    string? Recipients = null,
+    /// <summary>Recurso que dio origen al aviso ("Zone:3", ver Recursos); null si no se pudo resolver.</summary>
+    string? ResourceKey = null,
+    /// <summary>Ubicación del recurso al momento del aviso.</summary>
+    string? LocationPath = null,
+    /// <summary>Consignas de la ficha del recurso al momento del aviso (lo que se le indicó al operador).</summary>
+    string? Instructions = null)
 {
     public bool Pending => RequiresAck && AcknowledgedAt is null;
 }
@@ -582,7 +588,12 @@ public sealed record WorkflowNotificationDto(
     /// </summary>
     long AlertId = 0,
     /// <summary>El aviso queda en pantalla hasta que alguien lo confirme.</summary>
-    bool RequiresAck = true)
+    bool RequiresAck = true,
+    /// <summary>
+    /// Recurso que dio origen al aviso ("Zone:3"): el puesto no abre además la
+    /// ventana de verificación de ese recurso (este aviso ya trae sus consignas).
+    /// </summary>
+    string? ResourceKey = null)
 {
     /// <summary>Valor de <see cref="Sound"/> que significa "pitido del sistema operativo".</summary>
     public const string SystemSoundName = "sistema";
