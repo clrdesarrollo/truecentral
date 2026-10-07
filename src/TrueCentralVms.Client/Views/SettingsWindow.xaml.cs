@@ -37,6 +37,7 @@ public partial class SettingsWindow : Window
 
         (settings.StretchVideo ? FitStretch : FitKeep).IsChecked = true;
         (settings.FitGridToDevice ? GridFit : GridStandard).IsChecked = true;
+        RestoreSessionCheck.IsChecked = settings.RestoreLastSession;
 
         VolumeSlider.Value = Math.Clamp(settings.DefaultVolume, 0, 100);
         TimeoutBox.Text = settings.ApiTimeoutSeconds.ToString();
@@ -136,6 +137,7 @@ public partial class SettingsWindow : Window
         _settings.SnapshotFormat = FormatPng.IsChecked == true ? "png" : "jpg";
         _settings.StretchVideo = FitStretch.IsChecked == true;
         _settings.FitGridToDevice = GridFit.IsChecked == true;
+        _settings.RestoreLastSession = RestoreSessionCheck.IsChecked == true;
         _settings.DefaultVolume = (int)VolumeSlider.Value;
         _settings.ApiTimeoutSeconds = timeout;
         // Apagar el inicio automático rige desde el próximo arranque del

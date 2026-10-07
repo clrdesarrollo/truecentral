@@ -62,6 +62,28 @@
         <DataTemplate x:Key="LayoutPreview">
             <Border BorderBrush="{StaticResource MutedBrush}" BorderThickness="0.8" Margin="0.8"/>
         </DataTemplate>
+
+        <!-- Una división dentro del popup: miniatura + cantidad de cuadros -->
+        <DataTemplate x:Key="LayoutPresetItem">
+            <Button Style="{StaticResource LayoutPresetButton}" Click="OnLayoutPicked" ToolTip="{Binding Key}"
+                    Command="{Binding DataContext.SelectLayoutCommand,
+                              RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="{Binding}">
+                <StackPanel>
+                    <ItemsControl ItemsSource="{Binding Cells}" Width="36" Height="26"
+                                  IsHitTestVisible="False" HorizontalAlignment="Center"
+                                  ItemTemplate="{StaticResource LayoutPreview}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <views:VideoLayoutPanel Layout="{Binding}"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                    <TextBlock Text="{Binding Name}" FontSize="10.5"
+                               HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Button>
+        </DataTemplate>
     </Window.Resources>
 
     <Grid x:Name="RootShell">
@@ -130,9 +152,10 @@
                         BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
                         Visibility="{Binding IsTreeCollapsed, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
                     <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Text="DISPOSITIVOS" Margin="14,12,14,8" FontSize="11"
+                        <!-- Agrupa por equipo o por ubicación según elija la ventana principal -->
+                        <TextBlock DockPanel.Dock="Top" Text="CÁMARAS" Margin="14,12,14,8" FontSize="11"
                                    FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"/>
-                        <TreeView x:Name="DeviceTree" ItemsSource="{Binding Devices}"
+                        <TreeView x:Name="DeviceTree" ItemsSource="{Binding TreeItems}"
                                   Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
                                   MouseDoubleClick="OnTreeDoubleClick"
                                   PreviewMouseLeftButtonDown="OnTreeMouseDown"
@@ -166,11 +189,20 @@
                                         <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
                                     </StackPanel>
                                 </HierarchicalDataTemplate>
+                                <HierarchicalDataTemplate DataType="{x:Type vm:LocationNode}" ItemsSource="{Binding Children}">
+                                    <StackPanel Orientation="Horizontal" Margin="0,2" ToolTip="{Binding ToolTipText}">
+                                        <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                                   Foreground="{StaticResource MutedBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding ChannelCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                                   Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </HierarchicalDataTemplate>
                                 <DataTemplate DataType="{x:Type vm:ChannelNode}">
                                     <StackPanel Orientation="Horizontal" Margin="0,1">
                                         <StackPanel.Style>
                                             <Style TargetType="StackPanel">
-                                                <Setter Property="ToolTip" Value="Doble clic para ver en vivo en esta pantalla"/>
+                                                <Setter Property="ToolTip" Value="{Binding TreeToolTip}"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsLive}" Value="True">
                                                         <Setter Property="ToolTip" Value="{Binding LiveLocation}"/>
@@ -233,7 +265,8 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="División:" VerticalAlignment="Center" Margin="0,0,8,0"
                                    Foreground="{StaticResource MutedBrush}"/>
-                        <ToggleButton x:Name="LayoutPickerToggle" Style="{StaticResource GhostToggle}" Margin="0,0,6,0">
+                        <ToggleButton x:Name="LayoutPickerToggle" Style="{StaticResource GhostToggle}" Margin="0,0,6,0"
+                                      ToolTip="{Binding CurrentLayout.Key}">
                             <StackPanel Orientation="Horizontal">
                                 <ItemsControl ItemsSource="{Binding CurrentLayout.Cells}" Width="24" Height="17"
                                               IsHitTestVisible="False" ItemTemplate="{StaticResource LayoutPreview}"
@@ -257,32 +290,21 @@
                                 <StackPanel>
                                     <TextBlock Text="División de pantalla" FontSize="11" FontWeight="SemiBold"
                                                Foreground="{StaticResource MutedBrush}" Margin="2,0,0,8"/>
-                                    <ItemsControl ItemsSource="{Binding Layouts}">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <UniformGrid Columns="5"/>
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
+                                    <ItemsControl ItemsSource="{Binding LayoutGroups}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Button Style="{StaticResource LayoutPresetButton}" Click="OnLayoutPicked"
-                                                        Command="{Binding DataContext.SelectLayoutCommand,
-                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
-                                                        CommandParameter="{Binding}">
-                                                    <StackPanel>
-                                                        <ItemsControl ItemsSource="{Binding Cells}" Width="36" Height="26"
-                                                                      IsHitTestVisible="False" HorizontalAlignment="Center"
-                                                                      ItemTemplate="{StaticResource LayoutPreview}">
-                                                            <ItemsControl.ItemsPanel>
-                                                                <ItemsPanelTemplate>
-                                                                    <views:VideoLayoutPanel Layout="{Binding}"/>
-                                                                </ItemsPanelTemplate>
-                                                            </ItemsControl.ItemsPanel>
-                                                        </ItemsControl>
-                                                        <TextBlock Text="{Binding Name}" FontSize="10.5"
-                                                                   HorizontalAlignment="Center" Margin="0,4,0,0"/>
-                                                    </StackPanel>
-                                                </Button>
+                                                <StackPanel Margin="0,0,0,6">
+                                                    <TextBlock Text="{Binding Title}" FontSize="10.5"
+                                                               Foreground="{StaticResource MutedBrush}" Margin="4,0,0,2"/>
+                                                    <ItemsControl ItemsSource="{Binding Layouts}"
+                                                                  ItemTemplate="{StaticResource LayoutPresetItem}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <UniformGrid Columns="7"/>
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                    </ItemsControl>
+                                                </StackPanel>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>

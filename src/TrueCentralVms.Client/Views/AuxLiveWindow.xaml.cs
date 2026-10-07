@@ -83,10 +83,42 @@ public partial class AuxLiveWindow : Window
         Show();
     }
 
+    /// <summary>
+    /// Reabre la pantalla donde estaba (última sesión). Si ese lugar ya no cae
+    /// en ningún monitor —se desconectó uno, cambió la disposición—, parte como
+    /// una pantalla nueva: en el primer monitor libre.
+    /// </summary>
+    public void ShowAt(Rect bounds, bool maximized, IReadOnlyList<Window> occupied)
+    {
+        bool usable = bounds.Width >= MinWidth && bounds.Height >= MinHeight &&
+                      !double.IsNaN(bounds.Left) && !double.IsInfinity(bounds.Left);
+        if (usable && occupied.Count > 0)
+        {
+            // Mismo criterio de escala que ShowOnFreeMonitor: una sola para todos.
+            var dpi = VisualTreeHelper.GetDpi(occupied[0]);
+            var center = new Point((bounds.Left + bounds.Width / 2) * dpi.DpiScaleX,
+                (bounds.Top + bounds.Height / 2) * dpi.DpiScaleY);
+            usable = ListMonitors().Any(m => center.X >= m.Bounds.Left && center.X < m.Bounds.Right &&
+                                              center.Y >= m.Bounds.Top && center.Y < m.Bounds.Bottom);
+        }
+        if (!usable)
+        {
+            ShowOnFreeMonitor(occupied);
+            return;
+        }
+        Left = bounds.Left;
+        Top = bounds.Top;
+        Width = bounds.Width;
+        Height = bounds.Height;
+        Show();
+        if (maximized) WindowState = WindowState.Maximized;
+    }
+
     private struct MonitorRect
     {
         public IntPtr Handle;
         public RECT Work;
+        public RECT Bounds;
     }
 
     private static List<MonitorRect> ListMonitors()
@@ -96,7 +128,7 @@ public partial class AuxLiveWindow : Window
         {
             var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
             if (GetMonitorInfo(handle, ref info))
-                monitors.Add(new MonitorRect { Handle = handle, Work = info.rcWork });
+                monitors.Add(new MonitorRect { Handle = handle, Work = info.rcWork, Bounds = info.rcMonitor });
             return true;
         }, IntPtr.Zero);
         return monitors;
@@ -249,6 +281,8 @@ public partial class AuxLiveWindow : Window
             await Vm.OpenChannelAsync(node);
         else if (DeviceTree.SelectedItem is DeviceNode device)
             await Vm.OpenDeviceAsync(device);
+        else if (DeviceTree.SelectedItem is LocationNode location)
+            await Vm.OpenLocationAsync(location);
     }
 
     private ChannelNode? _dragCandidate;

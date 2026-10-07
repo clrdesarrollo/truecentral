@@ -24,7 +24,8 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     private readonly ClientSettings _settings;
     private ChannelNode? _assigned;
     private int _openSequence;
-    private bool _retryPending;
+    /// <summary>Secuencia que ya tiene un reintento esperando (-1 = ninguna).</summary>
+    private int _retrySequence = -1;
 
     /// <summary>
     /// Cuadro dueño de cada player. Los manejadores del player NO capturan el
@@ -145,6 +146,12 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         config.Player.MaxLatency = 400 * Ms;
         config.Player.MinLatency = 150 * Ms;
         config.Decoder.MaxVideoFrames = 2;
+        // Apertura acotada: por omisión Flyleaf espera hasta 5 MINUTOS el
+        // handshake RTSP, y mientras el player está abriendo el reintento no
+        // actúa. MediaMTX responde o rechaza en ≤15 s (sourceOnDemandStartTimeout
+        // del servidor): con 20 s una apertura colgada (servidor a medio
+        // reiniciar) falla y entra al ciclo normal de reintentos.
+        config.Demuxer.OpenTimeout = 20_000 * Ms;
         var player = new Player(config);
         PlayerOwners.AddOrUpdate(player, this);
         player.Audio.Volume = Math.Clamp(_settings.DefaultVolume, 0, 100);
@@ -210,8 +217,10 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     }
 
     /// <summary>Anula un cambio de stream en vuelo: el player de reserva se
-    /// descarta solo al despertar (ve la secuencia vencida).</summary>
-    public void CancelPendingSwitch() => _openSequence++;
+    /// descarta solo al despertar (ve la secuencia vencida). El mismo salto de
+    /// secuencia anula el reintento del stream visible si estaba sin señal:
+    /// se re-arma (y se descarta solo si el visible sigue vivo).</summary>
+    public void CancelPendingSwitch() => ScheduleRetry(++_openSequence);
 
     /// <summary>
     /// Player "estacionado": el stream que el cuadro mostraba antes de una
@@ -370,6 +379,10 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
                 if (sequence != _openSequence) return;
                 _pendingSwitchSequence = -1;
                 FlashStatus("No se pudo cambiar el stream: " + ex.Message);
+                // Con el servidor caído (ej. maximizar un cuadro sin señal
+                // durante una actualización) el bump de secuencia mató el
+                // reintento del stream visible: se re-arma.
+                ScheduleRetry(sequence);
                 return;
             }
             catch (Exception ex)
@@ -422,21 +435,34 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     }
 
     /// <summary>
+    /// El stream visible está andando o en camino. Paused NO cuenta: un cuadro
+    /// en vivo nunca se pausa a propósito, y Paused es justo el estado en que
+    /// Flyleaf deja al player cuando el stream se corta con error ("Playback
+    /// stopped unexpectedly" o "Timeout": servidor reiniciado, MediaMTX caído,
+    /// enlace cortado); solo un cierre limpio (EOF) termina en Ended. Contarlo
+    /// como vivo descartaba el reintento, y el cuadro quedaba congelado en
+    /// "Sin señal — reintentando…" aunque el servidor ya hubiera vuelto.
+    /// </summary>
+    private bool IsStreamAlive => Player is { Status: FlyleafLib.MediaPlayer.Status.Playing
+        or FlyleafLib.MediaPlayer.Status.Opening };
+
+    /// <summary>
     /// Reintento con espera fija. Se descarta si la celda cambió de asignación
-    /// o si el player ya volvió a estar activo (una reasignación detiene el
-    /// video anterior y ese stop también dispara PlaybackStopped).
+    /// (secuencia vencida) o si el stream visible ya está vivo (una reasignación
+    /// detiene el video anterior y ese stop también dispara PlaybackStopped).
+    /// Uno por secuencia: el que espera por una secuencia vieja no tapa al de
+    /// la nueva (con un único flag, el re-armado tras un cambio de stream se
+    /// perdía si el reintento anterior aún no despertaba).
     /// </summary>
     private async void ScheduleRetry(int sequence)
     {
-        if (_retryPending) return;
-        _retryPending = true;
-        try { await Task.Delay(RetryDelay); }
-        finally { _retryPending = false; }
+        if (_retrySequence == sequence) return;
+        _retrySequence = sequence;
+        await Task.Delay(RetryDelay);
+        if (_retrySequence == sequence) _retrySequence = -1;
 
         if (sequence != _openSequence || _assigned is null) return;
-        if (Player is { Status: FlyleafLib.MediaPlayer.Status.Playing
-            or FlyleafLib.MediaPlayer.Status.Opening
-            or FlyleafLib.MediaPlayer.Status.Paused }) return;
+        if (IsStreamAlive) return;
         Status = "Reconectando…";
         await ConnectAsync(sequence);
     }
@@ -701,10 +727,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     /// intercambio puede haber quedado una apertura a medio hacer).</summary>
     private void RestartConnect()
     {
-        if (_assigned is null) return;
-        if (Player is { Status: FlyleafLib.MediaPlayer.Status.Opening
-            or FlyleafLib.MediaPlayer.Status.Playing
-            or FlyleafLib.MediaPlayer.Status.Paused }) return;
+        if (_assigned is null || IsStreamAlive) return;
         Status = "Reconectando…";
         IsConnecting = true;
         _ = ConnectAsync(_openSequence);

@@ -23,6 +23,56 @@ public sealed class SavedAccount
     public string DisplayLabel => $"{Username} — {ServerUrl.Replace("http://", "").Replace("https://", "")}";
 }
 
+/// <summary>
+/// Lo que había en la Vista en Vivo: la grilla principal y cada pantalla
+/// auxiliar, con la cámara y el stream de cada cuadro. Es de UN servidor y UN
+/// usuario: otra persona que ingrese en este puesto no hereda las cámaras del
+/// anterior (puede no tener permiso para verlas).
+/// </summary>
+public sealed class LiveSession
+{
+    public string ServerUrl { get; set; } = "";
+    public string Username { get; set; } = "";
+    public DateTime SavedAtUtc { get; set; }
+    /// <summary>La viñeta de Vista en Vivo estaba abierta.</summary>
+    public bool LiveViewOpen { get; set; }
+    public LiveSessionGrid Main { get; set; } = new();
+    public List<LiveSessionScreen> AuxScreens { get; set; } = [];
+
+    /// <summary>Hay algo que reabrir.</summary>
+    [JsonIgnore]
+    public bool HasCameras => Main.Cells.Count > 0 || AuxScreens.Any(s => s.Cells.Count > 0);
+}
+
+/// <summary>Una grilla: su división y qué cámara había en cada cuadro.</summary>
+public class LiveSessionGrid
+{
+    /// <summary>Clave de la división ("4", "13") o la de una grilla a medida.</summary>
+    public string LayoutName { get; set; } = "";
+    public int Columns { get; set; }
+    public int Rows { get; set; }
+    public List<LiveSessionCell> Cells { get; set; } = [];
+}
+
+/// <summary>Un cuadro con cámara: posición (0..n-1), id del canal y stream (0 principal, 1 secundario).</summary>
+public sealed class LiveSessionCell
+{
+    public int Index { get; set; }
+    public int ChannelId { get; set; }
+    public int Profile { get; set; }
+}
+
+/// <summary>Una pantalla auxiliar: su grilla y dónde estaba su ventana.</summary>
+public sealed class LiveSessionScreen : LiveSessionGrid
+{
+    public int Slot { get; set; }
+    public double Left { get; set; }
+    public double Top { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+    public bool Maximized { get; set; }
+}
+
 /// <summary>Preferencias locales del cliente (%AppData%\CLRTrueCentralVMS\client.json).</summary>
 public sealed class ClientSettings
 {
@@ -61,6 +111,17 @@ public sealed class ClientSettings
     public string? MicrophoneDevice { get; set; }
     /// <summary>Tono de apertura (dos pitidos cortos) antes de la voz al hablar por los parlantes IP.</summary>
     public bool TalkPreTone { get; set; } = true;
+    /// <summary>Árbol de cámaras de Vista en vivo y Reproducción: true = por
+    /// ubicación (Recursos del servidor), false = por equipo.</summary>
+    public bool TreeByLocation { get; set; }
+    /// <summary>
+    /// Al iniciar sesión, volver a abrir las cámaras de la última sesión (grilla
+    /// principal y pantallas auxiliares). Sirve para que un cierre inesperado —o
+    /// uno a propósito— no obligue a cargar cámara por cámara de nuevo.
+    /// </summary>
+    public bool RestoreLastSession { get; set; }
+    /// <summary>Lo que había en pantalla la última vez (se guarda a medida que cambia).</summary>
+    public LiveSession? LastSession { get; set; }
 
     // ---------- Exportación de grabaciones (diálogo Exportar) ----------
 

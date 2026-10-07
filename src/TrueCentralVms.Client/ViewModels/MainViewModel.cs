@@ -207,6 +207,11 @@ public partial class MainViewModel : ObservableObject
                     _cercoSiren.Stop();
                     return Task.CompletedTask;
                 });
+        // Si el cerco tiene ficha con consignas o cámaras: verificación.
+        _ = VerifyAsync($"cercoPanel={dto.PanelId}", $"Alarma de cerco: {dto.Description}",
+            $"{dto.PanelName}{(dto.ZoneName is { Length: > 0 } zone ? $" · {zone}" : "")} · " +
+            $"{dto.ReceivedAt.ToLocalTime():dd-MM-yyyy HH:mm:ss}",
+            critical: true, dto.ReceivedAt);
     }
 
     /// <summary>Se silenció o desarmó el panel (desde aquí, otro puesto o el control): calla la sirena local.</summary>
@@ -231,6 +236,10 @@ public partial class MainViewModel : ObservableObject
                     dto.Description + (where.Length > 0 ? $"\n{where}" : "") +
                     $"\n{dto.Timestamp.ToLocalTime():HH:mm:ss}");
         });
+        // Si la zona (o su área) tiene ficha con consignas o cámaras: verificación.
+        _ = VerifyAsync(AlarmQuery(dto), dto.Description,
+            $"{where} · {dto.Timestamp.ToLocalTime():dd-MM-yyyy HH:mm:ss}" + (dto.Code is { } code ? $" · código {code}" : ""),
+            critical: true, dto.Timestamp);
     }
 
     /// <summary>
@@ -249,6 +258,10 @@ public partial class MainViewModel : ObservableObject
     private void OnWorkflowNotification(Core.Contracts.WorkflowNotificationDto dto)
     {
         StatusMessage = $"{dto.Title}: {dto.Message}";
+        // La ventana de alarma muestra las consignas y cámaras del recurso que
+        // la originó: no se abre además su verificación.
+        if (dto.RequiresAck && dto.AlertId > 0 && dto.ResourceKey is { Length: > 0 } resourceKey)
+            NoteAlertedResource(resourceKey);
         // El sonido arranca de inmediato, sin esperar a que baje la foto: es
         // lo que hace que el operador levante la vista.
         _ = _alertSound.PlayAsync(dto.Sound, dto.SoundRepeat);
@@ -602,8 +615,12 @@ public partial class MainViewModel : ObservableObject
     private void UpdatePtzPanel()
     {
         _ptzChannel = SelectedCell?.AssignedChannel is { Channel.SupportsPtz: true } node ? node : null;
-        IsPtzAvailable = _ptzChannel is not null;
-        PtzTargetName = _ptzChannel?.Channel.Name ?? "sin cámara PTZ";
+        // Alcance por ubicación: la cámara de otro lugar se ve, pero su PTZ no se mueve.
+        bool operable = _ptzChannel is not null && OperableScope.Current.CanOperateChannel(_ptzChannel.Channel.Id);
+        IsPtzAvailable = operable;
+        PtzTargetName = _ptzChannel is null ? "sin cámara PTZ"
+            : operable ? _ptzChannel.Channel.Name
+            : $"{_ptzChannel.Channel.Name} (fuera de su alcance)";
         SyncTreeSelection();
     }
 
@@ -631,6 +648,11 @@ public partial class MainViewModel : ObservableObject
     private void ApplySearchFilter()
     {
         string text = SearchText.Trim();
+        if (IsTreeByLocation)
+        {
+            ApplyLocationSearchFilter(text);
+            return;
+        }
         foreach (var device in Devices)
         {
             bool deviceMatch = Matches(device.Header, text);
@@ -713,7 +735,7 @@ public partial class MainViewModel : ObservableObject
     /// sobreescribe la velocidad del panel (modo precisión del teclado).</summary>
     public async Task PtzAsync(PtzCommand command, bool stop, int? speed = null)
     {
-        if (_ptzChannel is not { } node) return;
+        if (_ptzChannel is not { } node || !IsPtzAvailable) return;
         try
         {
             await _api.PtzAsync(node.Device.Id, node.Channel.ChannelNumber, command, speed ?? PtzSpeed, stop);
@@ -730,7 +752,7 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Ir / guardar / borrar el preset del panel, con confirmación en la barra de estado.</summary>
     public async Task PtzPresetAsync(PtzPresetAction action)
     {
-        if (_ptzChannel is not { } node) return;
+        if (_ptzChannel is not { } node || !IsPtzAvailable) return;
         int index = Math.Clamp(PtzPresetIndex, 1, 300);
         PtzPresetIndex = index;
         try
@@ -785,12 +807,24 @@ public partial class MainViewModel : ObservableObject
         _hub = hub;
         _alertSound = new AlertSoundPlayer(api);
 
+        // Árbol por equipo o por ubicación: preferencia de este puesto.
+        _isTreeByLocation = _settings.TreeByLocation;
+
         _hub.ConfigChanged += entity =>
         {
-            if (entity is "devices" or "channels")
+            if (entity is "devices" or "channels" or "locations")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadTreeAsync());
             if (entity is "license")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = PollLicenseAsync());
+            // Un administrador cambió el alcance por ubicación de este usuario
+            // (los árboles y módulos recargan con sus propios tópicos).
+            if (entity is "scope")
+                Application.Current.Dispatcher.InvokeAsync(() => _ = LoadScopeAsync());
+            // Lo que se puede operar cambia con el alcance, con dónde está cada
+            // recurso y con los recursos nuevos (heredan la ubicación de su equipo).
+            if (entity is "scope" or "locations" or "devices" or "channels" or "alarm-panels"
+                or "access-devices" or "speakers" or "intercoms")
+                Application.Current.Dispatcher.InvokeAsync(ScheduleOperableReload);
         };
         _hub.DeviceStatusChanged += dto => Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -803,11 +837,14 @@ public partial class MainViewModel : ObservableObject
             ConnectionStatus = ok ? "Conectado" : "Reconectando…";
             // Al recuperar la conexión pueden haber quedado alertas sin confirmar.
             if (ok) _ = LoadPendingAlertsAsync();
+            if (ok) ScheduleOperableReload();
         });
         // Automatizaciones del servidor: el aviso llega ya resuelto (título,
         // mensaje y, si la automatización capturó una, la foto del hecho).
         _hub.WorkflowNotification += OnWorkflowNotification;
         _hub.WorkflowAlertAcknowledged += OnAlertAcknowledged;
+        // Alarmas de puerta (forzada, mantenida abierta...): aviso y verificación.
+        _hub.AccessEventReceived += OnAccessEvent;
 
         // El Centro de descargas atiende la cola aunque su ventana esté cerrada;
         // al encolar desde Reproducción, la ventana se muestra sola (no modal).
@@ -854,10 +891,15 @@ public partial class MainViewModel : ObservableObject
 
         // Alertas que quedaron pendientes mientras este puesto estaba cerrado.
         _ = LoadPendingAlertsAsync();
+        // Alcance por ubicación de la sesión (menú del usuario) y lo que puede operar.
+        _ = LoadScopeAsync();
+        OperableScope.Current.Changed += OnOperableChanged;
+        _ = LoadOperableAsync();
 
         // Preferencia local: se abre con la última división que usó el usuario
         // (asíncrono: las celdas se crean por tandas sin congelar el arranque).
-        _ = ApplyLayoutAsync(Layouts.FirstOrDefault(l => l.Name == _settings.LastLayout) ?? VideoLayout.Default);
+        // Restaurar la última sesión espera a que esta termine (ver MainViewModel.Session).
+        _initialLayout = ApplyLayoutAsync(VideoLayout.Find(_settings.LastLayout) ?? VideoLayout.Default);
 
         // Indicadores CPU/RAM/disco del servidor: sondeo liviano cada 5 s.
         _metricsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
@@ -873,7 +915,37 @@ public partial class MainViewModel : ObservableObject
         _ = PollLicenseAsync();
     }
 
-    public async Task LoadTreeAsync()
+    private Task? _treeLoad;
+    private bool _treeReloadPending;
+
+    /// <summary>
+    /// Recarga el árbol de cámaras. Varios avisos seguidos (devices, channels,
+    /// locations: un cambio de alcance los manda juntos) no corren cargas en
+    /// paralelo: cada una vacía la lista y la vuelve a llenar, y entrelazadas
+    /// duplicaban equipos. Se corre una y, si llegó otro pedido mientras tanto,
+    /// una más al terminar. Todo ocurre en el hilo de la interfaz.
+    /// </summary>
+    public Task LoadTreeAsync()
+    {
+        if (_treeLoad is { IsCompleted: false })
+        {
+            _treeReloadPending = true;
+            return _treeLoad;
+        }
+        _treeLoad = RunTreeLoadsAsync();
+        return _treeLoad;
+    }
+
+    private async Task RunTreeLoadsAsync()
+    {
+        do
+        {
+            _treeReloadPending = false;
+            await LoadTreeOnceAsync();
+        } while (_treeReloadPending);
+    }
+
+    private async Task LoadTreeOnceAsync()
     {
         try
         {
@@ -887,6 +959,7 @@ public partial class MainViewModel : ObservableObject
                     node.Channels.Add(new ChannelNode(node, channel));
                 Devices.Add(node);
             }
+            await LoadLocationTreeAsync(); // mismos nodos de cámara, agrupados por ubicación
             ApplySearchFilter(); // el árbol nuevo debe respetar el filtro vigente
             RefreshLiveChannels(); // y marcar lo que ya está en pantalla
             StatusMessage = IsLiveViewOpen ? HintMessage : ReadyMessage;
@@ -897,8 +970,11 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Divisiones disponibles en el selector (estilo iVMS-4200).</summary>
+    /// <summary>Divisiones disponibles en el selector.</summary>
     public IReadOnlyList<VideoLayout> Layouts => VideoLayout.Standard;
+
+    /// <summary>Las mismas divisiones agrupadas por familia (así las muestra el selector).</summary>
+    public IReadOnlyList<VideoLayoutGroup> LayoutGroups => VideoLayout.Groups;
 
     /// <summary>Cuadro maximizado con doble clic (−1 = grilla normal). Los
     /// demás cuadros quedan ocultos pero vivos: sus streams no se cortan.</summary>
@@ -993,9 +1069,9 @@ public partial class MainViewModel : ObservableObject
         try { await ApplyLayoutAsync(layout); }
         finally { _layoutBusy = false; }
         // La elección del usuario se recuerda para la próxima sesión.
-        if (_settings.LastLayout != layout.Name)
+        if (_settings.LastLayout != layout.Key)
         {
-            _settings.LastLayout = layout.Name;
+            _settings.LastLayout = layout.Key;
             _settings.Save();
         }
     }
@@ -1133,23 +1209,28 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Canales que se abren juntos en la apertura masiva.</summary>
     private const int OpenBatchSize = 4;
 
-    public async Task OpenDeviceAsync(DeviceNode device)
+    public Task OpenDeviceAsync(DeviceNode device) => OpenChannelsAsync(device.Device.Name, device.Channels.ToList());
+
+    /// <summary>Apertura masiva: todos los canales de un equipo o de una
+    /// ubicación (<see cref="OpenLocationAsync"/>), por tandas y con la
+    /// interfaz bloqueada mientras dura. <paramref name="label"/> es el nombre
+    /// que se muestra en los avisos.</summary>
+    private async Task OpenChannelsAsync(string label, List<ChannelNode> channels)
     {
-        var channels = device.Channels.ToList();
         if (channels.Count == 0)
         {
-            StatusMessage = $"\"{device.Device.Name}\" no tiene canales habilitados.";
+            StatusMessage = $"\"{label}\" no tiene canales habilitados.";
             return;
         }
 
         if (channels.Count > 64)
         {
-            StatusMessage = $"\"{device.Device.Name}\" tiene {channels.Count} canales: se abren los primeros 64.";
+            StatusMessage = $"\"{label}\" tiene {channels.Count} canales: se abren los primeros 64.";
             channels = channels.Take(64).ToList();
         }
 
         IsBulkOpening = true;
-        BulkOpeningText = $"Abriendo {channels.Count} canal(es) de \"{device.Device.Name}\"…";
+        BulkOpeningText = $"Abriendo {channels.Count} canal(es) de \"{label}\"…";
         StatusMessage = BulkOpeningText;
         // Bloquea la interfaz mientras dura: aviso centrado (ventana propia y
         // Topmost, sobre el video) y la ventana principal deshabilitada.
@@ -1170,11 +1251,11 @@ public partial class MainViewModel : ObservableObject
             }
             else
             {
-                var layout = Layouts.FirstOrDefault(l => l.CellCount >= channels.Count) ?? Layouts[^1];
+                var layout = VideoLayout.SmallestFor(channels.Count);
                 if (CurrentLayout != layout)
                 {
                     await ApplyLayoutAsync(layout);
-                    _settings.LastLayout = layout.Name; // división estándar: sí se recuerda
+                    _settings.LastLayout = layout.Key; // división estándar: sí se recuerda
                     _settings.Save();
                 }
             }
@@ -1199,19 +1280,19 @@ public partial class MainViewModel : ObservableObject
                 for (int j = i; j < upTo; j++)
                     wave.Add(Cells[j].OpenAsync(channels[j], profile));
                 await Task.WhenAll(wave);
-                BulkOpeningText = $"Abriendo canales de \"{device.Device.Name}\"… {upTo}/{openCount}";
+                BulkOpeningText = $"Abriendo canales de \"{label}\"… {upTo}/{openCount}";
                 StatusMessage = BulkOpeningText;
                 loading?.Update(BulkOpeningText);
                 await BreatheAsync();
             }
-            StatusMessage = $"{openCount} canal(es) de \"{device.Device.Name}\" en pantalla.";
+            StatusMessage = $"{openCount} canal(es) de \"{label}\" en pantalla.";
         }
         catch (Exception ex)
         {
             // Abrir video toca driver, GPU y red: una falla ahí NO puede
             // llevarse la aplicación. El doble clic del árbol es async void y
             // la excepción no tendría dónde caer — se cierra el proceso.
-            StatusMessage = $"No se pudieron abrir todos los canales de \"{device.Device.Name}\": {ex.Message}";
+            StatusMessage = $"No se pudieron abrir todos los canales de \"{label}\": {ex.Message}";
         }
         finally
         {
@@ -1279,6 +1360,11 @@ public partial class MainViewModel : ObservableObject
             channel.IsLive = live;
             channel.LiveLocation = live ? "En vivo en " + string.Join(", ", where!) : "";
         }
+
+        // Todo lo que cambia lo que hay en pantalla pasa por acá (cámara
+        // asignada, división, pantalla auxiliar abierta o cerrada): es el punto
+        // donde se guarda la última sesión.
+        ScheduleSessionSave();
     }
 
     // ---------- Pantallas auxiliares (estilo iVMS-4200, máximo 3) ----------
@@ -1299,13 +1385,7 @@ public partial class MainViewModel : ObservableObject
         }
         // El número más bajo libre: cerrar la 2 y abrir otra vuelve a dar la 2.
         int slot = Enumerable.Range(1, MaxAuxScreens).First(n => _auxWindows.All(w => w.Vm.SlotNumber != n));
-        var window = new Views.AuxLiveWindow(new AuxScreenViewModel(this, slot));
-        window.Closed += (_, _) =>
-        {
-            _auxWindows.Remove(window);
-            RefreshLiveChannels(); // lo que mostraba deja de estar en vivo
-        };
-        _auxWindows.Add(window);
+        var window = CreateAuxWindow(slot);
 
         // Parte en el primer monitor sin ventanas de la aplicación (si lo hay).
         var occupied = new List<Window>();
@@ -1313,6 +1393,22 @@ public partial class MainViewModel : ObservableObject
         occupied.AddRange(_auxWindows.Where(w => w != window && w.IsLoaded));
         window.ShowOnFreeMonitor(occupied);
         StatusMessage = $"Pantalla auxiliar {slot} abierta: arrástrela al monitor que quiera si no partió ahí.";
+    }
+
+    /// <summary>Crea (sin mostrar) la ventana de una pantalla auxiliar y la registra.</summary>
+    private Views.AuxLiveWindow CreateAuxWindow(int slot)
+    {
+        var window = new Views.AuxLiveWindow(new AuxScreenViewModel(this, slot));
+        window.Closed += (_, _) =>
+        {
+            _auxWindows.Remove(window);
+            RefreshLiveChannels(); // lo que mostraba deja de estar en vivo
+        };
+        // Moverla de monitor o maximizarla también es parte de la última sesión.
+        window.LocationChanged += (_, _) => ScheduleSessionSave();
+        window.StateChanged += (_, _) => ScheduleSessionSave();
+        _auxWindows.Add(window);
+        return window;
     }
 
     [RelayCommand]
@@ -1324,6 +1420,11 @@ public partial class MainViewModel : ObservableObject
 
     public void Shutdown()
     {
+        // La última sesión se toma ANTES de cerrar ventanas y liberar cuadros:
+        // si no, lo que quedaría guardado es una grilla vacía.
+        _sessionSaveTimer?.Stop();
+        SaveSessionNow();
+        _sessionFrozen = true;
         _metricsTimer.Stop();
         _licenseTimer.Stop();
         _cercoSiren.Stop();

@@ -29,9 +29,13 @@ public partial class AuxScreenViewModel : ObservableObject
     /// estados en línea (y el filtro del buscador de la ventana principal).</summary>
     public ObservableCollection<DeviceNode> Devices => _shell.Devices;
 
+    /// <summary>Árbol de cámaras según el modo del shell (por equipo o por
+    /// ubicación): cambia junto con el de la ventana principal.</summary>
+    public System.Collections.IEnumerable TreeItems => _shell.TreeItems;
+
     public ObservableCollection<VideoCellViewModel> Cells { get; } = [];
 
-    public IReadOnlyList<VideoLayout> Layouts => VideoLayout.Standard;
+    public IReadOnlyList<VideoLayoutGroup> LayoutGroups => VideoLayout.Groups;
 
     [ObservableProperty] private VideoLayout _currentLayout = VideoLayout.Default;
     [ObservableProperty] private int _maximizedIndex = -1;
@@ -63,7 +67,16 @@ public partial class AuxScreenViewModel : ObservableObject
     {
         _shell = shell;
         SlotNumber = slotNumber;
-        _ = ApplyLayoutAsync(VideoLayout.Default);
+        _shell.PropertyChanged += OnShellPropertyChanged;
+        InitialLayout = ApplyLayoutAsync(VideoLayout.Default);
+    }
+
+    /// <summary>La primera división: quien quiera cambiarla enseguida (restaurar la última sesión) la espera.</summary>
+    public Task InitialLayout { get; }
+
+    private void OnShellPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.TreeItems)) OnPropertyChanged(nameof(TreeItems));
     }
 
     [RelayCommand]
@@ -213,23 +226,29 @@ public partial class AuxScreenViewModel : ObservableObject
 
     /// <summary>Doble clic en un equipo: abre todos sus canales habilitados en
     /// esta pantalla, con grilla a medida (misma preferencia que la principal).</summary>
-    public async Task OpenDeviceAsync(DeviceNode device)
+    public Task OpenDeviceAsync(DeviceNode device) => OpenChannelsAsync(device.Device.Name, device.Channels.ToList());
+
+    /// <summary>Doble clic en una ubicación (árbol por ubicación): abre en esta
+    /// pantalla sus cámaras y las de sus sububicaciones.</summary>
+    public Task OpenLocationAsync(LocationNode location) =>
+        OpenChannelsAsync(location.Header, location.AllChannels().ToList());
+
+    private async Task OpenChannelsAsync(string label, List<ChannelNode> channels)
     {
-        var channels = device.Channels.ToList();
         if (channels.Count == 0)
         {
-            StatusMessage = $"\"{device.Device.Name}\" no tiene canales habilitados.";
+            StatusMessage = $"\"{label}\" no tiene canales habilitados.";
             return;
         }
 
         if (channels.Count > 64)
         {
-            StatusMessage = $"\"{device.Device.Name}\" tiene {channels.Count} canales: se abren los primeros 64.";
+            StatusMessage = $"\"{label}\" tiene {channels.Count} canales: se abren los primeros 64.";
             channels = channels.Take(64).ToList();
         }
 
         IsBulkOpening = true;
-        BulkOpeningText = $"Abriendo {channels.Count} canal(es) de \"{device.Device.Name}\"…";
+        BulkOpeningText = $"Abriendo {channels.Count} canal(es) de \"{label}\"…";
         StatusMessage = BulkOpeningText;
         var loading = OwnerWindow is { IsLoaded: true } owner
             ? Views.LoadingWindow.Open(owner, BulkOpeningText)
@@ -242,7 +261,7 @@ public partial class AuxScreenViewModel : ObservableObject
             if (_shell.Settings.FitGridToDevice)
                 await ApplyLayoutAsync(VideoLayout.FitFor(channels.Count));
             else
-                await ApplyLayoutAsync(Layouts.FirstOrDefault(l => l.CellCount >= channels.Count) ?? Layouts[^1]);
+                await ApplyLayoutAsync(VideoLayout.SmallestFor(channels.Count));
 
             SelectedCell = null;
             var profile = DefaultProfileForOpen();
@@ -257,18 +276,18 @@ public partial class AuxScreenViewModel : ObservableObject
                 for (int j = i; j < upTo; j++)
                     wave.Add(Cells[j].OpenAsync(channels[j], profile));
                 await Task.WhenAll(wave);
-                BulkOpeningText = $"Abriendo canales de \"{device.Device.Name}\"… {upTo}/{openCount}";
+                BulkOpeningText = $"Abriendo canales de \"{label}\"… {upTo}/{openCount}";
                 StatusMessage = BulkOpeningText;
                 loading?.Update(BulkOpeningText);
                 await MainViewModel.BreatheAsync();
             }
-            StatusMessage = $"{openCount} canal(es) de \"{device.Device.Name}\" en pantalla.";
+            StatusMessage = $"{openCount} canal(es) de \"{label}\" en pantalla.";
         }
         catch (Exception ex)
         {
             // Igual que en la grilla principal: una falla de video no puede
             // llevarse la aplicación (el doble clic del árbol es async void).
-            StatusMessage = $"No se pudieron abrir todos los canales de \"{device.Device.Name}\": {ex.Message}";
+            StatusMessage = $"No se pudieron abrir todos los canales de \"{label}\": {ex.Message}";
         }
         finally
         {
@@ -296,6 +315,7 @@ public partial class AuxScreenViewModel : ObservableObject
     /// <summary>La ventana se cerró: se liberan sus players.</summary>
     public void Dispose()
     {
+        _shell.PropertyChanged -= OnShellPropertyChanged;
         foreach (var cell in Cells)
             cell.Dispose();
         Cells.Clear();

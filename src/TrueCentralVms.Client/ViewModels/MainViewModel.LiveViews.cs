@@ -73,13 +73,13 @@ public partial class MainViewModel
             ? $" · compartida por {view.Owner}"
             : view.Shared ? " · compartida" : "";
         return new SavedViewItem(view.Id, view.Name,
-            $"{view.Items.Count} cámara(s) · división {view.LayoutName}{owner}",
+            $"{view.Items.Count} cámara(s) · división {VideoLayout.Find(view.LayoutName)?.Key ?? view.LayoutName}{owner}",
             view.Shared, view.CanEdit);
     }
 
     /// <summary>Foto de la grilla actual en el formato que guarda el servidor.</summary>
     private LiveViewSaveRequest SnapshotRequest(string name, bool shared) => new(
-        name, CurrentLayout.Name, CurrentLayout.Columns, CurrentLayout.Rows, shared,
+        name, CurrentLayout.Key, CurrentLayout.Columns, CurrentLayout.Rows, shared,
         Cells.Select((cell, index) => (cell, index))
             .Where(x => x.cell.AssignedChannel is not null)
             .Select(x => new LiveViewItemDto(x.index, x.cell.AssignedChannel!.Channel.Id, (int)x.cell.Profile))
@@ -223,9 +223,9 @@ public partial class MainViewModel
             await ApplyLayoutAsync(layout);
             // Si la vista trae una de las divisiones del selector, esa pasa a
             // ser la preferencia local (la próxima sesión abre en ella).
-            if (Layouts.Any(l => l.Name == layout.Name) && _settings.LastLayout != layout.Name)
+            if (Layouts.Contains(layout) && _settings.LastLayout != layout.Key)
             {
-                _settings.LastLayout = layout.Name;
+                _settings.LastLayout = layout.Key;
                 _settings.Save();
             }
 
