@@ -1088,12 +1088,38 @@ El VMS se licencia contra el **servidor central de licencias de CLRobotics**
 | Nivel | Cómo se vende | Cómo lo aplica el VMS |
 |---|---|---|
 | **Base** | Una licencia base por instalación (código `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`), vinculada al equipo (`hardware_id`) | Sin licencia base vigente el sistema entra en **modo restringido** |
-| **Módulo** | Característica booleana: `module_video`, `module_playback`, `module_anpr`, `module_alarms`, `module_access`, `module_videowall`, `module_speakers`, `module_automation` | Las altas del módulo se rechazan con HTTP 402 si no está incluido |
-| **Canal / cupo** | Característica entera: `video_channels`, `anpr_channels`, `alarm_panels`, `access_doors`, `videowalls`, `videowall_decoders`, `speaker_channels`, `automation_rules`, `max_users`, `max_client_sessions` | Cuenta los elementos **habilitados**; al llegar al cupo no se puede habilitar más (los canales de un equipo nuevo que no caben entran deshabilitados) |
+| **Módulo** | Característica booleana: `module_video`, `module_playback`, `module_anpr`, `module_alarms`, `module_access`, `module_videowall`, `module_speakers`, `module_intercom`, `module_automation` | Las altas del módulo se rechazan con HTTP 402 si no está incluido |
+| **Canal / cupo** | Característica entera: `video_channels`, `anpr_channels`, `alarm_panels`, `access_doors`, `videowalls`, `videowall_decoders`, `speaker_channels`, `intercom_devices`, `automation_rules`, `max_users`, `max_client_sessions` | Cuenta los elementos **habilitados**; al llegar al cupo no se puede habilitar más (los canales de un equipo nuevo que no caben entran deshabilitados) |
 | **Expansión** | Licencia `ADDON` colgada de la base (packs "8 canales", "1 decodificador", ...) | Se suma sola en la siguiente revalidación en línea o al importar el `.lic` regenerado |
 
-Las claves viven en `Core\Contracts\LicenseDtos.cs` (`LicenseFeatures`) y son el
-contrato con el catálogo del servidor de licencias (`manage.py seed_truecentral`).
+Las claves viven en `Core\Contracts\LicenseDtos.cs` (`LicenseFeatures`) y cada
+una se define **una sola vez** en `Core\Contracts\LicenseCatalog.cs` (nombre,
+tipo, valor por defecto y los packages estándar Base/Professional/Enterprise y
+expansiones). El servidor de licencias **no se arma a mano**: importa ese
+catálogo como JSON y deja de solo lectura en su web todo lo que viene de aquí.
+
+```powershell
+TrueCentralVms.Server.exe --export-license-catalog truecentral.catalog.json
+```
+
+El exportador falla (código 1) si una constante de `LicenseFeatures` no tiene
+definición, si un package usa una clave inexistente o con otro tipo, o si la
+prueba incorporada no cuadra; Jenkins lo corre en cada build (etapa *Catálogo
+de licencias*) y deja el JSON como artefacto. Se importa en el backoffice del
+servidor de licencias (*Productos → Importar catálogo*, con vista previa) o con
+`manage.py sync_catalog <archivo>`. Reglas:
+
+- **Subir `LicenseCatalog.Version`** con cualquier cambio: se rechaza un catálogo
+  con el mismo número y otro contenido, o uno más antiguo que el importado.
+- Nada se borra: lo que sale del catálogo queda *retirado* (no se ofrece en
+  licencias nuevas). El tipo de una clave existente no se cambia: otra clave.
+- Las licencias emitidas **no cambian** con el catálogo: guardan los valores con
+  que se vendieron, y una característica nueva les llega con su valor por
+  defecto. Para ampliar a un cliente se emite una expansión.
+
+Agregar un módulo licenciable = constante en `LicenseFeatures` + definición en
+`LicenseCatalog.Features` (y en los packages que lo incluyan) + subir `Version`
++ importar el JSON del build.
 El control de acceso cuenta **puertas** (`access_doors`), no equipos: es la
 unidad que el cliente entiende y la que paga.
 

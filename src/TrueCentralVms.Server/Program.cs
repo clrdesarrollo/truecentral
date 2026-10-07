@@ -14,6 +14,15 @@ using TrueCentralVms.Server.Services.Supervisor;
 using TrueCentralVms.Server.Services.Workflows;
 using TrueCentralVms.Server.Services.Workflows.Actions;
 
+// Exporta el catálogo de licenciamiento (el JSON que importa el servidor de
+// licencias) y termina sin levantar nada. Lo usan Jenkins y el desarrollador
+// al cambiar LicenseCatalog.
+if (args.Length > 0 && args[0] == LicenseCatalogExport.Argument)
+{
+    Environment.ExitCode = LicenseCatalogExport.Run(args.Length > 1 ? args[1] : null);
+    return;
+}
+
 // El servidor corre igual como consola (desarrollo) o como servicio de Windows
 // (instalado). Como servicio, el directorio de trabajo inicial es System32, así
 // que el content root debe apuntar a la carpeta del ejecutable (appsettings,

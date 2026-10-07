@@ -9,8 +9,8 @@ namespace TrueCentralVms.Server.Services.Licensing;
 /// del VMS: un archivo .lic solo se acepta si su firma verifica con ella. Por
 /// eso no puede venir de appsettings (quien pudiera cambiarla firmaría sus
 /// propias licencias). Se obtiene del servidor de licencias con
-/// <c>GET /api/v1/products/public-key/</c> (o al correr
-/// <c>manage.py seed_truecentral</c>) y se pega aquí ANTES de compilar el
+/// <c>GET /api/v1/products/public-key/</c> (o al importar el catálogo con
+/// <c>manage.py sync_catalog</c>) y se pega aquí ANTES de compilar el
 /// instalador de producción. Cada servidor de licencias (desarrollo,
 /// producción) tiene su propio par: si se rota la clave hay que recompilar
 /// y reemitir los archivos de licencia.

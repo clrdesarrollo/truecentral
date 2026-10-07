@@ -305,6 +305,20 @@ pipeline {
             }
         }
 
+        // Catálogo de licenciamiento: el JSON que se importa en el servidor de
+        // licencias (backoffice → Productos → Importar catálogo). Lo genera el
+        // propio servidor desde LicenseCatalog y el exportador falla si el
+        // catálogo no cuadra con LicenseFeatures: un contrato roto no llega a
+        // publicarse.
+        stage('Catálogo de licencias') {
+            steps {
+                powershell '''
+                    & "$env:DIST\\server\\TrueCentralVms.Server.exe" --export-license-catalog "$env:DIST\\truecentral.catalog-$env:SEMVER.json"
+                    if ($LASTEXITCODE -ne 0) { throw "El catálogo de licencias no es consistente (ver errores arriba)." }
+                '''
+            }
+        }
+
         // Las herramientas se buscan en runtime como tools\ junto al ejecutable
         // (EmbeddedPostgres, MediaMtxManager) y el cliente busca su FFmpeg en la
         // carpeta FFmpeg\ junto al exe (App.xaml.cs). El paquete respeta esas
@@ -400,10 +414,10 @@ pipeline {
             archiveArtifacts artifacts: 'reports/**/*.trx', allowEmptyArchive: true
         }
         success {
-            archiveArtifacts artifacts: 'dist/*.zip, dist/*.exe', allowEmptyArchive: true, fingerprint: true
+            archiveArtifacts artifacts: 'dist/*.zip, dist/*.exe, dist/*.catalog-*.json', allowEmptyArchive: true, fingerprint: true
         }
         unstable {
-            archiveArtifacts artifacts: 'dist/*.zip, dist/*.exe', allowEmptyArchive: true, fingerprint: true
+            archiveArtifacts artifacts: 'dist/*.zip, dist/*.exe, dist/*.catalog-*.json', allowEmptyArchive: true, fingerprint: true
         }
         cleanup {
             // El workspace NO se limpia a propósito: conservar obj\ y los

@@ -7,9 +7,9 @@
 // (license_service_server): una licencia BASE por instalación, módulos que se
 // habilitan por característica booleana y cupos por canal (cámaras, paneles,
 // decodificadores, parlantes...) por característica entera. Las CLAVES de
-// abajo son el contrato con el catálogo del producto "truecentral" en ese
-// servidor (manage.py seed_truecentral): cambiar una aquí sin cambiarla allá
-// deja el módulo sin licencia.
+// abajo son el contrato con el producto "truecentral" de ese servidor: cada
+// una se define (nombre, tipo, valor por defecto, packages) en LicenseCatalog,
+// que el servidor de licencias importa; no se cargan a mano en su web.
 
 /// <summary>Claves de las características licenciables del producto TrueCentral.</summary>
 public static class LicenseFeatures
