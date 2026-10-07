@@ -83,6 +83,39 @@ public static class HikvisionSadp
     }
 
     /// <summary>
+    /// Activa el equipo de fábrica con esa MAC: le fija la contraseña del
+    /// usuario admin (cámaras, grabadores, control de acceso, citofonía... todo
+    /// equipo Hikvision se activa igual). Funciona aunque siga en su IP de
+    /// fábrica, fuera de la subred del servidor.
+    /// </summary>
+    public static async Task<HikvisionSadpResult> ActivateAsync(string mac, string password, CancellationToken ct = default)
+    {
+        await Gate.WaitAsync(ct);
+        try
+        {
+            var found = new ConcurrentDictionary<string, HikvisionSadpDevice>(StringComparer.OrdinalIgnoreCase);
+            HikvisionSadpResult? result = null;
+            await RunSessionAsync(found, TimeSpan.FromSeconds(3), _ =>
+            {
+                if (!found.TryGetValue(NormalizeMac(mac), out var device) || device.Serial.Length == 0)
+                {
+                    result = new HikvisionSadpResult(false,
+                        "El equipo no respondió a la búsqueda SADP. Vuelva a buscar e intente de nuevo.");
+                    return Task.FromResult(0);
+                }
+                // El SDK identifica al equipo por su N° de serie completo, no por la MAC.
+                result = SadpSdk.SADP_ActivateDevice(device.Serial, password)
+                    ? new HikvisionSadpResult(true, null)
+                    : new HikvisionSadpResult(false,
+                        $"El equipo no aceptó la activación: {SadpSdk.DescribeError(SadpSdk.SADP_GetLastError())}.");
+                return Task.FromResult(0);
+            }, ct);
+            return result ?? new HikvisionSadpResult(false, "No se pudo iniciar la búsqueda SADP.");
+        }
+        finally { Gate.Release(); }
+    }
+
+    /// <summary>
     /// Abre la sesión SADP, pregunta, espera la ventana y ejecuta <paramref name="action"/>
     /// con la sesión todavía abierta (el cambio necesita que el SDK conozca al equipo).
     /// </summary>

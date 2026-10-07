@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Migrator.HikCentral;
@@ -33,8 +34,9 @@ public sealed class MainForm : Form
     // --- Paso 2: terminales
     private readonly CheckBox _readTerminals = new() { Text = "Leer desde los terminales las plantillas de huella y el legajo con el que conocen a cada persona", AutoSize = true, Checked = true };
     private readonly TextBox _termUser = new() { Width = 140 };
-    private readonly TextBox _termPass = new() { Width = 140, UseSystemPasswordChar = true };
+    private readonly TextBox _termPass = new() { Width = 160, UseSystemPasswordChar = true };
     private readonly DataGridView _terminals = new();
+    private bool _showTerminalPasswords;   // el ojo de _termPass también destapa la columna de la grilla
     private readonly Label _termStatus = new() { AutoSize = true, ForeColor = Color.DimGray };
 
     // --- Paso 3: TrueCentral
@@ -69,6 +71,7 @@ public sealed class MainForm : Form
     private readonly Button _copyLog = new() { Text = "Copiar registro", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10, 3, 10, 3) };
     private readonly Button _saveLog = new() { Text = "Guardar registro…", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10, 3, 10, 3) };
     private readonly CheckBox _remember = new() { Text = "Recordar credenciales en este equipo", AutoSize = true };
+    private readonly ToolTip _tips = new();
 
     public MainForm()
     {
@@ -204,6 +207,49 @@ public sealed class MainForm : Form
         grid.Controls.Add(control, 1, row);
     }
 
+    /// <summary>
+    /// Pone dentro del campo, a la derecha, el ojo para mostrar u ocultar lo
+    /// escrito (Segoe MDL2: View / Hide). <paramref name="toggled"/> recibe
+    /// <c>true</c> cuando el campo queda visible.
+    /// </summary>
+    private void AddRevealButton(TextBox box, string subject = "la contraseña", Action<bool>? toggled = null)
+    {
+        const string View = "", Hide = "";
+        var eye = new Button
+        {
+            Dock = DockStyle.Right, Width = 28, TabStop = false, Cursor = Cursors.Default,
+            FlatStyle = FlatStyle.Flat, BackColor = SystemColors.Window, ForeColor = Color.FromArgb(80, 80, 80),
+            Font = new Font("Segoe MDL2 Assets", 11f), Text = View,
+        };
+        eye.FlatAppearance.BorderSize = 0;
+        _tips.SetToolTip(eye, $"Mostrar {subject}");
+        eye.Click += (_, _) =>
+        {
+            bool show = box.UseSystemPasswordChar;
+            box.UseSystemPasswordChar = !show;
+            eye.Text = show ? Hide : View;
+            _tips.SetToolTip(eye, show ? $"Ocultar {subject}" : $"Mostrar {subject}");
+            toggled?.Invoke(show);
+            box.Focus();
+            box.SelectionStart = box.TextLength;
+        };
+        box.Controls.Add(eye);
+        box.EnabledChanged += (_, _) => eye.BackColor = box.Enabled ? SystemColors.Window : SystemColors.Control;
+
+        // Margen derecho para que el texto no corra por debajo del ojo. El
+        // control lo pierde al recrearse (cambiar UseSystemPasswordChar lo
+        // recrea) o al cambiar la fuente con el DPI: se vuelve a fijar.
+        void SetMargin() { if (box.IsHandleCreated) SendMessage(box.Handle, EM_SETMARGINS, EC_RIGHTMARGIN, eye.Width << 16); }
+        box.HandleCreated += (_, _) => SetMargin();
+        box.FontChanged += (_, _) => SetMargin();
+        eye.SizeChanged += (_, _) => SetMargin();
+    }
+
+    private const int EM_SETMARGINS = 0xD3, EC_RIGHTMARGIN = 0x2;
+
+    [DllImport("user32.dll")]
+    private static extern nint SendMessage(nint hWnd, int msg, nint wParam, nint lParam);
+
     private TabPage BuildHikCentralTab()
     {
         var page = new TabPage("  1 · HikCentral  ");
@@ -214,6 +260,7 @@ public sealed class MainForm : Form
         _hcpUrl.PlaceholderText = "https://200.55.209.84";
         AddRow(grid, 2, "Clave del socio (AppKey)", _hcpKey);
         AddRow(grid, 3, "Secreto del socio (AppSecret)", _hcpSecret);
+        AddRevealButton(_hcpSecret, "el secreto");
         var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 4, 0, 4) };
         buttons.Controls.AddRange([_hcpConnect, _hcpStatus]);
         _hcpStatus.Margin = new Padding(12, 8, 0, 0);
@@ -271,6 +318,12 @@ public sealed class MainForm : Form
         ]);
         _termStatus.Margin = new Padding(12, 6, 0, 0);
         layout.Controls.Add(creds, 0, 2);
+        AddRevealButton(_termPass, "las contraseñas de los terminales", show =>
+        {
+            _showTerminalPasswords = show;
+            _terminals.EndEdit();   // la celda en edición toma el modo nuevo al volver a abrirse
+            _terminals.Invalidate();
+        });
 
         _terminals.Dock = DockStyle.Fill;
         _terminals.AllowUserToAddRows = false;
@@ -288,7 +341,7 @@ public sealed class MainForm : Form
         _terminals.Columns.Add(new DataGridViewTextBoxColumn { Name = "state", HeaderText = "Estado", FillWeight = 26, ReadOnly = true });
         _terminals.CellFormatting += (_, e) =>
         {
-            if (e.ColumnIndex == _terminals.Columns["pass"]!.Index && e.Value is string s && s.Length > 0)
+            if (!_showTerminalPasswords && e.ColumnIndex == _terminals.Columns["pass"]!.Index && e.Value is string s && s.Length > 0)
             {
                 e.Value = new string('•', Math.Min(8, s.Length));
                 e.FormattingApplied = true;
@@ -297,7 +350,7 @@ public sealed class MainForm : Form
         _terminals.EditingControlShowing += (_, e) =>
         {
             if (e.Control is TextBox tb)
-                tb.UseSystemPasswordChar = _terminals.CurrentCell?.OwningColumn?.Name == "pass";
+                tb.UseSystemPasswordChar = !_showTerminalPasswords && _terminals.CurrentCell?.OwningColumn?.Name == "pass";
         };
         layout.Controls.Add(_terminals, 0, 3);
 
@@ -327,6 +380,7 @@ public sealed class MainForm : Form
         _tcUrl.PlaceholderText = "http://192.168.10.232:5080";
         AddRow(grid, 2, "Usuario", _tcUser);
         AddRow(grid, 3, "Contraseña", _tcPass);
+        AddRevealButton(_tcPass);
         var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 4, 0, 4) };
         buttons.Controls.AddRange([_tcConnect, _tcStatus]);
         _tcStatus.Margin = new Padding(12, 8, 0, 0);

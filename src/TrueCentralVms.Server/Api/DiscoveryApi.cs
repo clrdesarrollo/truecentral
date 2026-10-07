@@ -101,6 +101,9 @@ public static partial class DiscoveryApi
                     // El control de acceso se administra por ISAPI (puerto HTTP), no por el SDK.
                     DriverKey = accessOnly ? "hikvision-isapi" : intercomOnly ? "hikvision-intercom" : "hikvision-netsdk",
                     d.CommandPort, d.HttpPort, d.Model, d.Serial, d.Mac, d.Activated, Category = category,
+                    // De fábrica sin activar (cualquier tipo de equipo): no tiene contraseña,
+                    // no se puede agregar hasta activarlo (POST /api/discovery/hikvision/activate).
+                    CanInitialize = !d.Activated,
                     // Cambio de IP por SADP (POST /api/discovery/change-ip): pide la contraseña, solo si está activado.
                     CanChangeIp = d.Activated, d.SubnetMask, d.Gateway, d.Dhcp,
                     Reachable = IsInLocalSubnet(d.Ip),
@@ -234,10 +237,81 @@ public static partial class DiscoveryApi
             });
         });
 
+        // Activar un equipo Hikvision de fábrica (cámara, grabador, control de
+        // acceso, citofonía...): fijarle la contraseña del usuario "admin", como
+        // "Activate" de SADP Tool. Va por SADP con la MAC, así que funciona aunque
+        // el equipo siga en su IP de fábrica (192.0.0.64), fuera de la subred.
+        app.MapPost("/api/discovery/hikvision/activate", async (HttpContext ctx, DahuaInitializeRequest request,
+            ILogger<Program> logger, Services.AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+
+            string mac = (request.Mac ?? "").Trim();
+            string target = mac;
+
+            async Task<IResult> Reject(int status, string error)
+            {
+                await audit.LogAsync(ctx, "devices", "device-initialized", targetType: "device", targetName: target,
+                    detail: $"No se pudo activar el equipo Hikvision {target}: {error}", success: false);
+                return Results.Json(new { error }, statusCode: status);
+            }
+
+            if (mac.Length == 0) return await Reject(StatusCodes.Status422UnprocessableEntity, "Falta la MAC del equipo.");
+            if (HikvisionPasswordProblem(request.Password) is { } problem)
+                return await Reject(StatusCodes.Status422UnprocessableEntity, problem);
+            if (request.Password != request.ConfirmPassword)
+                return await Reject(StatusCodes.Status422UnprocessableEntity, "Las contraseñas no coinciden.");
+
+            // Se vuelve a preguntar al equipo: su estado pudo cambiar desde la búsqueda del panel.
+            var found = await SadpDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, ct);
+            var device = found.FirstOrDefault(d => HikvisionSadp.NormalizeMac(d.Mac) == HikvisionSadp.NormalizeMac(mac));
+            if (device is null)
+                return await Reject(StatusCodes.Status404NotFound,
+                    "El equipo ya no responde en la red. Vuelva a buscar e intente de nuevo.");
+            target = $"{device.Model} {device.Ip} ({device.Mac})";
+            if (device.Activated)
+                return await Reject(StatusCodes.Status409Conflict,
+                    "El equipo ya está activado: agréguelo con su usuario y contraseña.");
+
+            var result = await HikvisionSadp.ActivateAsync(device.Mac, request.Password!, ct);
+            if (!result.Success)
+                return await Reject(StatusCodes.Status502BadGateway, result.Error ?? "error desconocido");
+
+            await audit.LogAsync(ctx, "devices", "device-initialized", targetType: "device", targetName: target,
+                detail: $"Activó el equipo Hikvision {target}: se fijó la contraseña del usuario \"{DahuaDeviceInitializer.AdminUser}\".");
+            logger.LogInformation("Equipo Hikvision {Target} activado.", target);
+            return Results.Ok(new
+            {
+                device.Ip, device.Mac, device.Model,
+                Username = DahuaDeviceInitializer.AdminUser,
+                // Varios equipos de fábrica comparten 192.0.0.64: hay que cambiarle la IP para agregarlo.
+                Reachable = IsInLocalSubnet(device.Ip),
+            });
+        });
+
         MapDahuaChangeIp(app);
     }
 
     public sealed record DahuaInitializeRequest(string? Mac, string? Password, string? ConfirmPassword, string? Email);
+
+    /// <summary>
+    /// Política de contraseñas de activación Hikvision: 8 a 16 caracteres, al
+    /// menos dos tipos entre mayúsculas, minúsculas, números y símbolos, y sin
+    /// contener el usuario "admin" (el equipo la rechaza como riesgosa).
+    /// </summary>
+    internal static string? HikvisionPasswordProblem(string? password)
+    {
+        if (string.IsNullOrEmpty(password) || password.Length < 8 || password.Length > 16)
+            return "La contraseña debe tener entre 8 y 16 caracteres.";
+        if (password.Contains(' ')) return "La contraseña no puede llevar espacios.";
+        if (password.Contains("admin", StringComparison.OrdinalIgnoreCase))
+            return "La contraseña no puede contener el nombre de usuario (admin).";
+        int kinds = (password.Any(char.IsUpper) ? 1 : 0) + (password.Any(char.IsLower) ? 1 : 0)
+                  + (password.Any(char.IsDigit) ? 1 : 0) + (password.Any(c => !char.IsLetterOrDigit(c)) ? 1 : 0);
+        return kinds < 2
+            ? "La contraseña debe combinar al menos dos tipos de caracteres: mayúsculas, minúsculas, números o símbolos."
+            : null;
+    }
 
     /// <param name="Brand">"Dahua" o "Hikvision".</param>
     /// <param name="Dhcp">true = el equipo toma IP y DNS del servidor DHCP (se ignoran IP, máscara, puerta y DNS).</param>
@@ -281,6 +355,18 @@ public static partial class DiscoveryApi
                 .OrderByDescending(n => n.Gateway.Length > 0)
                 .ToList();
             return Results.Ok(networks);
+        });
+
+        // Comprobación rápida de una IP antes de asignarla (el panel la pide al
+        // salir del campo "IP nueva"): ¿responde algo en ella? Es solo un aviso;
+        // el cambio de IP vuelve a comprobarlo antes de aplicar.
+        app.MapGet("/api/discovery/ip-in-use", async (HttpContext ctx, string? ip) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (!TryParseV4((ip ?? "").Trim(), out var address))
+                return Results.Json(new { error = "La IP debe ser una dirección IPv4." },
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+            return Results.Ok(new { Ip = address.ToString(), InUse = await IsIpAnsweringAsync(address) });
         });
 
         app.MapPost("/api/discovery/change-ip", async (HttpContext ctx, ChangeIpRequest request,
@@ -378,17 +464,7 @@ public static partial class DiscoveryApi
             {
                 // Una IP repetida dejaría a dos equipos peleándose la misma
                 // dirección: se rechaza si algo ya responde en ella.
-                bool inUse = ipsInUse.Contains(newIp);
-                if (!inUse)
-                {
-                    try
-                    {
-                        using var ping = new System.Net.NetworkInformation.Ping();
-                        inUse = (await ping.SendPingAsync(ipAddress, 1000)).Status ==
-                                System.Net.NetworkInformation.IPStatus.Success;
-                    }
-                    catch (System.Net.NetworkInformation.PingException) { /* sin ruta: no se puede comprobar */ }
-                }
+                bool inUse = ipsInUse.Contains(newIp) || await IsIpAnsweringAsync(ipAddress);
                 if (inUse)
                     return await Reject(StatusCodes.Status409Conflict,
                         $"La IP {newIp} ya está en uso por otro equipo de la red. Elija otra.");
@@ -456,21 +532,21 @@ public static partial class DiscoveryApi
             // Parámetros básicos: fecha, hora y zona horaria iguales a las del
             // servidor (el equipo de fábrica arranca con otra zona y otra hora).
             bool timeSynced = false;
-            string? timeError = null;
+            string? timeError = null, timeNote = null;
             if (request.SyncTime)
             {
                 if (!reachable || !confirmed)
                     timeError = "El equipo no quedó accesible desde este servidor: ajuste la fecha y la hora desde el propio equipo.";
                 else
                 {
-                    timeError = await DeviceWebSetup.SyncTimeAsync(brand, ip, httpPort > 0 ? httpPort : 80, username,
-                        request.Password!, logger, ct);
+                    (timeError, timeNote) = await DeviceWebSetup.SyncTimeAsync(brand, ip, httpPort > 0 ? httpPort : 80,
+                        username, request.Password!, logger, ct);
                     timeSynced = timeError is null;
                 }
                 await audit.LogAsync(ctx, "devices", "device-time-synced", targetType: "device", targetName: target,
                     detail: timeSynced
                         ? $"Sincronizó la fecha, la hora y la zona horaria del equipo {brand} {target} con el servidor " +
-                          $"({TimeZoneInfo.Local.DisplayName})."
+                          $"({TimeZoneInfo.Local.DisplayName})" + (timeNote is null ? "." : $"; {timeNote}")
                         : $"No se pudo sincronizar la fecha y la hora del equipo {brand} {target}: {timeError}",
                     success: timeSynced);
             }
@@ -478,11 +554,39 @@ public static partial class DiscoveryApi
             return Results.Ok(new
             {
                 Ip = ip, Mac = mac, Model = model, Username = username, Dhcp = dhcp,
-                TimeSynced = timeSynced, TimeError = timeError,
+                TimeSynced = timeSynced, TimeError = timeError, TimeNote = timeNote,
                 Confirmed = confirmed, Reachable = reachable, DnsApplied = dnsApplied, DnsError = dnsError,
             });
         });
     }
+
+    /// <summary>
+    /// ¿Hay algo en esa IP? Ping de 1 s y, si no contesta y la IP está en una
+    /// subred del servidor, una consulta ARP: muchos equipos (y Windows con su
+    /// firewall) no responden al ping pero sí al ARP.
+    /// </summary>
+    private static async Task<bool> IsIpAnsweringAsync(IPAddress address)
+    {
+        try
+        {
+            using var ping = new System.Net.NetworkInformation.Ping();
+            if ((await ping.SendPingAsync(address, 1000)).Status == System.Net.NetworkInformation.IPStatus.Success)
+                return true;
+        }
+        catch (System.Net.NetworkInformation.PingException) { /* sin ruta: se sigue con ARP */ }
+
+        if (!IsInLocalSubnet(address.ToString())) return false;
+        return await Task.Run(() =>
+        {
+            var mac = new byte[6];
+            uint length = (uint)mac.Length;
+            uint destination = BitConverter.ToUInt32(address.GetAddressBytes(), 0);
+            return SendARP(destination, 0, mac, ref length) == 0 && length > 0;
+        });
+    }
+
+    [System.Runtime.InteropServices.DllImport("iphlpapi.dll", ExactSpelling = true)]
+    private static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref uint physicalAddrLen);
 
     private static bool TryParseV4(string text, out IPAddress address) =>
         IPAddress.TryParse(text, out address!) && address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork

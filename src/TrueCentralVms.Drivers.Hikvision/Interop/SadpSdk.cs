@@ -70,6 +70,14 @@ internal static class SadpSdk
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Ansi)]
     public static extern bool SADP_ModifyDeviceNetParam(string sMAC, string sPassword, ref SADP_DEV_NET_PARAM lpNetParam);
 
+    /// <summary>
+    /// Activa un equipo de fábrica: le fija la contraseña del usuario admin
+    /// (como "Activate" de SADP Tool). Se identifica por su N° de serie
+    /// completo, tal como lo anunció la sesión en curso.
+    /// </summary>
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Ansi)]
+    public static extern bool SADP_ActivateDevice(string sDevSerialNO, string sCommand);
+
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
     public static extern uint SADP_GetLastError();
 
@@ -83,6 +91,8 @@ internal static class SadpSdk
         2011 => "el equipo no respondió (tiempo agotado)",
         2018 => "el equipo está bloqueado por demasiados intentos con contraseña incorrecta; espere unos minutos",
         2019 => "el equipo no está activado: actívelo antes de cambiarle la IP",
+        2020 => "el equipo rechazó la contraseña por débil; use una más robusta",
+        2021 => "el equipo ya está activado",
         2024 => "contraseña incorrecta",
         _ => $"error {code} del SDK de SADP",
     };
