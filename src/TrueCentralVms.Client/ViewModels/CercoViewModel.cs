@@ -44,6 +44,17 @@ public sealed partial class CercoViewModel : ObservableObject
         {
             if (ok && _loaded) Application.Current.Dispatcher.InvokeAsync(() => _ = ReloadAsync());
         };
+        // Cambió el alcance por ubicación de este usuario, o un panel cambió de
+        // ubicación: otros paneles a la vista y otra ruta en cada tarjeta.
+        hub.ConfigChanged += entity =>
+        {
+            if (entity is "scope" or "locations" && _loaded) Application.Current.Dispatcher.InvokeAsync(() => _ = ReloadAsync());
+        };
+        // Cambió lo que esta sesión puede operar: se re-evalúan los botones.
+        OperableScope.Current.Changed += () =>
+        {
+            foreach (var panel in Panels) panel.RefreshOperable();
+        };
     }
 
     public ObservableCollection<CercoPanelItem> Panels { get; } = [];
@@ -147,7 +158,7 @@ public sealed partial class CercoPanelItem : ObservableObject
 
     public int Id => _dto.Id;
     public string Name => _dto.Name;
-    public string Subtitle => string.IsNullOrWhiteSpace(_dto.Site) ? _dto.DeviceId : _dto.Site!;
+    public string Subtitle => string.IsNullOrWhiteSpace(_dto.Location) ? _dto.DeviceId : _dto.Location!;
     public bool Connected => _dto.Connected;
     public bool Armed => _dto.Armed;
     public bool Siren => _dto.Siren;
@@ -164,11 +175,26 @@ public sealed partial class CercoPanelItem : ObservableObject
     public string StateText => _dto.Arming ? "Armando…" : _dto.Armed ? "Armado" : "Desarmado";
     public string ConnectionText => !_dto.Enabled ? "Pausado" : _dto.Connected ? "En línea" : "Sin conexión";
     public string LevelText => _dto.Voltage is int v ? $"Nivel {v}/21" : "";
+
+    // Señal WiFi del panel. Umbrales para el ESP8266: >= -67 dBm buena, -68..-75
+    // regular, < -75 débil (pierde la asociación de vez en cuando).
+    public string SignalText => _dto.Connected && _dto.Rssi is int r
+        ? $"{SignalBars(r)} Señal {(r >= -67 ? "buena" : r >= -75 ? "regular" : "débil")} · {r} dBm" : "";
+    /// <summary>Color de la píldora (reusa los estilos de LevelBadge): Armed verde, Triggered ámbar, Alarm rojo.</summary>
+    public string SignalLevel => _dto.Rssi is int s ? (s >= -67 ? "Armed" : s >= -75 ? "Triggered" : "Alarm") : "Normal";
+    private static string SignalBars(int r) => r >= -67 ? "▂▄▆█" : r >= -75 ? "▂▄▆" : r >= -82 ? "▂▄" : "▂";
     public string ZoneText => string.Join(" · ", _dto.Zones.Where(z => z.InAlarm).Select(z => $"Zona {z.Number} en alarma"));
 
-    public bool CanArm => _dto.Connected && !_dto.Armed && !_dto.Arming && !IsBusy;
-    public bool CanDisarm => _dto.Connected && (_dto.Armed || _dto.Arming) && !IsBusy;
-    public bool CanSilence => _dto.Connected && _dto.Siren && !IsBusy;
+    /// <summary>El panel está en el alcance de este usuario (si no, se ve pero no se opera).</summary>
+    public bool CanOperate => OperableScope.Current.CanOperateFence(_dto.Id);
+    public bool IsReadOnly => !CanOperate;
+
+    public bool CanArm => CanOperate && _dto.Connected && !_dto.Armed && !_dto.Arming && !IsBusy;
+    public bool CanDisarm => CanOperate && _dto.Connected && (_dto.Armed || _dto.Arming) && !IsBusy;
+    public bool CanSilence => CanOperate && _dto.Connected && _dto.Siren && !IsBusy;
+
+    /// <summary>Cambió lo que esta sesión puede operar.</summary>
+    public void RefreshOperable() => OnPropertyChanged(string.Empty);
 
     partial void OnIsBusyChanged(bool value)
     {

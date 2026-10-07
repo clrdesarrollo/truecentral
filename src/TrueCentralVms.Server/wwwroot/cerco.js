@@ -24,7 +24,7 @@ const CERCO_ENUMS = {
   status: ["Unknown", "Online", "Offline"],
   kind: ["Boot", "Armed", "Disarmed", "Alarm", "FenceCut", "HvFault", "Arc", "SirenOn", "SirenOff",
          "RfRemote", "Tamper", "ArmFailed", "ZoneRestore", "Panic", "RfLearned", "RfLearnTimeout",
-         "PowerLost", "PowerRestored", "Reconnected"],
+         "PowerLost", "PowerRestored", "Reconnected", "FirmwareUpdated"],
   severity: ["Info", "Warning", "Critical"],
   action: ["None", "Arm", "Disarm", "Toggle", "Panic", "Silence"],
 };
@@ -73,8 +73,8 @@ async function renderCercoPanels() {
       </div>` : `
       <div class="table-scroll"><table class="grid">
         <thead><tr>
-          <th>Nombre</th><th>ID de equipo</th><th>Sitio</th><th>Firmware</th>
-          <th>Armado</th><th>Sirena</th><th>Nivel AV</th><th>Conexión</th><th></th>
+          <th>Nombre</th><th>ID de equipo</th><th>Ubicación</th><th>Firmware</th>
+          <th>Armado</th><th>Sirena</th><th>Nivel AV</th><th>Señal</th><th>Conexión</th><th></th>
         </tr></thead>
         <tbody id="cerco-rows">
           ${panels.map((p) => cercoRow(p, isAdmin)).join("")}
@@ -92,7 +92,19 @@ async function renderCercoPanels() {
   });
   cercoBind("CercoRemotesChanged", (m) => cercoCfgOnRemotes(m.panelId, m.remotes));
   cercoBind("CercoEventReceived", (e) => cercoCfgOnEvent(e));
+  cercoBind("CercoOtaProgress", (m) => cercoCfgOnOta(m));
   cercoReconnectUnsub = VmsHub.onReconnected(() => { if (location.hash === "#/cerco-panels") renderCercoPanels(); });
+}
+
+// Señal WiFi del panel (RSSI que reporta en cada "state"). Umbrales para el ESP8266:
+// >= -67 dBm buena, -68..-75 regular, < -75 débil (pierde la asociación de vez en cuando).
+function cercoSignal(p, compact) {
+  if (p.rssi == null || !p.connected) return compact ? `<span class="muted">—</span>` : "";
+  const r = p.rssi;
+  const [cls, label, bars] = r >= -67 ? ["ok", "buena", 4] : r >= -75 ? ["warn", "regular", 3] : r >= -82 ? ["danger", "débil", 2] : ["danger", "muy débil", 1];
+  const svg = `<svg class="sig-bars" viewBox="0 0 16 12" aria-hidden="true">${[0, 1, 2, 3].map((i) =>
+    `<rect x="${i * 4}" y="${9 - i * 3}" width="3" height="${3 + i * 3}" rx="0.6" opacity="${i < bars ? 1 : 0.25}"/>`).join("")}</svg>`;
+  return `<span class="tag ${cls} sig" title="Señal WiFi ${label}: ${r} dBm. Con menos de -75 dBm el panel puede perder la conexión de vez en cuando; revise la antena o acerque el punto de acceso.">${svg}${compact ? "" : "Señal "}${r} dBm</span>`;
 }
 
 function cercoRow(p, isAdmin) {
@@ -100,17 +112,15 @@ function cercoRow(p, isAdmin) {
     <tr id="cerco-row-${p.id}" data-id="${p.id}" data-name="${esc(p.name)}">
       <td>${esc(p.name)}</td>
       <td class="muted">${esc(p.deviceId)}${p.enrolled ? "" : ` <span class="tag warn" title="Esperando que el instalador cargue el código de enrolamiento en el equipo">sin enrolar</span>`}</td>
-      <td class="muted">${esc(p.site ?? "—")}</td>
+      <td class="muted">${p.location ? esc(p.location) : `<span class="loc-line none">Por ubicar</span>`}</td>
       <td class="muted">${esc(p.firmware ?? "—")}</td>
       <td>${p.armed ? `<span class="tag ok">armado</span>` : `<span class="tag">desarmado</span>`}</td>
       <td>${p.siren ? `<span class="tag danger">sonando</span>` : "—"}</td>
       <td class="muted">${p.voltage ?? "—"}</td>
+      <td>${cercoSignal(p, true)}</td>
       <td>${cercoConnDot(p)}</td>
       <td class="row-actions">
-        ${isAdmin ? `<button class="btn btn-config" title="Potencia, sirena, zona, llave y controles remotos">Configurar</button>
-        <button class="btn ghost btn-key" title="Genera un código de enrolamiento nuevo (hay que re-enrolar el equipo)">Rotar clave</button>
-        <button class="btn ghost btn-reboot" title="Reiniciar el equipo">Reiniciar</button>
-        <button class="btn ghost btn-factory" title="Borra WiFi, servidor y clave del equipo; vuelve al portal de provisioning">Restaurar</button>
+        ${isAdmin ? `<button class="btn btn-config" title="Potencia, sirena, zona, llave, firmware, controles remotos y zona de riesgo (rotar clave, reiniciar, restaurar)">Configurar</button>
         <button class="btn ghost btn-edit">Editar</button>
         <button class="btn danger btn-delete">Eliminar</button>` : ""}
       </td>
@@ -132,27 +142,16 @@ async function onCercoAdminClick(e) {
     if (!confirm(`¿Eliminar el panel "${name}"? El historial de eventos se conserva.`)) return;
     try { await Api.delete(`/api/cerco/panels/${id}`); toast("Panel eliminado."); document.getElementById(`cerco-row-${id}`)?.remove(); }
     catch (err) { toast(err.error, true); }
-  } else if (btn.classList.contains("btn-key")) {
-    if (!confirm(`¿Rotar la clave de "${name}"? El panel dejará de conectar hasta que lo re-enrole con el código nuevo (desde CLR Cerco Provisioner o el portal del equipo).`)) return;
-    try { cercoCredentialsModal(await Api.post(`/api/cerco/panels/${id}/rotate-key`), name); }
-    catch (err) { toast(err.error, true); }
-  } else if (btn.classList.contains("btn-reboot")) {
-    if (!confirm(`¿Reiniciar el panel "${name}"?`)) return;
-    try { await Api.post(`/api/cerco/panels/${id}/reboot`); toast("Reinicio enviado."); }
-    catch (err) { toast(err.error, true); }
-  } else if (btn.classList.contains("btn-factory")) {
-    if (!confirm(`¿Restaurar de fábrica el panel "${name}"?\n\nEl equipo borra su WiFi, servidor, clave y contraseña, y vuelve al portal de provisioning. Conserva la configuración del cerco y los controles remotos. Habrá que provisionarlo de nuevo en terreno.`)) return;
-    try { await Api.post(`/api/cerco/panels/${id}/factory`); toast("Restauración enviada: el panel vuelve al portal."); }
-    catch (err) { toast(err.error, true); }
   }
 }
 
-function cercoPanelModal(panel) {
+async function cercoPanelModal(panel) {
   const editing = !!panel;
+  const places = await loadLocationChoices();
   openModal(`
     <h3>${editing ? "Editar" : "Agregar"} panel de cerco</h3>
     <div class="field"><label>Nombre</label><input id="c-name" maxlength="128" value="${editing ? esc(panel.name) : ""}" placeholder="Cerco perímetro norte"></div>
-    <div class="field"><label>Sitio</label><input id="c-site" maxlength="255" value="${editing ? esc(panel.site ?? "") : ""}" placeholder="Bodega central"></div>
+    ${locationFieldHtml("c-location", places, editing ? panel.locationId ?? null : null)}
     <div class="field checkbox"><label><input type="checkbox" id="c-enabled" ${!editing || panel.enabled ? "checked" : ""}> Habilitado</label></div>
     ${editing ? "" : `<div class="info-box">Al guardar, el sistema genera el <b>ID de equipo</b> (6 dígitos) y el <b>código de enrolamiento</b> (8 dígitos, válido 48 h). Se muestran una sola vez: el instalador los carga en el panel.</div>`}
     <div class="modal-actions">
@@ -161,7 +160,7 @@ function cercoPanelModal(panel) {
     </div>`);
   $("#c-cancel").addEventListener("click", closeModal);
   $("#c-save").addEventListener("click", async () => {
-    const body = { name: $("#c-name").value.trim(), site: $("#c-site").value.trim() || null, enabled: $("#c-enabled").checked };
+    const body = { name: $("#c-name").value.trim(), locationId: locationFieldValue("c-location"), enabled: $("#c-enabled").checked };
     if (!body.name) { toast("El nombre es obligatorio.", true); return; }
     try {
       if (editing) {
@@ -263,6 +262,16 @@ async function cercoConfigModal(panel) {
       <button class="btn" type="button" id="cfg-save">Guardar configuración</button>
     </div>
 
+    <h4 style="margin:18px 0 4px">Firmware</h4>
+    <div class="muted" style="font-size:12px">Versión instalada: <b id="fw-current">${esc(panel.firmware ?? "—")}</b></div>
+    <div class="toolbar" style="gap:6px;flex-wrap:wrap;margin-top:6px">
+      <input type="file" id="fw-file" accept=".bin" style="flex:1;min-width:180px">
+      <button class="btn" type="button" id="fw-send">Actualizar firmware</button>
+    </div>
+    <div id="fw-status" class="info-box hidden"></div>
+    <div class="muted" style="font-size:11px">Solo este panel, y solo desarmado. Tarda alrededor de un minuto y el panel se reinicia.
+      No hay vuelta atrás automática: pruebe cada versión en banco antes de subirla a un cerco en servicio.</div>
+
     <h4 style="margin:18px 0 4px">Controles remotos (433 MHz)</h4>
     <div class="muted" style="font-size:11px;margin-bottom:6px">Cada botón se programa con su acción. Un control de 2 botones = 2 entradas.</div>
     <div class="toolbar" style="gap:6px;flex-wrap:wrap">
@@ -278,6 +287,11 @@ async function cercoConfigModal(panel) {
 
     <div class="modal-actions">
       <button class="btn danger ghost" type="button" id="rf-clear">Eliminar todos los controles</button>
+    </div>
+
+    ${cercoDangerZoneHtml(panel)}
+
+    <div class="modal-actions">
       <button class="btn ghost" type="button" id="cfg-close">Cerrar</button>
     </div>`, "wider");
 
@@ -286,7 +300,34 @@ async function cercoConfigModal(panel) {
   cercoCfgRenderRemotes(remotes);
 
   $("#cfg-level").addEventListener("input", (e) => { $("#cfg-level-v").textContent = e.target.value; });
-  $("#cfg-close").addEventListener("click", () => { cercoCfgStopLearn(); cercoCfg = null; closeModal(); });
+  $("#cfg-close").addEventListener("click", () => { cercoCfgStopLearn(); cercoCfgStopOta(); cercoCfg = null; closeModal(); });
+
+  $("#fw-send").addEventListener("click", async () => {
+    const file = $("#fw-file").files[0];
+    if (!file) { toast("Elija el archivo .bin del firmware.", true); return; }
+    if (!confirm(`¿Actualizar el firmware de "${panel.name}" con ${file.name}?\n\nEl panel debe estar desarmado. Se reinicia al terminar (alrededor de un minuto).`)) return;
+    const btn = $("#fw-send");
+    btn.disabled = true;
+    cercoCfgOtaStatus("Subiendo el archivo al servidor…", 0);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(`/api/cerco/panels/${panel.id}/firmware`, {
+        method: "POST", headers: { Authorization: "Bearer " + Api.token }, body: form,
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw { error: (data && data.error) || `Error ${response.status}` };
+      cercoCfgStopOta();
+      cercoCfg.ota = { target: data.version, timer: setTimeout(() => {
+        cercoCfgOtaStatus(`No se confirmó la versión ${esc(data.version)}. Revise el historial del panel; si sigue con la anterior, reintente.`, null, true);
+        cercoCfgStopOta();
+      }, 180000) };
+      cercoCfgOtaStatus(`Orden enviada: ${esc(data.current ?? "?")} → <b>${esc(data.version)}</b>. Esperando que el panel descargue…`, 0);
+    } catch (err) {
+      cercoCfgOtaStatus(esc(err.error ?? "No se pudo enviar el firmware."), null, true);
+      btn.disabled = false;
+    }
+  });
 
   $("#cfg-save").addEventListener("click", async () => {
     const body = {
@@ -319,6 +360,8 @@ async function cercoConfigModal(panel) {
     catch (err) { toast(err.error, true); }
   });
 
+  cercoDangerZoneBind(panel);
+
   // Acciones por fila (renombrar / eliminar).
   $("#rf-rows").addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-slot]");
@@ -331,6 +374,105 @@ async function cercoConfigModal(panel) {
       const input = document.getElementById(`rf-n-${slot}`);
       try { await Api.put(`/api/cerco/panels/${panel.id}/remotes/${slot}`, { name: input.value.trim() }); toast("Nombre guardado."); }
       catch (err) { toast(err.error, true); }
+    }
+  });
+}
+
+// ---- zona de riesgo ----
+// Acciones que cortan la comunicación con el equipo. Cada una exige escribir el
+// ID de equipo para habilitar el botón final (como la "Danger Zone" de GitHub);
+// el servidor las audita (cerco/panel-key-rotated y cerco/command).
+const CERCO_DANGER = [
+  {
+    act: "rotate", title: "Rotar clave", button: "Rotar clave",
+    help: "Genera un código de enrolamiento nuevo (8 dígitos, válido 48 h) e invalida la clave actual del equipo.",
+    risk: "El panel se desconecta de inmediato y NO vuelve a conectar hasta que el instalador cargue el código nuevo en el equipo (CLR Cerco Provisioner o portal del equipo). Mientras tanto no llegan alarmas ni se puede armar o desarmar desde la central.",
+    needsConnection: false,
+  },
+  {
+    act: "reboot", title: "Reiniciar el equipo", button: "Reiniciar",
+    help: "Reinicia el panel de forma remota. No borra la configuración, la clave ni los controles remotos.",
+    risk: "El panel queda fuera de línea mientras arranca y vuelve a conectarse (normalmente menos de un minuto; más si la señal WiFi es débil). En ese lapso no se reciben eventos ni se pueden enviar comandos. Si no reconecta, hay que ir a terreno.",
+    needsConnection: true,
+  },
+  {
+    act: "factory", title: "Restaurar de fábrica", button: "Restaurar",
+    help: "Borra el WiFi, el servidor, la clave y la contraseña del equipo, y lo devuelve al portal de provisioning. Conserva los ajustes del cerco y los controles remotos.",
+    risk: "Se pierde la comunicación de forma PERMANENTE: el panel no vuelve a conectar hasta que se provisione de nuevo en terreno (WiFi, servidor y código de enrolamiento). No se puede deshacer desde la central.",
+    needsConnection: true,
+  },
+];
+
+function cercoDangerZoneHtml(panel) {
+  return `
+    <div class="danger-zone" id="cfg-danger">
+      <h4>Zona de riesgo</h4>
+      <div class="dz-intro muted">Cualquiera de estas acciones corta la comunicación con el equipo. Para continuar hay que
+        confirmar escribiendo el ID de equipo <b>${esc(panel.deviceId)}</b>.</div>
+      ${CERCO_DANGER.map((d) => `
+        <div class="dz-item" data-act="${d.act}">
+          <div class="dz-row">
+            <div>
+              <b>${esc(d.title)}</b>
+              <div class="dz-help">${esc(d.help)}</div>
+              <div class="dz-help"><span class="dz-risk">Riesgo:</span> ${esc(d.risk)}</div>
+            </div>
+            <button class="btn dz-open" type="button">${esc(d.button)}</button>
+          </div>
+          <div class="dz-confirm hidden">
+            <label>Para confirmar <b>${esc(d.title.toLowerCase())}</b> de «${esc(panel.name)}», escriba el ID de equipo <b>${esc(panel.deviceId)}</b>:</label>
+            <div class="dz-confirm-row">
+              <input class="dz-input" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="${esc(panel.deviceId)}">
+              <button class="btn danger dz-go" type="button" disabled>Entiendo el riesgo: ${esc(d.button.toLowerCase())}</button>
+              <button class="btn ghost dz-cancel" type="button">Cancelar</button>
+            </div>
+          </div>
+        </div>`).join("")}
+    </div>`;
+}
+
+function cercoDangerZoneBind(panel) {
+  const zone = document.getElementById("cfg-danger");
+  if (!zone) return;
+  const close = (item) => {
+    item.querySelector(".dz-confirm").classList.add("hidden");
+    item.querySelector(".dz-input").value = "";
+    item.querySelector(".dz-go").disabled = true;
+  };
+  zone.addEventListener("input", (e) => {
+    if (!e.target.classList.contains("dz-input")) return;
+    e.target.closest(".dz-item").querySelector(".dz-go").disabled = e.target.value.trim() !== String(panel.deviceId);
+  });
+  zone.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button");
+    const item = btn?.closest(".dz-item");
+    if (!item) return;
+    const d = CERCO_DANGER.find((x) => x.act === item.dataset.act);
+    if (btn.classList.contains("dz-open")) {
+      zone.querySelectorAll(".dz-item").forEach((it) => { if (it !== item) close(it); });
+      item.querySelector(".dz-confirm").classList.remove("hidden");
+      item.querySelector(".dz-input").focus();
+    } else if (btn.classList.contains("dz-cancel")) {
+      close(item);
+    } else if (btn.classList.contains("dz-go")) {
+      if (item.querySelector(".dz-input").value.trim() !== String(panel.deviceId)) return;
+      btn.disabled = true;
+      try {
+        if (d.act === "rotate") {
+          const creds = await Api.post(`/api/cerco/panels/${panel.id}/rotate-key`);
+          // Las credenciales se muestran una sola vez: reemplazan al modal de configuración.
+          cercoCfgStopLearn(); cercoCfgStopOta(); cercoCfg = null;
+          cercoCredentialsModal(creds, panel.name);
+          return;
+        }
+        await Api.post(`/api/cerco/panels/${panel.id}/${d.act}`);
+        toast(d.act === "reboot" ? "Reinicio enviado: el panel vuelve en alrededor de un minuto."
+                                 : "Restauración enviada: el panel vuelve al portal de provisioning.");
+        close(item);
+      } catch (err) {
+        toast(err.error ?? "No se pudo enviar la orden.", true);
+        btn.disabled = false;
+      }
     }
   });
 }
@@ -365,6 +507,67 @@ function cercoCfgOnState(p) {
     : `${p.zone0Adc} → ${p.zone0Adc >= 384 && p.zone0Adc <= 895 ? "normal" : "abierta/corto"}`;
   const key = document.getElementById("cfg-key-now");
   if (key) key.textContent = p.keyOn ? "cerrada" : "abierta";
+  const fw = document.getElementById("fw-current");
+  if (fw) fw.textContent = p.firmware ?? "—";
+  // Reiniciar y restaurar viajan por la conexión: sin panel conectado no se pueden entregar.
+  for (const d of CERCO_DANGER.filter((x) => x.needsConnection)) {
+    const open = document.querySelector(`#cfg-danger .dz-item[data-act="${d.act}"] .dz-open`);
+    if (!open) continue;
+    open.disabled = !p.connected;
+    open.title = p.connected ? "" : "El panel no está conectado: la orden no se puede entregar.";
+  }
+  // OTA confirmada: el panel volvió con la versión pedida.
+  if (cercoCfg.ota && p.connected && p.firmware === cercoCfg.ota.target) {
+    cercoCfgOtaStatus(`Actualizado: el panel volvió con la versión <b>${esc(p.firmware)}</b>.`, null);
+    cercoCfgStopOta();
+  }
+}
+
+// ---- actualización de firmware (OTA) ----
+const CERCO_OTA_ERRORS = {
+  armed: "el panel está armado; desármelo y reintente",
+  busy: "ya hay una actualización en curso",
+  url: "dirección de descarga inválida",
+  size: "la imagen no cabe en el panel o su tamaño no coincide",
+  sha: "la imagen llegó distinta (huella SHA-256); no se instaló",
+  incomplete: "la descarga se cortó; no se instaló",
+  begin: "el panel no pudo preparar la flash",
+  write: "falló la escritura en la flash",
+  sign: "el archivo no tiene una firma válida de CLRobotics; no se instaló",
+  sign_key: "el panel no pudo cargar su clave de verificación",
+};
+function cercoOtaError(code) {
+  if (!code) return "error desconocido";
+  if (CERCO_OTA_ERRORS[code]) return CERCO_OTA_ERRORS[code];
+  if (code.startsWith("http_")) return `el panel no pudo descargar el archivo (HTTP ${code.slice(5)}). Revise que el firewall del servidor permita el puerto 5093.`;
+  if (code.startsWith("end_")) return `la verificación final falló (código ${code.slice(4)}); no se instaló`;
+  return code;
+}
+function cercoCfgOtaStatus(html, pct, isError) {
+  const box = document.getElementById("fw-status");
+  if (!box) return;
+  box.classList.remove("hidden");
+  box.style.borderColor = isError ? "var(--danger)" : "";
+  box.innerHTML = html + (pct == null ? "" :
+    `<div style="height:6px;background:rgba(139,152,165,.25);border-radius:3px;margin-top:6px;overflow:hidden">
+       <div style="height:100%;width:${pct}%;background:var(--accent);transition:width .3s"></div></div>`);
+}
+function cercoCfgStopOta() {
+  if (cercoCfg?.ota?.timer) clearTimeout(cercoCfg.ota.timer);
+  if (cercoCfg) cercoCfg.ota = null;
+  const btn = document.getElementById("fw-send");
+  if (btn) btn.disabled = false;
+}
+function cercoCfgOnOta(m) {
+  if (!cercoCfg || cercoCfg.panelId !== m.panelId) return;
+  const target = cercoCfg.ota?.target ? ` a <b>${esc(cercoCfg.ota.target)}</b>` : "";
+  if (m.state === "start") cercoCfgOtaStatus(`Descargando el firmware${target}…`, 0);
+  else if (m.state === "progress") cercoCfgOtaStatus(`Descargando y escribiendo${target}… ${m.pct}%`, m.pct);
+  else if (m.state === "done") cercoCfgOtaStatus(`Imagen verificada e instalada${target}. El panel se está reiniciando…`, 100);
+  else if (m.state === "error") {
+    cercoCfgOtaStatus(`No se actualizó: ${esc(cercoOtaError(m.err))}. El panel sigue con su versión actual.`, null, true);
+    cercoCfgStopOta();
+  }
 }
 
 function cercoCfgOnRemotes(panelId, remotes) {
@@ -457,7 +660,7 @@ function cercoCard(p) {
   return `
     <div class="mon-card ${p.siren ? "alarm" : ""}" id="cerco-card-${p.id}">
       <div class="mon-head"><b>${esc(p.name)}</b>${cercoConnDot(p)}</div>
-      <div class="muted" style="font-size:12px">${esc(p.site ?? p.deviceId)}</div>
+      <div class="muted" style="font-size:12px">${esc(p.location ?? p.deviceId)}</div>
       <div class="mon-stats">
         ${p.arming ? `<span class="tag operator">Armando…</span>`
                    : `<span class="${p.armed ? "tag ok" : "tag"}">${p.armed ? "Armado" : "Desarmado"}</span>`}
@@ -467,12 +670,13 @@ function cercoCard(p) {
         ${p.armed ? (p.hvOk ? `<span class="tag ok">Pulso OK</span>` : `<span class="tag danger">Sin retorno</span>`) : ""}
         ${!p.fenceOk ? `<span class="tag danger">Cerco caído</span>` : ""}
         ${p.voltage != null ? `<span class="tag" title="Nivel Voltaje configurado (7–21): tiempo de carga del energizador. El panel no mide kV.">Nivel ${p.voltage}/21</span>` : ""}
+        ${cercoSignal(p, false)}
       </div>
       <div class="mon-actions">
         ${p.armed
-          ? `<button class="btn ghost btn-cmd" data-id="${p.id}" data-cmd="disarm" ${off ? "disabled" : ""}>Desarmar</button>`
-          : `<button class="btn btn-cmd" data-id="${p.id}" data-cmd="arm" ${off ? "disabled" : ""}>Armar</button>`}
-        <button class="btn danger btn-cmd" data-id="${p.id}" data-cmd="silence" ${off || !p.siren ? "disabled" : ""}>Silenciar</button>
+          ? `<button class="btn ghost btn-cmd" data-op="fence:${p.id}" data-id="${p.id}" data-cmd="disarm" ${off ? "disabled" : ""}>Desarmar</button>`
+          : `<button class="btn btn-cmd" data-op="fence:${p.id}" data-id="${p.id}" data-cmd="arm" ${off ? "disabled" : ""}>Armar</button>`}
+        <button class="btn danger btn-cmd" data-op="fence:${p.id}" data-id="${p.id}" data-cmd="silence" ${off || !p.siren ? "disabled" : ""}>Silenciar</button>
       </div>
       ${off ? `<div class="muted" style="font-size:11px;margin-top:6px">Sin conexión — comandos deshabilitados.</div>` : ""}
     </div>`;
@@ -486,7 +690,7 @@ const CERCO_KIND_LABELS = [
   ["Panic", "Pánico"], ["SirenOn", "Sirena activada"], ["SirenOff", "Sirena silenciada"],
   ["RfRemote", "Silenciada desde control"], ["RfLearned", "Control programado"],
   ["RfLearnTimeout", "Programación sin respuesta"], ["Boot", "Arranque del panel"],
-  ["Reconnected", "Reconexión con el servidor"],
+  ["Reconnected", "Reconexión con el servidor"], ["FirmwareUpdated", "Firmware actualizado"],
 ];
 const CERCO_HIST_PAGE = 50;
 

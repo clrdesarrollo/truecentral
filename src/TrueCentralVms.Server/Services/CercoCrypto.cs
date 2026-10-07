@@ -13,6 +13,35 @@ public static class CercoCrypto
 {
     public static byte[] Hmac(byte[] key, ReadOnlySpan<byte> msg) => HMACSHA256.HashData(key, msg.ToArray());
 
+    // Mensaje firmado del panel (estado y lista RF, firmware 1.5.0+): el JSON termina en
+    // ,"mac":"<44 base64>"} y mac = HMAC(sk, "sig|" + mismo JSON sin ese campo). Se trabaja
+    // sobre los BYTES recibidos (no se re-serializa): el panel firma exactamente lo que envía.
+    private const int SigSuffixLen = 54;                    // ,"mac":" (8) + 44 + "} (2)
+    private static ReadOnlySpan<byte> SigSuffixHead => ",\"mac\":\""u8;
+
+    /// <summary>¿El mensaje trae el sufijo de firma?</summary>
+    public static bool HasSignature(ReadOnlySpan<byte> raw) =>
+        raw.Length > SigSuffixLen && raw[^2] == (byte)'"' && raw[^1] == (byte)'}'
+        && raw.Slice(raw.Length - SigSuffixLen, 8).SequenceEqual(SigSuffixHead);
+
+    /// <summary>Verifica la firma de un mensaje del panel. why = motivo si falla.</summary>
+    public static bool VerifySigned(byte[] sk, byte[] raw, out string why)
+    {
+        why = "";
+        if (!HasSignature(raw)) { why = "sin firma"; return false; }
+        int cut = raw.Length - SigSuffixLen;
+        byte[] got;
+        try { got = Convert.FromBase64String(Encoding.ASCII.GetString(raw, cut + 8, 44)); }
+        catch (FormatException) { why = "firma ilegible"; return false; }
+        byte[] msg = new byte[4 + cut + 1];
+        "sig|"u8.CopyTo(msg);
+        Buffer.BlockCopy(raw, 0, msg, 4, cut);
+        msg[^1] = (byte)'}';
+        if (got.Length != 32 || !CryptographicOperations.FixedTimeEquals(HMACSHA256.HashData(sk, msg), got))
+        { why = "firma inválida"; return false; }
+        return true;
+    }
+
     public static string HmacB64(byte[] key, string msg) =>
         Convert.ToBase64String(Hmac(key, Encoding.UTF8.GetBytes(msg)));
 

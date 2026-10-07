@@ -21,6 +21,9 @@ public sealed class CercoConnection(int panelId, string deviceId, WebSocket sock
     public WebSocket Socket { get; } = socket;
     public byte[] Sk { get; } = sessionKey;
     public DateTime ConnectedAt { get; } = DateTime.UtcNow;
+    /// <summary>IP de este servidor tal como la ve el panel (extremo local del socket): con ella se
+    /// arma la URL de descarga del firmware para OTA.</summary>
+    public System.Net.IPAddress? ServerAddress { get; init; }
 
     public async Task<bool> SendRawAsync(string json, CancellationToken ct)
     {
@@ -79,10 +82,19 @@ public sealed class CercoConnectionManager
     public CercoConnection? Get(string deviceId) =>
         _byDevice.TryGetValue(deviceId, out var c) ? c : null;
 
-    public void Register(CercoConnection c) => _byDevice[c.DeviceId] = c;
+    /// <summary>
+    /// Registra la sesión nueva. Si el panel tenía otra (quedó colgada: el panel se
+    /// reconectó sin que el TCP viejo se cerrara), se aborta para liberarla de inmediato.
+    /// </summary>
+    public void Register(CercoConnection c)
+    {
+        if (_byDevice.TryGetValue(c.DeviceId, out var old) && !ReferenceEquals(old, c))
+            try { old.Socket.Abort(); } catch { }
+        _byDevice[c.DeviceId] = c;
+    }
 
-    /// <summary>Suelta la conexión solo si es exactamente la que se registró (evita soltar una reconexión).</summary>
-    public void Unregister(CercoConnection c) =>
+    /// <summary>Suelta la conexión solo si es exactamente la que se registró (evita soltar una reconexión). true = era la vigente.</summary>
+    public bool Unregister(CercoConnection c) =>
         ((ICollection<KeyValuePair<string, CercoConnection>>)_byDevice)
             .Remove(new KeyValuePair<string, CercoConnection>(c.DeviceId, c));
 

@@ -8,14 +8,14 @@ namespace TrueCentralVms.Server.Services;
 public static class CercoMapper
 {
     public static CercoPanelDto ToDto(CercoPanel p, bool connected) => new(
-        p.Id, p.Name, p.DeviceId, p.Site, p.Enabled, p.Status, connected,
+        p.Id, p.Name, p.DeviceId, Auth.LocationPaths.Of(p.LocationId), p.Enabled, p.Status, connected,
         p.Armed, p.Siren, p.HvOk, p.FenceOk, p.ArcFault, p.Voltage, p.Rssi,
         p.Model, p.Firmware, p.Mac, p.LastSeenAt, p.LastStateAt,
         p.Zones.OrderBy(z => z.Number)
                .Select(z => new CercoZoneDto(z.Number, z.Name, z.Enabled, z.InAlarm))
                .ToList(),
         p.Arming, p.KeyOn, p.RfLearning, p.Zone0Adc, p.ConfigSynced,
-        p.PowerSource, p.PowerDropPermille, p.ReturnUs, p.Enrolled);
+        p.PowerSource, p.PowerDropPermille, p.ReturnUs, p.Enrolled, p.LocationId);
 
     public static CercoEventDto ToDto(CercoEvent e) => new(
         e.Id, e.CercoPanelId, e.PanelName, e.Timestamp, e.ReceivedAt, e.Kind,

@@ -17,9 +17,19 @@
       "runtimeArgs": [
         "-NoProfile",
         "-Command",
-        "$env:Urls='http://localhost:5093'; $env:Database__PgPort='25492'; $env:Database__PgDataDir='../../build/pgdata-dev'; $env:Streaming__RtspPort='8664'; $env:Streaming__ApiPort='9921'; $env:Streaming__ServerPort='5093'; $env:Alarms__Receiver__Enabled='false'; $env:Alarms__LocalReceiver__Enabled='false'; $env:Cerco__Receiver__Enabled='false';Set-Location src/TrueCentralVms.Server; dotnet run --no-build"
+        "$env:Urls='http://localhost:5093'; $env:Database__PgPort='25492'; $env:Database__PgDataDir='../../build/pgdata-dev'; $env:Streaming__RtspPort='8664'; $env:Streaming__ApiPort='9921'; $env:Streaming__ServerPort='5093'; $env:Alarms__Receiver__Enabled='false'; $env:Alarms__LocalReceiver__Enabled='false'; $env:Cerco__Receiver__Enabled='false'; $env:Cerco__Firmware__Enabled='false'; Set-Location src/TrueCentralVms.Server; dotnet run --no-build"
       ],
       "port": 5093
+    },
+    {
+      "name": "server-test",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "$env:Urls='http://localhost:5097'; $env:Database__PgPort='25492'; $env:Database__PgDataDir='../../build/pgdata-dev'; $env:Streaming__RtspPort='8674'; $env:Streaming__ApiPort='9931'; $env:Streaming__ServerPort='5097'; $env:Alarms__Receiver__Enabled='false'; $env:Alarms__LocalReceiver__Enabled='false'; $env:Cerco__Receiver__Enabled='false'; $env:Cerco__Firmware__Enabled='false'; Set-Location src/TrueCentralVms.Server; dotnet run --no-build"
+      ],
+      "port": 5097
     }
   ]
 }

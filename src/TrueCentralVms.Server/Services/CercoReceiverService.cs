@@ -27,13 +27,18 @@ public sealed class CercoReceiverService(
     IServiceScopeFactory scopeFactory,
     CercoConnectionManager connections,
     CredentialProtector protector,
-    IHubContext<VmsHub> hub,
+    ScopedHub hub,
     IConfiguration config,
     ILogger<CercoReceiverService> logger) : BackgroundService
 {
     private const int MaxFrameBytes = 8 * 1024;
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ClockWindow = TimeSpan.FromSeconds(120);
+    // El panel manda "ping" cada 20 s y "state" cada 15 s: si en este plazo no llega
+    // nada, la conexión está muerta aunque el TCP siga "abierto" (corte de energía o de
+    // red del panel sin cierre). Sin este plazo la sesión vieja quedaba colgada y el
+    // panel figuraba en línea sin estarlo.
+    private static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(60);
 
     public int Port { get; private set; }
 
@@ -72,7 +77,9 @@ public sealed class CercoReceiverService(
             if (!await WsUpgrade.TryHandshakeAsync(stream, ct)) return;
             ws = WebSocket.CreateFromStream(stream, isServer: true, subProtocol: null,
                 keepAliveInterval: TimeSpan.FromSeconds(15));
-            await RunSessionAsync(ws, ct);
+            var local = (client.Client.LocalEndPoint as IPEndPoint)?.Address;
+            if (local is { IsIPv4MappedToIPv6: true }) local = local.MapToIPv4();
+            await RunSessionAsync(ws, local, ct);
         }
         catch (Exception ex) when (ex is WebSocketException or IOException or OperationCanceledException or ObjectDisposedException)
         {
@@ -88,7 +95,7 @@ public sealed class CercoReceiverService(
         }
     }
 
-    private async Task RunSessionAsync(WebSocket ws, CancellationToken ct)
+    private async Task RunSessionAsync(WebSocket ws, IPAddress? localAddress, CancellationToken ct)
     {
         // ---- 1) hello ----
         var hello = await ReceiveJsonAsync(ws, HandshakeTimeout, ct);
@@ -178,8 +185,10 @@ public sealed class CercoReceiverService(
 
         byte[] sk = CercoCrypto.SessionKey(psk, nonceC, nonceS);
         CryptographicOperations.ZeroMemory(psk);
-        var conn = new CercoConnection(panelId, deviceId, ws, sk);
+        var conn = new CercoConnection(panelId, deviceId, ws, sk) { ServerAddress = localAddress };
         connections.Register(conn);
+        var sessionStart = DateTime.UtcNow;
+        string endReason = ct.IsCancellationRequested ? "servidor detenido" : "sesión terminada";
         logger.LogInformation("Panel de cerco '{Id}' autenticado", deviceId);
 
         try
@@ -199,24 +208,82 @@ public sealed class CercoReceiverService(
             await PushConfigAsync(panelId, deviceId, ct);
 
             // ---- 4) bucle de estado / eventos ----
-            while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
+            // Un mensaje ilegible o un error al procesarlo (p. ej. de la BD) NO cortan la
+            // sesión: antes se cerraba sin dejar rastro y el panel se reconectaba.
+            var idle = TimeSpan.FromSeconds(config.GetValue("Cerco:Receiver:IdleTimeoutSeconds", (int)DefaultIdleTimeout.TotalSeconds));
+            // Estado y lista RF firmados: obligatorios si el panel lo anuncia (cap "sig",
+            // firmware 1.5.0+) o si Cerco:Receiver:RequireSignedState=true. Un panel
+            // anterior se acepta sin firma, con aviso. Apenas llega un mensaje con firma
+            // válida, la sesión queda exigiéndola (evita que se la quiten a mitad).
+            bool requireSig = (hello["cap"] as JsonArray)?.Any(n => (string?)n == "sig") == true
+                              || config.GetValue("Cerco:Receiver:RequireSignedState", false);
+            long lastSigSeq = 0;
+            bool warnedUnsigned = false;
+            try
             {
-                var msg = await ReceiveJsonAsync(ws, Timeout.InfiniteTimeSpan, ct);
-                if (msg is null) break;
-                switch ((string?)msg["t"])
+                while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
                 {
-                    case "state": await OnStateAsync(panelId, msg, ct); break;
-                    case "rf_list": await OnRfListAsync(panelId, msg, ct); break;
-                    case "event": lastEventSeq = await OnEventAsync(panelId, sk, msg, lastEventSeq, ct); break;
-                    case "ping":  await conn.SendRawAsync("{\"t\":\"pong\"}", ct); break;
-                    case "ack":   break;
+                    var (msg, end, raw) = await ReceiveMessageAsync(ws, idle, ct);
+                    if (end is not null) { endReason = end; break; }
+                    if (msg is null) { logger.LogWarning("Panel de cerco '{Id}': mensaje ilegible, se ignora", deviceId); continue; }
+                    string kind = (string?)msg["t"] ?? "";
+                    if (kind is "state" or "rf_list")
+                    {
+                        if (requireSig || CercoCrypto.HasSignature(raw))
+                        {
+                            if (!CercoCrypto.VerifySigned(sk, raw, out var why))
+                            {
+                                logger.LogWarning("Panel de cerco '{Id}': '{T}' rechazado ({Why})", deviceId, kind, why);
+                                continue;
+                            }
+                            long sseq = (long?)msg["sseq"] ?? 0;
+                            if (sseq <= lastSigSeq)
+                            {
+                                logger.LogWarning("Panel de cerco '{Id}': '{T}' repetido (sseq {Seq} <= {Last}), se ignora", deviceId, kind, sseq, lastSigSeq);
+                                continue;
+                            }
+                            lastSigSeq = sseq;
+                            requireSig = true;
+                        }
+                        else if (!warnedUnsigned)
+                        {
+                            warnedUnsigned = true;
+                            logger.LogWarning("Panel de cerco '{Id}': estado sin firma (firmware {Fw}). Actualice a 1.5.0 o superior.",
+                                deviceId, (string?)hello["fw"]);
+                        }
+                    }
+                    try
+                    {
+                        switch ((string?)msg["t"])
+                        {
+                            case "state": await OnStateAsync(panelId, msg, ct); break;
+                            case "rf_list": await OnRfListAsync(panelId, msg, ct); break;
+                            case "event": lastEventSeq = await OnEventAsync(panelId, sk, msg, lastEventSeq, ct); break;
+                            case "ping":  await conn.SendRawAsync("{\"t\":\"pong\"}", ct); break;
+                            case "ota":   await OnOtaAsync(panelId, deviceId, msg, ct); break;
+                            case "ack":   break;
+                        }
+                    }
+                    catch (Exception ex) when (ex is not (OperationCanceledException or WebSocketException or IOException or ObjectDisposedException))
+                    {
+                        logger.LogWarning(ex, "Panel de cerco '{Id}': error procesando '{T}'; la sesión sigue", deviceId, (string?)msg["t"]);
+                    }
                 }
+            }
+            catch (Exception ex) when (ex is WebSocketException or IOException or ObjectDisposedException)
+            {
+                endReason = "conexión perdida (" + ex.Message + ")";
             }
         }
         finally
         {
-            connections.Unregister(conn);
-            await MarkOfflineAsync(panelId, ct);
+            // Solo la sesión vigente marca offline: si el panel ya abrió otra (reconexión),
+            // el cierre tardío de la vieja no debe dejarlo en rojo estando conectado.
+            bool current = connections.Unregister(conn);
+            var dur = DateTime.UtcNow - sessionStart;
+            logger.LogWarning("Panel de cerco '{Id}' desconectado: {Reason}. Sesión de {Duration}{Note}",
+                deviceId, endReason, dur.ToString(@"d\.hh\:mm\:ss"), current ? "" : " (ya había una sesión nueva)");
+            if (current) await MarkOfflineAsync(panelId, CancellationToken.None);
         }
     }
 
@@ -256,11 +323,42 @@ public sealed class CercoReceiverService(
         var panel = await db.CercoPanels.Include(p => p.Zones).FirstAsync(p => p.Id == panelId, ct);
         panel.Status = CercoPanelStatus.Online;
         panel.LastSeenAt = DateTime.UtcNow;
-        panel.Firmware = (string?)hello["fw"] ?? panel.Firmware;
+        string? oldFw = panel.Firmware, newFw = (string?)hello["fw"];
+        panel.Firmware = newFw ?? panel.Firmware;
         panel.Mac = (string?)hello["mac"] ?? panel.Mac;
         panel.UpdatedAt = DateTime.UtcNow;
+        // Cambio de versión (OTA o cable): queda en el historial. La sesión ya está autenticada.
+        CercoEvent? fwEvent = null;
+        if (!string.IsNullOrEmpty(oldFw) && !string.IsNullOrEmpty(newFw) && oldFw != newFw)
+        {
+            fwEvent = new CercoEvent
+            {
+                CercoPanelId = panel.Id, PanelName = panel.Name,
+                Timestamp = DateTime.UtcNow, ReceivedAt = DateTime.UtcNow,
+                Kind = CercoEventKind.FirmwareUpdated, Severity = CercoSeverity.Info,
+                Description = $"Firmware actualizado: {oldFw} → {newFw}", Verified = true,
+            };
+            db.CercoEvents.Add(fwEvent);
+            logger.LogWarning("Panel de cerco '{Id}': firmware {Old} → {New}", panel.DeviceId, oldFw, newFw);
+        }
         await db.SaveChangesAsync(ct);
-        await hub.Clients.All.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, true), ct);
+        if (fwEvent is not null)
+            await hub.SendAsync(VmsHubContract.CercoEventReceived, CercoMapper.ToDto(fwEvent), s => s.CanViewCerco(panel.Id), ct);
+        await hub.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, true), s => s.CanViewCerco(panel.Id), ct);
+    }
+
+    /// <summary>
+    /// Avance de una OTA que informa el panel ({"t":"ota","state","pct","err"}). Es
+    /// informativo (sin firma): la confirmación real es la versión del próximo hello.
+    /// </summary>
+    private async Task OnOtaAsync(int panelId, string deviceId, JsonObject m, CancellationToken ct)
+    {
+        string state = (string?)m["state"] ?? "";
+        int pct = (int?)m["pct"] ?? 0;
+        string? err = (string?)m["err"];
+        if (state == "error") logger.LogWarning("Panel de cerco '{Id}': actualización de firmware fallida ({Err})", deviceId, err);
+        else if (state is "start" or "done") logger.LogInformation("Panel de cerco '{Id}': actualización de firmware {State}", deviceId, state);
+        await hub.SendAsync(VmsHubContract.CercoOtaProgress, new { panelId, state, pct, err }, s => s.CanViewCerco(panelId), ct);
     }
 
     private async Task MarkOfflineAsync(int panelId, CancellationToken ct)
@@ -274,7 +372,7 @@ public sealed class CercoReceiverService(
             panel.Status = CercoPanelStatus.Offline;
             panel.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(CancellationToken.None);
-            await hub.Clients.All.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, false), CancellationToken.None);
+            await hub.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, false), s => s.CanViewCerco(panel.Id), CancellationToken.None);
         }
         catch (Exception ex) { logger.LogDebug(ex, "No se pudo marcar offline el panel {Id}", panelId); }
     }
@@ -304,6 +402,7 @@ public sealed class CercoReceiverService(
         panel.ReturnUs = (int?)m["ret_us"] is int r && r > 0 ? r : null;
         panel.LastSeenAt = DateTime.UtcNow;
         panel.LastStateAt = DateTime.UtcNow;
+        panel.Status = CercoPanelStatus.Online;    // corrige un "offline" que dejó una sesión vieja
         if (m["zones"] is JsonArray zs)
         {
             foreach (var zn in zs.OfType<JsonObject>())
@@ -318,7 +417,7 @@ public sealed class CercoReceiverService(
         }
         panel.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-        await hub.Clients.All.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, true), ct);
+        await hub.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, true), s => s.CanViewCerco(panel.Id), ct);
     }
 
     // Nombres dados por el operador a botones recién aprendidos ((panelId, slot) → nombre).
@@ -378,8 +477,8 @@ public sealed class CercoReceiverService(
         await db.SaveChangesAsync(ct);
         var list = await db.CercoRemotes.AsNoTracking().Where(r => r.CercoPanelId == panelId)
             .OrderBy(r => r.Slot).ToListAsync(ct);
-        await hub.Clients.All.SendAsync(VmsHubContract.CercoRemotesChanged,
-            new { panelId, remotes = list.Select(CercoMapper.ToDto).ToList() }, ct);
+        await hub.SendAsync(VmsHubContract.CercoRemotesChanged,
+            new { panelId, remotes = list.Select(CercoMapper.ToDto).ToList() }, s => s.CanViewCerco(panelId), ct);
     }
 
     private static CercoZone AddZone(CercoPanel panel, int num)
@@ -457,8 +556,8 @@ public sealed class CercoReceiverService(
         db.CercoEvents.Add(entity);
         panel.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-        await hub.Clients.All.SendAsync(VmsHubContract.CercoEventReceived, CercoMapper.ToDto(entity), ct);
-        await hub.Clients.All.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, true), ct);
+        await hub.SendAsync(VmsHubContract.CercoEventReceived, CercoMapper.ToDto(entity), s => s.CanViewCerco(panel.Id), ct);
+        await hub.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, true), s => s.CanViewCerco(panel.Id), ct);
         return seq;
     }
 
@@ -472,6 +571,38 @@ public sealed class CercoReceiverService(
 
     private static async Task SendJsonAsync(WebSocket ws, JsonObject o, CancellationToken ct) =>
         await ws.SendAsync(Encoding.UTF8.GetBytes(o.ToJsonString()), WebSocketMessageType.Text, true, ct);
+
+    /// <summary>
+    /// Recibe un mensaje de la sesión. End != null = la sesión terminó (motivo legible);
+    /// Msg == null con End == null = mensaje ilegible (se ignora y se sigue).
+    /// </summary>
+    private static async Task<(JsonObject? Msg, string? End, byte[] Raw)> ReceiveMessageAsync(WebSocket ws, TimeSpan idle, CancellationToken ct)
+    {
+        using var to = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        to.CancelAfter(idle);
+        var buf = new byte[4096];
+        using var ms = new MemoryStream();
+        WebSocketReceiveResult res;
+        try
+        {
+            do
+            {
+                res = await ws.ReceiveAsync(buf, to.Token);
+                if (res.MessageType == WebSocketMessageType.Close)
+                    return (null, $"cerrada por el panel ({res.CloseStatus?.ToString() ?? "sin código"})", []);
+                ms.Write(buf, 0, res.Count);
+                if (ms.Length > MaxFrameBytes) return (null, "mensaje demasiado grande", []);
+            } while (!res.EndOfMessage);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return (null, $"sin datos del panel en {idle.TotalSeconds:0} s", []);
+        }
+        if (res.MessageType != WebSocketMessageType.Text || ms.Length == 0) return (null, null, []);
+        byte[] raw = ms.ToArray();
+        try { return (JsonNode.Parse(raw) as JsonObject, null, raw); }
+        catch { return (null, null, raw); }
+    }
 
     private static async Task<JsonObject?> ReceiveJsonAsync(WebSocket ws, TimeSpan timeout, CancellationToken ct)
     {

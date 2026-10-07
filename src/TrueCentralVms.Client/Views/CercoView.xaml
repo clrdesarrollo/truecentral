@@ -2,6 +2,7 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
+             xmlns:svc="clr-namespace:TrueCentralVms.Client.Services"
              Background="{StaticResource BgBrush}">
     <UserControl.Resources>
         <SolidColorBrush x:Key="WarnBrush" Color="#FCD34D"/>
@@ -136,6 +137,11 @@
                                                 Visibility="{Binding LevelText, Converter={x:Static vm:NonEmptyToVisibility.Instance}}">
                                             <TextBlock Style="{StaticResource LevelBadgeText}" Tag="Normal" Text="{Binding LevelText}"/>
                                         </Border>
+                                        <Border Style="{StaticResource LevelBadge}" Tag="{Binding SignalLevel}"
+                                                ToolTip="Señal WiFi del panel. Con menos de -75 dBm puede perder la conexión de vez en cuando: revise la antena o acerque el punto de acceso."
+                                                Visibility="{Binding SignalText, Converter={x:Static vm:NonEmptyToVisibility.Instance}}">
+                                            <TextBlock Style="{StaticResource LevelBadgeText}" Tag="{Binding SignalLevel}" Text="{Binding SignalText}"/>
+                                        </Border>
                                     </WrapPanel>
 
                                     <StackPanel Orientation="Horizontal">
@@ -152,6 +158,9 @@
                                                 Command="{Binding DataContext.SilenceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                 CommandParameter="{Binding}"/>
                                     </StackPanel>
+                                    <TextBlock Text="{x:Static svc:OperableScope.DeniedHint}" FontSize="10.5" Margin="0,6,0,0"
+                                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                                               Visibility="{Binding IsReadOnly, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                 </StackPanel>
                             </Border>
                         </DataTemplate>

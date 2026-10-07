@@ -117,7 +117,7 @@ const CercoAlarm = (() => {
         ${list.some((a) => a.sounding) && !audioReady()
           ? `<div class="cerco-alarm-hint">🔇 Haga clic en cualquier parte de la página para activar el sonido de la alarma.</div>` : ""}`);
     setHtml(actions, `
-        ${panels.map(([id, name]) => `<button class="btn danger" data-silence="${id}" title="Apaga la sirena del panel ${esc(name)}">Silenciar sirena${panels.length > 1 ? ` · ${esc(name)}` : ""}</button>`).join("")}
+        ${panels.map(([id, name]) => `<button class="btn danger" data-op="fence:${id}" data-silence="${id}" title="Apaga la sirena del panel ${esc(name)}">Silenciar sirena${panels.length > 1 ? ` · ${esc(name)}` : ""}</button>`).join("")}
         <button class="btn ghost" data-go="monitor">Ver monitor</button>
         <button class="btn" data-ack="1" title="Detiene el sonido en este navegador y cierra el aviso">Reconocer</button>`);
     el.classList.remove("hidden");
@@ -179,6 +179,11 @@ const CercoAlarm = (() => {
       started = true;
       VmsHub.on("CercoEventReceived", onEvent);
       VmsHub.ensureStarted();
+    },
+    /// La sesión terminó: sin sirena ni aviso en la pantalla de ingreso.
+    reset() {
+      active.clear();
+      refresh();
     },
   };
 })();

@@ -46,6 +46,8 @@ public enum CercoEventKind
     PowerRestored,
     /// <summary>El panel recuperó la sesión con el servidor sin reiniciarse (detail = segundos sin conexión).</summary>
     Reconnected,
+    /// <summary>El panel volvió con otra versión de firmware (OTA o grabación por cable). Lo genera el servidor.</summary>
+    FirmwareUpdated,
 }
 
 /// <summary>
@@ -103,7 +105,8 @@ public sealed record CercoPanelDto(
     int Id,
     string Name,
     string DeviceId,
-    string? Site,
+    /// <summary>Ruta de su ubicación en el árbol de Recursos ("Casa matriz › Bodega"); null = por ubicar.</summary>
+    string? Location,
     bool Enabled,
     CercoPanelStatus Status,
     /// <summary>Hay una conexión WebSocket viva y autenticada ahora mismo.</summary>
@@ -137,7 +140,9 @@ public sealed record CercoPanelDto(
     /// <summary>Ancho medio del pulso de retorno (µs).</summary>
     int? ReturnUs = null,
     /// <summary>El panel ya se enroló (tiene PSK). Si no, espera el código de enrolamiento.</summary>
-    bool Enrolled = false);
+    bool Enrolled = false,
+    /// <summary>Ubicación en el árbol de Recursos (null = por ubicar).</summary>
+    int? LocationId = null);
 
 /// <summary>
 /// Credenciales generadas por el servidor al crear o rotar la clave de un panel.
@@ -155,8 +160,12 @@ public sealed record CercoPanelCredentialsDto(
     /// <summary>Vencimiento del código (UTC).</summary>
     DateTime ExpiresAt);
 
-/// <summary>Alta/edición de un panel de cerco (el PSK no se envía; lo genera el servidor).</summary>
-public sealed record CercoPanelUpsertDto(string Name, string? Site, bool Enabled = true);
+/// <summary>
+/// Alta/edición de un panel de cerco (el PSK no se envía; lo genera el servidor).
+/// LocationId: ubicación en el árbol de Recursos; null = conservar la actual (en el
+/// alta, por ubicar), 0 = por ubicar.
+/// </summary>
+public sealed record CercoPanelUpsertDto(string Name, bool Enabled = true, int? LocationId = null);
 
 /// <summary>Evento de un panel de cerco para el historial/monitor.</summary>
 public sealed record CercoEventDto(

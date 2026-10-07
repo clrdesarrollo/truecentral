@@ -106,36 +106,51 @@ public static class CercoApi
     private static bool IsUniqueViolation(DbUpdateException ex) =>
         ex.InnerException is Npgsql.PostgresException { SqlState: "23505" };
 
+    /// <summary>Alcance por ubicación: solo eventos de paneles de sus ubicaciones (en la consulta).</summary>
+    private static IQueryable<CercoEvent> InScope(VmsDbContext db, IQueryable<CercoEvent> query, UserScope scope)
+    {
+        if (!scope.FiltersView) return query;
+        var allowed = scope.Locations.ToList();
+        return query.Where(e => db.CercoPanels.Any(p => p.Id == e.CercoPanelId && p.LocationId != null
+                                                        && allowed.Contains(p.LocationId.Value)));
+    }
+
     public static void MapCercoApi(this WebApplication app)
     {
         // -------- listar --------
         app.MapGet("/api/cerco/panels", async (HttpContext ctx, VmsDbContext db, CercoConnectionManager conns, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
             var panels = await db.CercoPanels.Include(p => p.Zones).AsNoTracking().OrderBy(p => p.Name).ToListAsync(ct);
-            return Results.Ok(panels.Select(p => CercoMapper.ToDto(p, conns.IsConnected(p.DeviceId))).ToList());
+            return Results.Ok(panels.Where(p => scope.CanView(p.LocationId))
+                .Select(p => CercoMapper.ToDto(p, conns.IsConnected(p.DeviceId))).ToList());
         });
 
         app.MapGet("/api/cerco/panels/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, CercoConnectionManager conns, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var panel = await db.CercoPanels.Include(p => p.Zones).AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
-            return panel is null ? Results.NotFound() : Results.Ok(CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)));
+            return panel is null || !(await ctx.ScopeAsync(session)).CanView(panel.LocationId)
+                ? Results.NotFound()
+                : Results.Ok(CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)));
         });
 
         // -------- crear (genera ID + PSK) --------
         app.MapPost("/api/cerco/panels", async (HttpContext ctx, CercoPanelUpsertDto request, VmsDbContext db,
-            CredentialProtector protector, IConfiguration config, IHubContext<VmsHub> hub, CercoConnectionManager conns,
+            CredentialProtector protector, IConfiguration config, ScopedHub hub, CercoConnectionManager conns,
             AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre es obligatorio (máximo 128 caracteres).");
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
 
             var panel = new CercoPanel
             {
                 Name = request.Name.Trim(),
-                Site = request.Site?.Trim(),
+                LocationId = locationId,
                 Enabled = request.Enabled,
                 DeviceId = NewDeviceId(),
                 Status = CercoPanelStatus.Unknown,
@@ -151,30 +166,46 @@ public static class CercoApi
             }
             await audit.LogAsync(ctx, "cerco", "panel-created", targetType: "cerco-panel",
                 targetId: panel.Id.ToString(), targetName: panel.Name,
-                detail: $"Creó el panel de cerco '{panel.Name}' ({panel.DeviceId}).");
-            await hub.Clients.All.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, false), ct);
+                detail: $"Creó el panel de cerco '{panel.Name}' ({panel.DeviceId})" +
+                        (panel.LocationId is null ? "." : $" en {EquipmentLocation.Describe(panel.LocationId)}."),
+                data: new { panel.DeviceId, panel.LocationId });
+            // Antes de avisar: el alcance de cada operador tiene que conocer el panel nuevo
+            // (y, si nace ubicado, los puestos releen lo que pueden operar).
+            if (panel.LocationId is null) EquipmentLocation.Changed(ctx);
+            else await EquipmentLocation.MovedAsync(ctx, ct);
+            await hub.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, false), s => s.CanViewCerco(panel.Id), ct);
             // Las credenciales se devuelven UNA vez, junto al panel creado.
             return Results.Ok(new { panel = CercoMapper.ToDto(panel, false), credentials = creds });
         });
 
         // -------- editar --------
         app.MapPut("/api/cerco/panels/{id:int}", async (HttpContext ctx, int id, CercoPanelUpsertDto request, VmsDbContext db,
-            IHubContext<VmsHub> hub, CercoConnectionManager conns, AuditService audit, CancellationToken ct) =>
+            ScopedHub hub, CercoConnectionManager conns, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             var panel = await db.CercoPanels.Include(p => p.Zones).FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre es obligatorio (máximo 128 caracteres).");
+            var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, panel.LocationId, ct);
+            if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
+
+            var changes = new List<string>();
+            if (panel.Name != request.Name.Trim()) changes.Add($"nombre '{panel.Name}' → '{request.Name.Trim()}'");
+            if (panel.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
+            int? previousLocation = panel.LocationId;
+            if (locationId != previousLocation)
+                changes.Add(EquipmentLocation.Change(previousLocation, locationId));
             panel.Name = request.Name.Trim();
-            panel.Site = request.Site?.Trim();
+            panel.LocationId = locationId;
             panel.Enabled = request.Enabled;
             panel.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             await audit.LogAsync(ctx, "cerco", "panel-updated", targetType: "cerco-panel",
                 targetId: panel.Id.ToString(), targetName: panel.Name,
-                detail: $"Editó el panel de cerco '{panel.Name}'.");
-            await hub.Clients.All.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)), ct);
+                detail: $"Editó el panel de cerco '{panel.Name}': " + (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
+            if (locationId != previousLocation) await EquipmentLocation.MovedAsync(ctx, ct);
+            await hub.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)), s => s.CanViewCerco(panel.Id), ct);
             return Results.Ok(CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)));
         });
 
@@ -194,7 +225,7 @@ public static class CercoApi
 
         // -------- rotar clave: nuevo código de enrolamiento (se muestra una vez) --------
         app.MapPost("/api/cerco/panels/{id:int}/rotate-key", async (HttpContext ctx, int id, VmsDbContext db,
-            CredentialProtector protector, IConfiguration config, AuditService audit, IHubContext<VmsHub> hub,
+            CredentialProtector protector, IConfiguration config, AuditService audit, ScopedHub hub,
             CercoConnectionManager conns, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
@@ -206,7 +237,7 @@ public static class CercoApi
             await audit.LogAsync(ctx, "cerco", "panel-key-rotated", targetType: "cerco-panel",
                 targetId: panel.Id.ToString(), targetName: panel.Name,
                 detail: $"Rotó la clave del panel de cerco '{panel.Name}'. Hay que re-enrolar el equipo con el código nuevo.");
-            await hub.Clients.All.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)), ct);
+            await hub.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)), s => s.CanViewCerco(panel.Id), ct);
             return Results.Ok(creds);
         });
 
@@ -217,6 +248,50 @@ public static class CercoApi
         // SoftAP (conserva ajustes del cerco y controles RF). Hay que re-provisionarlo.
         app.MapPost("/api/cerco/panels/{id:int}/factory", (HttpContext ctx, int id) =>
             Command(ctx, id, "factory", null, "restauró de fábrica", admin: true));
+
+        // -------- actualización de firmware (OTA, administrador) --------
+        // 1:1: el .bin se valida, se publica con un token de un uso en el servidor de
+        // firmware (puerto propio, 5093) y se le envía SOLO a este panel la orden "ota"
+        // firmada con url, tamaño y SHA-256. El avance llega por el hub (CercoOtaProgress)
+        // y el resultado final, como evento FirmwareUpdated al reconectar con la versión nueva.
+        app.MapPost("/api/cerco/panels/{id:int}/firmware", async (HttpContext ctx, int id, IFormFile file, VmsDbContext db,
+            CercoConnectionManager conns, CercoFirmwareService firmware, IConfiguration config, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            var panel = await db.CercoPanels.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+            if (panel is null) return Results.NotFound();
+            if (!firmware.Running)
+                return Error($"El servidor de firmware (puerto {config.GetValue("Cerco:Firmware:Port", 5093)}) no está activo. Revise Cerco:Firmware en la configuración.", StatusCodes.Status503ServiceUnavailable);
+            var conn = conns.Get(panel.DeviceId);
+            if (conn is null) return Error("El panel no está conectado.", StatusCodes.Status409Conflict);
+            if (panel.Armed || panel.Arming) return Error("Desarme el panel antes de actualizar el firmware.", StatusCodes.Status409Conflict);
+            if (file.Length > CercoFirmwareImage.MaxBytes) return Error("El archivo es demasiado grande para el panel (máx. 1 MB).");
+
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms, ct);
+            var image = CercoFirmwareImage.TryParse(ms.ToArray(), out var invalid);
+            if (image is null) return Error(invalid);
+
+            string? host = config.GetValue<string?>("Cerco:Firmware:PublicHost", null);
+            if (string.IsNullOrWhiteSpace(host)) host = conn.ServerAddress?.ToString();
+            if (string.IsNullOrWhiteSpace(host))
+                return Error("No se pudo determinar la IP del servidor tal como la ve el panel. Configure Cerco:Firmware:PublicHost.");
+
+            string token = firmware.Stage(image, panel.Name);
+            var args = new JsonObject
+            {
+                ["url"] = $"http://{host}:{firmware.Port}/fw/{token}",
+                ["size"] = image.Bytes.Length,
+                ["sha"] = image.Sha256Hex,
+            };
+            bool sent = await conns.SendPanelCommandAsync(db, panel.Id, panel.DeviceId, "ota", args, ct);
+            await audit.LogAsync(ctx, "cerco", "firmware", targetType: "cerco-panel",
+                targetId: panel.Id.ToString(), targetName: panel.Name,
+                detail: $"{session.Username} envió el firmware {image.Version} a '{panel.Name}' (tenía {panel.Firmware ?? "?"}).", success: sent);
+            return sent
+                ? Results.Ok(new { ok = true, version = image.Version, size = image.Bytes.Length, current = panel.Firmware })
+                : Error("No se pudo entregar la orden al panel.", StatusCodes.Status502BadGateway);
+        }).DisableAntiforgery();
 
         // -------- órdenes: armar / desarmar / silenciar / zona --------
         app.MapPost("/api/cerco/panels/{id:int}/arm", (HttpContext ctx, int id) => Command(ctx, id, "arm", null, "armó"));
@@ -242,7 +317,7 @@ public static class CercoApi
         });
 
         app.MapPut("/api/cerco/panels/{id:int}/config", async (HttpContext ctx, int id, CercoConfigDto request, VmsDbContext db,
-            CercoConnectionManager conns, IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
+            CercoConnectionManager conns, ScopedHub hub, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
             if (CercoMapper.Validate(request) is { } err) return Error(err);
@@ -264,7 +339,7 @@ public static class CercoApi
                 targetId: panel.Id.ToString(), targetName: panel.Name,
                 detail: $"{session.Username} cambió la configuración de '{panel.Name}': nivel {panel.HvLevel}, sirena {panel.SirenSeconds}s, " +
                         $"salida {panel.ExitDelaySeconds}s, llave {panel.KeyMode}, zona 0 {panel.Zone0Mode}{(panel.Zone0BlocksArm ? " (bloquea armado)" : "")}.");
-            await hub.Clients.All.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)), ct);
+            await hub.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)), s => s.CanViewCerco(panel.Id), ct);
             return Results.Ok(new { config = CercoMapper.ConfigOf(panel), sent });
         });
 
@@ -279,6 +354,8 @@ public static class CercoApi
         app.MapPost("/api/cerco/panels/{id:int}/remotes/learn", async (HttpContext ctx, int id, CercoRfLearnDto request,
             CercoConnectionManager conns) =>
         {
+            // Antes de tocar nada: el nombre pendiente es estado compartido del panel.
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             string name = (request.Name ?? "").Trim();
             if (name.Length is 0 or > 64) return Error("El nombre del botón es obligatorio (máximo 64 caracteres).");
             if (request.Action == CercoRfAction.None || !Enum.IsDefined(request.Action)) return Error("Elija la acción del botón.");
@@ -288,7 +365,7 @@ public static class CercoApi
         });
 
         app.MapPut("/api/cerco/panels/{id:int}/remotes/{slot:int}", async (HttpContext ctx, int id, int slot, CercoRemoteRenameDto request,
-            VmsDbContext db, IHubContext<VmsHub> hub, CancellationToken ct) =>
+            VmsDbContext db, ScopedHub hub, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
             string name = (request.Name ?? "").Trim();
@@ -298,7 +375,7 @@ public static class CercoApi
             r.Name = name;
             await db.SaveChangesAsync(ct);
             var list = await db.CercoRemotes.AsNoTracking().Where(x => x.CercoPanelId == id).OrderBy(x => x.Slot).ToListAsync(ct);
-            await hub.Clients.All.SendAsync(VmsHubContract.CercoRemotesChanged, new { panelId = id, remotes = list.Select(CercoMapper.ToDto).ToList() }, ct);
+            await hub.SendAsync(VmsHubContract.CercoRemotesChanged, new { panelId = id, remotes = list.Select(CercoMapper.ToDto).ToList() }, s => s.CanViewCerco(id), ct);
             return Results.Ok(CercoMapper.ToDto(r));
         });
 
@@ -322,6 +399,8 @@ public static class CercoApi
 
             var panel = await db.CercoPanels.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanOperate(panel.LocationId))
+                return await ctx.OutOfScopeAsync(session, "cerco-panel", id.ToString(), panel.Name, $"dar la orden '{cmd}' a");
             if (!conns.IsConnected(panel.DeviceId))
             {
                 await audit.LogAsync(ctx, "cerco", "command", targetType: "cerco-panel",
@@ -340,9 +419,10 @@ public static class CercoApi
         // -------- eventos recientes (monitor) --------
         app.MapGet("/api/cerco/events", async (HttpContext ctx, int? panelId, int? take, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             int limit = Math.Clamp(take ?? 100, 1, MaxTake);
-            var q = db.CercoEvents.AsNoTracking().OrderByDescending(e => e.ReceivedAt).AsQueryable();
+            var q = InScope(db, db.CercoEvents.AsNoTracking(), await ctx.ScopeAsync(session))
+                .OrderByDescending(e => e.ReceivedAt).AsQueryable();
             if (panelId is int pid) q = q.Where(e => e.CercoPanelId == pid);
             var events = await q.Take(limit).ToListAsync(ct);
             return Results.Ok(events.Select(CercoMapper.ToDto).ToList());
@@ -352,8 +432,8 @@ public static class CercoApi
         app.MapGet("/api/cerco/events/history", async (HttpContext ctx, VmsDbContext db, int? panelId,
             CercoEventKind? kind, DateTime? from, DateTime? to, int? page, int? pageSize, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            var query = FilterEvents(db, panelId, kind, from, to);
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var query = InScope(db, FilterEvents(db, panelId, kind, from, to), await ctx.ScopeAsync(session));
             long total = await query.LongCountAsync(ct);
             int size = Math.Clamp(pageSize ?? 50, 1, 200);
             int current = Math.Max(1, page ?? 1);
