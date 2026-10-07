@@ -1,6 +1,10 @@
+using System.Reflection;
+using System.Runtime.InteropServices;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Server.Auth;
+using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Server.Services.Licensing;
 using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Api;
@@ -15,6 +19,45 @@ public static class SystemApi
 {
     public static void MapSystemApi(this WebApplication app)
     {
+        // "Acerca de" del panel web: producto, fabricante, versión y build del
+        // servidor, plataforma y un resumen de la licencia. Cualquier usuario
+        // con sesión (el operador también lo necesita para reportar a soporte).
+        app.MapGet("/api/system/about", async (HttpContext ctx, LicenseService license, VmsDbContext db, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            var asm = typeof(SystemApi).Assembly;
+            string? Attr<T>(Func<T, string> pick) where T : Attribute => asm.GetCustomAttribute<T>() is { } a ? pick(a) : null;
+            // InformationalVersion = "0.5.4+<build Jenkins o commit>": lo que va después del '+' es el build.
+            string info = Attr<AssemblyInformationalVersionAttribute>(a => a.InformationalVersion) ?? "";
+            int plus = info.IndexOf('+');
+            string? build = plus >= 0 ? info[(plus + 1)..] : null;
+            if (build is { Length: 40 }) build = build[..10];   // hash de commit (compilación local): abreviado
+            DateTime? builtAt = null;
+            try { if (!string.IsNullOrEmpty(asm.Location)) builtAt = File.GetLastWriteTimeUtc(asm.Location); } catch { /* sin acceso al archivo */ }
+            var status = await license.GetStatusAsync(db, ct);
+            var started = System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
+            return Results.Ok(new
+            {
+                product = Attr<AssemblyProductAttribute>(a => a.Product) ?? "CLR TrueCentral VMS",
+                manufacturer = Attr<AssemblyCompanyAttribute>(a => a.Company) ?? "CLRobotics",
+                copyright = Attr<AssemblyCopyrightAttribute>(a => a.Copyright),
+                version = asm.GetName().Version?.ToString(3) ?? "0.0.0",
+                fileVersion = Attr<AssemblyFileVersionAttribute>(a => a.Version),
+                build,
+                builtAt,
+                runtime = RuntimeInformation.FrameworkDescription,
+                os = RuntimeInformation.OSDescription,
+                hostname = Environment.MachineName,
+                startedAt = started,
+                license = new
+                {
+                    status.State, status.Operational, status.Mode, status.Message, status.Warning,
+                    status.LicenseKey, status.CustomerName, status.Package, status.ExpiresAt, status.DaysRemaining,
+                    status.HardwareId,
+                },
+            });
+        });
+
         // Uso de recursos del servidor (indicadores del cliente y del panel).
         // Cualquier usuario autenticado: los operadores también monitorean.
         app.MapGet("/api/system/metrics", (HttpContext ctx, SystemMetrics metrics) =>
@@ -26,6 +69,43 @@ public static class SystemApi
         // ------------------------------------------------------------------
         // Supervisor de servicios
         // ------------------------------------------------------------------
+        // Puestos de cliente de escritorio (el cupo de la licencia): qué equipos
+        // los ocupan y liberarlos. Un cliente que se cerró sin cerrar sesión
+        // sigue ocupando su puesto hasta que la sesión vence (12 h); desde acá
+        // un administrador lo libera sin reiniciar el servidor.
+        app.MapGet("/api/system/desktop-seats", (HttpContext ctx, TokenService tokens, LicenseService license) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            var seats = tokens.DesktopSeats();
+            return Results.Ok(new
+            {
+                limit = license.Quota(LicenseFeatures.MaxClientSessions),
+                inUse = seats.Count,
+                seats,
+            });
+        });
+
+        app.MapPost("/api/system/desktop-seats/release", async (HttpContext ctx, DesktopSeatReleaseRequest request,
+            TokenService tokens, AuditService audit) =>
+        {
+            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (string.IsNullOrWhiteSpace(request.Seat))
+                return Results.Json(new { error = "Indique el equipo cuyo puesto quiere liberar." }, statusCode: 422);
+            var seat = tokens.DesktopSeats().FirstOrDefault(s =>
+                string.Equals(s.Seat, request.Seat.Trim(), StringComparison.OrdinalIgnoreCase));
+            int closed = tokens.ReleaseSeat(request.Seat);
+            await audit.LogAsync(ctx, "auth", "desktop-seat-released", targetType: "client", targetId: request.Seat.Trim(),
+                targetName: request.Seat.Trim(),
+                detail: seat is null
+                    ? $"Liberó el puesto del equipo '{request.Seat.Trim()}' (no tenía sesiones vigentes)."
+                    : $"Liberó el puesto del equipo '{seat.Seat}' ({seat.Username}, cliente {seat.Version ?? "?"}, " +
+                      $"{(seat.Connected ? "conectado en ese momento" : "sesión colgada: el cliente no estaba conectado")}): " +
+                      $"{closed} sesión(es) cerrada(s); ese equipo no puede volver a entrar durante " +
+                      $"{(int)TokenService.ReleasedSeatBlock.TotalSeconds} s.",
+                data: new { closed, connected = seat?.Connected });
+            return Results.Ok(new { closed });
+        });
+
         app.MapGet("/api/system/services", (HttpContext ctx, ServiceSupervisor supervisor) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
@@ -88,3 +168,6 @@ public static class SystemApi
             : Results.Json(new { error = result.Message, service = result.Service }, statusCode: result.StatusCode);
     }
 }
+
+/// <summary>Equipo cuyo puesto de cliente de escritorio se libera (el nombre que muestra la lista).</summary>
+public sealed record DesktopSeatReleaseRequest(string Seat);

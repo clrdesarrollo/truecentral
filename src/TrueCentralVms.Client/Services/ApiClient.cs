@@ -8,8 +8,24 @@ using TrueCentralVms.Core.Drivers;
 
 namespace TrueCentralVms.Client.Services;
 
-/// <summary>Error de la API con mensaje apto para mostrar al usuario.</summary>
-public sealed class ApiException(string message) : Exception(message);
+/// <summary>Error de la API con mensaje apto para mostrar al usuario (y el
+/// código HTTP, si el servidor alcanzó a responder).</summary>
+public sealed class ApiException(string message, int? statusCode = null) : Exception(message)
+{
+    public int? StatusCode { get; } = statusCode;
+}
+
+/// <summary>Resultado de renovar la sesión con las credenciales de esta ejecución.</summary>
+public enum SessionRenewal
+{
+    /// <summary>Hay token vigente: se renovó ahora o ya lo había renovado otro hilo.</summary>
+    Renewed,
+    /// <summary>El servidor no la acepta (usuario deshabilitado o eliminado, contraseña
+    /// cambiada o vencida, sin puestos en la licencia): hay que volver al login.</summary>
+    Rejected,
+    /// <summary>No se pudo consultar (servidor caído, sin red): se reintenta más tarde.</summary>
+    Unavailable,
+}
 
 /// <summary>
 /// Cliente REST del servidor TrueCentral. Todos los DTO son los records
@@ -45,11 +61,15 @@ public sealed class ApiClient
     private readonly SemaphoreSlim _reloginLock = new(1, 1);
     private string? _password;
     private DateTime _reloginFailedUntil = DateTime.MinValue;
+    private SessionRenewal _lastReloginFailure = SessionRenewal.Unavailable;
 
     public string? BaseUrl { get; private set; }
     public string? Token { get; private set; }
     public string? Username { get; private set; }
     public string? Role { get; private set; }
+
+    /// <summary>Por qué el servidor no aceptó renovar la sesión (para mostrarlo al volver al login).</summary>
+    public string? SessionEndReason { get; private set; }
 
     public ApiClient()
     {
@@ -96,29 +116,44 @@ public sealed class ApiClient
     }
 
     /// <summary>
-    /// Renueva la sesión con las credenciales del login original. Devuelve
-    /// true si hay token nuevo (o si otro hilo ya lo renovó: las celdas de
-    /// video y el sondeo de métricas pueden chocar con el 401 a la vez).
-    /// Tras un intento fallido no se vuelve a intentar por 30 s, para no
-    /// martillar el servidor con logins si la contraseña cambió.
+    /// Renueva la sesión con las credenciales del login original, salvo que
+    /// <paramref name="staleToken"/> ya no sea el vigente (otro hilo la
+    /// renovó: las celdas de video, el sondeo de métricas y el hub pueden
+    /// chocar con el 401 a la vez). Tras un intento fallido no se vuelve a
+    /// intentar por 30 s, para no martillar el servidor con logins si la
+    /// contraseña cambió: mientras tanto se repite el último resultado.
     /// </summary>
-    private async Task<bool> TryReloginAsync(string? staleToken, CancellationToken ct)
+    public async Task<SessionRenewal> RenewSessionAsync(string? staleToken, CancellationToken ct = default)
     {
-        if (_password is null) return false;
+        if (_password is null) return SessionRenewal.Rejected;
         await _reloginLock.WaitAsync(ct);
         try
         {
-            if (Token != staleToken) return true; // otro hilo ya renovó la sesión
-            if (DateTime.UtcNow < _reloginFailedUntil) return false;
+            if (Token != staleToken) return SessionRenewal.Renewed; // otro hilo ya renovó la sesión
+            if (DateTime.UtcNow < _reloginFailedUntil) return _lastReloginFailure;
             try
             {
                 await LoginAsync(BaseUrl!, Username!, _password, ct);
-                return true;
+                return SessionRenewal.Renewed;
             }
-            catch
+            catch (Exception ex)
             {
                 _reloginFailedUntil = DateTime.UtcNow.AddSeconds(30);
-                return false;
+                // 401 (usuario o clave ya no valen), 402 (sin puestos de cliente en
+                // la licencia) y 403 (clave vencida) son respuestas del servidor que
+                // insistir no cambia; sin respuesta (red, servidor caído) sí puede.
+                if (ex is ApiException { StatusCode: 401 or 402 or 403 } rejected)
+                {
+                    SessionEndReason = rejected.StatusCode == 401
+                        ? "El servidor cerró su sesión: su usuario fue deshabilitado o eliminado, o su contraseña cambió."
+                        : rejected.Message;
+                    _lastReloginFailure = SessionRenewal.Rejected;
+                }
+                else
+                {
+                    _lastReloginFailure = SessionRenewal.Unavailable;
+                }
+                return _lastReloginFailure;
             }
         }
         finally
@@ -127,11 +162,53 @@ public sealed class ApiClient
         }
     }
 
+    private async Task<bool> TryReloginAsync(string? staleToken, CancellationToken ct) =>
+        await RenewSessionAsync(staleToken, ct) == SessionRenewal.Renewed;
+
     public Task<List<DeviceDto>> GetDevicesAsync(CancellationToken ct = default) =>
         SendAsync<List<DeviceDto>>(HttpMethod.Get, "/api/devices", null, ct);
 
     public Task<List<ChannelDto>> GetChannelsAsync(int deviceId, CancellationToken ct = default) =>
         SendAsync<List<ChannelDto>>(HttpMethod.Get, $"/api/devices/{deviceId}/channels", null, ct);
+
+    /// <summary>Árbol de ubicaciones de Recursos (lista plana: se arma por ParentId).</summary>
+    public Task<List<LocationDto>> GetLocationsAsync(CancellationToken ct = default) =>
+        SendAsync<List<LocationDto>>(HttpMethod.Get, "/api/locations", null, ct);
+
+    /// <summary>Alcance por ubicación de esta sesión (null si el servidor es anterior o no responde).</summary>
+    public async Task<UserScopeDto?> GetMyScopeAsync(CancellationToken ct = default)
+    {
+        try { return (await SendAsync<MeDto>(HttpMethod.Get, "/api/auth/me", null, ct))?.Scope; }
+        catch (ApiException) { return null; }
+    }
+
+    private sealed record MeDto(string Username, string Role, UserScopeDto? Scope);
+
+    /// <summary>Qué puede operar esta sesión (null si no se pudo leer: entonces no se bloquea nada).</summary>
+    public async Task<OperableDto?> GetOperableAsync(CancellationToken ct = default)
+    {
+        try { return await SendAsync<OperableDto>(HttpMethod.Get, "/api/auth/operable", null, ct); }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException) { return null; }
+    }
+
+    /// <summary>
+    /// Resumen del recurso que causó un evento (ubicación, consignas y cámaras
+    /// asociadas). <paramref name="query"/> es la consulta de
+    /// /api/resources/briefing (p. ej. "alarmPanel=1&amp;zone=2"). null si el
+    /// evento no apunta a ningún recurso o el servidor no contestó: el aviso
+    /// sale igual, solo que sin ficha.
+    /// </summary>
+    public async Task<ResourceBriefingDto?> GetBriefingAsync(string query, CancellationToken ct = default)
+    {
+        try { return await SendAsync<ResourceBriefingDto?>(HttpMethod.Get, "/api/resources/briefing?" + query, null, ct); }
+        catch (ApiException) { return null; }
+    }
+
+    /// <summary>Orden sobre las áreas de alarma de una ubicación; con <paramref name="dryRun"/> solo dice cuáles tocaría.</summary>
+    public Task<LocationCommandResultDto> RunLocationCommandAsync(int locationId, string command, bool dryRun,
+        CancellationToken ct = default) =>
+        SendAsync<LocationCommandResultDto>(HttpMethod.Post, $"/api/locations/{locationId}/command",
+            new LocationCommandRequest(command, dryRun), ct);
 
     /// <summary>Alertas de automatizaciones (pendientes de confirmar o todas).</summary>
     public Task<WorkflowAlertListDto?> GetAlertsAsync(bool pendingOnly = true, int take = 20, CancellationToken ct = default) =>
@@ -741,7 +818,7 @@ public sealed class ApiClient
                     error = e.GetString();
             }
             catch { /* cuerpo no JSON */ }
-            throw new ApiException(error ?? $"Error del servidor ({(int)response.StatusCode}).");
+            throw new ApiException(error ?? $"Error del servidor ({(int)response.StatusCode}).", (int)response.StatusCode);
         }
 
         // Un servidor más ANTIGUO no conoce la ruta y, en vez de un 404,

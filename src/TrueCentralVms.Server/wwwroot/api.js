@@ -44,9 +44,10 @@ const Api = {
 
     if (!response.ok) {
       // Sesión vencida o revocada: volver al login (excepto en el propio login).
+      // Primero el aviso (anota el motivo para las otras pestañas) y después se limpia.
       if (response.status === 401 && this.token && !path.startsWith("/api/auth/")) {
-        this.clearSession();
         window.dispatchEvent(new Event("tcvms:unauthorized"));
+        this.clearSession();
       }
       throw { status: response.status, error: (data && data.error) || `Error ${response.status}`, data };
     }

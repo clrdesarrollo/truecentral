@@ -16,10 +16,17 @@ public partial class LoginWindow : Window
     /// <param name="skipAutoLogin">true al volver desde un cierre de sesión:
     /// sin esto el auto-login volvería a entrar de inmediato con la cuenta que
     /// el usuario acaba de cerrar.</param>
-    public LoginWindow(bool skipAutoLogin = false)
+    /// <param name="notice">Aviso a la vista al abrir (p. ej. por qué terminó
+    /// la sesión anterior).</param>
+    public LoginWindow(bool skipAutoLogin = false, string? notice = null)
     {
         InitializeComponent();
         if (skipAutoLogin) _autoLoginAttempted = true;
+        if (notice is not null)
+        {
+            ErrorText.Text = notice;
+            ErrorText.Visibility = Visibility.Visible;
+        }
         ServerBox.Text = _settings.ServerUrl;
         UserBox.Text = _settings.Username;
         RememberCheck.IsChecked = _settings.RememberPassword;
@@ -141,7 +148,7 @@ public partial class LoginWindow : Window
             _settings.AutoLogin = AutoLoginCheck.IsChecked == true;
             _settings.RecordLogin(serverUrl, username, _settings.RememberPassword ? password : null);
 
-            var hub = new VmsHubClient(serverUrl, () => api.Token);
+            var hub = new VmsHubClient(serverUrl, () => api.Token, token => api.RenewSessionAsync(token));
             try { await hub.StartAsync(); }
             catch { /* el hub reintenta; el cliente funciona igual sin tiempo real */ }
 

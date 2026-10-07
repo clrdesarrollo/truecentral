@@ -4,6 +4,7 @@
 const VmsHub = (() => {
   let conn = null;
   let starting = null;
+  let lastRestart = 0;
   const handlers = new Map();          // evento -> Set(fn)
   const reconnected = new Set();       // callbacks al reconectar
 
@@ -14,7 +15,33 @@ const VmsHub = (() => {
       .build();
     for (const [ev, set] of handlers) for (const fn of set) conn.on(ev, fn);
     conn.onreconnected(() => { for (const fn of reconnected) { try { fn(); } catch { /* noop */ } } });
+    conn.onclose(onClosed);
     return conn;
+  }
+
+  // El servidor corta la conexión al revocar la sesión (usuario deshabilitado o
+  // eliminado, contraseña o rol cambiados, cierre de sesión) sin dejar que se
+  // reconecte sola, y una sesión revocada recibe 401 al reconectar. Se consulta
+  // la sesión: vencida o revocada → al login, como ante cualquier 401 de la API;
+  // vigente → se vuelve a conectar, a lo más una vez cada 10 s (nunca en bucle).
+  async function onClosed() {
+    const token = Api.token;
+    if (!token) return;                // cierre de sesión en curso
+    try {
+      await Api.get("/api/auth/me");
+    } catch (err) {
+      // /api/auth/* no dispara el aviso de api.js: se hace aquí, si el token
+      // sigue siendo el mismo (no lo cambió un cierre o un login entretanto).
+      // Primero el aviso (deja el motivo para las otras pestañas) y después se limpia.
+      if (err.status === 401 && Api.token === token) {
+        window.dispatchEvent(new Event("tcvms:unauthorized"));
+        Api.clearSession();
+      }
+      return;                          // sin servidor: lo retoma la próxima vista
+    }
+    if (Date.now() - lastRestart < 10000) return;
+    lastRestart = Date.now();
+    ensureStarted();
   }
 
   async function ensureStarted() {

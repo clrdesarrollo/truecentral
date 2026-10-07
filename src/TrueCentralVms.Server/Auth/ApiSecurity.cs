@@ -4,11 +4,15 @@ namespace TrueCentralVms.Server.Auth;
 
 /// <summary>
 /// Guardas de autorización compartidas por los módulos de la API (el middleware
-/// de token deja la sesión en <c>HttpContext.Items["session"]</c>).
+/// de token deja la sesión en <c>HttpContext.Items["session"]</c> y su token
+/// en <c>HttpContext.Items["token"]</c>).
 /// </summary>
 public static class ApiSecurity
 {
     public static SessionInfo? CurrentSession(HttpContext ctx) => ctx.Items["session"] as SessionInfo;
+
+    /// <summary>El token de esa sesión (el hub lo registra para cortar sus conexiones al revocarlo).</summary>
+    public static string? CurrentToken(HttpContext ctx) => ctx.Items["token"] as string;
 
     /// <summary>Devuelve null si hay sesión válida; si no, el resultado de error a retornar.</summary>
     public static IResult? RequireUser(HttpContext ctx, out SessionInfo session)

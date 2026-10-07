@@ -150,6 +150,9 @@ public sealed class LicenseService : BackgroundService
                  || path.StartsWithSegments("/api/system/license")
                  || path.StartsWithSegments("/api/system/services")
                  || path.StartsWithSegments("/api/system/restart")
+                 // Liberar puestos de cliente: justo lo que hace falta cuando
+                 // la licencia no da para que entre alguien más.
+                 || path.StartsWithSegments("/api/system/desktop-seats")
                  || path.StartsWithSegments("/api/streaming")
                  || path.StartsWithSegments("/api/audit/client-event"));
     }

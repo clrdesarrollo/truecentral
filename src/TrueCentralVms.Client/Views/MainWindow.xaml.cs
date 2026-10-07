@@ -20,9 +20,21 @@ public partial class MainWindow : Window
         // El menú del usuario cuelga alineado a la DERECHA de su botón: es lo
         // último del navbar y el menú es más ancho que el botón.
         UserMenuPopup.CustomPopupPlacementCallback = PlaceUserMenu;
-        Loaded += async (_, _) => await _vm.LoadTreeAsync();
+        Loaded += async (_, _) =>
+        {
+            // La última sesión se reabre con el árbol ya cargado: las cámaras
+            // se buscan en él. Aunque la carga falle, hay que decidir igual.
+            try { await _vm.LoadTreeAsync(); }
+            finally { await _vm.RestoreLastSessionAsync(); }
+        };
         Closing += OnShellClosing;
-        Closed += (_, _) => _vm.Shutdown();
+        Closed += (_, _) =>
+        {
+            _vm.Shutdown();
+            if (!_loggingOut) ReleaseSeatOnExit();
+        };
+        // El evento llega desde el hilo del hub.
+        _vm.Hub.SessionRejected += () => Dispatcher.InvokeAsync(OnSessionRejected);
         StateChanged += OnWindowStateChanged;
         _vm.PropertyChanged += (_, e) =>
         {
@@ -70,6 +82,19 @@ public partial class MainWindow : Window
         if (downloading) _vm.Downloads.CancelAll();
     }
 
+    /// <summary>
+    /// Salir de la aplicación cierra la sesión en el servidor: si no, el puesto
+    /// de este equipo (cupo de clientes de la licencia) seguía ocupado hasta
+    /// que la sesión venciera, 12 horas después. Con tope de 3 s para no
+    /// demorar la salida si el servidor no contesta; en Task.Run porque esperar
+    /// en el hilo de la interfaz una tarea que vuelve a él lo trabaría.
+    /// </summary>
+    private void ReleaseSeatOnExit()
+    {
+        try { Task.Run(() => _vm.Api.LogoutAsync()).Wait(TimeSpan.FromSeconds(3)); }
+        catch { /* sin servidor: la sesión vence sola */ }
+    }
+
     // ------------------------------------------------------------------
     // Menú del usuario (navbar) y cierre de sesión.
     // ------------------------------------------------------------------
@@ -115,10 +140,28 @@ public partial class MainWindow : Window
             _vm.Downloads.CancelAll();
         }
 
+        await ReturnToLoginAsync(notice: null);
+    }
+
+    /// <summary>
+    /// El servidor revocó la sesión y no aceptó renovarla (usuario deshabilitado
+    /// o eliminado, contraseña cambiada): de vuelta al login, diciendo por qué.
+    /// Sin preguntar: la sesión ya no existe y las descargas no podrían seguir.
+    /// </summary>
+    private async void OnSessionRejected()
+    {
+        if (_loggingOut) return;
+        if (_vm.Downloads.HasActiveJobs) _vm.Downloads.CancelAll();
+        await ReturnToLoginAsync(_vm.Api.SessionEndReason ??
+                                 "El servidor cerró su sesión. Vuelva a iniciar sesión.");
+    }
+
+    private async Task ReturnToLoginAsync(string? notice)
+    {
         _loggingOut = true;
         // El login se abre ANTES de cerrar esta ventana: con la última ventana
         // cerrada la aplicación terminaría (ShutdownMode por defecto).
-        var login = new LoginWindow(skipAutoLogin: true);
+        var login = new LoginWindow(skipAutoLogin: true, notice);
         Application.Current.MainWindow = login;
         login.Show();
         Close(); // Closed → _vm.Shutdown(): cuadros, hub, timers y pantallas auxiliares

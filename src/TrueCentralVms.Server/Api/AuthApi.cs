@@ -46,6 +46,18 @@ public static class AuthApi
             // licencia restringida el login sigue: el cliente muestra el aviso.
             string? clientId = ctx.Request.Headers.TryGetValue("X-TCVMS-Client", out var clientHeader)
                 ? clientHeader.ToString() : null;
+            // Un administrador acaba de liberar el puesto de este equipo: el
+            // cliente que seguía abierto no puede recuperarlo renovando solo la
+            // sesión (403 = el cliente vuelve al ingreso con este aviso).
+            if (tokens.IsSeatReleased(clientId))
+            {
+                await audit.LogAsAsync(ctx, user.Id, user.Username, user.Role, "auth", "login-blocked",
+                    targetType: "client", targetName: TokenService.SeatOf(clientId),
+                    detail: "Ingreso denegado: un administrador acaba de liberar el puesto de este equipo.", success: false);
+                return Results.Json(new { error = "Un administrador cerró la sesión de este equipo para liberar su puesto. " +
+                                                  "Podrá volver a ingresar en un minuto." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
             if (clientId is not null && license.IsOperational
                 && license.Deny(null, LicenseFeatures.MaxClientSessions, tokens.CountDesktopSessions(excludingClientId: clientId)) is { } denied)
             {
@@ -97,9 +109,33 @@ public static class AuthApi
             return Results.Ok();
         });
 
-        app.MapGet("/api/auth/me", (HttpContext ctx) =>
+        app.MapGet("/api/auth/me", async (HttpContext ctx, UserScopeService scopes) =>
+        {
+            if (ApiSecurity.CurrentSession(ctx) is not { } s) return Results.Unauthorized();
+            // Su alcance por ubicación, para mostrarlo (el servidor ya filtra todo lo demás).
+            var scope = await ctx.ScopeAsync(s);
+            var index = (await scopes.SnapshotAsync(ctx.RequestAborted)).Index;
+            var dto = new UserScopeDto(!scope.Unrestricted, scope.ViewOutside, scope.AssignedLocations,
+                scope.AssignedLocations.Select(index.PathOf).Where(n => n.Length > 0).Order().ToList());
+            return Results.Ok(new { s.UserId, s.Username, s.Role, s.ExpiresAt, Scope = dto });
+        });
+
+        // Qué puede operar esta sesión: la interfaz deshabilita el resto (el
+        // servidor valida igual cada orden). Cambia con el alcance del usuario y
+        // con la ubicación de los recursos: los puestos lo releen con esos avisos.
+        app.MapGet("/api/auth/operable", async (HttpContext ctx) =>
+        {
+            if (ApiSecurity.CurrentSession(ctx) is not { } s) return Results.Unauthorized();
+            return Results.Ok((await ctx.ScopeAsync(s)).Operable());
+        });
+
+        // Vigencia de la sesión, sin más trabajo: el panel la consulta al volver
+        // a la pestaña, al recuperar el foco, cada minuto y a la hora del
+        // vencimiento, para avisar en cuanto termina aunque nadie toque nada.
+        // 401 = terminó (venció, la cortó un administrador o el servidor se reinició).
+        app.MapGet("/api/auth/session", (HttpContext ctx) =>
             ApiSecurity.CurrentSession(ctx) is { } s
-                ? Results.Ok(new { s.Username, s.Role, s.ExpiresAt })
+                ? Results.Ok(new { s.ExpiresAt })
                 : Results.Unauthorized());
     }
 }
