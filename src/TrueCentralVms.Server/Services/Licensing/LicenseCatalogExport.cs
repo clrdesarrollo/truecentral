@@ -39,7 +39,7 @@ public static class LicenseCatalogExport
 
         string version = typeof(LicenseCatalogExport).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
-        string json = LicenseCatalog.ToJson($"TrueCentralVms.Server {version}");
+        string json = LicenseCatalog.ToJson($"TrueCentralVms.Server {version}", LicensingConstants.ProductPublicKey);
         if (string.IsNullOrWhiteSpace(path))
         {
             Console.Out.Write(json);

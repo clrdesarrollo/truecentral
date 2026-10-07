@@ -24,6 +24,9 @@ namespace TrueCentralVms.Core.Contracts;
 //     queda "retirado" (no se ofrece en licencias nuevas). Las licencias ya
 //     emitidas guardan sus valores y no cambian con el catálogo.
 //   - El tipo de una clave existente no se puede cambiar: usar otra clave.
+//   - El JSON lleva la clave pública que compila el VMS: el servidor de
+//     licencias no importa el catálogo si firmaría con otra (o si tendría que
+//     generar un par nuevo), porque el VMS rechazaría sus licencias.
 
 /// <summary>Tipo de valor de una característica licenciable.</summary>
 public enum LicenseFeatureType
@@ -247,9 +250,11 @@ public static class LicenseCatalog
 
     /// <summary>
     /// JSON que importa el servidor de licencias (formato <see cref="SchemaVersion"/>).
-    /// <paramref name="generatedBy"/> es informativo y no cuenta para detectar cambios.
+    /// <paramref name="generatedBy"/> es informativo; <paramref name="publicKey"/> es la
+    /// clave pública que compila el VMS, para que el servidor verifique que firma con
+    /// ella. Ninguno de los dos cuenta para detectar cambios del catálogo.
     /// </summary>
-    public static string ToJson(string? generatedBy = null)
+    public static string ToJson(string? generatedBy = null, string? publicKey = null)
     {
         using var stream = new MemoryStream();
         using (var w = new Utf8JsonWriter(stream, new JsonWriterOptions
@@ -269,6 +274,8 @@ public static class LicenseCatalog
             w.WriteString("document_notes", DocumentNotes);
             w.WriteNumber("heartbeat_interval_days", HeartbeatIntervalDays);
             w.WriteNumber("grace_period_days", GracePeriodDays);
+            if (!string.IsNullOrWhiteSpace(publicKey))
+                w.WriteString("public_key", publicKey);
             w.WriteEndObject();
 
             w.WriteStartArray("features");
