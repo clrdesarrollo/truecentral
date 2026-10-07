@@ -22,8 +22,12 @@ public class AccessDevice
     public bool UseHttps { get; set; }
     public string Username { get; set; } = "";
     public byte[] PasswordCiphertext { get; set; } = [];
-    /// <summary>Ubicación libre para el operador ("Portería", "Bodega 2").</summary>
-    public string? Location { get; set; }
+    /// <summary>
+    /// Ubicación del equipo en el árbol de Recursos (null = por ubicar; antes
+    /// era un texto libre). La reciben sus puertas nuevas; al cambiarla se
+    /// mueven las puertas que estaban con el equipo.
+    /// </summary>
+    public int? LocationId { get; set; }
 
     // Datos obtenidos del equipo al validar credenciales.
     public AccessDeviceKind Kind { get; set; } = AccessDeviceKind.Unknown;
@@ -54,6 +58,14 @@ public class AccessDevice
     /// pasó mientras estaba apagado se recupera igual.
     /// </summary>
     public DateTime? LastEventAt { get; set; }
+
+    /// <summary>
+    /// El VMS lo pone en hora solo cuando se desfasa o tiene otra zona (si la
+    /// política lo hace). Se apaga para un equipo cuya hora la maneja otro
+    /// sistema y no conviene pelearle.
+    /// </summary>
+    public bool ClockAutoCorrect { get; set; } = true;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
@@ -65,7 +77,7 @@ public class AccessDevice
 /// el equipo (tantas como declare) y se identifica por su número EN EL EQUIPO,
 /// que es el que usan sus órdenes. Es la unidad que cuenta la licencia.
 /// </summary>
-public class AccessDoor
+public class AccessDoor : ILocatable
 {
     public int Id { get; set; }
     public int AccessDeviceId { get; set; }
@@ -93,7 +105,12 @@ public class AccessDoor
     public AccessDoorMode Mode { get; set; } = AccessDoorMode.Unknown;
     /// <summary>Hoja abierta según el sensor de puerta; null si el equipo no lo informa.</summary>
     public bool? IsOpen { get; set; }
+    /// <summary>Cerradura trabada según el equipo; null si no lo informa.</summary>
+    public bool? IsLocked { get; set; }
     public DateTime? StateReadAt { get; set; }
+
+    /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
+    public int? LocationId { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

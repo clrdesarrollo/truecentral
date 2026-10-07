@@ -39,6 +39,14 @@ public static class ZkProtocol
     /// <summary>Pide el historial de marcas/pasadas (llega como bloque largo).</summary>
     public const ushort CmdAttLogRead = 13;
 
+    // Hora y mantenimiento.
+    /// <summary>Lee la hora del equipo: 4 bytes con la marca de tiempo (ver <see cref="DecodeTime"/>).</summary>
+    public const ushort CmdGetTime = 201;
+    /// <summary>Fija la hora del equipo con el mismo formato.</summary>
+    public const ushort CmdSetTime = 202;
+    /// <summary>Reinicia el equipo (acusa y se reinicia).</summary>
+    public const ushort CmdRestart = 1004;
+
     // Respuestas.
     public const ushort CmdAckOk = 2000;
     public const ushort CmdAckError = 2001;
@@ -68,6 +76,20 @@ public static class ZkProtocol
         // devolver algo válido que reventar el sondeo del historial.
         if (year is < 2000 or > 2099 || day > DateTime.DaysInMonth(year, month)) return DateTime.MinValue;
         return new DateTime(year, month, day, hour, minute, second, DateTimeKind.Unspecified);
+    }
+
+    /// <summary>Lo inverso de <see cref="DecodeTime"/>: la hora local en el entero del equipo.</summary>
+    public static uint EncodeTime(DateTime local)
+    {
+        if (local.Year is < 2000 or > 2099)
+            throw new ArgumentOutOfRangeException(nameof(local), "Los equipos ZKTeco cuentan la hora entre 2000 y 2099.");
+        uint value = (uint)(local.Year - 2000);
+        value = value * 12 + (uint)(local.Month - 1);
+        value = value * 31 + (uint)(local.Day - 1);
+        value = value * 24 + (uint)local.Hour;
+        value = value * 60 + (uint)local.Minute;
+        value = value * 60 + (uint)local.Second;
+        return value;
     }
 
     /// <summary>Cabecera de los mensajes sobre TCP (por UDP no se usa).</summary>

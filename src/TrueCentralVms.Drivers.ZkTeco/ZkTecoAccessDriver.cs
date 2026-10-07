@@ -112,6 +112,50 @@ public sealed class ZkTecoAccessDriver : IAccessControlDriver
     }
 
     // ==================================================================
+    // Hora y mantenimiento
+    // ==================================================================
+
+    // El protocolo solo conoce la hora local: no tiene zona horaria, horario
+    // de verano ni NTP. Lo que se le fija es la hora de la zona esperada, y el
+    // horario de verano lo trae el VMS al ponerlo en hora (la supervisión lo
+    // corrige sola cuando la hora salta).
+
+    public bool SupportsClock => true;
+    public bool SupportsReboot => true;
+
+    public async Task<DeviceClock> GetClockAsync(AccessConnectionInfo info, CancellationToken ct = default)
+    {
+        await using var connection = await ZkConnection.OpenAsync(info.Host, info.Port, CommKeyOf(info), ct);
+        var before = DateTime.UtcNow;
+        var reply = await connection.CommandAsync(ZkProtocol.CmdGetTime, null, ct);
+        var readAt = before + (DateTime.UtcNow - before) / 2;
+        if (!reply.Ok || reply.Data.Length < 4) throw new DriverException("El equipo no entregó su hora.");
+        var local = ZkProtocol.DecodeTime(System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(reply.Data));
+        if (local == DateTime.MinValue) throw new DriverException("El equipo tiene la hora sin configurar.");
+        return new DeviceClock(local, UtcOffset: null, TimeZone: null, ZoneOffset: null, DaylightSaving: null,
+            ZoneDescription: null, DeviceTimeMode.Manual, NtpServer: null, NtpIntervalMinutes: null, readAt);
+    }
+
+    public async Task<string?> SetClockAsync(AccessConnectionInfo info, DeviceClockSetting setting, CancellationToken ct = default)
+    {
+        if (setting.Mode == DeviceTimeMode.Ntp)
+            throw new DriverException("Los equipos ZKTeco no usan NTP: se les fija la hora directamente.");
+        await using var connection = await ZkConnection.OpenAsync(info.Host, info.Port, CommKeyOf(info), ct);
+        var payload = new byte[4];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(payload, ZkProtocol.EncodeTime(setting.TargetLocalTime()));
+        var reply = await connection.CommandAsync(ZkProtocol.CmdSetTime, payload, ct);
+        if (!reply.Ok) throw new DriverException("El equipo rechazó la hora.");
+        return "el equipo no guarda zona horaria: quedó con la hora local de la zona elegida.";
+    }
+
+    public async Task RebootAsync(AccessConnectionInfo info, CancellationToken ct = default)
+    {
+        await using var connection = await ZkConnection.OpenAsync(info.Host, info.Port, CommKeyOf(info), ct);
+        var reply = await connection.CommandAsync(ZkProtocol.CmdRestart, null, ct);
+        if (!reply.Ok) throw new DriverException("El equipo rechazó el reinicio.");
+    }
+
+    // ==================================================================
     // Operación
     // ==================================================================
 

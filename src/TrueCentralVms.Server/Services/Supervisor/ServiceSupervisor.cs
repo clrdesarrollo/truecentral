@@ -115,6 +115,9 @@ public sealed class ServiceSupervisor : BackgroundService
         yield return new HostedServiceAdapter("access-events", "Historial de accesos",
             "Trae de cada equipo quién pasó por cada puerta y lo guarda en el VMS.",
             sp.GetRequiredService<AccessEventService>());
+        yield return new HostedServiceAdapter("device-clock", "Hora de los equipos",
+            "Revisa la hora y la zona horaria de los equipos y los pone en hora cuando se desfasan.",
+            sp.GetRequiredService<DeviceClockService>());
         yield return new HostedServiceAdapter("speakers", "Parlantes IP",
             "Sondeo de estado, reproducción sincronizada y voz en vivo hacia los altavoces de red.",
             sp.GetRequiredService<SpeakerService>());

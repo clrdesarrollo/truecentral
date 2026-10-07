@@ -129,6 +129,93 @@ public sealed partial class DahuaAccessDriver : IAccessControlDriver
     }
 
     // ------------------------------------------------------------------
+    // Hora y mantenimiento (CGI comunes a toda la marca; sin probar todavía
+    // contra un equipo de acceso Dahua real)
+    // ------------------------------------------------------------------
+
+    public bool SupportsClock => true;
+    public bool SupportsNtp => true;
+    public bool SupportsReboot => true;
+
+    /// <summary>
+    /// <c>global.cgi?action=getCurrentTime</c> (la hora local, sin zona) más la
+    /// zona (<c>NTP.TimeZone</c>, un índice de la tabla de Dahua) y el horario
+    /// de verano (<c>Locales.DSTEnable</c>).
+    /// </summary>
+    public async Task<DeviceClock> GetClockAsync(AccessConnectionInfo info, CancellationToken ct = default)
+    {
+        using var http = CreateClient(info);
+        var before = DateTime.UtcNow;
+        var now = Parse(await GetAsync(http, info, "/cgi-bin/global.cgi?action=getCurrentTime", ct, required: true));
+        var readAt = before + (DateTime.UtcNow - before) / 2;
+        if (!now.TryGetValue("result", out string? text) ||
+            !DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var local))
+            throw new DriverException($"El equipo informó una hora que no se entiende ('{text}').");
+
+        var ntp = Parse(await GetAsync(http, info, "/cgi-bin/configManager.cgi?action=getConfig&name=NTP", ct));
+        var locales = Parse(await GetAsync(http, info, "/cgi-bin/configManager.cgi?action=getConfig&name=Locales", ct));
+        TimeSpan? zone = ntp.TryGetValue("table.NTP.TimeZone", out string? index) && int.TryParse(index, out int i)
+            ? DahuaTime.OffsetOf(i) : null;
+        bool? dst = locales.TryGetValue("table.Locales.DSTEnable", out string? dstText)
+            ? dstText.Equals("true", StringComparison.OrdinalIgnoreCase) : null;
+        bool ntpOn = ntp.TryGetValue("table.NTP.Enable", out string? enable) &&
+                     enable.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        string? description = zone is { } z
+            ? $"{DeviceTimeZones.OffsetLabel(z)} {(dst == true ? "con horario de verano" : "sin horario de verano")}"
+            : null;
+        return new DeviceClock(
+            DateTime.SpecifyKind(local, DateTimeKind.Unspecified),
+            // Sin horario de verano, el desfase de ahora es el de la zona.
+            UtcOffset: dst == false ? zone : null,
+            TimeZone: index, ZoneOffset: zone, DaylightSaving: dst, ZoneDescription: description,
+            ntpOn ? DeviceTimeMode.Ntp : DeviceTimeMode.Manual,
+            NtpServer: ntpOn ? ntp.GetValueOrDefault("table.NTP.Address") : null,
+            NtpIntervalMinutes: ntpOn && int.TryParse(ntp.GetValueOrDefault("table.NTP.UpdatePeriod"), out int every) ? every : null,
+            readAt);
+    }
+
+    public async Task<string?> SetClockAsync(AccessConnectionInfo info, DeviceClockSetting setting, CancellationToken ct = default)
+    {
+        using var http = CreateClient(info);
+        var settings = DahuaTime.ZoneSettings(setting.Zone);
+        string? note = settings.Any(s => s.StartsWith("NTP.TimeZone=", StringComparison.Ordinal))
+            ? null
+            : "la tabla de zonas de Dahua no tiene ese desfase: se dejó la zona como estaba y solo se fijó la hora.";
+        if (setting.Mode == DeviceTimeMode.Ntp)
+        {
+            if (string.IsNullOrWhiteSpace(setting.NtpServer)) throw new DriverException("Falta el servidor NTP.");
+            settings.Add("NTP.Enable=true");
+            settings.Add($"NTP.Address={Uri.EscapeDataString(setting.NtpServer.Trim())}");
+            settings.Add($"NTP.UpdatePeriod={Math.Clamp(setting.NtpIntervalMinutes, 1, 10080)}");
+        }
+        else
+        {
+            settings.Add("NTP.Enable=false");
+        }
+        ExpectOk(await GetAsync(http, info, "/cgi-bin/configManager.cgi?action=setConfig&" + string.Join('&', settings), ct,
+            required: true), "la zona horaria");
+        ExpectOk(await GetAsync(http, info,
+            $"/cgi-bin/global.cgi?action=setCurrentTime&time={DahuaTime.TimeArgument(setting.TargetLocalTime())}", ct,
+            required: true), "la hora");
+        return note;
+    }
+
+    public async Task RebootAsync(AccessConnectionInfo info, CancellationToken ct = default)
+    {
+        using var http = CreateClient(info);
+        ExpectOk(await GetAsync(http, info, "/cgi-bin/magicBox.cgi?action=reboot", ct, required: true), "el reinicio");
+    }
+
+    /// <summary>Los CGI de configuración contestan "OK" cuando aplicaron lo pedido.</summary>
+    private static void ExpectOk(string? result, string what)
+    {
+        if (result is null || !result.Trim().StartsWith("OK", StringComparison.OrdinalIgnoreCase))
+            throw new DriverException($"El equipo no aceptó {what} ({Shorten(result ?? "sin respuesta")}).");
+    }
+
+    // ------------------------------------------------------------------
     // Puertas
     // ------------------------------------------------------------------
 

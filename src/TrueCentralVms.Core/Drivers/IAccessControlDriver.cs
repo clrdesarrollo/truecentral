@@ -41,7 +41,9 @@ public sealed record AccessDoorStatus(
     int Number,
     AccessDoorMode Mode,
     /// <summary>Hoja abierta según el sensor de puerta; null si el equipo no lo informa.</summary>
-    bool? Open);
+    bool? Open,
+    /// <summary>Cerradura trabada (relé sin energizar); null si el equipo no lo informa.</summary>
+    bool? Locked = null);
 
 /// <summary>Un renglón del historial de accesos, tal como lo entrega el equipo.</summary>
 public sealed record AccessEventRecord(
@@ -234,6 +236,44 @@ public interface IAccessControlDriver
     /// <summary>Sube un horario semanal a su ranura del equipo, antes de que las personas lo referencien.</summary>
     Task ApplyWeekPlanAsync(AccessConnectionInfo info, AccessWeekPlan plan, CancellationToken ct = default) =>
         throw new DriverException("Este equipo no admite administrar horarios desde el VMS.");
+
+    // ------------------------------------------------------------------
+    // Hora y mantenimiento (ver DeviceMaintenance.cs). Importa más de lo que
+    // parece: los horarios de los niveles y la vigencia de las personas los
+    // evalúa el EQUIPO con su propia hora local.
+    // ------------------------------------------------------------------
+
+    /// <summary>Sabe leer y fijar su reloj (hora, zona horaria y, según la marca, horario de verano y NTP).</summary>
+    bool SupportsClock => false;
+
+    /// <summary>Sabe usar un servidor NTP (además de la hora fijada).</summary>
+    bool SupportsNtp => false;
+
+    /// <summary>Lee el reloj del equipo.</summary>
+    Task<DeviceClock> GetClockAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+        throw new DriverException("Este equipo no informa su hora al VMS.");
+
+    /// <summary>
+    /// Deja el reloj del equipo como se indica. Devuelve una nota si quedó
+    /// aplicado a medias (por ejemplo, sin horario de verano porque el firmware
+    /// no lo acepta), o null si quedó tal cual se pidió.
+    /// </summary>
+    Task<string?> SetClockAsync(AccessConnectionInfo info, DeviceClockSetting setting, CancellationToken ct = default) =>
+        throw new DriverException("Este equipo no acepta que el VMS le cambie la hora.");
+
+    /// <summary>Sabe reiniciarse a pedido.</summary>
+    bool SupportsReboot => false;
+
+    /// <summary>Reinicia el equipo. Vuelve en cuanto el equipo aceptó la orden, no cuando terminó de arrancar.</summary>
+    Task RebootAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+        throw new DriverException("Este equipo no acepta reinicios remotos.");
+
+    /// <summary>Restablecimientos que sabe hacer.</summary>
+    DeviceResetModes SupportedResets => DeviceResetModes.None;
+
+    /// <summary>Restablece el equipo a fábrica (ver <see cref="DeviceResetMode"/> para qué conserva cada modo).</summary>
+    Task ResetAsync(AccessConnectionInfo info, DeviceResetMode mode, CancellationToken ct = default) =>
+        throw new DriverException("Este equipo no acepta restablecerse desde el VMS.");
 }
 
 public interface IAccessControlDriverFactory
