@@ -13,20 +13,24 @@ public static class AuditCatalog
 
     public static readonly IReadOnlyList<CategoryInfo> Categories =
     [
-        new("auth", "Autenticación",
+        new("auth", "Autenticación y permisos",
         [
             new("login", "Inicio de sesión"),
             new("login-failed", "Inicio de sesión rechazado"),
             new("login-blocked", "Login bloqueado (clave vencida)"),
+            new("sessions-revoked", "Sesiones revocadas y conexiones en tiempo real cortadas"),
+            new("desktop-seat-released", "Puesto de cliente de escritorio liberado por un administrador"),
             new("logout", "Cierre de sesión"),
             new("password-changed", "Cambio de contraseña"),
             new("setup-admin", "Creación del primer administrador"),
+            new("scope-denied", "Acción fuera del alcance por ubicación rechazada"),
         ]),
         new("users", "Usuarios",
         [
             new("user-created", "Usuario creado"),
             new("user-updated", "Usuario modificado"),
             new("user-deleted", "Usuario eliminado"),
+            new("user-scope-updated", "Alcance por ubicación de un usuario modificado"),
         ]),
         new("devices", "Dispositivos",
         [
@@ -38,10 +42,23 @@ public static class AuditCatalog
             new("channel-updated", "Canal modificado"),
             new("channels-enabled-bulk", "Canales con señal habilitados en bloque"),
             new("discovery-scan", "Búsqueda de equipos en la red"),
-            new("device-initialized", "Equipo de fábrica inicializado"),
+            new("device-initialized", "Equipo de fábrica inicializado / activado"),
             new("device-ip-changed", "IP de un equipo cambiada"),
             new("device-dns-changed", "DNS de un equipo configurados"),
             new("device-time-synced", "Fecha, hora y zona horaria de un equipo sincronizadas"),
+        ]),
+        new("locations", "Recursos y ubicaciones",
+        [
+            new("location-created", "Ubicación creada"),
+            new("location-updated", "Ubicación modificada"),
+            new("location-moved", "Ubicación movida"),
+            new("location-deleted", "Ubicación eliminada"),
+            new("resources-located", "Recursos ubicados"),
+            new("resource-updated", "Ficha de recurso modificada"),
+            new("resource-cameras-updated", "Cámaras asociadas de un recurso modificadas"),
+            new("location-command", "Orden sobre las áreas de alarma de una ubicación"),
+            new("resources-unlocated", "Recursos devueltos a «por ubicar»"),
+            new("equipment-located", "Recursos movidos junto con su equipo"),
         ]),
         new("live", "Video en vivo",
         [
@@ -178,6 +195,17 @@ public static class AuditCatalog
             new("sync-forced", "Reenvío forzado del padrón"),
             new("webcontrol-downloaded", "Instalador del complemento descargado"),
             new("search", "Consulta del historial de accesos"),
+            new("report-exported", "Reporte de accesos exportado (Excel o PDF)"),
+        ]),
+        new("maintenance", "Hora y mantenimiento de equipos",
+        [
+            new("clock-set", "Hora, zona horaria o NTP de un equipo ajustados"),
+            new("clock-corrected", "Equipo puesto en hora automáticamente"),
+            new("clock-drift", "Equipo con la hora desfasada o en otra zona horaria"),
+            new("clock-policy-changed", "Política de hora de los equipos modificada"),
+            new("clock-autocorrect-changed", "Corrección automática de hora de un equipo activada o apagada"),
+            new("device-rebooted", "Equipo reiniciado a distancia"),
+            new("device-reset", "Equipo restablecido a fábrica"),
         ]),
         new("speakers", "Parlantes IP",
         [

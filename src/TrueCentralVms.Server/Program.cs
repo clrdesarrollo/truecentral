@@ -56,6 +56,10 @@ builder.Services.AddDbContext<VmsDbContext>(o => o.UseNpgsql(EF.IsDesignTime
     : postgres.ConnectionString));
 
 builder.Services.AddSingleton<TokenService>();
+// Alcance por ubicación de cada usuario (qué recursos ve y opera) y el hub
+// que entrega los eventos según ese alcance.
+builder.Services.AddSingleton<UserScopeService>();
+builder.Services.AddSingleton<ScopedHub>();
 builder.Services.AddSingleton<PasswordGovernance>();
 builder.Services.AddSingleton<CredentialProtector>();
 builder.Services.AddSingleton<SystemMetrics>();
@@ -129,6 +133,9 @@ builder.Services.AddSingleton<AccessSyncService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessSyncService>());
 builder.Services.AddSingleton<AccessEventService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessEventService>());
+// Hora de los equipos: revisa su reloj y su zona, y los pone en hora solos.
+builder.Services.AddSingleton<DeviceClockService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceClockService>());
 
 // Parlantes IP: drivers, registro y servicio (sondeo de estado, reproducción sincronizada, voz en vivo).
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
@@ -151,6 +158,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmReceiverServi
 builder.Services.AddSingleton<CercoConnectionManager>();
 builder.Services.AddSingleton<CercoReceiverService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CercoReceiverService>());
+// Descarga de firmware para OTA de los paneles de cerco, también en PUERTO PROPIO
+// (Cerco:Firmware:Port, 5093 por omisión): fuera de la API :5090.
+builder.Services.AddSingleton<CercoFirmwareService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CercoFirmwareService>());
 
 // Automatizaciones (workflows): "cuando pase ESTO, hacer ESTO OTRO". El motor
 // escucha lo que publican los módulos (hoy, los paneles de alarma) y ejecuta
@@ -194,6 +205,11 @@ builder.Services.AddSingleton<ServiceSupervisor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServiceSupervisor>());
 
 builder.Services.AddSignalR();
+// Conexiones vivas del hub con su usuario y su token: TokenService las corta
+// al revocar la sesión (el hub solo valida al conectarse). El acceso al
+// request en curso le sirve para auditar quién revocó.
+builder.Services.AddSingleton<HubConnections>();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 // Los enums de los DTO viajan como texto en JSON ("Nvr", "Online", ...).
@@ -221,6 +237,10 @@ using (var scope = app.Services.CreateScope())
     // Control de acceso: el horario 24/7 tiene que existir desde el principio,
     // porque es el que se ofrece por omisión al crear el primer nivel de acceso.
     await AccessCatalogApi.EnsureBuiltInScheduleAsync(db, CancellationToken.None);
+
+    // Alcances por ubicación y árbol de ubicaciones en memoria: los equipos
+    // muestran la ruta de su ubicación desde el primer pedido.
+    await app.Services.GetRequiredService<UserScopeService>().SnapshotAsync();
 
     // El servidor se distribuye "desactivado": sin usuarios no hay login. El
     // primer administrador se crea desde el asistente del panel web, solo
@@ -283,7 +303,19 @@ app.Use(async (context, next) =>
     token ??= context.Request.Query["access_token"].FirstOrDefault();
 
     if (token is not null && tokens.Validate(token) is { } session)
+    {
         context.Items["session"] = session;
+        context.Items["token"] = token;
+    }
+    else if (context.Request.Path.StartsWithSegments(VmsHubContract.HubPath))
+    {
+        // El hub solo atiende sesiones vigentes y lo dice con 401 ANTES de abrir
+        // la conexión (negotiate, WebSocket o sondeo): así el cliente de una
+        // sesión revocada sabe que debe renovarla o volver al login, en vez de
+        // conectarse, ser cortado y reintentar en bucle.
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
+    }
 
     await next();
 });
@@ -329,6 +361,8 @@ app.MapLicenseApi();
 app.MapDecodersApi();
 app.MapWallsApi();
 app.MapLiveViewsApi();
+app.MapLocationsApi();
+app.MapResourcesApi();
 app.MapAnprApi();
 app.MapAuditApi();
 app.MapAlarmsApi();
@@ -337,6 +371,8 @@ app.MapSpeakersApi();
 app.MapIntercomsApi();
 app.MapAccessApi();
 app.MapAccessCatalogApi();
+app.MapAccessRecordsApi();
+app.MapDeviceMaintenanceApi();
 app.MapWorkflowsApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);

@@ -11,6 +11,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<PasswordHistory> PasswordHistories => Set<PasswordHistory>();
+    /// <summary>Ubicaciones del alcance de cada usuario restringido (ver User.RestrictToLocations).</summary>
+    public DbSet<UserLocation> UserLocations => Set<UserLocation>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<StreamSession> StreamSessions => Set<StreamSession>();
@@ -64,6 +66,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<WorkflowAlert> WorkflowAlerts => Set<WorkflowAlert>();
     /// <summary>Servidor de correo saliente: fila única (Id = 1).</summary>
     public DbSet<SmtpSettings> SmtpSettings => Set<SmtpSettings>();
+    /// <summary>Cómo debe estar el reloj de los equipos: fila única (Id = 1).</summary>
+    public DbSet<DeviceClockPolicy> DeviceClockPolicies => Set<DeviceClockPolicy>();
 
     // Muro de video
     public DbSet<Decoder> Decoders => Set<Decoder>();
@@ -76,6 +80,12 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     // Vistas guardadas del monitoreo en vivo (Custom View de iVMS-4200)
     public DbSet<LiveView> LiveViews => Set<LiveView>();
     public DbSet<LiveViewItem> LiveViewItems => Set<LiveViewItem>();
+
+    // Ubicaciones: el árbol lógico de Recursos (cada recurso apunta a una)
+    public DbSet<Location> Locations => Set<Location>();
+    /// <summary>Fichas de recursos (descripción, consignas y cámaras asociadas).</summary>
+    public DbSet<ResourceProfile> ResourceProfiles => Set<ResourceProfile>();
+    public DbSet<ResourceProfileCamera> ResourceProfileCameras => Set<ResourceProfileCamera>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -93,6 +103,16 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
                 .HasForeignKey(h => h.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(h => h.UserId);
+        });
+
+        modelBuilder.Entity<UserLocation>(e =>
+        {
+            e.HasKey(x => new { x.UserId, x.LocationId });
+            e.HasOne<User>().WithMany(u => u.Locations).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            // Una ubicación en el alcance de alguien no se borra en silencio: la
+            // API exige sacarla antes de los alcances (y la base lo respalda).
+            e.HasOne<Location>().WithMany().HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.LocationId);
         });
 
         modelBuilder.Entity<Device>(e =>
@@ -242,7 +262,6 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(a => a.DriverKey).HasMaxLength(32);
             e.Property(a => a.Host).HasMaxLength(255);
             e.Property(a => a.Username).HasMaxLength(64);
-            e.Property(a => a.Location).HasMaxLength(128);
             e.Property(a => a.Model).HasMaxLength(64);
             e.Property(a => a.SerialNumber).HasMaxLength(64);
             e.Property(a => a.FirmwareVersion).HasMaxLength(64);
@@ -489,7 +508,6 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         {
             e.Property(p => p.Name).HasMaxLength(128);
             e.Property(p => p.DeviceId).HasMaxLength(48);
-            e.Property(p => p.Site).HasMaxLength(255);
             e.Property(p => p.Model).HasMaxLength(64);
             e.Property(p => p.Firmware).HasMaxLength(64);
             e.Property(p => p.Mac).HasMaxLength(32);
@@ -589,10 +607,15 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(a => a.AcknowledgedIp).HasMaxLength(64);
             e.Property(a => a.RecipientUserIds).HasMaxLength(512);
             e.Property(a => a.Recipients).HasMaxLength(512);
+            e.Property(a => a.ResourceKey).HasMaxLength(32);
+            e.Property(a => a.LocationPath).HasMaxLength(1100);
+            e.Property(a => a.Instructions).HasMaxLength(4000);
             // Las pendientes se consultan en cada arranque de cliente; el
             // registro se lee por fecha descendente.
             e.HasIndex(a => a.RaisedAt);
             e.HasIndex(a => new { a.AcknowledgedAt, a.RaisedAt });
+            // Historial de la ficha de un recurso: sus avisos, los más recientes primero.
+            e.HasIndex(a => new { a.ResourceKey, a.RaisedAt }).HasFilter("\"ResourceKey\" IS NOT NULL");
         });
 
         modelBuilder.Entity<SmtpSettings>(e =>
@@ -602,6 +625,13 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(s => s.FromAddress).HasMaxLength(255);
             e.Property(s => s.FromName).HasMaxLength(128);
             e.Property(s => s.Security).HasConversion<string>().HasMaxLength(16);
+        });
+
+        modelBuilder.Entity<DeviceClockPolicy>(e =>
+        {
+            e.Property(p => p.TimeZoneId).HasMaxLength(128);
+            e.Property(p => p.Mode).HasConversion<string>().HasMaxLength(16);
+            e.Property(p => p.NtpServer).HasMaxLength(255);
         });
 
         // -------------------------------------------------------------------
@@ -735,6 +765,88 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
                 .HasForeignKey(i => i.ChannelId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(i => new { i.LiveViewId, i.CellIndex }).IsUnique();
+        });
+
+        // -------------------------------------------------------------------
+        // Ubicaciones (árbol de Recursos). Cada recurso apunta a UNA ubicación
+        // con su propio LocationId: borrar la ubicación lo deja "por ubicar"
+        // (SET NULL) en vez de llevarse la cámara o la puerta, y borrar el
+        // equipo se lleva sus recursos sin dejar referencias colgando.
+        // -------------------------------------------------------------------
+        modelBuilder.Entity<Location>(e =>
+        {
+            e.Property(l => l.Name).HasMaxLength(128);
+            e.Property(l => l.Kind).HasConversion<string>().HasMaxLength(16);
+            e.Property(l => l.Description).HasMaxLength(500);
+            e.Property(l => l.Address).HasMaxLength(255);
+            // Una ubicación con sububicaciones no se borra: la API exige
+            // vaciarla antes (mover o borrar sus hijas).
+            e.HasOne(l => l.Parent)
+                .WithMany(l => l.Children)
+                .HasForeignKey(l => l.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Channel>().HasOne<Location>().WithMany()
+            .HasForeignKey(c => c.LocationId).OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<AccessDoor>().HasOne<Location>().WithMany()
+            .HasForeignKey(d => d.LocationId).OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<AlarmArea>().HasOne<Location>().WithMany()
+            .HasForeignKey(a => a.LocationId).OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<AlarmZone>().HasOne<Location>().WithMany()
+            .HasForeignKey(z => z.LocationId).OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<CercoPanel>().HasOne<Location>().WithMany()
+            .HasForeignKey(p => p.LocationId).OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<Speaker>().HasOne<Location>().WithMany()
+            .HasForeignKey(s => s.LocationId).OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<Intercom>().HasOne<Location>().WithMany()
+            .HasForeignKey(i => i.LocationId).OnDelete(DeleteBehavior.SetNull);
+        // Ubicación de los equipos que agrupan recursos: la heredan sus canales,
+        // áreas, zonas y puertas nuevas (no es la de ellos: cada uno tiene la suya).
+        modelBuilder.Entity<Device>().HasOne<Location>().WithMany()
+            .HasForeignKey(d => d.LocationId).OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<AlarmPanel>().HasOne<Location>().WithMany()
+            .HasForeignKey(p => p.LocationId).OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<AccessDevice>().HasOne<Location>().WithMany()
+            .HasForeignKey(d => d.LocationId).OnDelete(DeleteBehavior.SetNull);
+
+        // Ficha del recurso: arco exclusivo (una sola referencia no nula, con
+        // CHECK) y cascada desde el recurso, para que la ficha se vaya con él.
+        modelBuilder.Entity<ResourceProfile>(e =>
+        {
+            e.Property(p => p.Description).HasMaxLength(1000);
+            e.Property(p => p.Instructions).HasMaxLength(4000);
+            e.HasOne<Channel>().WithMany().HasForeignKey(p => p.ChannelId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AccessDoor>().WithMany().HasForeignKey(p => p.AccessDoorId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AlarmArea>().WithMany().HasForeignKey(p => p.AlarmAreaId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AlarmZone>().WithMany().HasForeignKey(p => p.AlarmZoneId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<CercoPanel>().WithMany().HasForeignKey(p => p.CercoPanelId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Speaker>().WithMany().HasForeignKey(p => p.SpeakerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Intercom>().WithMany().HasForeignKey(p => p.IntercomId).OnDelete(DeleteBehavior.Cascade);
+            // Una sola ficha por recurso.
+            e.HasIndex(p => p.ChannelId).IsUnique().HasFilter("\"ChannelId\" IS NOT NULL");
+            e.HasIndex(p => p.AccessDoorId).IsUnique().HasFilter("\"AccessDoorId\" IS NOT NULL");
+            e.HasIndex(p => p.AlarmAreaId).IsUnique().HasFilter("\"AlarmAreaId\" IS NOT NULL");
+            e.HasIndex(p => p.AlarmZoneId).IsUnique().HasFilter("\"AlarmZoneId\" IS NOT NULL");
+            e.HasIndex(p => p.CercoPanelId).IsUnique().HasFilter("\"CercoPanelId\" IS NOT NULL");
+            e.HasIndex(p => p.SpeakerId).IsUnique().HasFilter("\"SpeakerId\" IS NOT NULL");
+            e.HasIndex(p => p.IntercomId).IsUnique().HasFilter("\"IntercomId\" IS NOT NULL");
+            e.ToTable(t => t.HasCheckConstraint("CK_ResourceProfiles_OneResource",
+                "num_nonnulls(\"ChannelId\", \"AccessDoorId\", \"AlarmAreaId\", \"AlarmZoneId\", " +
+                "\"CercoPanelId\", \"SpeakerId\", \"IntercomId\") = 1"));
+        });
+
+        modelBuilder.Entity<ResourceProfileCamera>(e =>
+        {
+            e.HasOne(c => c.Profile)
+                .WithMany(p => p.Cameras)
+                .HasForeignKey(c => c.ResourceProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Si la cámara deja de existir, deja de estar asociada.
+            e.HasOne(c => c.Channel)
+                .WithMany()
+                .HasForeignKey(c => c.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(c => new { c.ResourceProfileId, c.ChannelId }).IsUnique();
         });
     }
 }

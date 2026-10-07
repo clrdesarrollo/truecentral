@@ -7,35 +7,51 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // ---------------------------------------------------------------------------
-// Campo de contraseña con botón "mostrar/ocultar"
+// Campos de contraseña con botón "mostrar/ocultar"
 // ---------------------------------------------------------------------------
-const EYE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
+// Todo <input type="password"> que aparezca en la página (login, equipos,
+// usuarios, claves de paneles, flujos...) recibe solo el ojo: un observador lo
+// envuelve apenas se inserta, así ningún formulario nuevo queda sin él. El
+// input conserva id, valor y eventos; solo cambia de contenedor.
+const EYE_ICON =`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const EYE_OFF_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
 
-/// Un <input type="password"> con el ojo para ver lo escrito. `attrs` son los
-/// atributos del input (id, autocomplete, required...). Activar con bindPasswordToggles().
-function passwordInputHtml(attrs) {
-  return `<div class="pw-wrap">
-    <input type="password" ${attrs}>
-    <button type="button" class="pw-toggle" title="Mostrar contraseña" aria-label="Mostrar contraseña" aria-pressed="false">${EYE_ICON}</button>
-  </div>`;
+/// Envuelve el campo en .pw-wrap y le agrega el ojo (si ya lo tiene, no hace nada).
+function addPasswordToggle(input) {
+  if (input.closest(".pw-wrap")) return;
+  const focused = document.activeElement === input;   // moverlo de nodo le quita el foco
+  const wrap = document.createElement("div");
+  wrap.className = "pw-wrap";
+  input.before(wrap);
+  wrap.append(input);
+  wrap.insertAdjacentHTML("beforeend",
+    `<button type="button" class="pw-toggle" title="Mostrar contraseña" aria-label="Mostrar contraseña" aria-pressed="false">${EYE_ICON}</button>`);
+  if (focused) input.focus();
 }
 
-/// Activa los botones de mostrar/ocultar de todos los campos de contraseña dentro de `root`.
-function bindPasswordToggles(root) {
-  $$(".pw-toggle", root).forEach((button) => {
-    const input = button.previousElementSibling;
-    if (!input) return;
-    button.addEventListener("click", () => {
-      const show = input.type === "password";
-      input.type = show ? "text" : "password";
-      button.innerHTML = show ? EYE_OFF_ICON : EYE_ICON;
-      button.title = button.ariaLabel = show ? "Ocultar contraseña" : "Mostrar contraseña";
-      button.setAttribute("aria-pressed", String(show));
-      input.focus();
-    });
-  });
+function addPasswordToggles(root) {
+  if (root.matches('input[type="password"]')) addPasswordToggle(root);
+  else root.querySelectorAll('input[type="password"]').forEach(addPasswordToggle);
 }
+
+addPasswordToggles(document.body);
+new MutationObserver((mutations) => {
+  for (const mutation of mutations)
+    for (const node of mutation.addedNodes)
+      if (node.nodeType === Node.ELEMENT_NODE) addPasswordToggles(node);
+}).observe(document.body, { childList: true, subtree: true });
+
+document.addEventListener("click", (e) => {
+  const button = e.target.closest(".pw-toggle");
+  const input = button?.parentElement.querySelector("input");
+  if (!input || input.disabled) return;
+  const show = input.type === "password";
+  input.type = show ? "text" : "password";
+  button.innerHTML = show ? EYE_OFF_ICON : EYE_ICON;
+  button.title = button.ariaLabel = show ? "Ocultar contraseña" : "Mostrar contraseña";
+  button.setAttribute("aria-pressed", String(show));
+  input.focus();
+});
 
 // ---------------------------------------------------------------------------
 // Política de contraseñas (réplica de Core\Auth\PasswordPolicy.cs; el servidor
@@ -107,6 +123,70 @@ function channelCountCell(d) {
   return `<span class="tag ${cls}" style="white-space:nowrap" title="${hidden} canal(es) con señal están deshabilitados: los operadores no los ven y no tienen ruta de streaming. Habilítelos desde &quot;Canales&quot;.">${enabled} / ${total}</span>`;
 }
 
+// ---------------------------------------------------------------------------
+// Ubicación de un equipo en su formulario de alta o edición. Sus recursos
+// (canales, áreas y zonas, puertas) la heredan; los que se ubicaron aparte en
+// Recursos se quedan donde están.
+// ---------------------------------------------------------------------------
+
+/** El árbol en orden de lectura (padres antes que hijos, hermanos por nombre),
+ *  o null si no se pudo leer: el formulario conserva entonces la ubicación actual. */
+async function loadLocationChoices() {
+  let list;
+  try { list = await Api.get("/api/locations"); } catch { return null; }
+  const byParent = new Map();
+  for (const l of list) {
+    const key = l.parentId ?? 0;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(l);
+  }
+  const out = [], seen = new Set();
+  const walk = (parent, depth) => {
+    for (const l of (byParent.get(parent) || []).sort((x, y) => x.name.localeCompare(y.name, "es"))) {
+      if (seen.has(l.id)) continue;
+      seen.add(l.id);
+      out.push({ id: l.id, name: l.name, depth });
+      walk(l.id, depth + 1);
+    }
+  };
+  walk(0, 0);
+  return out;
+}
+
+/** Campo "Ubicación" con el árbol indentado; "" = por ubicar. */
+function locationFieldHtml(id, choices, selectedId, hint) {
+  if (!choices) {
+    return `
+      <div class="field">
+        <label for="${id}">Ubicación</label>
+        <select id="${id}" data-keep="1" disabled><option>No se pudo leer el árbol: se conserva la actual</option></select>
+      </div>`;
+  }
+  return `
+    <div class="field">
+      <label for="${id}">Ubicación</label>
+      <select id="${id}">
+        <option value="">Por ubicar</option>
+        ${choices.map((c) => `<option value="${c.id}" ${c.id === selectedId ? "selected" : ""}>${"\u00a0\u00a0\u00a0".repeat(c.depth)}${esc(c.name)}</option>`).join("")}
+      </select>
+      ${hint ? `<div class="muted field-hint">${esc(hint)}</div>` : ""}
+    </div>`;
+}
+
+/** Lo que va al servidor: el id elegido, 0 = por ubicar, null = conservar la actual. */
+function locationFieldValue(id) {
+  const select = $("#" + id);
+  if (!select || select.dataset.keep) return null;
+  return select.value ? Number(select.value) : 0;
+}
+
+/** Ruta de la ubicación bajo el nombre del equipo en las listas. */
+function locationLineHtml(path) {
+  return path
+    ? `<div class="loc-line" title="Ubicación en Recursos">${esc(path)}</div>`
+    : `<div class="loc-line none" title="Sin ubicación: los operadores con alcance restringido no lo ven">Por ubicar</div>`;
+}
+
 function openModal(html, size) {
   // `size`: true = "wide" (formularios con grilla, editor de muros) o el
   // nombre de una clase de ancho ("wider" para tablas dentro del modal).
@@ -137,6 +217,116 @@ function showAppShell() {
   $("#auth-screen").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
   $("#current-user").textContent = `${Api.username} (${Api.role === "Admin" ? "Administrador" : "Operador"})`;
+  showUserScope();
+}
+
+// ---------------------------------------------------------------------------
+// Qué puede OPERAR esta sesión (armar, abrir, mover un PTZ, hablar…), no solo
+// ver: lo dice el servidor (/api/auth/operable) con las mismas reglas con que
+// valida cada orden. Los controles de una orden llevan data-op="tipo:id" (varios
+// separados por espacio = todos tienen que poder operarse) y se deshabilitan
+// solos, con la explicación en su tooltip, aunque el módulo los vuelva a dibujar.
+// Tipos: location, channel, area y zone ("panel/número"), panel (todo el panel),
+// door, fence, speaker, intercom. Mientras no se haya leído no se bloquea nada:
+// el servidor valida igual.
+// ---------------------------------------------------------------------------
+const OP_DENIED = "Fuera de su alcance: puede verlo, pero no operarlo.";
+const OP_TOPICS = new Set(["scope", "locations", "devices", "channels", "alarm-panels", "access-devices", "speakers", "intercoms"]);
+const OP_KINDS = {
+  location: "locations", channel: "channels", area: "areas", zone: "zones", panel: "wholePanels",
+  door: "doors", fence: "fences", speaker: "speakers", intercom: "intercoms",
+};
+const Operable = {
+  all: true,
+  sets: {},
+  timer: null,
+  async load() {
+    let dto;
+    try { dto = await Api.get("/api/auth/operable"); } catch { return; } // sin respuesta: se deja como estaba
+    this.all = !!dto.all;
+    this.sets = {};
+    if (!this.all) for (const [kind, prop] of Object.entries(OP_KINDS)) this.sets[kind] = new Set((dto[prop] ?? []).map(String));
+    applyOperable(document);
+  },
+  /** Relee con una pausa corta: varios avisos seguidos del hub hacen una sola consulta. */
+  schedule() {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.load(), 400);
+  },
+  reset() { this.all = true; this.sets = {}; applyOperable(document); },
+  /** ¿Puede operar el recurso? kind según OP_KINDS; id tal cual lo nombra la API. */
+  can(kind, id) { return this.all || !!this.sets[kind]?.has(String(id)); },
+  /** "door:12 door:13" → todos tienen que poder operarse. */
+  allows(spec) {
+    return this.all || String(spec).split(/\s+/).filter(Boolean).every((part) => {
+      const i = part.indexOf(":");
+      return i > 0 && this.can(part.slice(0, i), part.slice(i + 1));
+    });
+  },
+};
+
+/** Aplica lo operable a los controles marcados con data-op dentro de root; los
+ *  avisos con data-op-hint="…" se muestran solo cuando algo de eso NO se puede operar. */
+function applyOperable(root) {
+  if (!root?.querySelectorAll) return;
+  const hints = [...root.querySelectorAll("[data-op-hint]")];
+  if (root.matches?.("[data-op-hint]")) hints.push(root);
+  for (const el of hints) el.hidden = Operable.allows(el.dataset.opHint);
+  const nodes = [...root.querySelectorAll("[data-op]")];
+  if (root.matches?.("[data-op]")) nodes.push(root);
+  for (const el of nodes) {
+    const ok = Operable.allows(el.dataset.op);
+    const off = el.classList.contains("op-off");
+    if (!ok && !off) {
+      el.dataset.opWasDisabled = el.disabled ? "1" : "";
+      el.dataset.opTitle = el.getAttribute("title") ?? "";
+      el.disabled = true;
+      el.classList.add("op-off");
+      el.title = OP_DENIED;
+    } else if (ok && off) {
+      el.classList.remove("op-off");
+      el.disabled = el.dataset.opWasDisabled === "1";
+      if (el.dataset.opTitle) el.title = el.dataset.opTitle; else el.removeAttribute("title");
+    }
+  }
+}
+
+// Lo que las páginas dibujan después también se revisa (re-render de tarjetas,
+// filas que llegan por el hub, modales).
+new MutationObserver((mutations) => {
+  if (Operable.all && !document.querySelector(".op-off")) return; // nada que bloquear (los avisos nacen ocultos)
+  for (const m of mutations) for (const node of m.addedNodes) if (node.nodeType === 1) applyOperable(node);
+}).observe(document.body, { childList: true, subtree: true });
+
+// Lo operable cambia con el alcance del usuario y con dónde está cada recurso
+// (y con los recursos nuevos, que heredan la ubicación de su equipo).
+function onOperableTopic(topic) {
+  if (OP_TOPICS.has(topic)) Operable.schedule();
+  if (topic === "scope") showUserScope();
+}
+function onOperableReconnected() { Operable.schedule(); }
+
+// Red de seguridad: si un módulo rehabilitó un control fuera de alcance, el clic no pasa.
+document.addEventListener("click", (e) => {
+  const el = e.target.closest?.(".op-off");
+  if (!el) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  toast(OP_DENIED, true);
+}, true);
+
+/** Alcance por ubicación del usuario conectado, en su menú (el servidor ya filtra todo lo demás). */
+async function showUserScope() {
+  const box = $("#user-scope");
+  if (!box) return;
+  try {
+    const scope = (await Api.get("/api/auth/me")).scope;
+    box.classList.toggle("hidden", !scope?.restricted);
+    if (!scope?.restricted) return;
+    box.innerHTML = `<div class="muted">Su alcance</div>
+      <div>${scope.locations.length ? scope.locations.map(esc).join("<br>") : "Ninguna ubicación"}</div>
+      ${scope.viewOutsideScope ? `<div class="muted">Ve el resto, sin operarlo</div>` : ""}`;
+  } catch { /* sin alcance que mostrar */ }
 }
 
 function renderSetup(status) {
@@ -204,11 +394,11 @@ function renderSetup(status) {
   });
 }
 
-function renderLogin(message) {
+function renderLogin(message, tone = "info") {
   showAuthScreen();
   $("#auth-subtitle").textContent = "Gestión de video multimarca";
   $("#auth-body").innerHTML = `
-    <div id="login-error">${message ? `<div class="info-box">${esc(message)}</div>` : ""}</div>
+    <div id="login-error">${message ? `<div class="${tone === "warn" ? "warn-box" : "info-box"}">${esc(message)}</div>` : ""}</div>
     <form id="login-form">
       <div class="field">
         <label>Usuario</label>
@@ -216,12 +406,10 @@ function renderLogin(message) {
       </div>
       <div class="field">
         <label>Contraseña</label>
-        ${passwordInputHtml(`id="login-password" autocomplete="current-password" required`)}
+        <input id="login-password" type="password" autocomplete="current-password" required>
       </div>
       <button class="btn block" type="submit">Ingresar</button>
     </form>`;
-
-  bindPasswordToggles($("#login-form"));
 
   $("#login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -377,6 +565,46 @@ function sessionDuration(startedAt) {
   return (h ? `${h} h ` : "") + (h || m ? `${m} min ` : "") + `${s} s`;
 }
 
+/**
+ * Puestos de cliente de escritorio: lo que cuenta el cupo de clientes de la
+ * licencia. Un puesto es un EQUIPO; "sin conexión" es una sesión colgada (el
+ * cliente se cerró sin cerrar sesión) que igual ocupa su puesto hasta vencer.
+ */
+function desktopSeatsHtml(data) {
+  const limit = data.limit > 0 ? data.limit : null;
+  const full = limit !== null && data.inUse >= limit;
+  return `
+    <div class="toolbar">
+      <h3>Clientes de escritorio <span class="muted" style="font-weight:normal;font-size:12px">
+        (${data.inUse}${limit !== null ? ` de ${limit}` : ""} puesto${data.inUse === 1 ? "" : "s"} de la licencia en uso)</span></h3>
+    </div>
+    ${full ? `<div class="warn-box">Están todos los puestos de cliente ocupados: nadie más puede ingresar con el cliente de
+      escritorio. Libere uno que ya no se use (las sesiones «sin conexión» quedaron colgadas).</div>` : ""}
+    ${data.seats.length === 0 ? `<div class="info-box">No hay clientes de escritorio con sesión abierta.</div>` : `
+    <div class="table-scroll"><table class="grid">
+      <thead><tr>
+        <th>Equipo</th><th>Usuario</th><th>Versión del cliente</th><th>Ingresó</th><th>Vence</th><th>Estado</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${data.seats.map((s) => `
+          <tr data-seat="${esc(s.seat)}">
+            <td>${esc(s.seat)}</td>
+            <td>${esc(s.username)} <span class="muted" style="font-size:11px">${s.role === "Admin" ? "administrador" : "operador"}</span></td>
+            <td class="muted">${esc(s.version ?? "—")}</td>
+            <td class="muted">${formatDate(s.startedAt)}</td>
+            <td class="muted">${formatDate(s.expiresAt)}</td>
+            <td>${s.connected
+              ? `<span class="tag on">Conectado</span>`
+              : `<span class="tag warn" title="El cliente se cerró sin cerrar sesión: el puesto sigue ocupado hasta que la sesión venza">Sin conexión (sesión colgada)</span>`}</td>
+            <td class="row-actions">
+              <button class="btn ${s.connected ? "danger" : "ghost"} btn-seat-release"
+                title="Cierra la sesión de ese equipo y libera su puesto">${s.connected ? "Desconectar" : "Liberar puesto"}</button>
+            </td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>`}`;
+}
+
 async function renderSessions() {
   $("#page-title").textContent = "Sesiones";
   if (Api.role !== "Admin") {
@@ -385,12 +613,15 @@ async function renderSessions() {
   }
 
   const load = async () => {
-    let sessions;
-    try { sessions = await Api.get("/api/streams/active"); }
+    let sessions, seats;
+    try {
+      [sessions, seats] = await Promise.all([Api.get("/api/streams/active"), Api.get("/api/system/desktop-seats")]);
+    }
     catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
     $("#view").innerHTML = `
-      <div class="toolbar">
+      ${desktopSeatsHtml(seats)}
+      <div class="toolbar" style="margin-top:22px">
         <h3>Sesiones de video activas <span class="muted" style="font-weight:normal;font-size:12px">(se actualiza cada 5 s)</span></h3>
       </div>
       ${sessions.length === 0 ? `<div class="info-box">Nadie está viendo video en este momento.</div>` : `
@@ -415,6 +646,25 @@ async function renderSessions() {
             </tr>`).join("")}
         </tbody>
       </table></div>`}`;
+
+    $$("#view .btn-seat-release").forEach((b) => b.addEventListener("click", async (e) => {
+      const seat = seats.seats.find((x) => x.seat === e.target.closest("tr").dataset.seat);
+      const aviso = seat.connected
+        ? `¿Desconectar el cliente de "${seat.seat}" (${seat.username}) y liberar su puesto?\n\n` +
+          "El cliente está abierto: vuelve a la pantalla de ingreso, se corta su video y no puede volver a entrar durante un minuto."
+        : `¿Liberar el puesto de "${seat.seat}" (${seat.username})?\n\n` +
+          "La sesión quedó colgada: el cliente se cerró sin cerrar sesión. Liberarla no afecta a nadie.";
+      if (!confirm(aviso)) return;
+      e.target.disabled = true;
+      try {
+        await Api.post("/api/system/desktop-seats/release", { seat: seat.seat });
+        toast(`Puesto de "${seat.seat}" liberado.`);
+        load();
+      } catch (err) {
+        toast(err.error, true);
+        e.target.disabled = false;
+      }
+    }));
 
     $$("#view .btn-kick").forEach((b) => b.addEventListener("click", async (e) => {
       const row = e.target.closest("tr");
@@ -502,7 +752,7 @@ async function renderDevices() {
         <tbody>
           ${devices.map((d) => `
             <tr data-id="${d.id}">
-              <td>${esc(d.name)}</td>
+              <td>${esc(d.name)}${locationLineHtml(d.location)}</td>
               <td>${esc(typeLabel(d.deviceType))}</td>
               <td class="muted">${esc(d.driverKey)}</td>
               <td class="muted">${esc(d.host)}:${d.sdkPort}</td>
@@ -706,7 +956,7 @@ function renderOnlineDevices(devices) {
           <td class="muted">${opt.portOf ? opt.portOf(d) : d.commandPort}</td>
           <td class="muted">${esc(d.mac)}</td>
           <td>${added ? `<span class="tag on">Agregado</span>`
-                : d.canInitialize ? `<span class="tag off">Sin inicializar</span>`
+                : d.canInitialize ? `<span class="tag off">${d.brand === "Hikvision" ? "Sin activar" : "Sin inicializar"}</span>`
                 : d.activated === false ? `<span class="tag off">Sin activar</span>`
                 : `<span class="tag operator">Nuevo</span>`}</td>
           <td class="row-actions">
@@ -714,7 +964,9 @@ function renderOnlineDevices(devices) {
               ? `<button class="btn ghost scan-ip" data-i="${i}" title="Cambia la IP del equipo sin entrar a él (como Change IP de SmartPSS)">Cambiar IP</button>`
               : ""}
             ${d.canInitialize && !added
-              ? `<button class="btn scan-init" data-i="${i}" title="Crea el usuario admin del equipo de fábrica">Inicializar</button>`
+              ? (d.brand === "Hikvision"
+                ? `<button class="btn scan-init" data-i="${i}" title="Fija la contraseña del usuario admin del equipo de fábrica (como Activate de SADP)">Activar</button>`
+                : `<button class="btn scan-init" data-i="${i}" title="Crea el usuario admin del equipo de fábrica">Inicializar</button>`)
               : `<button class="btn ghost scan-use" data-i="${i}" ${added ? "disabled" : ""}
                   ${d.reachable === false ? `title="El equipo está en otra subred: cámbiele la IP antes de agregarlo"` : ""}>Agregar</button>`}
           </td>
@@ -723,7 +975,7 @@ function renderOnlineDevices(devices) {
       </tbody>
     </table></div>`;
   $$(".scan-use").forEach((b) => b.addEventListener("click", () => opt.onUse(lastScan[Number(b.dataset.i)])));
-  $$(".scan-init").forEach((b) => b.addEventListener("click", () => dahuaInitModal(lastScan[Number(b.dataset.i)], devices)));
+  $$(".scan-init").forEach((b) => b.addEventListener("click", () => initModal(lastScan[Number(b.dataset.i)], devices)));
   $$(".scan-ip").forEach((b) => b.addEventListener("click", () => changeIpModal(lastScan[Number(b.dataset.i)], devices)));
 }
 
@@ -773,6 +1025,7 @@ async function changeIpModal(d, devices, knownPassword) {
           <div class="field">
             <label>IP nueva</label>
             <input id="dip-ip" value="${esc(ip)}" placeholder="192.168.10.60">
+            <div id="dip-ip-check" style="font-size:12px;margin-top:4px"></div>
           </div>
           <div class="field">
             <label>Máscara de subred</label>
@@ -839,6 +1092,33 @@ async function changeIpModal(d, devices, knownPassword) {
     ipInput.setSelectionRange(ipInput.value.length, ipInput.value.length);
   }
 
+  // Al salir del campo "IP nueva", si cambió, se avisa si ya hay algo en esa
+  // IP (otro equipo de la búsqueda, o algo que responde al ping o al ARP).
+  // Es solo un aviso: Aplicar lo vuelve a comprobar en el servidor.
+  let checkedIp = d.ip;
+  $("#dip-ip").addEventListener("blur", async () => {
+    const value = $("#dip-ip").value.trim();
+    const box = $("#dip-ip-check");
+    if (value === checkedIp) return;
+    checkedIp = value;
+    if (!isIPv4(value) || value === d.ip) { box.innerHTML = ""; return; }
+    const neighbor = (lastScan || []).find((x) => x.ip === value && x.mac !== d.mac);
+    if (neighbor) {
+      box.innerHTML = `<span style="color:var(--danger, #e5534b)">En uso por ${esc(neighbor.brand)} ${esc(neighbor.model)} (${esc(neighbor.mac)}).</span>`;
+      return;
+    }
+    box.innerHTML = `<span class="muted">Comprobando si está libre…</span>`;
+    try {
+      const r = await Api.get(`/api/discovery/ip-in-use?ip=${encodeURIComponent(value)}`);
+      if (checkedIp !== value) return; // el usuario ya escribió otra
+      box.innerHTML = r.inUse
+        ? `<span style="color:var(--danger, #e5534b)">La IP ${esc(value)} ya está en uso por otro equipo de la red.</span>`
+        : `<span style="color:var(--ok, #3fb950)">La IP ${esc(value)} está libre.</span>`;
+    } catch {
+      if (checkedIp === value) box.innerHTML = `<span class="muted">No se pudo comprobar la IP.</span>`;
+    }
+  });
+
   $("#dip-cancel").addEventListener("click", closeModal);
   $("#dip-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -884,7 +1164,8 @@ async function changeIpModal(d, devices, knownPassword) {
             : "El equipo aceptó el cambio pero todavía no responde en la IP nueva; algunos tardan hasta un minuto en reiniciar la red. Si no aparece en la próxima búsqueda, revise el cableado y la IP elegida."}</div>`}
         ${r.dnsApplied ? `<div class="info-box" style="margin-top:10px">DNS configurados.</div>` : ""}
         ${r.dnsError ? `<div class="warn-box" style="margin-top:10px">No se pudieron configurar los DNS: ${esc(r.dnsError)}</div>` : ""}
-        ${r.timeSynced ? `<div class="info-box" style="margin-top:10px">Fecha, hora y zona horaria sincronizadas con el servidor.</div>` : ""}
+        ${r.timeSynced && !r.timeNote ? `<div class="info-box" style="margin-top:10px">Fecha, hora y zona horaria sincronizadas con el servidor.</div>` : ""}
+        ${r.timeSynced && r.timeNote ? `<div class="warn-box" style="margin-top:10px">Fecha y hora sincronizadas, pero ${esc(r.timeNote)}</div>` : ""}
         ${r.timeError ? `<div class="warn-box" style="margin-top:10px">No se pudo sincronizar la fecha y la hora: ${esc(r.timeError)}</div>` : ""}
         ${r.reachable ? "" : `<div class="warn-box" style="margin-top:10px">
           La IP ${esc(r.ip)} no está en la red de este servidor: no se podrá agregar desde acá.</div>`}
@@ -912,17 +1193,36 @@ function dahuaPasswordProblem(p) {
     : null;
 }
 
+/** Política de activación Hikvision (la misma que revisa el servidor). Devuelve el problema o null. */
+function hikvisionPasswordProblem(p) {
+  if (!p || p.length < 8 || p.length > 16) return "La contraseña debe tener entre 8 y 16 caracteres.";
+  if (p.includes(" ")) return "La contraseña no puede llevar espacios.";
+  if (/admin/i.test(p)) return "La contraseña no puede contener el nombre de usuario (admin).";
+  const kinds = [/[A-Z]/, /[a-z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((r) => r.test(p)).length;
+  return kinds < 2
+    ? "La contraseña debe combinar al menos dos tipos de caracteres: mayúsculas, minúsculas, números o símbolos."
+    : null;
+}
+
 /**
- * Inicializa un equipo Dahua de fábrica (le crea el usuario admin), como el
- * botón "Initialize" de SmartPSS. Al terminar ofrece agregarlo de inmediato.
+ * Deja listo un equipo de fábrica (cualquier tipo: cámara, grabador, control
+ * de acceso, citofonía...): Dahua se inicializa (se le crea el usuario admin,
+ * como "Initialize" de SmartPSS) y Hikvision se activa (se fija la contraseña
+ * de admin, como "Activate" de SADP). Al terminar ofrece agregarlo de
+ * inmediato, o cambiarle la IP si quedó fuera de la red del servidor.
  */
-function dahuaInitModal(d, devices) {
+function initModal(d, devices) {
   const opt = discoveryOptions;
+  const hik = d.brand === "Hikvision";
+  const verb = hik ? "Activar" : "Inicializar";
+  const maxLength = hik ? 16 : 32;
   openModal(`
-    <h3>Inicializar equipo</h3>
+    <h3>${verb} equipo</h3>
     <p class="muted" style="margin-top:0">
       ${esc(d.model)} · ${esc(d.ip)} · ${esc(d.mac)}<br>
-      El equipo está de fábrica y no tiene usuarios. Se le creará el usuario <b>admin</b> con esta contraseña.
+      ${hik
+        ? "El equipo está de fábrica, sin activar. Se fijará esta contraseña al usuario <b>admin</b>."
+        : "El equipo está de fábrica y no tiene usuarios. Se le creará el usuario <b>admin</b> con esta contraseña."}
     </p>
     <div id="di-error"></div>
     <form id="di-form">
@@ -933,23 +1233,26 @@ function dahuaInitModal(d, devices) {
       <div class="form-grid">
         <div class="field">
           <label>Contraseña</label>
-          <input id="di-pass" type="password" autocomplete="new-password" required maxlength="32">
+          <input id="di-pass" type="password" autocomplete="new-password" required maxlength="${maxLength}">
         </div>
         <div class="field">
           <label>Confirmar contraseña</label>
-          <input id="di-pass2" type="password" autocomplete="new-password" required maxlength="32">
+          <input id="di-pass2" type="password" autocomplete="new-password" required maxlength="${maxLength}">
         </div>
       </div>
       <div class="muted" style="font-size:12px;margin:-4px 0 12px">
-        8 a 32 caracteres, combinando al menos dos tipos (mayúsculas, minúsculas, números o símbolos), sin ' " ; : &amp; ni espacios.
+        ${hik
+          ? "8 a 16 caracteres, combinando al menos dos tipos (mayúsculas, minúsculas, números o símbolos), sin espacios y sin la palabra admin."
+          : "8 a 32 caracteres, combinando al menos dos tipos (mayúsculas, minúsculas, números o símbolos), sin ' \" ; : &amp; ni espacios."}
       </div>
+      ${hik ? "" : `
       <div class="field">
         <label>Correo para recuperar la contraseña${d.initNeedsEmail ? "" : " (opcional)"}</label>
         <input id="di-email" type="email" maxlength="63" ${d.initNeedsEmail ? "required" : ""}>
-      </div>
+      </div>`}
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="di-cancel">Cancelar</button>
-        <button class="btn" type="submit" id="di-save">Inicializar</button>
+        <button class="btn" type="submit" id="di-save">${verb}</button>
       </div>
     </form>`);
 
@@ -959,24 +1262,26 @@ function dahuaInitModal(d, devices) {
     const password = $("#di-pass").value;
     const confirmPassword = $("#di-pass2").value;
     const showError = (msg) => { $("#di-error").innerHTML = `<div class="error-box">${esc(msg)}</div>`; };
-    const problem = dahuaPasswordProblem(password)
+    const problem = (hik ? hikvisionPasswordProblem(password) : dahuaPasswordProblem(password))
       ?? (password !== confirmPassword ? "Las contraseñas no coinciden." : null);
     if (problem) { showError(problem); return; }
 
     const button = $("#di-save");
     button.disabled = true;
-    button.textContent = "Inicializando…";
+    button.textContent = hik ? "Activando…" : "Inicializando…";
     $("#di-error").innerHTML = "";
     try {
-      const r = await Api.post("/api/discovery/dahua/initialize", {
-        mac: d.mac, password, confirmPassword, email: $("#di-email").value,
-      });
-      // El equipo ya tiene usuario: la próxima búsqueda lo mostrará como "Nuevo".
+      const r = hik
+        ? await Api.post("/api/discovery/hikvision/activate", { mac: d.mac, password, confirmPassword })
+        : await Api.post("/api/discovery/dahua/initialize", {
+            mac: d.mac, password, confirmPassword, email: $("#di-email").value,
+          });
+      // El equipo ya tiene contraseña: la próxima búsqueda lo mostrará como "Nuevo".
       lastScan = null;
       runDiscovery(devices, false);
-      const ready = { ...d, activated: true, canInitialize: false, username: r.username };
+      const ready = { ...d, activated: true, canInitialize: false, canChangeIp: true, username: r.username };
       openModal(`
-        <h3>Equipo inicializado</h3>
+        <h3>Equipo ${hik ? "activado" : "inicializado"}</h3>
         <div class="info-box">
           ${esc(r.model)} (${esc(r.ip)}) ya tiene el usuario <b>${esc(r.username)}</b> con la contraseña elegida.
         </div>
@@ -995,9 +1300,9 @@ function dahuaInitModal(d, devices) {
       $("#di-ip")?.addEventListener("click", () =>
         changeIpModal({ ...ready, reachable: false }, devices, password));
     } catch (err) {
-      showError(err.error || "No se pudo inicializar el equipo.");
+      showError(err.error || `No se pudo ${verb.toLowerCase()} el equipo.`);
       button.disabled = false;
-      button.textContent = "Inicializar";
+      button.textContent = verb;
     }
   });
 }
@@ -1005,7 +1310,7 @@ function dahuaInitModal(d, devices) {
 async function deviceModal(device, prefill) {
   const isNew = !device;
   const seed = isNew ? (prefill || {}) : {};
-  const drivers = await getDrivers();
+  const [drivers, places] = await Promise.all([getDrivers(), loadLocationChoices()]);
   openModal(`
     <h3>${isNew ? "Agregar dispositivo" : "Editar dispositivo"}</h3>
     <div id="dev-modal-error"></div>
@@ -1014,6 +1319,8 @@ async function deviceModal(device, prefill) {
         <label>Nombre</label>
         <input id="df-name" required maxlength="128" value="${esc(device?.name ?? seed.name ?? "")}" placeholder="NVR Bodega, Cámara acceso...">
       </div>
+      ${locationFieldHtml("df-location", places, device?.locationId ?? null,
+        "Sus canales la heredan; los que ubique aparte en Recursos se quedan donde están.")}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="df-driver">
@@ -1117,6 +1424,7 @@ async function deviceModal(device, prefill) {
       rtspPort: Number($("#df-rtspport").value),
       username: $("#df-username").value.trim(),
       password: $("#df-password").value || null,
+      locationId: locationFieldValue("df-location"),
     };
     if (pickerActive()) body.enabledChannels = pickedChannels();
     return body;
@@ -1291,9 +1599,17 @@ async function renderUsers() {
     $("#view").innerHTML = `<div class="warn-box">Requiere rol administrador.</div>`;
     return;
   }
-  let users;
-  try { users = await Api.get("/api/users"); }
+  let users, locations, unassigned;
+  try {
+    // El árbol de ubicaciones y lo "por ubicar" sirven para el alcance de cada usuario.
+    [users, locations, unassigned] = await Promise.all([
+      Api.get("/api/users"),
+      Api.get("/api/locations").catch(() => []),
+      Api.get("/api/resources?unassigned=true").catch(() => []),
+    ]);
+  }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
+  const scopeCtx = { locations, unassigned: unassigned.length };
 
   $("#view").innerHTML = `
     <div class="toolbar">
@@ -1302,13 +1618,14 @@ async function renderUsers() {
     </div>
     <table class="grid">
       <thead><tr>
-        <th>Usuario</th><th>Rol</th><th>Estado</th><th>Creado</th><th>Última clave</th><th></th>
+        <th>Usuario</th><th>Rol</th><th>Alcance</th><th>Estado</th><th>Creado</th><th>Última clave</th><th></th>
       </tr></thead>
       <tbody>
         ${users.map((u) => `
           <tr data-id="${u.id}">
             <td>${esc(u.username)}</td>
             <td><span class="tag ${u.role === "Admin" ? "admin" : "operator"}">${u.role === "Admin" ? "Administrador" : "Operador"}</span></td>
+            <td>${userScopeHtml(u, locations)}</td>
             <td><span class="tag ${u.enabled ? "on" : "off"}">${u.enabled ? "Habilitado" : "Deshabilitado"}</span></td>
             <td class="muted">${formatDate(u.createdAt)}</td>
             <td class="muted">${formatDate(u.passwordChangedAt)}</td>
@@ -1320,10 +1637,10 @@ async function renderUsers() {
       </tbody>
     </table>`;
 
-  $("#btn-user-new").addEventListener("click", () => userModal(null));
+  $("#btn-user-new").addEventListener("click", () => userModal(null, scopeCtx));
   $$("#view .btn-edit").forEach((b) => b.addEventListener("click", (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
-    userModal(users.find((u) => u.id === id));
+    userModal(users.find((u) => u.id === id), scopeCtx);
   }));
   $$("#view .btn-delete").forEach((b) => b.addEventListener("click", async (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
@@ -1337,8 +1654,80 @@ async function renderUsers() {
   }));
 }
 
-function userModal(user) {
+// ---------------------------------------------------------------------------
+// Alcance por ubicación de un usuario (qué ve y qué opera)
+// ---------------------------------------------------------------------------
+
+/** "Casa matriz › Edificio A" de una ubicación, con la lista plana del árbol. */
+function scopeLocationPath(id, byId) {
+  const parts = [];
+  const seen = new Set();
+  let current = byId.get(id);
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    parts.unshift(current.name);
+    current = current.parentId != null ? byId.get(current.parentId) : null;
+  }
+  return parts.join(" › ");
+}
+
+/** La celda "Alcance" de la tabla de usuarios. */
+function userScopeHtml(u, locations) {
+  if (u.role === "Admin") return `<span class="muted">Todo (administrador)</span>`;
+  if (!u.restrictToLocations) return `<span class="muted">Todas las ubicaciones</span>`;
+  const byId = new Map(locations.map((l) => [l.id, l]));
+  const names = (u.locationIds || []).map((id) => scopeLocationPath(id, byId)).filter(Boolean).sort();
+  const shown = names.slice(0, 2).map(esc).join(", ");
+  const more = names.length > 2 ? ` <span class="muted">(+${names.length - 2})</span>` : "";
+  return `<span title="${esc(names.join("\n"))}">${names.length ? shown + more : `<span class="muted">Ninguna ubicación</span>`}</span>` +
+    (u.viewOutsideScope ? ` <span class="tag operator" title="Ve el resto sin poder operarlo">ve el resto</span>` : "");
+}
+
+/** Árbol de casillas: marcar una ubicación incluye sus sububicaciones (quedan marcadas y bloqueadas). */
+function userScopeTreeHtml(locations, selected) {
+  const children = new Map();
+  for (const l of locations) {
+    const key = l.parentId ?? "root";
+    if (!children.has(key)) children.set(key, []);
+    children.get(key).push(l);
+  }
+  const collator = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
+  for (const list of children.values()) list.sort((a, b) => collator.compare(a.name, b.name));
+  const branch = (key) => {
+    const list = children.get(key) || [];
+    if (!list.length) return "";
+    return `<ul>${list.map((l) => `
+      <li><label class="scope-node"><input type="checkbox" data-loc="${l.id}" ${selected.has(l.id) ? "checked" : ""}>
+        <span>${esc(l.name)}</span></label>${branch(l.id)}</li>`).join("")}</ul>`;
+  };
+  return locations.length
+    ? branch("root")
+    : `<div class="muted">Todavía no hay ubicaciones: créelas en Configuración → Recursos.</div>`;
+}
+
+/**
+ * Una casilla marcada deja marcadas y bloqueadas sus sububicaciones (ya están
+ * incluidas); al desmarcarla, cada una vuelve a lo que el usuario tenía marcado.
+ * El orden del documento recorre cada padre antes que sus hijas.
+ */
+function userScopeSync(tree) {
+  for (const box of $$("input[data-loc]", tree)) {
+    const parentBox = box.closest("ul")?.closest("li")?.querySelector(":scope > label > input[data-loc]");
+    const inherited = parentBox ? (parentBox.checked || parentBox.dataset.inherited === "1") : false;
+    const was = box.dataset.inherited === "1";
+    if (inherited && !was) box.dataset.own = box.checked ? "1" : "0";
+    if (!inherited && was) box.checked = box.dataset.own === "1";
+    box.dataset.inherited = inherited ? "1" : "0";
+    box.disabled = inherited;
+    if (inherited) box.checked = true;
+    box.closest("label").title = inherited ? "Incluida por la ubicación de arriba" : "";
+  }
+}
+
+function userModal(user, scopeCtx = { locations: [], unassigned: 0 }) {
   const isNew = !user;
+  const selected = new Set(user?.locationIds || []);
+  const restricted = !!user?.restrictToLocations;
   openModal(`
     <h3>${isNew ? "Agregar usuario" : "Editar usuario"}</h3>
     <div id="user-modal-error"></div>
@@ -1353,6 +1742,27 @@ function userModal(user) {
           <option value="Operator" ${user?.role === "Operator" ? "selected" : ""}>Operador</option>
           <option value="Admin" ${user?.role === "Admin" ? "selected" : ""}>Administrador</option>
         </select>
+      </div>
+      <div class="field" id="uf-scope">
+        <label>Alcance por ubicación</label>
+        <div class="muted scope-admin-note" id="uf-scope-admin">Los administradores ven y operan todo.</div>
+        <div id="uf-scope-edit">
+          <label class="radio-row"><input type="radio" name="uf-scope-mode" value="all" ${restricted ? "" : "checked"}>
+            Todas las ubicaciones</label>
+          <label class="radio-row"><input type="radio" name="uf-scope-mode" value="some" ${restricted ? "checked" : ""}>
+            Solo estas ubicaciones (cada una con sus sububicaciones)</label>
+          <div id="uf-scope-pick">
+            <div class="scope-tree" id="uf-scope-tree">${userScopeTreeHtml(scopeCtx.locations, selected)}</div>
+            <label class="checkbox-row" style="margin-top:8px">
+              <input type="checkbox" id="uf-view-outside" ${user?.viewOutsideScope ? "checked" : ""}>
+              <span>Puede <b>ver</b> el resto, sin operarlo (supervisión)</span>
+            </label>
+            <div class="muted scope-hint">Fuera de su alcance no ve listas, eventos ni video, ni puede dar órdenes.
+              ${scopeCtx.unassigned > 0
+                ? `Hay ${scopeCtx.unassigned} recurso(s) por ubicar: solo los ven los usuarios sin restricción.`
+                : "Lo que esté por ubicar solo lo ven los usuarios sin restricción."}</div>
+          </div>
+        </div>
       </div>
       <div class="checkbox-row">
         <input type="checkbox" id="uf-enabled" ${user?.enabled !== false ? "checked" : ""}>
@@ -1370,6 +1780,21 @@ function userModal(user) {
     </form>`);
 
   bindPolicyList($("#uf-password"), "uf-policy");
+  // Alcance: se ve según el rol (el administrador no tiene) y el modo elegido.
+  const scopeTree = $("#uf-scope-tree");
+  const refreshScope = () => {
+    const admin = $("#uf-role").value === "Admin";
+    const some = $("input[name=uf-scope-mode]:checked")?.value === "some";
+    $("#uf-scope-admin").classList.toggle("hidden", !admin);
+    $("#uf-scope-edit").classList.toggle("hidden", admin);
+    $("#uf-scope-pick").classList.toggle("hidden", !some);
+    userScopeSync(scopeTree);
+  };
+  $("#uf-role").addEventListener("change", refreshScope);
+  $$("input[name=uf-scope-mode]").forEach((r) => r.addEventListener("change", refreshScope));
+  scopeTree.addEventListener("change", () => userScopeSync(scopeTree));
+  refreshScope();
+
   $("#uf-cancel").addEventListener("click", closeModal);
   $("#user-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1380,11 +1805,24 @@ function userModal(user) {
       errorBox.innerHTML = `<div class="error-box">La contraseña no cumple la política de seguridad.</div>`;
       return;
     }
+    const restrict = $("#uf-role").value !== "Admin" && $("input[name=uf-scope-mode]:checked")?.value === "some";
+    // Solo las marcadas a mano: las incluidas por una de arriba ya van con ella.
+    const locationIds = restrict
+      ? $$("input[data-loc]", scopeTree).filter((b) => b.checked && b.dataset.inherited !== "1").map((b) => Number(b.dataset.loc))
+      : [];
+    const viewOutside = restrict && $("#uf-view-outside").checked;
+    if (restrict && locationIds.length === 0 && !viewOutside) {
+      errorBox.innerHTML = `<div class="error-box">Marque al menos una ubicación, o "puede ver el resto" si solo debe supervisar.</div>`;
+      return;
+    }
     const body = {
       username: $("#uf-username").value.trim(),
       password: password || null,
       role: $("#uf-role").value,
       enabled: $("#uf-enabled").checked,
+      restrictToLocations: restrict,
+      viewOutsideScope: viewOutside,
+      locationIds,
     };
     try {
       if (isNew) await Api.post("/api/users", body);
@@ -1623,6 +2061,7 @@ const routes = {
   "#/access-events": renderAccessEvents,
   "#/speakers": renderSpeakers,
   "#/intercoms": renderIntercoms,
+  "#/device-maintenance": renderDeviceMaintenance,
   "#/workflows": renderWorkflows,
   "#/workflows/edit": renderWorkflowEditor,
   "#/sounds": renderSounds,
@@ -1635,6 +2074,7 @@ const routes = {
   "#/intercom-console": renderIntercomConsole,
   "#/decoders": renderDecoders,
   "#/walls": renderWalls,
+  "#/resources": renderResources,
   "#/sessions": renderSessions,
   "#/users": renderUsers,
   "#/audit": renderAudit,
@@ -1669,6 +2109,8 @@ function setupNav() {
       group.classList.toggle("open");
       btn.setAttribute("aria-expanded", group.classList.contains("open") ? "true" : "false");
       saveNavState();
+      // Lo que se acaba de desplegar queda a la vista (sin perder su título).
+      if (group.classList.contains("open")) requestAnimationFrame(() => keepNavVisible(group));
     });
   });
   syncNavAria();
@@ -1680,7 +2122,8 @@ function syncNavAria() {
   });
 }
 
-// Deja visible el enlace activo abriendo los nodos que lo contienen.
+// Deja visible el enlace activo abriendo los nodos que lo contienen y
+// desplazando el menú hasta él (el menú tiene su propio scroll).
 function revealActiveNav(link) {
   $$("#nav .nav-group").forEach((g) => g.classList.remove("has-active"));
   if (!link) return;
@@ -1689,9 +2132,25 @@ function revealActiveNav(link) {
   }
   saveNavState();
   syncNavAria();
+  requestAnimationFrame(() => keepNavVisible(link));
 }
 
-function navigate() {
+/**
+ * Desplaza SOLO el menú lateral (nunca la página) hasta que el elemento quede
+ * a la vista, con un margen. Si es más alto que el menú, manda su comienzo.
+ */
+function keepNavVisible(el) {
+  const nav = $("#nav");
+  if (!nav || !el) return;
+  const box = nav.getBoundingClientRect(), r = el.getBoundingClientRect();
+  const margin = 28;
+  if (r.top < box.top + margin) nav.scrollTop -= box.top + margin - r.top;
+  else if (r.bottom > box.bottom - margin)
+    nav.scrollTop += Math.min(r.bottom - (box.bottom - margin), r.top - (box.top + margin));
+}
+
+/** Suelta lo que la página actual dejó corriendo: sondeos, hub, sonidos y menús. */
+function leaveCurrentPage() {
   clearInterval(sessionsTimer);  // el sondeo de sesiones vive solo en su página
   clearInterval(wallsTimer);     // ídem el del estado de los muros
   clearInterval(discoveryTimer); // ídem el de equipos en línea
@@ -1699,6 +2158,8 @@ function navigate() {
   clearInterval(speakersTimer);  // ídem el de parlantes IP
   clearInterval(intercomsTimer); // ídem el de citofonía
   clearInterval(accessTimer);    // ídem el de control de acceso
+  clearInterval(maintTimer);     // ídem el de hora y mantenimiento
+  clearInterval(maintTick);      // y sus relojes
   clearInterval(accessDoorsTimer);  // ídem el del monitoreo de puertas
   clearInterval(accessEventsTimer); // ídem el del historial de accesos
   clearInterval(workflowsTimer); // ídem el del historial de automatizaciones
@@ -1706,11 +2167,17 @@ function navigate() {
   clearInterval(anprTimer);      // ídem el de lecturas de patentes
   clearInterval(alarmMonTimer);  // ídem el del monitoreo de alarmas
   if (typeof cercoDetachHub === "function") cercoDetachHub(); // suelta hub + delegaciones de cerco
+  if (typeof accessDetachHub === "function") accessDetachHub(); // ídem el monitoreo de puertas
+  if (typeof resourcesDetachHub === "function") resourcesDetachHub(); // ídem la página Recursos
   clearInterval(eventCenterTimer); // ídem el del centro de eventos
   evcStopSound();                // y su alarma sonora no sigue en otra página
   clearInterval(videowallTimer); // ídem el del puesto de videowall
   document.getElementById("vw-menu")?.remove();
   intercomConsoleLeave();        // timbre, conversación y sondeo de la citofonía
+}
+
+function navigate() {
+  leaveCurrentPage();
   // La ruta puede llevar parámetros (#/workflows/edit?id=7): la tabla se
   // consulta sin ellos, y el enlace del menú se marca también en las
   // subrutas (#/workflows/edit resalta "Automatizaciones").
@@ -1734,8 +2201,114 @@ function navigate() {
   render();
 }
 
+// ---------------------------------------------------------------------------
+// Fin de la sesión. Una sesión vence a las horas de haber ingresado y se corta
+// antes si un administrador cambia la cuenta o si el servidor se reinicia (las
+// sesiones viven en su memoria). El panel no espera a que el usuario haga algo
+// para darse cuenta: revisa al volver a la pestaña o a la ventana, cada minuto
+// mientras está a la vista y a la hora exacta del vencimiento. Si terminó,
+// lleva al ingreso diciendo por qué.
+// ---------------------------------------------------------------------------
+const SessionWatch = {
+  active: false,
+  expiresAt: 0,   // ms; 0 = todavía no se sabe
+  lastCheck: 0,
+  timer: null,
+  ticker: null,
+
+  start() {
+    this.active = true;
+    this.lastCheck = 0;
+    clearInterval(this.ticker);
+    this.ticker = setInterval(() => { if (!document.hidden) this.check(); }, 60000);
+    this.check(true);
+  },
+
+  stop() {
+    this.active = false;
+    clearTimeout(this.timer);
+    clearInterval(this.ticker);
+    this.timer = this.ticker = null;
+  },
+
+  /** Pregunta al servidor si la sesión sigue (a lo más una vez cada 5 s, salvo que se fuerce). */
+  async check(force) {
+    if (!this.active || !Api.token) return;
+    const now = Date.now();
+    if (!force && now - this.lastCheck < 5000) return;
+    this.lastCheck = now;
+    let session;
+    try { session = await Api.get("/api/auth/session"); }
+    catch (err) {
+      if (err.status === 401) this.end();
+      return; // sin conexión no se puede saber: ya lo dice la sonda de conexión
+    }
+    this.expiresAt = Date.parse(session.expiresAt) || 0;
+    clearTimeout(this.timer);
+    if (this.expiresAt) {
+      // Apenas después del vencimiento (los navegadores demoran los
+      // temporizadores de las pestañas ocultas; al volver se revisa igual).
+      const wait = Math.min(Math.max(this.expiresAt - Date.now() + 1500, 1000), 2 ** 31 - 1);
+      this.timer = setTimeout(() => this.check(true), wait);
+    }
+  },
+
+  /**
+   * La sesión terminó: se suelta todo y se lleva al ingreso con el motivo.
+   * cause: "other-tab" (cerrada en otra pestaña), "expired", "closed" o nada
+   * (se deduce: si ya pasó la hora de vencimiento, venció; si no, la cerraron).
+   */
+  end(cause) {
+    if (!this.active) return;
+    if (!cause) cause = this.expiresAt > 0 && Date.now() >= this.expiresAt - 2000 ? "expired" : "closed";
+    const at = this.expiresAt
+      ? new Date(this.expiresAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", hour12: false }) : null;
+    this.stop();
+    leaveCurrentPage();
+    CercoAlarm.reset();
+    closeModal();
+    // Las demás pestañas se enteran al borrarse el token: el motivo va antes.
+    if (cause !== "other-tab") SessionWatch.mark(cause);
+    Api.clearSession();
+    renderLogin(cause === "other-tab"
+      ? "Se cerró la sesión desde otra pestaña de este navegador. Ingrese de nuevo para seguir."
+      : cause === "expired"
+        ? `Su sesión venció${at ? ` a las ${at}` : ""}. Ingrese de nuevo para seguir.`
+        : "Su sesión se cerró: un administrador cambió su cuenta o el servidor se reinició. Ingrese de nuevo para seguir.",
+      "warn");
+  },
+
+  /** Deja anotado por qué terminó la sesión, para las otras pestañas de este navegador. */
+  mark(cause) {
+    try { localStorage.setItem("tcvms_session_end", JSON.stringify({ cause, at: Date.now() })); } catch { /* sin almacenamiento */ }
+  },
+
+  /** El motivo que dejó otra pestaña (si es reciente); el cierre a mano se informa como tal. */
+  causeFromOtherTab() {
+    let marker = null;
+    try { marker = JSON.parse(localStorage.getItem("tcvms_session_end") || "null"); } catch { /* ilegible */ }
+    return marker && Date.now() - marker.at < 15000 && marker.cause !== "logout" ? marker.cause : "other-tab";
+  },
+};
+
+// Volver a la pestaña o a la ventana, o recuperar la red: ¿la sesión sigue?
+document.addEventListener("visibilitychange", () => { if (!document.hidden) SessionWatch.check(); });
+window.addEventListener("focus", () => SessionWatch.check());
+window.addEventListener("online", () => SessionWatch.check(true));
+// Otra pestaña de este navegador cerró la sesión o entró con otro usuario
+// (el token se comparte): esta se pone al día.
+window.addEventListener("storage", (e) => {
+  if (e.key !== "tcvms_token" || !SessionWatch.active) return;
+  if (!e.newValue) SessionWatch.end(SessionWatch.causeFromOtherTab());
+  else location.reload();
+});
+
 function enterApp() {
   showAppShell();
+  SessionWatch.start();        // avisa apenas termine la sesión, aunque nadie toque nada
+  Operable.load();             // qué puede operar: lo demás se deshabilita
+  VmsHub.on("ConfigChanged", onOperableTopic);
+  VmsHub.onReconnected(onOperableReconnected);
   CercoAlarm.start();          // alarma de cerco con sonido, en cualquier página
   setupNav();
   startLicenseBanner();        // aviso de licencia (prueba o licencia por vencer) en todas las páginas
@@ -1756,8 +2329,10 @@ window.addEventListener("hashchange", () => {
   if (!$("#app-shell").classList.contains("hidden")) navigate();
 });
 
+// Una llamada a la API respondió 401: la sesión terminó.
 window.addEventListener("tcvms:unauthorized", () => {
-  renderLogin("La sesión expiró. Ingrese nuevamente.");
+  if (SessionWatch.active) SessionWatch.end();
+  else renderLogin("Su sesión terminó. Ingrese de nuevo para seguir.", "warn");
 });
 
 $("#btn-menu").addEventListener("click", () => {
@@ -1797,9 +2372,74 @@ $("#btn-download-addon").addEventListener("click", async () => {
   toast(`Descargando el complemento (${info.sizeMb} MB)…`);
 });
 
+// "Acerca de": producto, fabricante, versión/build del servidor, plataforma y
+// estado de la licencia (lo que soporte pide primero).
+$("#btn-about").addEventListener("click", async () => {
+  setUserMenu(false);
+  let a;
+  try { a = await Api.get("/api/system/about"); } catch (err) { toast(err.error ?? "No se pudo leer la información del sistema.", true); return; }
+  const l = a.license ?? {};
+  const row = (k, v) => `<tr><th>${esc(k)}</th><td>${v ?? `<span class="muted">—</span>`}</td></tr>`;
+  const licensed = l.state === "Active" || l.state === "GracePeriod";
+  openModal(`
+    <div class="about-head">
+      <div class="about-logo" aria-hidden="true">TC</div>
+      <div>
+        <h3 style="margin:0">${esc(a.product)}</h3>
+        <div class="muted">Versión <b>${esc(a.version)}</b>${a.build ? ` · build <b>${esc(a.build)}</b>` : ""}</div>
+      </div>
+    </div>
+    <div class="about-license ${licensed ? "ok" : l.state === "Trial" ? "trial" : "bad"}">
+      ${licenseStateTag(l.state)}
+      <span>${licensed ? "Producto licenciado" : l.state === "Trial" ? "Versión de evaluación: aún no está licenciado" : "Producto sin licencia vigente"}${
+        l.daysRemaining != null ? ` · ${l.daysRemaining} día(s) restantes` : ""}</span>
+    </div>
+    <table class="about-table">
+      ${row("Fabricante", esc(a.manufacturer))}
+      ${row("Versión", esc(a.version))}
+      ${row("Build", a.build ? esc(a.build) : null)}
+      ${row("Versión de archivo", a.fileVersion ? esc(a.fileVersion) : null)}
+      ${row("Compilado", a.builtAt ? esc(formatDate(a.builtAt)) : null)}
+      ${row("Licencia", l.licenseKey ? `<code>${esc(l.licenseKey)}</code>` : null)}
+      ${row("Cliente", l.customerName ? esc(l.customerName) : null)}
+      ${row("Paquete", l.package ? esc(l.package) : null)}
+      ${row("Modalidad", esc(licenseModeLabel(l.mode ?? "NONE")))}
+      ${row("Vence", l.expiresAt ? esc(formatDate(l.expiresAt)) : null)}
+      ${row("ID de hardware", l.hardwareId ? `<code>${esc(l.hardwareId)}</code>` : null)}
+      ${row("Servidor", esc(a.hostname))}
+      ${row("Sistema operativo", esc(a.os))}
+      ${row("Plataforma", esc(a.runtime))}
+      ${row("En ejecución desde", esc(formatDate(a.startedAt)))}
+    </table>
+    ${l.warning ? `<div class="info-box" style="margin-top:10px">${esc(l.warning)}</div>` : ""}
+    <div class="muted" style="font-size:11px;margin-top:10px">${esc(a.copyright ?? "")}</div>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" id="about-copy">Copiar datos</button>
+      ${Api.role === "Admin" ? `<button class="btn ghost" type="button" id="about-license">Ver licencia</button>` : ""}
+      <button class="btn" type="button" id="about-close">Cerrar</button>
+    </div>`);
+  $("#about-close").addEventListener("click", closeModal);
+  $("#about-license")?.addEventListener("click", () => { closeModal(); location.hash = "#/license"; });
+  $("#about-copy").addEventListener("click", async () => {
+    const txt = [
+      `${a.product} ${a.version}${a.build ? ` (build ${a.build})` : ""}`,
+      `Fabricante: ${a.manufacturer}`,
+      `Licencia: ${(LICENSE_STATES[l.state] || { label: l.state }).label}${l.licenseKey ? ` (${l.licenseKey})` : ""}`,
+      `ID de hardware: ${l.hardwareId ?? "—"}`,
+      `Servidor: ${a.hostname} · ${a.os} · ${a.runtime}`,
+    ].join("\n");
+    try { await navigator.clipboard.writeText(txt); toast("Datos copiados."); }
+    catch { toast("No se pudo copiar.", true); }
+  });
+});
+
 $("#btn-logout").addEventListener("click", async () => {
   setUserMenu(false);
+  SessionWatch.stop();
+  SessionWatch.mark("logout");
   try { await Api.post("/api/auth/logout"); } catch { /* la sesión local se limpia igual */ }
+  leaveCurrentPage();
+  CercoAlarm.reset();
   Api.clearSession();
   renderLogin();
 });
@@ -1817,7 +2457,18 @@ async function init() {
       await Api.get("/api/auth/me");
       enterApp();
       return;
-    } catch { Api.clearSession(); }
+    } catch (err) {
+      // La que había guardada ya no vale (venció, la cerraron o el servidor se
+      // reinició): se dice, en vez de mostrar el ingreso como si nada.
+      if (err.status === 401) {
+        Api.clearSession();
+        renderLogin("Su sesión anterior terminó. Ingrese de nuevo para seguir.", "warn");
+        return;
+      }
+      // Sin conexión: la sesión puede seguir viva; se conserva para el próximo intento.
+      renderLogin("No se pudo hablar con el servidor: revise la conexión e ingrese de nuevo.", "warn");
+      return;
+    }
   }
   renderLogin();
 }
