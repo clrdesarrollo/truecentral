@@ -36,6 +36,10 @@ mediamtx.runtime.yml
 appsettings.Local.json
 # ...menos la plantilla que el instalador copia en cada equipo.
 !installer/config/appsettings.Local.json
+# API key del producto en el servidor de licencias de producción: la inyecta
+# installer/build-installers.ps1 en la configuración del instalador (no va a git;
+# en Jenkins viene de la variable TCVMS_LICENSE_APIKEY).
+installer/config/licensing.apikey
 # Fotos de los reconocimientos de patentes (las guarda el servidor en runtime;
 # en la base solo queda su ruta)
 /anpr/

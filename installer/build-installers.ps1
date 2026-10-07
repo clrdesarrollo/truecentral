@@ -185,7 +185,7 @@ if (-not $iscc) {
 }
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
-function Invoke-Iscc([string]$Script) {
+function Invoke-Iscc([string]$Script, [string[]]$Defines = @()) {
     Write-Host ""
     Write-Host "== ISCC $Script ==" -ForegroundColor Cyan
     # ISCC puede fallar con "Resource update error: EndUpdateResource failed
@@ -202,7 +202,7 @@ function Invoke-Iscc([string]$Script) {
         $errFile = [IO.Path]::GetTempFileName()
         try {
             $proc = Start-Process -FilePath $iscc -NoNewWindow -Wait -PassThru `
-                -ArgumentList @("/DAppVersion=$script:Version", '/Qp', "`"$issPath`"") `
+                -ArgumentList (@("/DAppVersion=$script:Version") + $Defines + @('/Qp', "`"$issPath`"")) `
                 -RedirectStandardOutput $outFile -RedirectStandardError $errFile
             $output = (Get-Content $outFile -Raw) + (Get-Content $errFile -Raw)
             $exit = $proc.ExitCode
@@ -232,13 +232,65 @@ function Invoke-Iscc([string]$Script) {
 # instalarlo en el mismo equipo y dejarlo disponible para los demás puestos.
 if ($buildClient) { Invoke-Iscc 'client.iss' }
 if ($buildAgent) { Invoke-Iscc 'complemento.iss' }
+# Instalador más reciente de dist\ para un prefijo ("...-Setup-"), por número de versión.
+function Find-LatestSetup([string]$Prefix) {
+    Get-ChildItem $dist -Filter "$Prefix*.exe" -ErrorAction SilentlyContinue |
+        Where-Object { $_.BaseName.Substring($Prefix.Length) -match '^\d+\.\d+\.\d+$' } |
+        Sort-Object { [version]$_.BaseName.Substring($Prefix.Length) } -Descending |
+        Select-Object -First 1
+}
+
 if ($buildSuite) {
-    $clientSetup = Join-Path $dist "CLRTrueCentralVMS-Client-Setup-$Version.exe"
-    if (-not (Test-Path $clientSetup)) {
-        Write-Warning ("No existe ${clientSetup}: la suite se compilará SIN el cliente de escritorio. " +
-            "Compile con -Solo Ambos para incluirlo.")
+    # Compilar solo la suite (-Solo Suite): si el cliente o el complemento de ESTA versión no
+    # existen, se empaqueta el último que haya en dist\ (no cambian con cada versión del
+    # servidor y el servidor los publica sin mirar la versión). Así no se pierden al actualizar.
+    $defines = @()
+    foreach ($pkg in @(
+            @{ Prefix = 'CLRTrueCentralVMS-Client-Setup-';      Define = 'ClientSetupName'; Name = 'cliente de escritorio' },
+            @{ Prefix = 'CLRTrueCentralVMS-Complemento-Setup-'; Define = 'AgentSetupName';  Name = 'complemento de enrolamiento' })) {
+        $current = Join-Path $dist "$($pkg.Prefix)$Version.exe"
+        if (Test-Path $current) { continue }
+        $latest = Find-LatestSetup $pkg.Prefix
+        if ($latest) {
+            Write-Host ("  La suite reutiliza el {0} existente: {1}" -f $pkg.Name, $latest.Name) -ForegroundColor Yellow
+            $defines += "/D$($pkg.Define)=$($latest.Name)"
+        } else {
+            Write-Warning ("No hay ningún instalador del $($pkg.Name) en ${dist}: la suite se compilará SIN él. " +
+                "Compile con -Solo Ambos para incluirlo.")
+        }
     }
-    Invoke-Iscc 'suite.iss'
+
+    # API key del producto en el servidor de licencias (activación en línea).
+    # NO va en git: sale de la variable TCVMS_LICENSE_APIKEY (Jenkins) o del
+    # archivo local installer\config\licensing.apikey, y se escribe en una COPIA
+    # de appsettings.Production.json que es la que empaqueta la suite. Sin key
+    # se compila igual, pero los servidores instalados solo podrán activarse
+    # sin conexión (.req / .lic).
+    $apiKey = $env:TCVMS_LICENSE_APIKEY
+    $apiKeySource = 'variable TCVMS_LICENSE_APIKEY'
+    $apiKeyFile = Join-Path $PSScriptRoot 'config\licensing.apikey'
+    if (-not $apiKey -and (Test-Path $apiKeyFile)) {
+        $apiKey = (Get-Content $apiKeyFile -Raw)
+        $apiKeySource = 'installer\config\licensing.apikey'
+    }
+    $apiKey = "$apiKey".Trim()
+    if ($apiKey) {
+        if ($apiKey -notmatch '^[A-Za-z0-9._-]+$') { throw 'La API key del servidor de licencias tiene caracteres inesperados.' }
+        $template = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'config\appsettings.Production.json'))
+        $withKey = [regex]::Replace($template, '("ApiKey"\s*:\s*)"[^"]*"', ('${1}"' + $apiKey + '"'))
+        if ($withKey -eq $template) { throw 'No se encontró "ApiKey" en installer\config\appsettings.Production.json.' }
+        $configDir = Join-Path $publish 'installer-config'
+        New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+        $configPath = Join-Path $configDir 'appsettings.Production.json'
+        [IO.File]::WriteAllText($configPath, $withKey, (New-Object System.Text.UTF8Encoding($true)))
+        # Entre comillas: la ruta del repositorio tiene espacios.
+        $defines += "/DProductionConfig=`"$configPath`""
+        Write-Host "  Servidor de licencias: API key incluida (de $apiKeySource)." -ForegroundColor DarkGray
+    } else {
+        Write-Warning ("Sin API key del servidor de licencias (TCVMS_LICENSE_APIKEY o installer\config\licensing.apikey): " +
+            "los servidores instalados solo podrán activarse sin conexión.")
+    }
+    Invoke-Iscc 'suite.iss' $defines
 }
 
 # ---------------------------------------------------------------------------

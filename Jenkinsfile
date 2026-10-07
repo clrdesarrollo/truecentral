@@ -131,7 +131,7 @@ pipeline {
         stage('Higiene de secretos') {
             steps {
                 powershell '''
-                    $filtrado = git ls-files -- "*.key" "*.secret" "pgdata/*" "mediamtx.runtime.yml" "admin-initial.txt" "appsettings.Local.json"
+                    $filtrado = git ls-files -- "*.key" "*.secret" "*.apikey" "pgdata/*" "mediamtx.runtime.yml" "admin-initial.txt" "appsettings.Local.json"
                     if ($filtrado) {
                         Write-Host "Archivos con secretos o datos de runtime versionados:" -ForegroundColor Red
                         $filtrado | ForEach-Object { Write-Host "  $_" }
@@ -397,10 +397,31 @@ pipeline {
                     } else {
                         // El script vuelve a publicar en build\publish (self-contained,
                         // como exigen los .iss) y deja los .exe en dist\.
-                        powershell label: 'installer\\build-installers.ps1', script: '''
-                            powershell -NoProfile -ExecutionPolicy Bypass -File installer\\build-installers.ps1 -Version $env:SEMVER
-                            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                        '''
+                        def buildInstallers = {
+                            powershell label: 'installer\\build-installers.ps1', script: '''
+                                powershell -NoProfile -ExecutionPolicy Bypass -File installer\\build-installers.ps1 -Version $env:SEMVER
+                                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                            '''
+                        }
+                        // API key del producto en el servidor de licencias de
+                        // produccion (activacion en linea). No va en git: es la
+                        // credencial 'truecentral-license-apikey' (Secret text) y le
+                        // llega al script como TCVMS_LICENSE_APIKEY; Jenkins la tapa
+                        // en el log. Sin la credencial se compila igual, pero el build
+                        // queda inestable: esos servidores solo se activan sin conexion.
+                        def licenseKeyId = 'truecentral-license-apikey'
+                        try {
+                            withCredentials([string(credentialsId: licenseKeyId, variable: 'TCVMS_LICENSE_APIKEY')]) {
+                                buildInstallers()
+                            }
+                        } catch (Exception e) {
+                            // Solo se tolera que falte la credencial; cualquier otro
+                            // error (o un build abortado) sigue su curso.
+                            if (!(e.message ?: '').contains(licenseKeyId)) { throw e }
+                            unstable("Falta la credencial '${licenseKeyId}' (Secret text con la API key del producto " +
+                                     "truecentral en bouncer.clrobotics.cl): los instaladores salen SIN activacion en linea.")
+                            buildInstallers()
+                        }
                     }
                 }
             }

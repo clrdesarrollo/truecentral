@@ -12,5 +12,10 @@
   -->
   <PropertyGroup>
     <Version Condition="Exists('$(MSBuildThisFileDirectory)VERSION')">$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</Version>
+    <!-- Fabricante y producto: propiedades de los .exe/.dll y la ventana
+         "Acerca de" del panel web (/api/system/about). -->
+    <Company>CLRobotics</Company>
+    <Product>CLR TrueCentral VMS</Product>
+    <Copyright>© CLRobotics. Todos los derechos reservados.</Copyright>
   </PropertyGroup>
 </Project>

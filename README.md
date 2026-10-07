@@ -42,6 +42,7 @@ HikCentral / SmartPSS / iVMS-4200).
 | MediaMTX API de control | **9911** | 127.0.0.1 |
 | MediaMTX del **cliente** (solo al proyectar la pantalla al muro) | **8554** | 0.0.0.0, TCP |
 | Receptor de paneles de cerco (WebSocket) | **5092** | 0.0.0.0, TCP |
+| Descarga de firmware OTA de paneles de cerco | **5093** | 0.0.0.0, TCP (solo tokens de un uso) |
 
 El 8554 lo abre el propio puesto de operación mientras transmite su pantalla
 al muro (lo consume el decodificador); el resto del tiempo no escucha nada.
@@ -100,7 +101,7 @@ Modo silencioso, sin menú (para scripts, Jenkins o una IA; código de salida 0 
 
 ```
 installeruild-menu.cmd --silent --only suite,client
-installeruild-menu.cmd --silent --only all --version 0.5.2 --skip-publish
+installeruild-menu.cmd --silent --only all --version 0.5.5 --skip-publish
 installeruild-menu.cmd --list
 ```
 
@@ -247,9 +248,11 @@ La versión sale del archivo `VERSION`. Instalación desatendida:
   viñeta en el navbar y la ventana usa barra de título propia (sin marco de
   Windows), con indicadores de CPU/RAM/disco del servidor (gris/amarillo/rojo
   por umbral, detalle en tooltip).
-- Vista en Vivo: árbol de dispositivos con buscador, divisiones de pantalla
-  estilo iVMS-4200 (1/4/6/8/9/13/16/25/36/64, incluidas las asimétricas; la
-  última usada se recuerda como preferencia local), apertura por doble clic o
+- Vista en Vivo: árbol de dispositivos con buscador, 36 divisiones de
+  pantalla en cinco familias — uniformes (1 a 64), con cuadro principal (6 a
+  17), en columnas, en filas y combinadas (4 a 48) —; la última usada se
+  recuerda como preferencia local y las vistas guardadas con la clave antigua
+  ("6", "8", "13") se siguen abriendo igual; apertura por doble clic o
   arrastrando el canal a un cuadro, selección sincronizada grilla↔árbol,
   audio por cuadro (exclusivo), y **reconexión automática** de cada cuadro
   ante cortes de red, reinicios del equipo o expulsiones (pide una concesión

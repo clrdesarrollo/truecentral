@@ -655,6 +655,518 @@ Decisiones:
   `LicensingConstants` / `appsettings.Production.json`; el servidor de pruebas
   192.168.10.232 arranca en prueba de 30 días y hay que emitirle licencia.
 
+## Recursos y ubicaciones (fase 1) — 2026-10-06
+
+La capa lógica del inventario, equivalente propio del "Área" de HikCentral (se comparó
+con Genetec Security Center, Dahua DSS Pro y Milestone XProtect para no calcar a Hik).
+Los equipos físicos siguen en **Dispositivos**; lo que el operador usa —cámaras, puertas,
+áreas y zonas de alarma, cercos, parlantes y citófonos— son **recursos**, y cada recurso
+vive en **una sola ubicación** de un árbol tipado: sitio → edificio → piso → sector → punto
+(el tipo solo cambia el ícono; cualquiera cuelga de cualquiera, hasta 8 niveles). No se
+usa la palabra "área": en el VMS ya es la partición de un panel (`AlarmArea`).
+- **Datos**: tabla `Locations` (padre `Restrict`: no se borra con sububicaciones) y un
+  `LocationId` opcional con FK `SET NULL` en `Channels`, `AccessDoors`, `AlarmAreas`,
+  `AlarmZones`, `CercoPanels`, `Speakers` e `Intercoms` (interfaz `ILocatable`). Borrar
+  una ubicación deja sus recursos "por ubicar"; borrar un equipo se lleva sus recursos sin
+  referencias colgando. La migración `Locations` convierte los textos libres que ya
+  existían (`AccessDevice.Location`, `CercoPanel.Site`) en ubicaciones raíz y ubica ahí
+  sus puertas y cercos (mismo texto sin distinguir mayúsculas = una sola ubicación; los
+  campos de texto se conservan). `SeedState` de paneles de alarma recrea áreas y zonas al
+  cambiar la conexión: ahora conserva su ubicación por número.
+- **API** (`LocationsApi`): `GET /api/locations` (lista plana + recursos directos por nodo),
+  `POST`/`PUT`/`DELETE /api/locations/{id}` (solo admin; PUT con otro `parentId` mueve con
+  todo el subárbol, rechaza ciclos y nombres repetidos entre hermanas), `GET /api/resources`
+  (`?locationId=` incluye sububicaciones, `?unassigned=true`) y `PUT /api/resources/location`
+  (ubicar en bloque, `locationId` null = por ubicar). `ResourceCatalog` proyecta las siete
+  tablas a `ResourceDto` con estado en palabras y salud (punto de color). Cada cambio se
+  anuncia por el hub (`ConfigChanged "locations"`) y queda en la bitácora: categoría
+  `locations` (`location-created|updated|moved|deleted`, `resources-located|unlocated`).
+  `ChannelDto` trae `LocationId`.
+- **Panel web** `#/resources` (Configuración → Recursos, `resources.js`): árbol con
+  conteos (incluye sububicaciones), "Todos los recursos" y bandeja **Por ubicar**; lista
+  mixta con chips por tipo (no pestañas por tipo), buscador sin tildes, filtro por equipo,
+  ubicación relativa a la selección, enlace al módulo del equipo; marcar varios →
+  "Mover a…" / "Quitar ubicación"; arrastrar filas a una ubicación (o a Por ubicar) y
+  ubicaciones entre sí (soltar en "Todos los recursos" = raíz). Refresco por hub + sondeo
+  de 15 s que solo redibuja si cambió algo y nunca durante un arrastre.
+- **Cliente WPF**: selector **Equipo | Ubicación** en el árbol de Vista en vivo y
+  Reproducción (las pantallas auxiliares siguen a la principal), recordado en
+  `client.json` (`TreeByLocation`). El árbol por ubicación reutiliza los mismos
+  `ChannelNode` (estado, ▶ en vivo y selección compartidos), oculta las ubicaciones sin
+  cámaras, junta lo no ubicado en "Sin ubicación" y el buscador también calza por nombre de
+  ubicación. Doble clic en una ubicación abre todas sus cámaras (misma apertura por tandas
+  que un equipo). El tooltip de cada cámara dice de qué equipo es.
+- **Verificado** contra un servidor aislado (base nueva en el scratchpad, puertos propios):
+  API completa con casos de error, conversión de textos libres, página web (mover, crear,
+  arrastrar, editar, borrar, vista de operador, tiempo real) y cliente real por UI
+  Automation (ambos modos, buscador, Reproducción, tiempo real).
+- **Pendiente (fases siguientes)**: parámetros de puerta desde el VMS
+  (`SupportsDoorConfig` en `IAccessControlDriver`), selector de ubicación en el alta de cada
+  equipo y reemplazo de los textos libres de acceso/cerco, comandos por ubicación, alcance
+  de usuarios por ubicación e importación de áreas desde HikCentral.
+
+## Recursos: ficha del recurso (fase 2) — 2026-10-06
+
+Cada recurso tiene una ficha con pestañas **General · Equipo · Cámaras asociadas ·
+Automatizaciones · Historial**, abierta desde su nombre en Recursos y con dirección propia
+(`#/resources?r=Door:12&tab=history`, enlazable; la pestaña va en la URL sin redibujar).
+- **Datos**: `ResourceProfiles` (descripción y consignas para el operador) con **arco
+  exclusivo**: siete FK opcionales (`ChannelId`, `AccessDoorId`, `AlarmAreaId`,
+  `AlarmZoneId`, `CercoPanelId`, `SpeakerId`, `IntercomId`) con `CHECK num_nonnulls(...) = 1`,
+  índices únicos filtrados (una ficha por recurso) y cascada desde el recurso: la ficha se va
+  con él. `ResourceProfileCameras` (cámaras asociadas en orden, la 0 es la principal) con
+  cascada desde la ficha y desde el canal. La ficha se crea al escribir algo y se borra sola
+  al quedar vacía. Migración `ResourceProfiles`.
+- **Paneles de alarma**: `SeedState` (alta y cambio de conexión) ya NO borra y recrea áreas y
+  zonas: las actualiza en su lugar por número, así conservan su id y, con él, ubicación, ficha
+  y cámaras asociadas (además descarta números repetidos de la lectura).
+- **API** (`ResourcesApi`, tipo por nombre en la ruta): `GET /api/resources/{tipo}/{id}`
+  (`ResourceDetails`: recurso, ruta de ubicación, equipo físico, características según el
+  tipo, cámaras asociadas, ruta de la imagen actual si es cámara), `PUT` (nombre si el tipo
+  lo permite —cámara, puerta, parlante, citófono; las áreas y zonas las nombra el panel y el
+  cerco se renombra en su módulo—, ubicación, descripción, consignas; la puerta renombrada
+  deja de tomar el nombre del equipo como en su módulo, y se anuncia por el hub igual que
+  allá), `PUT .../cameras` (lista completa en orden; la cámara del frente de un citófono
+  aparece fija), `GET .../workflows` (`ResourceUsage`: busca al recurso en el disparador
+  —`ConditionsJson`—, en los nodos de condición del grafo y en las acciones —`doorIds`,
+  `panelId`+`areaNumber`, `channelId(s)`, `speakerIds`/`group`—, y cuenta aparte las
+  automatizaciones generales que lo alcanzan sin nombrarlo) y `GET .../history`
+  (`ResourceHistory`: eventos del módulo —accesos de la puerta, eventos del área o zona, del
+  cerco, llamadas del citófono, patentes de la cámara— mezclados por fecha con la bitácora
+  del recurso según la convención de cada módulo —`channel` "dev/canal", `access-door`,
+  `alarm-area`/`alarm-zone` "panel/número", `cerco-panel`, `speaker`, `intercom`— más
+  `resource` "Door:12" y los cambios de ubicación en bloque, que ahora guardan las claves de
+  los recursos en sus datos). Bitácora: `resource-updated` y `resource-cameras-updated` en la
+  categoría `locations`.
+- **Panel web**: el nombre en la lista abre la ficha; elegir una ubicación en el árbol vuelve a
+  la lista; Automatizaciones e Historial se cargan al abrir su pestaña; el operador ve la
+  ficha de solo lectura; buscador para asociar cámaras, flechas para ordenarlas y "Quitar";
+  la imagen actual de una cámara avisa si el equipo no la entrega.
+- **Verificado** contra el servidor aislado con automatizaciones y eventos sembrados: unas 60
+  comprobaciones de API (incluidos errores, la otra puerta del mismo equipo y otra zona del
+  panel que NO deben contarse, la ficha vacía que se borra y el CHECK que rechaza dos
+  recursos) y la página en el navegador (pestañas, guardar, asociar, operador, enlaces).
+- **Pendiente**: parámetros de puerta leídos y escritos en el equipo (fase 2b, necesita un
+  terminal real para validar el formato ISAPI) y el uso de las consignas y la cámara
+  principal en el puesto del operador (fase 3).
+
+## Recursos: verificación en el puesto y órdenes por ubicación (fase 3) — 2026-10-06
+
+Las fichas llegan al guardia: cuando un recurso avisa, el puesto muestra qué hacer y el vivo
+de sus cámaras, sin que nadie tenga que configurar una automatización.
+- **Resumen por evento**: `GET /api/resources/briefing` (`ResourceBriefings.ForEventAsync`,
+  `ResourceBriefingDto`: recurso, ubicación, descripción, consignas, cámaras). Recibe el
+  origen del evento (`alarmPanel`+`area`+`zone`, `cercoPanel`, `accessDevice`+`door`,
+  `intercom`, `channel` o `device`+`channelNumber`) y elige la zona antes que su área, la
+  primera con consignas o cámaras y, si ninguna tiene, la más específica con ubicación.
+- **Ventana de verificación** (cliente, `VerificationWindow`): se abre sola ante una alarma
+  crítica de panel, una alarma de cerco o una alarma de puerta reciente (< 5 min; forzada,
+  mantenida abierta, coacción) si el recurso tiene consignas o cámaras asociadas. Consignas
+  arriba, recurso, ubicación, descripción, el aviso y la grilla de sus cámaras (secundario,
+  la principal primero); "Abrir en la Vista en vivo" las lleva a la grilla principal. Una
+  sola ventana para todos los avisos (paginador); el mismo recurso dentro del minuto
+  actualiza su entrada en vez de sumar otra. El cliente se suscribe además a
+  `AccessEventReceived` (aviso flotante de alarma de puerta con anti-repetición de 1 min).
+- **Sin ventanas dobles**: si una automatización avisa (acción "notificar" con acuse) por el
+  mismo recurso, manda su ventana de alarma. La acción resuelve siempre la ficha del recurso
+  que disparó y la alerta guarda `ResourceKey` ("Zone:3"), `LocationPath` e `Instructions`
+  **tal como estaban al avisar** (constancia de lo que se le indicó al operador; migración
+  `WorkflowAlertBriefing`, con índice filtrado `ResourceKey, RaisedAt`). El aviso del hub
+  lleva la clave: el puesto espera 1,5 s antes de abrir la verificación y no la abre si llegó
+  la alerta del mismo recurso; si la alerta llega más tarde (acciones previas, esperas), la
+  verificación de ese recurso de los últimos 2 min se retira sola. Sin cámaras elegidas en la
+  acción ni fotos, la alerta usa las cámaras asociadas; marcas nuevas `{ubicacion}` y
+  `{consignas}` para títulos y mensajes (correo, web, etc.).
+- **Ventana de alarma** (cliente) y **Centro de eventos** (web): bloque "Consignas para el
+  operador" arriba y fila "Ubicación" (en la web, con enlace a la ficha); sin fotos pero con
+  cámaras abren directo en el vivo. Corregido en ambas ventanas del cliente: el nombre de la
+  cámara iba superpuesto al video y Flyleaf lo tapaba; ahora va en una barra propia con
+  número, cámara, estado y el indicador de conexión, como en la Vista en vivo.
+- **Historial de la ficha**: suma los avisos de automatizaciones originados por el recurso
+  (fuente "alert", etiqueta "Aviso") con quién los atendió y en cuántos segundos.
+- **Órdenes por ubicación**: `POST /api/locations/{id}/command` (`arm-away`, `arm-stay`,
+  `disarm`; `dryRun` devuelve las áreas que tocaría). Recorre las áreas habilitadas de la
+  ubicación y sus sububicaciones (panel habilitado), ordena área por área con
+  `AlarmPanelService.ExecuteAsync` sin cortar ante un fallo (cada área informa su error; la
+  tapa abierta bloquea armar) y audita cada área (`alarms/area-armed|area-disarmed`) más la
+  orden completa (`locations/location-command`). Web: barra "Armar total / parcial /
+  Desarmar" en la cabecera de una ubicación con áreas, con confirmación y lista de fallas.
+  Cliente: clic derecho en una ubicación del árbol (Vista en vivo) → abrir sus cámaras o las
+  tres órdenes, con prueba previa y confirmación; también con Mayús+F10 o la tecla Menú.
+- **Verificado** contra el servidor aislado: resumen por evento (zona, área por la zona,
+  puerta, citófono con su cámara fija, cerco sin ficha, 404), órdenes (prueba, ejecución con
+  panel inalcanzable y error por área, 422, bitácora e historial), alertas con recurso,
+  consignas y ubicación, historial con el aviso atendido; en el cliente real con alarmas
+  simuladas por la notificación HTTP del panel: verificación sola, alerta sola (sin ventana
+  doble), alerta tardía que retira la verificación, cuadros con su barra y "Abrir en la Vista
+  en vivo". El menú contextual del árbol NO se probó por la interfaz (habría que tomar el
+  foco del equipo); su API sí.
+- **Pendiente**: alcance de usuarios por ubicación (permisos), importación de áreas desde
+  HikCentral y parámetros de puerta (fase 2b).
+
+## Recursos: permisos por ubicación (fase 4) — 2026-10-06
+
+Cada operador puede quedar limitado a ciertas ubicaciones: ve y opera solo lo que está en
+ellas (cada una con sus sububicaciones). El servidor filtra todo; la interfaz no esconde nada
+por su cuenta.
+- **Modelo**: `User.RestrictToLocations` (false = todas, por omisión: nadie cambia de
+  comportamiento al actualizar), `User.ViewOutsideScope` (ve el resto sin operarlo:
+  supervisión) y la tabla `UserLocations` (FK a la ubicación en Restrict: una ubicación en el
+  alcance de alguien no se borra; la API lo explica). Un administrador siempre ve y opera
+  todo y no guarda alcance. Lo "por ubicar" queda fuera de todo alcance restringido.
+  Migración `UserLocationScope`.
+- **Reglas** (`Auth/UserScope.cs`): `CanView` / `CanOperate` por ubicación; la zona sin
+  ubicación propia vale por la de su área; un equipo, un panel o un equipo de acceso se ven
+  si se ve alguno de sus recursos, y sus datos llegan recortados a lo visible; armar o
+  desarmar "todo el panel" (área 0) exige poder operar todas sus áreas. Ver video en vivo,
+  grabaciones, descargas e imágenes es "ver"; PTZ, presets, órdenes de alarma, cerco,
+  puertas, parlantes, citófonos y órdenes por ubicación son "operar".
+- **Índice en memoria** (`UserScopeService`): dónde está cada recurso (canal por id, por
+  equipo + número y por canal RTSP; área y zona por panel + número y por fila; puerta por id
+  y por equipo + número) y el alcance expandido de cada usuario habilitado. Se rehace al
+  cambiar usuarios, ubicaciones o la ubicación de un recurso, y cada 30 s por las dudas; si
+  la base falla sigue con la última versión buena (falla cerrada si no hay ninguna).
+- **API**: listas filtradas en la consulta (historiales de alarmas, cerco, accesos, patentes,
+  llamadas y alertas: los topes y la paginación cuentan solo lo visible) y órdenes validadas
+  (403 "fuera de su alcance" + `auth/scope-denied` en la bitácora, sin repetirse por
+  reintento). El video valida en la concesión de vivo y de reproducción (y otra vez en el
+  callback de MediaMTX, por si el alcance cambió en los 60 s del token), y en lo que no pasa
+  por MediaMTX: descarga, imágenes, muro (se le envían solo cámaras propias; un layout con
+  cámaras ajenas no se aplica), voz de parlantes y citófonos. `/api/auth/me` entrega el
+  alcance de la sesión.
+- **Tiempo real** (`ScopedHub`): cada mensaje con datos de un recurso va solo a quien lo
+  puede ver (estado y eventos de alarmas con el panel recortado por usuario, cerco, puertas
+  y equipos de acceso, parlantes, citófonos, patentes, estado de equipos de video); mientras
+  nadie tenga la vista filtrada todo sale a todos como antes. Las sesiones activas de video
+  van solo a los administradores, el aviso de "ejecución terminada" solo a quien no tiene
+  la vista filtrada, y las alertas y su acuse a sus destinatarios o a quien ve su recurso.
+- **Alertas**: una para todos se ve si el recurso que ORIGINÓ el evento está en el alcance;
+  la dirigida a un usuario la ve igual. Para eso el resumen del evento distingue el origen
+  (`ResourceBriefingDto.OriginKey`, p. ej. la zona) del recurso que aporta las consignas
+  (su área): la alerta guarda el origen y el aviso muestra la ubicación del origen. Esa clave
+  es también la que cruza la verificación del cliente con la alerta de una automatización.
+- **Usuarios**: alcance en el alta y la edición (web: "Todas las ubicaciones" o "Solo
+  estas", árbol de casillas donde marcar una ubicación incluye y bloquea sus sububicaciones,
+  "puede ver el resto sin operarlo" y cuántos recursos quedan por ubicar), columna "Alcance"
+  y bitácora `users/user-scope-updated` con el antes y el después. Al cambiar el alcance se
+  cortan las sesiones de video que quedaron fuera y sus puestos recargan (avisos por el
+  grupo del usuario). Corregido de paso: cambiar el ROL ahora renueva la sesión (antes un
+  administrador degradado seguía siéndolo hasta 12 h); el acuse de una alerta exige poder
+  verla; el motivo de falla de una reproducción solo se entrega a quien la pidió; el
+  aprendizaje de controles RF del cerco valida al administrador antes de tocar nada.
+- **Cliente**: el menú del usuario muestra su alcance; cerco y centro de eventos recargan al
+  cambiar; la recarga del árbol de cámaras ya no corre en paralelo (varios avisos seguidos
+  duplicaban equipos).
+- **Verificado** contra el servidor aislado con cuatro operadores (Edificio A; Casa matriz,
+  que hereda Edificio A; Edificio A + ve el resto; sin restricción): ~60 comprobaciones de
+  API (listas, 403 en órdenes y video ajenos, recortes de panel, alertas, efecto inmediato al
+  cambiar el alcance, ubicación protegida, sesión renovada al cambiar el rol, bitácora); el
+  hub en dos pestañas del panel web (el restringido no recibe la alarma ni el aviso de una
+  zona ajena; el supervisor recibe ambos); la página Usuarios (columna, editor, herencia de
+  casillas, guardado) y el cliente real (árbol solo con lo suyo, alcance en el menú,
+  recarga sin duplicados al ampliarlo, sin ventanas por una alarma ajena).
+- **Pendiente / a decidir**: los muros de video son pantallas compartidas (su estado se ve
+  completo); el padrón de personas, niveles y horarios es común; las listas de
+  automatizaciones (definiciones) no se filtran; con "ve el resto" la interfaz aún muestra
+  los botones de lo que no puede operar (el servidor responde 403).
+
+## Recursos: ubicación de cada equipo y herencia — 2026-10-06
+
+La ubicación se elige al dar de alta o editar cada equipo (video, alarma, cerco, acceso,
+parlante, citófono), sin pasar por Recursos.
+- **Modelo**: `LocationId` (FK SetNull) en `Device`, `AlarmPanel` y `AccessDevice`; cerco,
+  parlante y citófono ya lo tenían (son recursos en sí). Los textos libres "Ubicación" del
+  equipo de acceso y "Sitio" del cerco se eliminaron. Migración `EquipmentLocation`, que
+  convierte lo existente: el equipo de acceso queda donde están sus puertas si todas
+  comparten ubicación, si no en la raíz con el nombre de su texto (creada como en la fase 1
+  si el equipo se dio de alta después; un mismo texto con otras mayúsculas o espacios da una
+  sola) y sus puertas por ubicar quedan con él; el cerco por ubicar va a la raíz de su
+  "Sitio"; grabadores y paneles toman la ubicación de sus canales o áreas/zonas si todos los
+  ubicados comparten una (sus recursos por ubicar no se tocan). `Down` devuelve el nombre de
+  la ubicación a los textos.
+- **Herencia** (`Services/EquipmentLocation.cs`): los canales, áreas y zonas, y puertas
+  NUEVOS (alta, revalidación, sondeo del panel) entran en la ubicación del equipo; la zona
+  nueva entra con su área si el área está ubicada. Al cambiar la ubicación del equipo se
+  mueven con él los recursos que estaban en su ubicación anterior o por ubicar; los
+  ubicados aparte desde Recursos se quedan donde están.
+- **API**: `LocationId` en los DTO de escritura con tres valores: null = conservar (en el
+  alta, por ubicar), 0 = por ubicar, n = esa ubicación (404 si no existe). Los DTO de lectura
+  traen `LocationId` y la ruta legible en `Location` (`LocationPaths`, en memoria con el
+  índice de alcances, que ahora se relee en segundo plano al invalidarse y al arrancar). En
+  `AccessDoorStateDto.Location` va la ruta de la puerta (o la del equipo). Las listas de
+  equipos de acceso y de puertas se ordenan por la ruta (por ubicar al final).
+- **Bitácora**: el cambio queda en la edición de cada módulo ("ubicación (por ubicar) →
+  'Casa matriz › Bodega'") y los recursos arrastrados, en `locations/equipment-located` con
+  sus claves: aparece también en el historial de cada recurso. Borrar una ubicación cuenta
+  además los equipos que quedan por ubicar.
+- **Tiempo real**: cambiar dónde está algo rehace los alcances al instante y avisa
+  `ConfigChanged "locations"`; en el cliente, alarmas, parlantes, citofonía y cerco recargan
+  con ese aviso (antes un operador restringido no se enteraba si le movían una zona desde
+  Recursos).
+- **Panel web**: campo "Ubicación" (árbol indentado, "Por ubicar") en los seis formularios,
+  con la nota de herencia en los que tienen recursos; ruta bajo el nombre en las listas
+  (columna "Ubicación" en acceso y cerco). Si el árbol no se puede leer, el campo queda
+  bloqueado y se conserva la ubicación actual.
+- **Verificado** contra el servidor aislado: la migración sobre datos preparados (casos de
+  texto nuevo, repetido, coincidente con una raíz existente, puertas mixtas, canales y zonas
+  en una o en varias ubicaciones); 36 comprobaciones de API (rutas, orden, arrastre, ubicado
+  aparte, conservar, por ubicar, 404, bitácora e historial, alcance de un operador
+  restringido al instante, alta de cerco con ubicación, borrado de ubicación con equipo);
+  aviso del hub; formularios y listas del panel web; y las pruebas de las fases 3 y 4 sin
+  fallas. El cliente WPF solo se compiló (no se abrió para no tomar el foco del equipo).
+
+## Recursos: la interfaz sabe qué puede operar cada uno — 2026-10-06
+
+Cierra el pendiente de la fase 4: con "ve el resto" (o con un panel compartido entre
+ubicaciones) la interfaz ofrecía órdenes que el servidor rechazaba con 403.
+- **Servidor**: `GET /api/auth/operable` (`OperableDto`, armado por `UserScope.Operable()`
+  con las MISMAS reglas que validan cada orden): ubicaciones (órdenes por ubicación),
+  canales (PTZ), áreas y zonas ("panel/número"), paneles enteros (área 0: exige todas sus
+  áreas), puertas, cercos, parlantes y citófonos. Sin restricción, `All` y listas vacías.
+  Es una lectura de los permisos propios (como `/api/auth/me`): no va a la bitácora; los
+  intentos rechazados ya quedan como `auth/scope-denied`. Los puestos lo releen con los
+  avisos `scope`, `locations` y los de los módulos (los recursos nuevos heredan la
+  ubicación de su equipo); para eso el sondeo del panel ahora avisa `alarm-panels` cuando
+  aparecen o desaparecen áreas o zonas, y el alta de un cerco ya ubicado avisa `locations`.
+- **Panel web** (`app.js`): `Operable` + `applyOperable`. Los controles de una orden llevan
+  `data-op="tipo:id"` y se deshabilitan solos con la explicación en su tooltip, también
+  cuando el módulo los vuelve a dibujar (MutationObserver); un clic en uno rehabilitado
+  por error no pasa. `data-op-hint` muestra un aviso solo cuando algo no se puede operar.
+  Marcados: monitoreo y página de paneles de alarma (áreas, todo el panel, zonas),
+  monitoreo de puertas (botones, casillas y "seleccionar todas"), cerco (tarjetas y
+  alarma global), consola de citofonía (contestar, rechazar, colgar, hablar, puertas; las
+  llamadas de un frente ajeno se ven pero no suenan ni abren su ventana), parlantes
+  (volumen, reproducir, detener, biblioteca; la selección múltiple ya no marca los
+  ajenos) y la barra de órdenes por ubicación de Recursos.
+- **Cliente WPF**: `Services/OperableScope` (instancia compartida, evento `Changed`).
+  Alarmas (áreas, zonas, todo el panel y aviso de solo lectura en la cabecera), cerco
+  (botones y aviso en la tarjeta), parlantes (los ajenos no se pueden marcar), citofonía
+  (abrir puerta; la ventana de llamada de un frente ajeno solo muestra el video; sus
+  llamadas no suenan), PTZ (deshabilitado y "fuera de su alcance" junto al nombre) y el
+  menú contextual de ubicaciones del árbol.
+- **Verificado** contra el servidor aislado: coherencia total entre lo que declara
+  `/api/auth/operable` y lo que el servidor deja hacer, orden por orden, para un
+  supervisor que ve todo y opera Edificio A (ubicaciones, áreas, panel entero, zonas,
+  cerco, puertas, PTZ, parlantes, citófonos); cambio al instante al mover un recurso; panel
+  web como ese supervisor en todas las pantallas marcadas y recarga en vivo (dos avisos,
+  una sola consulta); cliente real abierto como ese usuario e inspeccionado por UI
+  Automation (sin teclado ni foco): parlante ajeno sin casilla, "Abrir puerta" según el
+  frente, avisos de solo lectura en cerco y alarmas, todo actualizado en vivo al cambiarle
+  el alcance. Pruebas de las fases 3 y 4 sin fallas. Corregido durante la prueba: el orden
+  de inicialización de los estáticos de `OperableScope` dejaba la instancia en null.
+- **Sin probar por la interfaz**: el PTZ (no hay domo en la base de prueba) y el menú
+  contextual de ubicaciones (abrirlo exige clic derecho); su lógica es la misma.
+
+## Control de acceso: vigencia en los Hikvision y huellas con las manos — 2026-10-07
+
+- **Vigencia hasta 2037**: los terminales Hikvision (Facial Tablero CLR Demo, DS-K1T804AMF)
+  rechazaban a la persona con "timeFormatError" en `endTime` (o 0x60000041) y quedaba "Con
+  problemas". Desde "vigencia con hora" (7340047) una persona nueva vale hasta el 31-12-2099,
+  y estos equipos guardan la fecha en 32 bits: el máximo es 31-12-2037 23:59:59.
+  `HikvisionAccessDriver.ValidityStamp` acota la vigencia al rango del equipo (2000-01-01 a
+  2037-12-31 23:59:59, hora local); el VMS conserva la fecha real. Es seguro porque la
+  sincronización empuja la vigencia y nunca la relee para comparar. La ayuda del formulario
+  avisa el tope. Probado el formateo dentro y fuera del rango; falta escribir en los
+  terminales reales.
+- **Huellas con las manos**: en el paso "Credenciales" del asistente de personas, la grilla
+  de diez dedos con sus botones pasó a ser un dibujo propio de las dos manos (palmas hacia
+  abajo, dedos como cápsulas: sin huella, enrolada en azul, recién capturada en verde, punto
+  ámbar si la calidad es menor que 60) con la ficha del dedo elegido (estado, barra de
+  calidad, Capturar/Recapturar y Quitar). Tras una buena captura pasa solo al siguiente dedo
+  sugerido (índices primero, alternando manos); con calidad baja se queda para recapturar.
+  Doble clic captura; con el teclado, Enter o Espacio. Con menos de dos huellas sugiere una
+  de cada mano. Probado con capturas simuladas; falta con el lector USB real y con una
+  persona que ya tenga huellas guardadas.
+- **Huellas rechazadas por `enableCardReader`**: con la vigencia ya corregida, el Facial
+  Tablero (192.168.10.76, que es un **DS-K1T323MBWX-QRE1** V4.23.41, no un DS-K1T321MFWX)
+  escribía a la persona pero rechazaba sus huellas con `badJsonContent · … Exceeding the
+  parameter range limit … enableCardReader`. Preguntándole al equipo: en este modelo el
+  lector 1 es el de rostro y tarjeta y **el de huella es el 2** (`CardReaderCfg/2` trae
+  `fingerPrintCheckLevel` y `defaultVerifyMode: fpOrCard`), y `FingerPrintCfg/capabilities`
+  declara `enableCardReader: {"@min": 2, "@max": 2}`. El driver tomaba solo el `@max` como
+  cantidad y mandaba `[1, 2]`. Verificado en el equipo real con un identificador
+  inexistente (no escribe nada; se comprobó después que no quedó huella): `[1,2]` da el
+  error exacto y `[2]` responde OK. Arreglo: `CardReadersAsync` manda el rango declarado
+  completo, `@min`..`@max` (`RangeOf`/`ReaderRange`). Como respaldo para firmwares que
+  declaren un rango más ancho que los lectores reales (1..512), ante ese rechazo
+  `DownloadFingerprintAsync` reintenta con la mitad conservando el primero, y
+  `AcceptedReaders` recuerda por equipo con cuáles aceptó (se olvida con `Forget`). Probado
+  con el driver real contra dos terminales simulados: el perfil del DS-K1T323MBWX (manda
+  `[2]` directo, también en el borrado) y uno de 1..512 (8→4→2→1 y después directo).
+  **Falta**: actualizar el servidor instalado y volver a escribir a la persona. De paso:
+  "faltó las huellas" → "falló la escritura de las huellas".
+- **Ese terminal está con la zona horaria de China** (`timeZone CST-8:00:00`, hora manual): la
+  hora absoluta está bien (≈3 min de atraso) pero en su pantalla y para sus horarios son 11 h
+  más. Los eventos llegan con su desfase y el VMS los pasa bien a UTC, pero los horarios de
+  los niveles y la vigencia los evalúa el equipo con SU hora local. `DeviceWebSetup.SyncTimeAsync`
+  ya sabe poner la zona de Chile con horario de verano (con el respaldo de 23:59:59 que
+  piden los DS-K1T); hoy solo se usa al cambiar la IP desde el descubrimiento.
+- **Detalle de la escritura por equipo**: en Personas, el estado de la columna "En los
+  equipos" ("Con problemas", "Pendiente", "Al día") ahora es un botón que abre el detalle:
+  cada equipo con su estado, lo que pasó en palabras, la respuesta del equipo aparte (la
+  parte técnica entre paréntesis que deja el driver) y la última escritura correcta; primero
+  los que fallan. Desde ahí, "Volver a escribir" (repinta con el resultado) y "Editar
+  persona". La tabla del paso "Accesos" separa igual el texto de la respuesta del equipo, y
+  la columna "Credenciales" cuenta también huellas y rostro (antes mostraba "—" a una
+  persona con 4 huellas). Solo lectura: no hay acción nueva que auditar.
+
+## Hora y mantenimiento de equipos — 2026-10-07
+
+Pedido del usuario a partir del Facial Tablero en zona China: ver y supervisar la hora de los
+equipos, configurar fecha/hora/zona/horario de verano/NTP, reiniciar y restablecer. Decisiones
+del usuario: **control de acceso primero** (video, paneles y citofonía después), **los dos
+restablecimientos con confirmación fuerte**, **supervisión que avisa y corrige sola**, y
+**página propia + apartado en la ficha**. Para no calcar la ficha "Time" de HikCentral se hizo
+una vista de conjunto con corrección automática (más cerca de la sincronización horaria de
+DSS/Genetec).
+
+- **Contratos (Core)**: `Drivers\DeviceMaintenance.cs` (`DeviceClock`, `DeviceClockSetting`,
+  `DeviceTimeMode`, `DeviceResetMode(s)`) y `Drivers\DeviceTimeZones.cs`: POSIX de Hikvision
+  (signo invertido; "DST01:00:00" es lo que se adelanta), variantes a probar (24:00:00 →
+  23:59:59 → sin verano), lectura, descripción en palabras ("UTC−4 con horario de verano (+1 h
+  desde el primer sábado de septiembre…)"), `Drift` (hora ABSOLUTA si el equipo informa su
+  desfase; si no, contra la hora local esperada) y `ZoneMismatch` (con `OnlyDaylight` para los
+  firmware que no aceptan reglas de verano). `IAccessControlDriver` suma `SupportsClock`,
+  `SupportsNtp`, `GetClockAsync`, `SetClockAsync` (devuelve una nota si quedó a medias),
+  `SupportsReboot`/`RebootAsync` y `SupportedResets`/`ResetAsync`. DTOs en
+  `Contracts\MaintenanceDtos.cs`; los equipos se nombran familia + id (`access`, 12) para sumar
+  otras familias sin cambiar la API.
+- **Drivers**: Hikvision → `HikvisionMaintenance` (reutilizable por toda la marca):
+  `/ISAPI/System/time`, `/time/ntpServers` (se lee `hostName` o `ipAddress` según
+  `addressingFormatType`: el otro campo puede traer un valor viejo), `/System/reboot`,
+  `/System/factoryReset?mode=basic|full`; revisa el `ResponseStatus` (1 y 7 = aceptado) y solo
+  reintenta otra forma de zona ante rechazo de CONTENIDO, nunca ante credenciales. ZKTeco →
+  comandos 201/202 (hora, sin zona ni NTP; `ZkProtocol.EncodeTime`) y 1004 (reinicio). Dahua
+  acceso → `global.cgi` get/setCurrentTime, `NTP`/`Locales` por configManager y
+  `magicBox.cgi?action=reboot`; `DahuaTime` (tabla de índices de zona y reglas de verano) lo
+  comparten el driver y `DeviceWebSetup` (que además pasó a usar `DeviceTimeZones`). Dahua y
+  ZKTeco sin probar con hardware; restablecer solo en Hikvision.
+- **Servidor**: `DeviceClockPolicy` (fila única: zona —null = la del servidor—, hora del
+  servidor o NTP, corrección automática, desfase tolerado 60 s, revisión cada 15 min) y
+  `AccessDevice.ClockAutoCorrect` (migración `DeviceClockMaintenance`, los existentes quedan en
+  true). `DeviceClockService` (en Sistema → Servicios como "Hora de los equipos"): lee los
+  equipos en línea, compara con la política y, si corresponde, corrige; una hora de espera
+  entre correcciones del mismo equipo (una corrección a mano también cuenta) para no pelearle a
+  otro sistema; cambiar la política reinicia esas esperas. Lo leído vive en memoria.
+  `DeviceMaintenanceApi`: `GET /api/maintenance/clocks`, `/time-zones`, `POST
+  /clocks/check` (leer sin corregir), `/clocks/sync` (poner en hora en bloque), `PUT
+  /clock-policy`, `PUT /devices/{kind}/{id}/clock` y `/auto-correct`, `POST
+  /devices/{kind}/{id}/reboot` y `/reset` (el servidor exige el nombre exacto del equipo; tras
+  restablecer, todo el padrón del equipo queda pendiente y se reescribe solo cuando vuelve).
+  Mirar: cualquier usuario dentro de su alcance; cambiar: administradores.
+- **Bitácora**: categoría nueva `maintenance` — clock-set, clock-corrected, clock-drift (una
+  vez por problema), clock-policy-changed, clock-autocorrect-changed, device-rebooted,
+  device-reset (éxitos y fallas).
+- **Panel**: Dispositivos → **Hora y mantenimiento** (`maintenance.js`): tarjetas (hora del
+  servidor andando, cómo deben estar, supervisión, cuántos en hora), tabla con la hora de cada
+  equipo andando, desfase, origen de la hora, estado (En hora / Desfasado / Otra zona horaria /
+  Sin conexión…), corrección automática por equipo, "Ajustar…" (zona, hora del servidor, a mano
+  o NTP) y "Reiniciar / restablecer…" (zona de riesgo: escribir el nombre del equipo para
+  restablecer). "Leer ahora", "Política…" y "Poner en hora" (elegidos o todos). En la ficha de
+  cada equipo de acceso, apartado "Hora y mantenimiento" con su reloj y los mismos botones.
+- **Licencia**: no se licencia aparte. Es mantenimiento de equipos ya licenciados por su
+  módulo; licenciarla sería cobrar por no dejar equipos mal configurados.
+- **Probado** con un servidor aislado (5290, base nueva) y un terminal simulado con la
+  respuesta real del Facial Tablero (zona `CST-8:00:00`, rechazo de "/24:00:00"): detecta "Otra
+  zona horaria", la pone en hora (queda en UTC−4 con verano, desfase < 1 s; el equipo recibió
+  primero 24:00:00, lo rechazó y aceptó 23:59:59), NTP por IP, hora a mano adelantada →
+  "Desfasado", política inválida rechazada, reinicio, restablecer con confirmación equivocada
+  (422) y correcta, **corrección automática sola a los 15 s** de cambiar la política, bitácora
+  completa y la pantalla en el navegador (página, Ajustar, zona de riesgo y ficha) sin errores
+  de consola. **Falta**: probarlo contra el Facial Tablero real (ponerle la zona de Chile) y con
+  equipos Dahua/ZKTeco.
+
+## Puestos de cliente de escritorio y última sesión del cliente — 2026-10-07
+
+- **Bug de puestos (licencia "3 clientes y ya hay 3 en uso" con un solo guardia)**: el puesto
+  se contaba por la cabecera completa `wpf/<versión> (<equipo>)`, así que actualizar el cliente
+  en un mismo PC (0.5.8 → 0.5.9 → 0.5.10) ocupaba un puesto nuevo por versión mientras la
+  sesión vieja seguía vigente (12 h), y además el cliente NO cerraba sesión al salir. Ahora
+  `TokenService.SeatOf` toma solo el EQUIPO: un PC = un puesto, y un ingreso nuevo de ese
+  equipo reemplaza sus sesiones anteriores de cualquier versión. El cliente cierra sesión al
+  salir (`ReleaseSeatOnExit`, tope 3 s). Workaround mientras no se actualice: Sistema →
+  Servicios → Reiniciar servidor (las sesiones viven en memoria).
+- **Liberar puestos desde el panel**: Streaming → Sesiones muestra arriba "Clientes de
+  escritorio" (equipo, usuario, versión, ingreso, vencimiento y si está **conectado** —canal en
+  tiempo real abierto— o es una **sesión colgada**), con "Desconectar"/"Liberar puesto". `GET
+  /api/system/desktop-seats` y `POST /api/system/desktop-seats/release` (admin, permitidos en
+  modo restringido). Liberar corta las sesiones y el hub del equipo y lo bloquea 1 minuto (el
+  login responde 403 con el motivo, así un cliente abierto vuelve al ingreso en vez de
+  recuperar el puesto solo). Bitácora: `auth/desktop-seat-released` y `auth/login-blocked`.
+  Probado: tres versiones en un PC = 1 puesto, el cuarto equipo recibe el 402, liberar,
+  bloqueo de 1 minuto, el cuarto entra, logout libera.
+- **Volver a abrir la última sesión** (cliente, Configuración → Video → "Al iniciar sesión":
+  "Volver a abrir las cámaras de la última sesión", apagado por omisión): `ClientSettings.
+  LastSession` guarda la grilla principal y cada pantalla auxiliar (división, canal y stream de
+  cada cuadro, posición/monitor y maximizada), por servidor + usuario. Se guarda a medida que
+  cambia (`RefreshLiveChannels` → `ScheduleSessionSave`, respiro de 2 s; mover/maximizar una
+  auxiliar también), no solo al salir; al salir se toma ANTES de cerrar ventanas y liberar
+  cuadros. No se guarda nada hasta haber decidido si restaurar (`_sessionReady`), porque la
+  grilla vacía del arranque pisaría la sesión. Restaura con el árbol cargado, por tandas, con
+  el aviso bloqueante; las cámaras que ya no están o quedaron fuera del alcance dejan su
+  cuadro libre; una auxiliar cuyo monitor ya no existe parte en un monitor libre. Probado con
+  el cliente real contra un servidor aislado y una cámara simulada (MediaMTX + FFmpeg
+  testsrc): restauró grilla 4 con 2 cámaras (S/P respetados) y la auxiliar en su posición;
+  cerrar la auxiliar y matar el proceso → al reabrir, solo la grilla; salida normal → sesión
+  intacta y 0 puestos en uso.
+
+## Panel web: menú lateral y aviso de fin de sesión — 2026-10-07
+
+- **Menú lateral**: fijo en pantalla y con su propio scroll (la marca y "Conectado" siempre a
+  la vista). Al abrir una página se desplaza hasta la opción activa y, al desplegar un grupo,
+  lo deja a la vista (`keepNavVisible`).
+- **Fin de sesión**: las sesiones duran 12 h fijas desde el ingreso, viven en la memoria del
+  servidor (un reinicio las corta todas) y un administrador las revoca. `GET
+  /api/auth/session` entrega la vigencia; `SessionWatch` (app.js) revisa al volver a la
+  pestaña, al recuperar el foco o la red, cada minuto mientras está a la vista, a la hora del
+  vencimiento y ante cualquier 401, y lleva al ingreso con el motivo (venció a las HH:MM, la
+  cerró un administrador o un reinicio, se cerró en otra pestaña). Entre pestañas el motivo
+  viaja en `tcvms_session_end` antes de borrar el token (`api.js` ahora avisa y después
+  limpia). Al cargar con un token muerto: "Su sesión anterior terminó". Probados los seis
+  caminos y el cierre de sesión normal.
+- El aviso equivalente del cliente de escritorio (el servidor rechaza el reingreso automático)
+  es parte del trabajo de revocación de sesiones, pendiente de juntar (ver Pendientes).
+
+## Pendientes (al 2026-10-07)
+
+Para cerrar lo hecho:
+1. ~~Juntar la revocación de sesiones~~ — hecho el 2026-10-07: fusión de tres vías desde el
+   worktree `claude/confident-lichterman-252d59` (conflictos solo en `UsersApi`, que revoca
+   después de guardar también por cambio de rol, e `index.html`); `hub.js` avisa y después
+   limpia. El worktree quedó intacto y ya se puede descartar.
+2. ~~Instaladores 0.5.8~~ — hechos el 2026-10-07 (suite, cliente, complemento y migrador):
+   llevan la revocación, la vigencia 2037, las manos, el menú lateral, el aviso de fin de
+   sesión y los nuevos layouts de video. Con el servidor actualizado, Control de acceso →
+   Personas → "Escribir pendientes" reintenta las personas que quedaron con error.
+3. **Commitear**: desde c805e6f hay ~110 archivos modificados y 35 nuevos de varias
+   funcionalidades y sesiones; separarlos en commits por tema.
+4. **Servidor de pruebas 192.168.1.78** (con las credenciales del usuario): al instalar corren
+   las migraciones de ubicaciones, incluida la que convierte "Ubicación" (acceso) y "Sitio"
+   (cerco) en ubicaciones del árbol, sobre datos reales del guardia.
+
+Pruebas con equipos reales:
+- Escribir personas en el Facial Tablero y el DS-K1T804AMF con la vigencia acotada, y las
+  huellas en el Facial Tablero con el lector de huella correcto (`enableCardReader` = 2).
+- Poner en hora el Facial Tablero (zona de China) desde Dispositivos → Hora y mantenimiento,
+  y probar ahí mismo reinicio. Probar hora y reinicio en Dahua y ZKTeco.
+
+Funcionalidad (hora y mantenimiento, segunda etapa):
+- Sumar fuentes de video (Hikvision por SDK/ISAPI, Dahua, ONVIF `SetSystemDateAndTime`/
+  `SystemReboot`), paneles de alarma y citofonía a la misma página (las rutas ya llevan la familia).
+- Recordar por equipo qué forma de zona aceptó (hoy cada puesta en hora prueba 24:00:00 y recién
+  después 23:59:59 en los DS-K1T).
+- Enrolar huellas con el lector USB, y abrir una persona que ya tenga huellas guardadas.
+- PTZ fuera de alcance (no hay domo en la base de prueba) y el menú contextual de
+  ubicaciones en el cliente.
+
+Funcionalidad:
+- Importar áreas desde HikCentral (verificar primero qué entrega su OpenAPI).
+- Recursos, fase 2b: parámetros de puerta (necesita un terminal real).
+- Permisos por ubicación, a decidir: los muros de video son compartidos y se ven completos;
+  el padrón de personas, niveles y horarios es común a todos; la lista de automatizaciones
+  no se filtra.
+- Que revocar una sesión corte también el video ya abierto (hoy corta el hub, no MediaMTX).
+
 ## Riesgos vigilados
 
 Patentes: el callback de mensajes de HCNetSDK es único por proceso y el delegado debe vivir en un campo estático (si el GC se lo lleva, el SDK llama a memoria liberada y el proceso cae) · las estructuras ITS del SDK cambian entre versiones: al actualizar HCNetSDK hay que revisar `ItsInterop` contra la cabecera nueva · Muro: el decodificador guarda su propio mapa de ventanas y el servidor re-sincroniza al arrancar (`WarmUpDecodersAsync`) — vigilar que un reinicio del servidor no deje ventanas huérfanas en el equipo · forma exacta del body de auth de MediaMTX (verificar contra docs v1.20 en M3) · marshaling x64 Dahua (harness de consola contra hardware real antes de integrar) · acople versión FlyleafLib↔FFmpeg (pinear juntos, LGPL shared build) · encoding URL de contraseñas con `@`/`:` en las source URLs · grant vencido en retry del cliente (re-pedir siempre) · interop Hik viejo + DLLs 6.1.9.48 (validar tamaños de structs en M2) · Flyleaf en vivo (2026-09-15): `avformat_find_stream_info` cuenta `analyzeduration` en tiempo del STREAM, no de reloj, así que un secundario de 7 fps tardaba 3,6 s en abrir (1,3 s el principal) y el cambio main↔sub del doble clic se sentía lento; `VideoCellViewModel.CreatePlayer` lo omite (`AllowFindStreamInfo = false`: 0,3-0,5 s de apertura, imagen en ~1 s; el SDP de MediaMTX trae sprop-*) — los cuadros de reproducción lo siguen necesitando para la duración. Además, al maximizar (sub→main) el secundario saliente queda **estacionado** (`VideoCellViewModel._parked`, `SwitchToProfileAsync(..., keepCurrentForRestore: true)`): sigue reproduciendo sin superficie y en silencio, y restaurar lo vuelve a poner con un intercambio instantáneo en vez de abrir de nuevo (una sesión de secundario extra mientras dura el maximizado; se libera al restaurar, cambiar de canal/división, limpiar o si muere).

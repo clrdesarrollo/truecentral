@@ -26,6 +26,12 @@
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
+; appsettings.Production.json que se instala. build-installers.ps1 pasa una
+; copia con la API key del servidor de licencias (que no va en git); sin ella
+; se empaqueta la plantilla del repositorio (solo activación sin conexión).
+#ifndef ProductionConfig
+  #define ProductionConfig "config\appsettings.Production.json"
+#endif
 
 #define AppName        "CLR TrueCentral VMS"
 #define Publisher      "CLRobotics"
@@ -35,6 +41,7 @@
 #define WebPort        "5090"
 #define ArcPort        "5091"
 #define CercoPort      "5092"   ; receptor WebSocket de los paneles de cerco
+#define CercoFwPort    "5093"   ; descarga de firmware (OTA) de los paneles de cerco
 #define RtspPort       "8654"
 ; Puerto del PostgreSQL embebido. Es PRIVADO del sistema: escucha solo en
 ; 127.0.0.1 y nunca se comparte, por eso no usa el 5432 de PostgreSQL ni el
@@ -77,7 +84,12 @@
 ; Complemento de enrolamiento (lector de huellas USB): la suite lo publica en
 ; la carpeta webcontrol\ del servidor, que es de donde el panel web lo ofrece
 ; en descarga a los puestos que lo necesiten.
-#define AgentSetupName "CLRTrueCentralVMS-Complemento-Setup-" + AppVersion + ".exe"
+; build-installers.ps1 puede pasar /DAgentSetupName y /DClientSetupName con un instalador
+; de una versión ANTERIOR que ya esté en dist\ (compilar solo la suite cuando el cliente y
+; el complemento no cambiaron). El servidor los publica por patrón, sin mirar la versión.
+#ifndef AgentSetupName
+  #define AgentSetupName "CLRTrueCentralVMS-Complemento-Setup-" + AppVersion + ".exe"
+#endif
 #define AgentSetup     "..\dist\" + AgentSetupName
 #if FileExists(AgentSetup)
   #define HasAgent
@@ -85,7 +97,9 @@
   #pragma warning "No existe " + AgentSetup + ": la suite se compila SIN el complemento de enrolamiento (compile primero complemento.iss)."
 #endif
 
-#define ClientSetupName "CLRTrueCentralVMS-Client-Setup-" + AppVersion + ".exe"
+#ifndef ClientSetupName
+  #define ClientSetupName "CLRTrueCentralVMS-Client-Setup-" + AppVersion + ".exe"
+#endif
 #define ClientSetup    "..\dist\" + ClientSetupName
 #if FileExists(ClientSetup)
   #define HasClient
@@ -159,7 +173,7 @@ Type: files; Name: "{app}\webcontrol\CLRTrueCentralVMS-Complemento-Setup-*.exe"
 ; que el SDK Web arrastra como contenido (ajustes locales, configuración
 ; generada de MediaMTX, logs).
 Source: "{#ServerPublish}\*"; DestDir: "{app}"; Excludes: "*.pdb,appsettings.Development.json,appsettings.Local.json,mediamtx.runtime.yml,*.log,pgdata\*,anpr\*,workflows\*"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "config\appsettings.Production.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#ProductionConfig}"; DestDir: "{app}"; DestName: "appsettings.Production.json"; Flags: ignoreversion
 ; Ajustes del equipo: solo la primera vez; las actualizaciones no lo tocan.
 Source: "config\appsettings.Local.json"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall
 ; Watchdog: monitor de escritorio del servidor. Va en su propia carpeta y se
@@ -488,9 +502,9 @@ begin
   DeleteFirewallRules();
   // Panel web + API + SignalR (5090), receptor de alarmas SIA DC-09 (5091) y
   // receptor WebSocket de los paneles de cerco (5092; sin esta regla los paneles
-  // no llegan al servidor desde otro equipo).
+  // no llegan al servidor desde otro equipo) y descarga de firmware OTA (5093).
   RunHidden(SysTool('netsh.exe'),
-    'advfirewall firewall add rule name="CLR TrueCentral VMS Server" dir=in action=allow protocol=TCP localport={#WebPort},{#ArcPort},{#CercoPort} profile=any');
+    'advfirewall firewall add rule name="CLR TrueCentral VMS Server" dir=in action=allow protocol=TCP localport={#WebPort},{#ArcPort},{#CercoPort},{#CercoFwPort} profile=any');
   // Respuestas del descubrimiento de equipos: SADP (UDP 37020), WS-Discovery
   // (UDP 3702), Dahua (UDP 37810) y ZKTeco (UDP 4370, control de acceso).
   // La regla va POR PROGRAMA, no por puerto: alcanza para cualquier familia
