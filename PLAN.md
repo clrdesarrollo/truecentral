@@ -1361,6 +1361,64 @@ rechazó la dirección, y el asistente no escribe contraseñas.
 - El cliente WPF real no se abrió por UI Automation: los bindings compilan, y la lógica se
   probó con el arnés.
 
+## Vista en vivo en el panel web (WebRTC) — 2026-10-08
+
+Aplicaciones → **Vista en vivo** (`#/live`, `wwwroot/live.js`, permiso `live.view`): la misma
+interfaz de la Vista en vivo del cliente de escritorio, en el navegador.
+
+- **Transporte**: WebRTC por el MediaMTX embebido (probado: H.264 y **H.265** en Chromium 152,
+  con G.711 de audio). El navegador manda su oferta SDP a `POST /api/streams/webrtc`; el
+  servidor hace las MISMAS validaciones de la concesión RTSP (helper `IssueGrantAsync`
+  compartido: permiso, canal habilitado, alcance por ubicación), emite el token de 60 s y
+  reenvía la oferta a la señalización WHEP de MediaMTX, que escucha SOLO en loopback
+  (`Streaming:WebRtcPort`, 9914) con `X-Forwarded-For` (127.0.0.1 es proxy de confianza: el
+  callback de autorización recibe la IP real). MediaMTX canjea el token contra
+  `/api/streaming/auth` como siempre. El medio va directo navegador ↔ MediaMTX por el puerto
+  ICE `Streaming:WebRtcIcePort` (8660, UDP y TCP; 0 = deshabilitado); el instalador abre ese
+  puerto en el firewall. Con NAT se anuncian `PublicHost` y `Streaming:WebRtcAdditionalHosts`.
+  `DELETE /api/streams/webrtc/{id}` cierra la sesión WHEP al instante (id opaco por usuario;
+  la URL interna no sale del servidor). Sin trickle ICE: sin STUN la oferta sale completa.
+- **Errores de MediaMTX en español** y nunca 401 (el panel lo tomaría como sesión vencida):
+  códec no soportado (H.265 sin decodificación por hardware, p. ej. Edge) → 422 y el cuadro NO
+  reintenta; fuente sin señal → 422 y reintenta (5 → 10 → 20 → 30 s); señalización caída → 504.
+- **Bitácora**: inicio/fin de video con origen `web` (`StreamTokenService.MarkWebSession`, el
+  callback ve `protocol: webrtc`); `SessionAccounting` también mira `/v3/webrtcsessions/list`
+  (solo con WebRTC habilitado, si no la pasada fallaría completa) y el kick prueba
+  `rtspsessions` y `webrtcsessions`. Capturas y grabaciones se auditan con las acciones de
+  cliente ya existentes (`live-snapshot`, `live-clip-start`, `live-clip-saved`).
+- **Interfaz** (réplica de `LiveView.xaml`): árbol por equipo o por ubicación con buscador sin
+  tildes, ▶ en los canales en pantalla, doble clic en canal (cuadro seleccionado o el primero
+  libre, la selección avanza), en equipo o ubicación (abre todo; grilla a medida o la estándar
+  más chica), clic derecho en ubicación (abrir cámaras y armar/desarmar sus áreas con
+  confirmación); las MISMAS divisiones y claves de `VideoLayouts.cs` (las vistas guardadas se
+  comparten con el cliente); barra por cuadro (audio exclusivo, P/S, captura JPG/PNG, grabación
+  local MP4/WebM con contador, cerrar); doble clic maximiza (sube a principal con el secundario
+  estacionado: restaurar es instantáneo); arrastrar del árbol al cuadro y de un cuadro a otro
+  (se mueve el escenario con sus `<video>`, el video no se corta); zoom digital (rueda, modo
+  rectángulo, arrastre para desplazar, clic derecho = 1×); vistas guardadas; pantalla completa
+  (Fullscreen API de la grilla); pantallas auxiliares (hasta 3 ventanas del navegador con su
+  propia división, mover cámaras entre ventanas por BroadcastChannel; con el permiso de
+  administración de ventanas se llevan solas a otro monitor); PTZ con teclado (flechas, +/−,
+  Shift = precisión) y órdenes en fila (un "detener" nunca adelanta a su "mover"); panel de
+  parlantes (voz en vivo por el WebSocket existente con remuestreo propio a 8 kHz, tono,
+  volumen, sonidos del servidor, biblioteca, texto a voz). Ajustes del navegador (stream al
+  abrir, formato de captura, grilla a medida, estirar, volver a abrir la última sesión).
+- **Doble buffer como el cliente**: cada cámara (`LvFeed`) tiene dos `<video>`; P/S y la
+  promoción de maximizar abren el destino atrás y se intercambian con imagen. MediaMTX anuncia
+  una pista de audio aunque la cámara no tenga: el audio se detecta cuando llegan paquetes
+  (`unmute`). Vigía: sin bytes de video por ~12 s = señal perdida y reconexión.
+- **Límites conocidos**: hablar por los parlantes exige contexto seguro (HTTPS o localhost);
+  las capturas/grabaciones van a la carpeta de descargas del navegador; la grabación
+  re-codifica en el navegador (MediaRecorder), no es remux como en el cliente.
+- **Probado** con un servidor aislado (5290) y cámaras simuladas (FFmpeg testsrc H.264+G.711,
+  H.265, sub H.264 y una ruta sin señal): video, P↔S en ~2,3 s, maximizar/restaurar,
+  intercambio de cuadros, árbol→cuadro, divisiones asimétricas, vistas guardadas,
+  captura/grabación, audio exclusivo, zoom, PTZ (teclado y botones, error del equipo a la
+  vista), reapertura de la última sesión, cierre inmediato de sesiones al recargar y la
+  bitácora. No probado aquí: pantalla completa y ventanas auxiliares reales (el navegador
+  integrado de la app no abre ventanas emergentes ni pasa a pantalla completa), ni el acceso
+  desde otro equipo de la red.
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

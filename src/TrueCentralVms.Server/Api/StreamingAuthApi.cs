@@ -39,6 +39,8 @@ public static class StreamingAuthApi
             string query = GetString("query");
             string ip = GetString("ip");
             string mtxId = GetString("id");
+            // "rtsp" = cliente de escritorio / decodificador; "webrtc" = panel web.
+            bool fromWeb = GetString("protocol") == "webrtc";
 
             // El token viaja en el query de la URL RTSP (?token=...).
             string? token = null;
@@ -103,8 +105,9 @@ public static class StreamingAuthApi
                 MtxSessionId = mtxId,
             });
             await db.SaveChangesAsync();
-            logger.LogInformation("Streaming: {User} comenzó a ver {Device} canal {Channel} ({Profile}) desde {Ip}.",
-                grant.Username, grant.DeviceName, grant.RtspChannel, grant.Profile, ip);
+            if (fromWeb) streamTokens.MarkWebSession(mtxId);
+            logger.LogInformation("Streaming: {User} comenzó a ver {Device} canal {Channel} ({Profile}) desde {Ip}{Origin}.",
+                grant.Username, grant.DeviceName, grant.RtspChannel, grant.Profile, ip, fromWeb ? " (panel web)" : "");
 
             // El inicio de reproducción de grabaciones se audita en su propio
             // endpoint (con el rango pedido); aquí solo el vivo.
@@ -113,8 +116,9 @@ public static class StreamingAuthApi
                     targetType: "channel", targetId: $"{grant.DeviceId}/{grant.RtspChannel}",
                     targetName: $"{grant.DeviceName} · canal {grant.RtspChannel}",
                     detail: $"Comenzó a ver '{grant.DeviceName}' canal {grant.RtspChannel} " +
-                            $"({(grant.Profile == "main" ? "stream principal" : "stream secundario")}).",
-                    userId: grant.UserId, username: grant.Username, clientIp: ip, origin: "client");
+                            $"({(grant.Profile == "main" ? "stream principal" : "stream secundario")})" +
+                            (fromWeb ? " desde el panel web." : "."),
+                    userId: grant.UserId, username: grant.Username, clientIp: ip, origin: fromWeb ? "web" : "client");
 
             await SessionAccounting.BroadcastActiveSessionsAsync(db, hub);
             return Results.Ok();

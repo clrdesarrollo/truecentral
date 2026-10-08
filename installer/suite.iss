@@ -43,6 +43,7 @@
 #define CercoPort      "5092"   ; receptor WebSocket de los paneles de cerco
 #define CercoFwPort    "5093"   ; descarga de firmware (OTA) de los paneles de cerco
 #define RtspPort       "8654"
+#define WebRtcIcePort  "8660"   ; medio WebRTC de la vista en vivo del panel web (UDP y TCP)
 ; Puerto del PostgreSQL embebido. Es PRIVADO del sistema: escucha solo en
 ; 127.0.0.1 y nunca se comparte, por eso no usa el 5432 de PostgreSQL ni el
 ; 25480 del producto videowall. Si estuviera ocupado, el instalador busca el
@@ -520,6 +521,8 @@ begin
   RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS Server"');
   RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS Server (descubrimiento)"');
   RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS MediaMTX"');
+  RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS MediaMTX (WebRTC UDP)"');
+  RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS MediaMTX (WebRTC TCP)"');
 end;
 
 procedure ConfigureFirewall();
@@ -540,6 +543,15 @@ begin
   // RTSP hacia los espectadores (clientes de escritorio y decodificadores).
   RunHidden(SysTool('netsh.exe'),
     'advfirewall firewall add rule name="CLR TrueCentral VMS MediaMTX" dir=in action=allow protocol=TCP localport={#RtspPort} program="'
+    + ExpandConstant('{app}') + '\tools\mediamtx\mediamtx.exe" profile=any');
+  // Vista en vivo del panel web: el navegador recibe el video por WebRTC
+  // directo desde MediaMTX por este puerto (UDP; TCP para redes que bloquean
+  // UDP). La señalización va por el puerto web del servidor.
+  RunHidden(SysTool('netsh.exe'),
+    'advfirewall firewall add rule name="CLR TrueCentral VMS MediaMTX (WebRTC UDP)" dir=in action=allow protocol=UDP localport={#WebRtcIcePort} program="'
+    + ExpandConstant('{app}') + '\tools\mediamtx\mediamtx.exe" profile=any');
+  RunHidden(SysTool('netsh.exe'),
+    'advfirewall firewall add rule name="CLR TrueCentral VMS MediaMTX (WebRTC TCP)" dir=in action=allow protocol=TCP localport={#WebRtcIcePort} program="'
     + ExpandConstant('{app}') + '\tools\mediamtx\mediamtx.exe" profile=any');
 end;
 
