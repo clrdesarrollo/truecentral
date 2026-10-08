@@ -428,7 +428,9 @@ function accessProbeResultHtml(r) {
 // Página del equipo (#/access/device?id=7&tab=doors). Reemplaza al modal de
 // edición, que quedaba angosto para todo lo que un equipo permite configurar:
 //   · Conexión: lo que antes estaba en el modal (nombre, ubicación, marca,
-//     dirección, credenciales, activo) con prueba de conexión.
+//     dirección, credenciales, activo) con prueba de conexión, y las puertas
+//     del equipo en el VMS: activa o pausada, y su ficha de Recursos (donde se
+//     les cambia el nombre).
 //   · Puertas y Lectores: los parámetros PROPIOS del equipo (contacto de
 //     puerta, tiempos de apertura, umbrales del reconocimiento facial, LED
 //     del lector…), leídos del equipo al abrir la pestaña y escritos de
@@ -657,7 +659,10 @@ async function acdDrawConnection(body) {
         <button class="btn" type="submit" id="ac-save">Guardar cambios</button>
       </div>` : ""}
       </fieldset>
-    </form>`;
+    </form>
+    ${acdDoorsHtml(d, isAdmin)}`;
+
+  acdBindDoors();
 
   $("#ac-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#ac-driver").value);
@@ -702,6 +707,58 @@ async function acdDrawConnection(body) {
       saveButton.textContent = "Guardar cambios";
     }
   });
+}
+
+// ---------- Puertas del equipo en el VMS (activa o pausada) ----------
+// Pausar una puerta es del VMS, no del equipo: deja de ocupar cupo de la
+// licencia y se la saca de los niveles de acceso en los equipos. El nombre se
+// cambia en su ficha de Recursos, que es donde se administra cada recurso.
+
+function acdDoorsHtml(d, isAdmin) {
+  if (!d.doors.length) return "";
+  return `
+    <section class="acd-card acd-narrow" id="acd-doors">
+      <div class="acd-card-head"><h4>Puertas del equipo</h4>
+        <span class="muted">Activa: el VMS la ofrece y da permisos en ella. Pausada: deja de ocupar cupo de la licencia
+          y se la quita de los niveles de acceso en los equipos.</span></div>
+      <div id="acd-doors-error"></div>
+      <ul class="acd-door-list">
+        ${d.doors.map((door) => `
+          <li data-id="${door.id}">
+            <span class="acd-door-name"><span class="muted">${door.number}.</span> ${esc(door.name)}
+              ${door.enabled ? "" : `<span class="tag operator">pausada</span>`}</span>
+            <a class="btn ghost small" href="#/resources?r=Door:${door.id}"
+               title="Abrir su ficha en Recursos (nombre, ubicación, consignas y cámaras)">Ficha en Recursos</a>
+            <label class="checkbox-row acd-door-toggle"><input type="checkbox" class="acd-door-enabled"
+              ${door.enabled ? "checked" : ""} ${isAdmin ? "" : "disabled"}> Activa</label>
+          </li>`).join("")}
+      </ul>
+    </section>`;
+}
+
+function acdBindDoors() {
+  $$("#acd-doors .acd-door-enabled").forEach((box) => box.addEventListener("change", async () => {
+    const id = Number(box.closest("li").dataset.id);
+    const door = acdState.device.doors.find((x) => x.id === id);
+    if (!door) return;
+    const enabled = box.checked;
+    if (!enabled && !confirm(`¿Pausar la puerta "${door.name}"? Se la quita de los niveles de acceso en los equipos.`)) {
+      box.checked = true;
+      return;
+    }
+    box.disabled = true;
+    $("#acd-doors-error").innerHTML = "";
+    try {
+      const updated = await Api.put(`/api/access/doors/${id}`, { name: door.name, enabled });
+      Object.assign(door, { enabled: updated.enabled, name: updated.name });
+      toast(enabled ? `Puerta "${door.name}" activada.` : `Puerta "${door.name}" pausada.`);
+      acdDrawPage();
+    } catch (err) {
+      box.checked = !enabled;
+      box.disabled = false;
+      $("#acd-doors-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    }
+  }));
 }
 
 // ---------- Puertas y lectores (configuración propia del equipo) ----------

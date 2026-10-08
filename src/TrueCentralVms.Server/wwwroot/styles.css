@@ -1741,6 +1741,14 @@ a.res-open:hover { color: var(--accent); text-decoration: underline; }
   .acd-check { margin-top: 0; }
   .acd-status { align-items: flex-start; }
 }
+/* Puertas del equipo en el VMS (pestaña Conexión): activa o pausada y enlace a su ficha. */
+#acd-doors { margin-top: 16px; }
+.acd-door-list { list-style: none; margin: 0; padding: 0; }
+.acd-door-list li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.acd-door-list li:first-child { border-top: 0; }
+.acd-door-name { flex: 1; min-width: 160px; display: inline-flex; align-items: center; gap: 6px; }
+.acd-door-list .btn { text-decoration: none; }
+.acd-door-toggle { margin: 0; }
 /* Pestaña Capacidades: lo que el equipo declara (✓ sí, ✕ no, ? no lo dice). */
 .acd-cap-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; margin: 0 0 12px; }
 .acd-cap-legend > span { display: inline-flex; align-items: center; gap: 6px; }
