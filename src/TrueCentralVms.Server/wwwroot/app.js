@@ -2054,6 +2054,7 @@ const routes = {
   "#/devices": renderDevices,
   "#/alarm-panels": renderAlarmPanels,
   "#/access": renderAccessDevices,
+  "#/access/device": renderAccessDevicePage,
   "#/access-monitor": renderAccessMonitor,
   "#/access-persons": renderAccessPersons,
   "#/access-levels": renderAccessLevels,

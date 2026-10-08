@@ -5,6 +5,10 @@
 // a lo COMPATIBLE. Las órdenes sobre puertas, el padrón de personas y el
 // historial de accesos llegan después y se cuelgan de esta misma página.
 //
+// El alta es un modal; todo lo demás de un equipo (conexión, parámetros de
+// sus puertas y de sus lectores, hora y mantenimiento) vive en su PÁGINA
+// (#/access/device?id=N), al final de este archivo.
+//
 // Se carga ANTES que app.js: este archivo solo declara funciones (sin efectos
 // al cargar) y app.js las referencia desde su tabla de rutas.
 "use strict";
@@ -118,7 +122,7 @@ async function renderAccessDevices() {
         <tbody>
           ${devices.map((d) => `
             <tr data-id="${d.id}">
-              <td>${esc(d.name)}${d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</td>
+              <td><a href="#/access/device?id=${d.id}" class="acd-link" title="Abrir la página del equipo">${esc(d.name)}</a>${d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</td>
               <td class="muted">${d.location ? esc(d.location) : `<span class="loc-line none">Por ubicar</span>`}</td>
               <td class="muted">${esc(accessBrandOf(d.driverKey))}</td>
               <td>${esc(ACCESS_KIND_LABELS[d.kind] ?? d.kind)}</td>
@@ -132,7 +136,7 @@ async function renderAccessDevices() {
                 ${isAdmin ? `<button class="btn ghost btn-ac-revalidate" title="Volver a sondear el equipo (modelo, firmware, capacidades y puertas)">Revalidar</button>
                 ${ACCESS_PADRON_DRIVERS.includes(d.driverKey) ? `<button class="btn ghost btn-ac-resync"
                   title="Reescribe en este equipo todas las personas, credenciales y horarios que le corresponden">Reenviar padrón</button>` : ""}
-                <button class="btn ghost btn-ac-edit">Editar</button>
+                <a class="btn ghost" href="#/access/device?id=${d.id}" title="Conexión, puertas, lectores, hora y mantenimiento">Configurar</a>
                 <button class="btn danger btn-ac-delete">Eliminar</button>` : ""}
               </div></td>
             </tr>`).join("")}
@@ -156,7 +160,6 @@ async function renderAccessDevices() {
   if (scanReady) renderOnlineDevices(devices);
   if (isAdmin) startDiscoveryPolling(devices, ACCESS_DISCOVERY);
 
-  $$("#view .btn-ac-edit").forEach((b) => b.addEventListener("click", (e) => accessDeviceModal(byRow(e))));
   $$("#view .btn-ac-resync").forEach((b) => b.addEventListener("click", async (e) => {
     const device = byRow(e);
     const button = e.currentTarget;
@@ -273,6 +276,11 @@ function accessCredentialFields(driver, device, isNew) {
 
 const accessPortLabel = (driver) => driver?.authMode === "CommKey" ? "Puerto del equipo" : "Puerto HTTP";
 
+/**
+ * Alta de un equipo (modal). La edición ya no pasa por acá: cada equipo tiene
+ * su página, con espacio para todo lo que se le configura. `device` queda
+ * admitido por compatibilidad (el formulario es el mismo).
+ */
 async function accessDeviceModal(device, prefill) {
   const isNew = !device;
   const seed = isNew ? (prefill || {}) : {};
@@ -317,7 +325,7 @@ async function accessDeviceModal(device, prefill) {
         <button class="btn ghost" type="button" id="ac-probe">Probar conexión</button>
         <button class="btn" type="submit" id="ac-save">${isNew ? "Guardar" : "Guardar cambios"}</button>
       </div>
-    </form>`);
+    </form>`, true);
 
   $("#ac-cancel").addEventListener("click", closeModal);
   if (!isNew) maintFillDeviceSection("access", device.id);
@@ -330,18 +338,7 @@ async function accessDeviceModal(device, prefill) {
     $("#ac-credentials").innerHTML = accessCredentialFields(dr, device, isNew);
   });
 
-  const readForm = () => ({
-    name: $("#ac-name").value.trim() || "(sin nombre)",
-    driverKey: $("#ac-driver").value,
-    host: $("#ac-host").value.trim(),
-    port: Number($("#ac-port").value),
-    // ZKTeco no tiene ni usuario ni HTTPS: sus campos no existen en el formulario.
-    useHttps: $("#ac-https")?.checked ?? false,
-    username: $("#ac-username")?.value.trim() ?? "",
-    password: $("#ac-password").value || null,
-    enabled: $("#ac-enabled").checked,
-    locationId: locationFieldValue("ac-location"),
-  });
+  const readForm = accessReadConnectionForm;
 
   $("#ac-probe").addEventListener("click", async () => {
     const errorBox = $("#ac-modal-error");
@@ -356,23 +353,7 @@ async function accessDeviceModal(device, prefill) {
         resultBox.innerHTML = `<div class="error-box">${esc(r.error)}</div>`;
         return;
       }
-      const yesNo = (v) => v ? "sí" : "no";
-      resultBox.innerHTML = `
-        <div class="probe-box">
-          <div class="probe-title">✔ Conexión validada</div>
-          <div class="probe-grid">
-            <span>Modelo</span><b>${esc(r.model ?? "—")}</b>
-            <span>Tipo</span><b>${esc(ACCESS_KIND_LABELS[r.kind] ?? r.kind)}</b>
-            <span>N° de serie</span><b>${esc(r.serialNumber ?? "—")}</b>
-            <span>Firmware</span><b>${esc(r.firmwareVersion ?? "—")}</b>
-            <span>Puertas</span><b>${r.doorCount}${r.doorNames.length ? ` (${esc(r.doorNames.join(", "))})` : ""}</b>
-            <span>Apertura remota</span><b>${yesNo(r.supportsRemoteControl)}</b>
-            <span>Eventos</span><b>${yesNo(r.supportsEvents)}</b>
-            <span>Credenciales</span><b>${[r.supportsCards ? "tarjeta" : null, r.supportsFingerprint ? "huella" : null,
-              r.supportsFace ? "rostro" : null].filter(Boolean).join(", ") || "—"}</b>
-            <span>Cupos del equipo</span><b>${r.userCapacity ?? "—"} personas · ${r.cardCapacity ?? "—"} tarjetas</b>
-          </div>
-        </div>`;
+      resultBox.innerHTML = accessProbeResultHtml(r);
     } catch (err) {
       resultBox.innerHTML = "";
       errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
@@ -399,6 +380,445 @@ async function accessDeviceModal(device, prefill) {
       errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
       saveButton.disabled = false;
       saveButton.textContent = isNew ? "Guardar" : "Guardar cambios";
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Formulario de conexión y resultado de la prueba: los comparten el modal de
+// alta y la página del equipo (mismos ids de campos).
+// ---------------------------------------------------------------------------
+
+function accessReadConnectionForm() {
+  return {
+    name: $("#ac-name").value.trim() || "(sin nombre)",
+    driverKey: $("#ac-driver").value,
+    host: $("#ac-host").value.trim(),
+    port: Number($("#ac-port").value),
+    // ZKTeco no tiene ni usuario ni HTTPS: sus campos no existen en el formulario.
+    useHttps: $("#ac-https")?.checked ?? false,
+    username: $("#ac-username")?.value.trim() ?? "",
+    password: $("#ac-password").value || null,
+    enabled: $("#ac-enabled").checked,
+    locationId: locationFieldValue("ac-location"),
+  };
+}
+
+function accessProbeResultHtml(r) {
+  const yesNo = (v) => v ? "sí" : "no";
+  return `
+    <div class="probe-box">
+      <div class="probe-title">✔ Conexión validada</div>
+      <div class="probe-grid">
+        <span>Modelo</span><b>${esc(r.model ?? "—")}</b>
+        <span>Tipo</span><b>${esc(ACCESS_KIND_LABELS[r.kind] ?? r.kind)}</b>
+        <span>N° de serie</span><b>${esc(r.serialNumber ?? "—")}</b>
+        <span>Firmware</span><b>${esc(r.firmwareVersion ?? "—")}</b>
+        <span>Puertas</span><b>${r.doorCount}${r.doorNames.length ? ` (${esc(r.doorNames.join(", "))})` : ""}</b>
+        <span>Apertura remota</span><b>${yesNo(r.supportsRemoteControl)}</b>
+        <span>Eventos</span><b>${yesNo(r.supportsEvents)}</b>
+        <span>Credenciales</span><b>${[r.supportsCards ? "tarjeta" : null, r.supportsFingerprint ? "huella" : null,
+          r.supportsFace ? "rostro" : null].filter(Boolean).join(", ") || "—"}</b>
+        <span>Cupos del equipo</span><b>${r.userCapacity ?? "—"} personas · ${r.cardCapacity ?? "—"} tarjetas</b>
+      </div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Página del equipo (#/access/device?id=7&tab=doors). Reemplaza al modal de
+// edición, que quedaba angosto para todo lo que un equipo permite configurar:
+//   · Conexión: lo que antes estaba en el modal (nombre, ubicación, marca,
+//     dirección, credenciales, activo) con prueba de conexión.
+//   · Puertas y Lectores: los parámetros PROPIOS del equipo (contacto de
+//     puerta, tiempos de apertura, umbrales del reconocimiento facial, LED
+//     del lector…), leídos del equipo al abrir la pestaña y escritos de
+//     vuelta al guardar cada bloque. El VMS no los guarda.
+//   · Hora y mantenimiento: el mismo apartado que tienen las fichas.
+// ---------------------------------------------------------------------------
+
+const ACD_TABS = [
+  { key: "connection", label: "Conexión" },
+  { key: "doors", label: "Puertas" },
+  { key: "readers", label: "Lectores" },
+  { key: "maintenance", label: "Hora y mantenimiento" },
+];
+
+let acdState = null;
+
+async function renderAccessDevicePage() {
+  $("#page-title").textContent = "Control de acceso";
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  const id = Number(params.get("id"));
+  if (!(id > 0)) { location.hash = "#/access"; return; }
+  const back = `<div class="acd-back"><a class="btn ghost small" href="#/access">← Volver a la lista</a></div>`;
+  $("#view").innerHTML = `${back}<div class="muted">Cargando el equipo…</div>`;
+  let device;
+  try { device = await Api.get(`/api/access/devices/${id}`); }
+  catch (err) {
+    $("#view").innerHTML = `${back}<div class="error-box">${esc(err.status === 404
+      ? "Ese equipo ya no existe (se eliminó o está fuera de su alcance)." : err.error)}</div>`;
+    return;
+  }
+  const tab = ACD_TABS.some((t) => t.key === params.get("tab")) ? params.get("tab") : "connection";
+  acdState = { id, device, tab, settings: null, settingsError: null, loadingSettings: false };
+  acdDrawPage();
+}
+
+function acdDrawPage() {
+  const { device: d, tab } = acdState;
+  $("#page-title").textContent = `Control de acceso · ${d.name}`;
+  const isAdmin = Api.role === "Admin";
+  const meta = [
+    accessBrandOf(d.driverKey),
+    ACCESS_KIND_LABELS[d.kind] && d.kind !== "Unknown" ? ACCESS_KIND_LABELS[d.kind] : null,
+    d.model,
+    d.firmwareVersion ? `firmware ${d.firmwareVersion}` : null,
+    `${d.useHttps ? "https://" : ""}${d.host}:${d.port}`,
+    d.location || "Por ubicar",
+  ].filter(Boolean).map(esc).join(" · ");
+  $("#view").innerHTML = `
+    <div class="acd-back"><a class="btn ghost small" href="#/access">← Volver a la lista</a></div>
+    <div class="acd-head">
+      <div class="acd-title">
+        <h3>${esc(d.name)}${d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</h3>
+        <div class="muted">${meta}</div>
+        <div class="acd-tags">${accessCapsTags(d)} ${d.doors.length
+          ? `<span class="tag operator" title="${esc(d.doors.map((x) => `${x.number}. ${x.name}`).join(" · "))}">${d.doors.length} puerta(s)</span>` : ""}</div>
+      </div>
+      <div class="acd-status">
+        ${accessStatusCell(d)}
+        ${isAdmin ? `<button class="btn ghost small" type="button" id="acd-revalidate"
+          title="Volver a sondear el equipo (modelo, firmware, capacidades y puertas)">Revalidar</button>` : ""}
+      </div>
+    </div>
+    <div class="res-tabs" role="tablist">
+      ${ACD_TABS.map((t) => `
+        <button type="button" role="tab" class="res-tab${t.key === tab ? " on" : ""}" data-tab="${t.key}"
+                aria-selected="${t.key === tab}">${t.label}</button>`).join("")}
+    </div>
+    <div id="acd-body" class="res-tab-body"></div>`;
+  $$("#view .res-tab").forEach((b) => b.addEventListener("click", () => acdTab(b.dataset.tab)));
+  $("#acd-revalidate")?.addEventListener("click", async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    button.textContent = "Sondeando…";
+    try {
+      acdState.device = await Api.post(`/api/access/devices/${acdState.id}/revalidate`);
+      acdState.settings = null;   // las puertas y lectores pueden haber cambiado
+      toast("Equipo revalidado: información, capacidades y puertas actualizadas.");
+      acdDrawPage();
+    } catch (err) {
+      toast(err.error, true);
+      button.disabled = false;
+      button.textContent = "Revalidar";
+    }
+  });
+  acdDrawTab();
+}
+
+function acdTab(tab) {
+  acdState.tab = tab;
+  history.replaceState(null, "", `#/access/device?id=${acdState.id}${tab === "connection" ? "" : `&tab=${tab}`}`);
+  $$("#view .res-tab").forEach((b) => {
+    b.classList.toggle("on", b.dataset.tab === tab);
+    b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  });
+  acdDrawTab();
+}
+
+async function acdDrawTab() {
+  const body = $("#acd-body");
+  switch (acdState.tab) {
+    case "doors":
+    case "readers":
+      await acdDrawSettings(body, acdState.tab === "doors" ? "door" : "reader");
+      break;
+    case "maintenance":
+      body.innerHTML = `<div class="acd-narrow"><div id="mt-section"><div class="muted" id="mt-section-body">Leyendo la hora del equipo…</div></div></div>`;
+      maintFillDeviceSection("access", acdState.id);
+      break;
+    default:
+      await acdDrawConnection(body);
+  }
+}
+
+// ---------- Conexión ----------
+
+async function acdDrawConnection(body) {
+  const d = acdState.device;
+  const isAdmin = Api.role === "Admin";
+  let drivers, places;
+  try { [drivers, places] = await Promise.all([getAccessDrivers(), loadLocationChoices()]); }
+  catch (err) { body.innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
+  if (acdState.tab !== "connection") return;   // cambió de pestaña mientras cargaba
+  const driver0 = drivers.find((x) => x.key === d.driverKey) ?? drivers[0];
+
+  body.innerHTML = `
+    <form id="acd-form" class="acd-narrow">
+      <fieldset ${isAdmin ? "" : "disabled"} class="acd-fieldset">
+      <div id="ac-modal-error"></div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Nombre</label>
+          <input id="ac-name" required maxlength="128" value="${esc(d.name)}" placeholder="Portería principal, Torniquete casino…">
+        </div>
+        ${locationFieldHtml("ac-location", places, d.locationId ?? null,
+          "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.")}
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Marca / protocolo</label>
+          <select id="ac-driver">
+            ${drivers.map((dr) => `<option value="${esc(dr.key)}" ${driver0?.key === dr.key ? "selected" : ""}>${esc(dr.displayName)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Dirección (IP o hostname)</label>
+            <input id="ac-host" required value="${esc(d.host)}" placeholder="192.168.1.65">
+          </div>
+          <div class="field">
+            <label id="ac-port-label">${accessPortLabel(driver0)}</label>
+            <input id="ac-port" type="number" min="1" max="65535" required value="${d.port}">
+          </div>
+        </div>
+      </div>
+      <div id="ac-credentials">${accessCredentialFields(driver0, d, false)}</div>
+      <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${d.enabled ? "checked" : ""}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
+      <div class="info-box">Si cambia la dirección, el puerto, el usuario o la contraseña, al guardar se vuelve a validar contra
+        el equipo y se releen su modelo, firmware, capacidades y puertas.</div>
+      <div id="ac-probe-result"></div>
+      ${isAdmin ? `<div class="acd-actions">
+        <button class="btn ghost" type="button" id="ac-probe">Probar conexión</button>
+        <button class="btn" type="submit" id="ac-save">Guardar cambios</button>
+      </div>` : ""}
+      </fieldset>
+    </form>`;
+
+  $("#ac-driver").addEventListener("change", () => {
+    const dr = drivers.find((x) => x.key === $("#ac-driver").value);
+    if (!dr) return;
+    $("#ac-port-label").textContent = accessPortLabel(dr);
+    $("#ac-credentials").innerHTML = accessCredentialFields(dr, d, false);
+  });
+
+  $("#ac-probe")?.addEventListener("click", async () => {
+    const errorBox = $("#ac-modal-error");
+    const resultBox = $("#ac-probe-result");
+    errorBox.innerHTML = "";
+    resultBox.innerHTML = `<div class="info-box">Conectando con el equipo…</div>`;
+    const probeButton = $("#ac-probe");
+    probeButton.disabled = true;
+    try {
+      const r = await Api.post(`/api/access/probe?deviceId=${d.id}`, accessReadConnectionForm());
+      resultBox.innerHTML = r.success ? accessProbeResultHtml(r) : `<div class="error-box">${esc(r.error)}</div>`;
+    } catch (err) {
+      resultBox.innerHTML = "";
+      errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    } finally {
+      probeButton.disabled = false;
+    }
+  });
+
+  $("#acd-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const errorBox = $("#ac-modal-error");
+    errorBox.innerHTML = "";
+    const saveButton = $("#ac-save");
+    saveButton.disabled = true;
+    saveButton.textContent = "Validando…";
+    try {
+      acdState.device = await Api.put(`/api/access/devices/${d.id}`, accessReadConnectionForm());
+      acdState.settings = null;
+      toast("Equipo actualizado.");
+      acdDrawPage();
+    } catch (err) {
+      errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+      saveButton.disabled = false;
+      saveButton.textContent = "Guardar cambios";
+    }
+  });
+}
+
+// ---------- Puertas y lectores (configuración propia del equipo) ----------
+
+async function acdLoadSettings() {
+  if (acdState.settings || acdState.loadingSettings) return;
+  acdState.loadingSettings = true;
+  acdState.settingsError = null;
+  try { acdState.settings = await Api.get(`/api/access/devices/${acdState.id}/settings`); }
+  catch (err) { acdState.settingsError = err; }
+  finally { acdState.loadingSettings = false; }
+}
+
+async function acdDrawSettings(body, kind) {
+  const state = acdState;
+  if (Api.role !== "Admin") {
+    body.innerHTML = `<div class="info-box">Solo un administrador puede ver y cambiar la configuración propia del equipo
+      (parámetros de sus puertas y de sus lectores).</div>`;
+    return;
+  }
+  if (!state.settings) {
+    body.innerHTML = `<div class="muted">Leyendo la configuración del equipo… (puede tardar unos segundos)</div>`;
+    await acdLoadSettings();
+    if (acdState !== state || !["doors", "readers"].includes(state.tab)) return;
+  }
+  if (state.settingsError) {
+    const err = state.settingsError;
+    body.innerHTML = `
+      <div class="error-box">${esc(err.error)}</div>
+      ${err.status === 501 ? "" : `<button class="btn ghost small" type="button" id="acd-retry">Volver a intentar</button>`}`;
+    $("#acd-retry")?.addEventListener("click", () => { state.settingsError = null; acdDrawTab(); });
+    return;
+  }
+  const sections = state.settings.sections.filter((s) => s.kind === kind);
+  const intro = kind === "door"
+    ? "Parámetros de cada puerta tal como están en el equipo: se leen al abrir esta pestaña y se escriben al guardar. Son los mismos que muestra la página web del equipo o HikCentral."
+    : "Parámetros de cada lector del equipo. Un terminal trae su propio lector (rostro, tarjeta, huella según el modelo) y una entrada para un lector externo; una controladora, los lectores cableados a ella.";
+  body.innerHTML = `
+    <p class="muted res-tab-intro">${intro}${Api.role === "Admin" ? "" : " Solo un administrador puede cambiarlos."}</p>
+    ${state.settings.notes.length ? `<div class="info-box">${state.settings.notes.map(esc).join("<br>")}</div>` : ""}
+    ${sections.length ? sections.map(acdSectionHtml).join("")
+      : `<div class="info-box">El equipo no informó ${kind === "door" ? "puertas" : "lectores"} configurables.</div>`}`;
+  sections.forEach((s) => acdBindSection(s));
+}
+
+function acdSectionHtml(s) {
+  const isAdmin = Api.role === "Admin";
+  return `
+    <section class="acd-card" data-section="${esc(s.key)}">
+      <div class="acd-card-head">
+        <h4>${esc(s.title)}</h4>
+        ${s.subtitle ? `<div class="muted">${esc(s.subtitle)}</div>` : ""}
+      </div>
+      <form class="acd-settings" autocomplete="off">
+        <fieldset ${isAdmin ? "" : "disabled"} class="acd-fieldset">
+          <div class="acd-error"></div>
+          ${s.settings.length ? `<div class="acd-grid">${s.settings.map(acdFieldHtml).join("")}</div>`
+            : `<div class="muted">El equipo no entrega parámetros editables de este bloque.</div>`}
+          ${s.others.length ? `
+          <details class="acd-others">
+            <summary>Otros parámetros que informa el equipo (${s.others.length})</summary>
+            <dl class="res-dl">${s.others.map((o) => `<dt>${esc(o.key)}</dt><dd>${esc(o.value ?? "—")}</dd>`).join("")}</dl>
+          </details>` : ""}
+          ${isAdmin && s.settings.some((f) => f.type !== "Info") ? `
+          <div class="acd-actions">
+            <span class="muted acd-dirty hidden">Hay cambios sin guardar.</span>
+            <button class="btn" type="submit" disabled>Guardar</button>
+          </div>` : ""}
+        </fieldset>
+      </form>
+    </section>`;
+}
+
+function acdFieldHtml(f) {
+  const key = esc(f.key);
+  const help = f.help ? `<div class="muted field-hint">${esc(f.help)}</div>` : "";
+  switch (f.type) {
+    case "Boolean":
+      return `
+        <div class="field acd-field">
+          <label class="checkbox-row acd-check"><input type="checkbox" data-key="${key}" data-type="Boolean" ${f.value === "true" ? "checked" : ""}> ${esc(f.label)}</label>
+          ${help}
+        </div>`;
+    case "Integer": {
+      const range = f.min != null || f.max != null ? ` <span class="muted">(${f.min ?? "…"}–${f.max ?? "…"})</span>` : "";
+      return `
+        <div class="field acd-field">
+          <label>${esc(f.label)}${range}</label>
+          <div class="acd-num">
+            <input type="number" data-key="${key}" data-type="Integer" value="${esc(f.value ?? "")}"
+                   ${f.min != null ? `min="${f.min}"` : ""} ${f.max != null ? `max="${f.max}"` : ""} step="1">
+            ${f.unit ? `<span class="acd-unit">${esc(f.unit)}</span>` : ""}
+          </div>
+          ${help}
+        </div>`;
+    }
+    case "Choice":
+      return `
+        <div class="field acd-field">
+          <label>${esc(f.label)}</label>
+          <select data-key="${key}" data-type="Choice">
+            ${(f.options ?? []).map((o) => `<option value="${esc(o.value)}" ${o.value === f.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}
+          </select>
+          ${help}
+        </div>`;
+    case "Password":
+      return `
+        <div class="field acd-field">
+          <label>${esc(f.label)}</label>
+          <input type="password" data-key="${key}" data-type="Password" autocomplete="new-password" placeholder="vacío = no cambiar">
+          ${help}
+        </div>`;
+    case "Info":
+      return `
+        <div class="field acd-field">
+          <label>${esc(f.label)}</label>
+          <div class="acd-ro">${esc(f.value ?? "—")}</div>
+          ${help}
+        </div>`;
+    default:
+      return `
+        <div class="field acd-field">
+          <label>${esc(f.label)}</label>
+          <input type="text" data-key="${key}" data-type="Text" maxlength="64" value="${esc(f.value ?? "")}">
+          ${help}
+        </div>`;
+  }
+}
+
+/** Valor actual de un campo del formulario, como texto comparable con el que mandó el equipo. */
+function acdFieldValue(input) {
+  switch (input.dataset.type) {
+    case "Boolean": return input.checked ? "true" : "false";
+    case "Password": return input.value;          // vacío = sin cambio
+    default: return input.value.trim();
+  }
+}
+
+function acdBindSection(s) {
+  const card = $(`#view .acd-card[data-section="${CSS.escape(s.key)}"]`);
+  if (!card) return;
+  const form = card.querySelector("form");
+  const inputs = Array.from(form.querySelectorAll("[data-key]"));
+  const original = Object.fromEntries(s.settings.map((f) => [f.key, f.type === "Password" ? "" : (f.value ?? "")]));
+  const changed = () => inputs.filter((i) => acdFieldValue(i) !== original[i.dataset.key]);
+  const refresh = () => {
+    const dirty = changed().length > 0;
+    form.querySelector(".acd-dirty")?.classList.toggle("hidden", !dirty);
+    const save = form.querySelector("button[type=submit]");
+    if (save) save.disabled = !dirty;
+  };
+  form.addEventListener("input", refresh);
+  form.addEventListener("change", refresh);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const errorBox = form.querySelector(".acd-error");
+    errorBox.innerHTML = "";
+    const diff = changed();
+    if (!diff.length) return;
+    for (const input of diff) {
+      if (input.dataset.type === "Integer" && !input.checkValidity()) {
+        input.reportValidity();
+        return;
+      }
+    }
+    const values = Object.fromEntries(diff.map((i) => [i.dataset.key, acdFieldValue(i)]));
+    const save = form.querySelector("button[type=submit]");
+    save.disabled = true;
+    save.textContent = "Guardando…";
+    try {
+      const fresh = await Api.put(`/api/access/devices/${acdState.id}/settings/${encodeURIComponent(s.key)}`, { values });
+      // Se redibuja el bloque con lo que el equipo DEJÓ (puede acotar o redondear).
+      const index = acdState.settings.sections.findIndex((x) => x.key === s.key);
+      if (index >= 0) acdState.settings.sections[index] = fresh;
+      card.outerHTML = acdSectionHtml(fresh);
+      acdBindSection(fresh);
+      toast(`${fresh.title}: cambios guardados en el equipo.`);
+    } catch (err) {
+      errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+      save.disabled = false;
+      save.textContent = "Guardar";
     }
   });
 }

@@ -91,6 +91,7 @@ function resourcesDetachHub() {
   resState.reconnectUnsub = null;
   clearInterval(resState.pollTimer);
   clearTimeout(resState.reloadTimer);
+  clearInterval(resState.snapTimer);
 }
 
 const RES_TOPICS = new Set(["locations", "devices", "channels", "access-devices", "alarm-panels", "speakers", "intercoms"]);
@@ -801,7 +802,96 @@ const RES_TABS = [
 ];
 
 const resSheetUrl = (sheet) => `/api/resources/${sheet.kind.toLowerCase()}/${sheet.id}`;
-const resSnapshotSrc = (path) => `${path}?access_token=${encodeURIComponent(Api.token)}&t=${Date.now()}`;
+// ---------- Imagen actual (snapshot que se refresca solo) ----------
+// Para una cámara es su propia imagen; para una puerta, una zona o cualquier
+// otro recurso, la de su cámara principal. El intervalo se elige y queda
+// guardado en este navegador; "manual" = solo con el botón.
+
+const RES_SNAP_KEY = "tcvms.res.snapshotEvery";
+const RES_SNAP_CHOICES = [
+  { value: 5, label: "5 s" }, { value: 10, label: "10 s" }, { value: 30, label: "30 s" },
+  { value: 60, label: "1 min" }, { value: 0, label: "manual" },
+];
+function resSnapshotEvery() {
+  try {
+    const stored = localStorage.getItem(RES_SNAP_KEY);
+    if (stored === null) return 10;   // nunca elegido: cada 10 s (Number(null) sería 0 = manual)
+    const v = Number(stored);
+    return RES_SNAP_CHOICES.some((c) => c.value === v) ? v : 10;
+  } catch { return 10; }
+}
+/** Ruta de la imagen del recurso (la suya o la de su cámara principal) y de qué cámara es. */
+function resSnapshotSource(d) {
+  if (d.snapshotPath) return { path: d.snapshotPath, camera: null };
+  const main = d.cameras?.[0];
+  return main ? { path: `/api/devices/${main.deviceId}/snapshot/${main.channelNumber}`, camera: main } : null;
+}
+// maxAge: el servidor vuelve a capturar si la que tiene es más vieja que eso
+// (si no, devuelve la misma imagen hasta 25 s, y el refresco no se notaría).
+const resSnapshotSrc = (path, maxAge = 2) =>
+  `${path}?access_token=${encodeURIComponent(Api.token)}&maxAge=${maxAge}&t=${Date.now()}`;
+
+function resSnapshotHtml(d, title) {
+  const source = resSnapshotSource(d);
+  if (!source) return "";
+  const every = resSnapshotEvery();
+  return `
+    <section class="res-card res-snap" id="rs-snap">
+      <div class="res-snap-head">
+        <h4>${esc(title)}</h4>
+        <label class="muted">Actualizar cada
+          <select id="rs-snap-every">${RES_SNAP_CHOICES.map((c) =>
+            `<option value="${c.value}" ${c.value === every ? "selected" : ""}>${c.label}</option>`).join("")}</select>
+        </label>
+        <button class="btn ghost small" type="button" id="rs-snapshot-refresh">Actualizar ahora</button>
+      </div>
+      ${source.camera ? `<div class="muted res-snap-sub">Cámara principal: ${esc(source.camera.name)}${source.camera.isOnline ? "" : " (sin señal)"}</div>` : ""}
+      <img id="rs-snapshot" class="res-snapshot" alt="Imagen actual de la cámara" src="${resSnapshotSrc(source.path)}">
+      <div class="muted hidden" id="rs-snapshot-error">El equipo no entregó una imagen (sin conexión o sin señal).</div>
+      <div class="muted res-snap-when" id="rs-snap-when"></div>
+    </section>`;
+}
+
+function resBindSnapshot(d) {
+  clearInterval(resState.snapTimer);
+  const img = $("#rs-snapshot");
+  const source = resSnapshotSource(d);
+  if (!img || !source) return;
+  // El equipo puede tardar en contestar: si el usuario ya cambió de pestaña,
+  // la imagen y su aviso ya no están en la página.
+  img.addEventListener("error", () => {
+    if (!img.isConnected) return;
+    img.classList.add("hidden");
+    $("#rs-snapshot-error")?.classList.remove("hidden");
+  });
+  img.addEventListener("load", () => {
+    if (!img.isConnected) return;
+    img.classList.remove("hidden");
+    $("#rs-snapshot-error")?.classList.add("hidden");
+    const when = $("#rs-snap-when");
+    if (when) when.textContent = `Actualizada a las ${new Date().toLocaleTimeString("es-CL", { hour12: false })}`;
+  });
+  const refresh = (maxAge) => { if (img.isConnected) img.src = resSnapshotSrc(source.path, maxAge); };
+  $("#rs-snapshot-refresh").addEventListener("click", () => refresh(2));
+  const schedule = () => {
+    clearInterval(resState.snapTimer);
+    const every = resSnapshotEvery();
+    if (!every) return;
+    resState.snapTimer = setInterval(() => {
+      // Sin la imagen en la página (otra pestaña, otra ficha) se corta; con la
+      // pestaña del navegador oculta no se pide nada al equipo.
+      if (!img.isConnected) { clearInterval(resState.snapTimer); return; }
+      if (document.hidden) return;
+      refresh(Math.max(2, every - 1));
+    }, every * 1000);
+  };
+  $("#rs-snap-every").addEventListener("change", (e) => {
+    try { localStorage.setItem(RES_SNAP_KEY, e.target.value); } catch { /* modo privado */ }
+    schedule();
+    if (Number(e.target.value)) refresh(2);
+  });
+  schedule();
+}
 
 async function resOpenSheet() {
   const sheet = resState.sheet;
@@ -872,6 +962,7 @@ function resSheetTab(tab) {
 async function resDrawSheetTab() {
   const sheet = resState.sheet;
   const body = $("#rs-body");
+  clearInterval(resState.snapTimer);
   const load = async (what, url) => {
     body.innerHTML = `<div class="muted">Cargando…</div>`;
     try { sheet[what] = await Api.get(url); }
@@ -904,16 +995,18 @@ async function resDrawSheetTab() {
 
 function resSheetGeneralHtml(d) {
   const r = d.resource;
+  const snapshot = resSnapshotHtml(d, "Imagen actual");
+  const wrap = (main) => snapshot ? `<div class="res-general"><div class="res-general-main">${main}</div>${snapshot}</div>` : main;
   if (Api.role !== "Admin") {
-    return `
+    return wrap(`
       <dl class="res-dl wide">
         <dt>Ubicación</dt><dd>${d.locationPath ? esc(d.locationPath) : "Por ubicar"}</dd>
         <dt>Descripción</dt><dd>${d.description ? esc(d.description) : `<span class="muted">—</span>`}</dd>
         <dt>Consignas para el operador</dt>
         <dd class="res-pre">${d.instructions ? esc(d.instructions) : `<span class="muted">Sin consignas.</span>`}</dd>
-      </dl>`;
+      </dl>`);
   }
-  return `
+  return wrap(`
     <div id="rs-error"></div>
     <div class="form-grid">
       <div class="field"><label for="rs-name">Nombre</label>
@@ -928,10 +1021,11 @@ function resSheetGeneralHtml(d) {
     <div class="field"><label for="rs-instr">Consignas para el operador <span class="muted">(qué hacer cuando este recurso avisa algo)</span></label>
       <textarea id="rs-instr" rows="6" maxlength="4000"
         placeholder="Si queda abierta más de 30 s: revisar la cámara exterior, llamar al supervisor y anotarlo en el libro del turno.">${esc(d.instructions ?? "")}</textarea></div>
-    <div class="res-sheet-actions"><button class="btn" type="button" id="rs-save">Guardar</button></div>`;
+    <div class="res-sheet-actions"><button class="btn" type="button" id="rs-save">Guardar</button></div>`);
 }
 
 function resBindSheetGeneral() {
+  resBindSnapshot(resState.sheet.detail);
   const save = $("#rs-save");
   if (!save) return;
   save.addEventListener("click", async () => {
@@ -968,38 +1062,18 @@ function resSheetDeviceHtml(d) {
           ${row("Firmware", s.firmware)}${row("Dirección", s.address)}${row("Conexión", s.status)}
           ${s.lastSeenAt ? row("Visto por última vez", formatDateTime(s.lastSeenAt)) : ""}
         </dl>
-        <a class="btn ghost small" href="#/${esc(s.module)}">Ir al equipo ${resIcon("link", 12)}</a>
+        <a class="btn ghost small" href="${s.module === "access" ? `#/access/device?id=${s.id}` : `#/${esc(s.module)}`}">Ir al equipo ${resIcon("link", 12)}</a>
       </section>
       <section class="res-card">
         <h4>Características</h4>
         <dl class="res-dl">${d.facts.map((f) => row(f.label, f.value)).join("")}</dl>
       </section>
-      ${d.snapshotPath ? `
-      <section class="res-card res-card-wide">
-        <h4>Imagen actual</h4>
-        <img id="rs-snapshot" class="res-snapshot" alt="Imagen actual de la cámara" src="${resSnapshotSrc(d.snapshotPath)}">
-        <div class="muted hidden" id="rs-snapshot-error">El equipo no entregó una imagen (sin conexión o sin señal).</div>
-        <button class="btn ghost small" type="button" id="rs-snapshot-refresh">Actualizar imagen</button>
-      </section>` : ""}
+      ${d.snapshotPath ? resSnapshotHtml(d, "Imagen actual").replace('class="res-card res-snap"', 'class="res-card res-snap res-card-wide"') : ""}
     </div>`;
 }
 
 function resBindSheetDevice() {
-  const img = $("#rs-snapshot");
-  if (!img) return;
-  // El equipo puede tardar en contestar: si el usuario ya cambió de pestaña,
-  // la imagen y su aviso ya no están en la página.
-  img.addEventListener("error", () => {
-    if (!img.isConnected) return;
-    img.classList.add("hidden");
-    $("#rs-snapshot-error")?.classList.remove("hidden");
-  });
-  img.addEventListener("load", () => {
-    if (!img.isConnected) return;
-    img.classList.remove("hidden");
-    $("#rs-snapshot-error")?.classList.add("hidden");
-  });
-  $("#rs-snapshot-refresh").addEventListener("click", () => { img.src = resSnapshotSrc(resState.sheet.detail.snapshotPath); });
+  if (resState.sheet.detail.snapshotPath) resBindSnapshot(resState.sheet.detail);
 }
 
 // ---------- Cámaras asociadas ----------

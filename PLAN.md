@@ -1127,6 +1127,64 @@ DSS/Genetec).
 - El aviso equivalente del cliente de escritorio (el servidor rechaza el reingreso automático)
   es parte del trabajo de revocación de sesiones, pendiente de juntar (ver Pendientes).
 
+## Control de acceso: página del equipo y configuración de puertas y lectores — 2026-10-08
+
+Pedido del usuario con capturas del modal «Editar equipo» (angosto) y de HikCentral (ficha de
+la puerta con contacto, botón de salida, tiempos, alarma de puerta abierta, códigos; ficha de
+cada lector con intervalo entre tarjetas, intentos fallidos, sabotaje, LED, nivel de huella,
+umbrales y tiempos del rostro, antisuplantación): ¿dónde queda todo eso en el VMS?
+
+- **Una puerta, dos lectores**: el DS-K1T321MFWX administra UNA puerta; lo que HikCentral
+  muestra como dos son los **lectores** (`Cardreader 01` = el propio terminal, rostro +
+  huella + tarjeta; `Cardreader 02` = la entrada Wiegand para un lector externo). El VMS
+  contaba bien; ahora además muestra los lectores en su pestaña.
+- **Página del equipo** (`#/access/device?id=N`, `access.js`): reemplaza al modal de edición.
+  En la tabla, el nombre enlaza a ella y «Editar» pasó a ser «Configurar». Pestañas (mismas
+  clases que la ficha de Recursos): **Conexión** (lo del modal, con prueba de conexión),
+  **Puertas**, **Lectores** y **Hora y mantenimiento** (el apartado de las fichas). El alta
+  sigue siendo un modal, ahora `wide`. Desde la ficha de una puerta en Recursos, «Ir al
+  equipo» lleva a su página.
+- **Configuración propia del equipo**: `IAccessDeviceSettingsProvider` (Core, por clave de
+  driver; registrado en DI aparte de `IAccessControlDriver` para no tocar el driver en curso)
+  con `AccessDeviceSettingsDto` → bloques `door:n` / `reader:n`, cada uno con sus parámetros
+  (clave del fabricante, nombre en español, tipo, valor, rango, opciones, ayuda) y «Otros»:
+  todo lo que el equipo informó y el catálogo no conoce, solo lectura, para no esconder
+  nada. `HikvisionAccessSettingsProvider` (`HikvisionAccessSettings.cs`) lee
+  `Door/param/{n}` (`DoorParam`) y `CardReaderCfg/{n}`: JSON primero y, si el firmware lo
+  da casi vacío (el DS-K1T321MFWX V3.9.20 con la puerta), XML; escribe en la **misma forma**
+  y el documento **entero y en el mismo orden**, cambiando solo lo pedido; los rangos y
+  opciones salen de `…/capabilities` (`@min`/`@max`/`@opt`). Cantidad de lectores:
+  `cardReaderNo @max` de las capacidades o, si no, hasta que el equipo deje de contestar.
+  Catálogo: puerta = doorName, magneticType, openButtonType, openDuration,
+  disabledOpenDuration (el «Delay Duration» de HikCentral), magneticAlarmTimeout,
+  enableDoorLock, enableLeaderCard, leaderCardOpenDuration, lockInputCheck/Type, códigos de
+  coacción/maestro/desbloqueo (solo escritura, vacío = no cambiar); lector = enable,
+  defaultVerifyMode, offlineCheckTime, swipeInterval, pressTimeout, enableFailAlarm,
+  maxReadCardFailNum, enableTamperCheck, polaridad de LED OK/error/zumbador, buzzerTime,
+  enableReverseCardNo, fingerPrintCheckLevel y demás de huella, faceMatchThresholdN/1,
+  umbrales con mascarilla, faceQuality, faceRecogizeTimeOut/Interval, livingBodyDetect
+  (antisuplantación), faceImageSensitometry. Lo de HikCentral que NO es del equipo
+  (cámaras vinculadas, almacenamiento de fotos) sigue en Recursos → Cámaras asociadas.
+- **API** (`AccessSettingsApi.cs`, admin): `GET /api/access/devices/{id}/settings` y
+  `PUT …/settings/{door:n|reader:n}` con `{values:{clave:valor}}` (solo lo cambiado);
+  devuelve el bloque releído. Auditoría `access/device-settings-updated` (claves y valores,
+  sin las contraseñas); si cambió `doorName` y la puerta aún lleva el nombre del equipo, el
+  VMS la renombra (mismo criterio que la revalidación). Marca sin proveedor → 501 con aviso.
+- **Recursos: imagen que se refresca sola**. En la ficha, pestañas General y Equipo: la
+  imagen de la cámara (o la de la **cámara principal** de una puerta o zona) con «Actualizar
+  cada 5 s / 10 s / 30 s / 1 min / manual» (guardado por navegador, 10 s por omisión), hora de
+  la última actualización y pausa con la pestaña del navegador oculta. El snapshot del
+  servidor (`/api/devices/{id}/snapshot/{canal}`) acepta `?maxAge=segundos` (mínimo 2):
+  vuelve a capturar si la que tiene es más vieja; sin el parámetro sigue sirviendo la caché de
+  25 s.
+- **Probado** con un simulador ISAPI (Digest, deviceInfo, capacidades, DoorParam en XML con
+  JSON pobre, dos `CardReaderCfg` en JSON, PUT con validación de rangos): alta, página
+  completa, guardar en puerta (PUT XML entero) y lector (PUT JSON), rechazo del equipo
+  (502 con su `subStatusCode`), bloque o clave desconocidos, auditoría, enlace desde la
+  ficha de la puerta y el refresco de la imagen. **Falta** verlo contra el DS-K1T321MFWX y el
+  DS-K1T323MBWX reales (nombres exactos de `faceAntiSpoofingLevel`/modo interior-exterior
+  aparecen en «Otros» hasta ponerles nombre en el catálogo).
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:
