@@ -64,9 +64,16 @@ function lvGrid(columns, rows) {
   return layout;
 }
 
+/**
+ * Tope de cuadros del panel web: el navegador no está hecho para muros de
+ * 25-64 cámaras (cada una es una sesión WebRTC y un decodificador); para eso
+ * está el cliente de escritorio, que conserva todas las divisiones.
+ */
+const LV_MAX_CELLS = 16;
+
 /** Grilla con el mínimo de cuadros sobrantes, algo más ancha que alta (VideoLayout.FitFor). */
 function lvFitFor(count) {
-  count = Math.min(Math.max(count, 1), 64);
+  count = Math.min(Math.max(count, 1), LV_MAX_CELLS);
   let best = [1, count], bestScore = Infinity;
   for (let cols = 1; cols <= count; cols++) {
     const rows = Math.ceil(count / cols);
@@ -78,11 +85,11 @@ function lvFitFor(count) {
 }
 
 const LV_LAYOUT_GROUPS = [
-  { title: "Uniformes", layouts: [lvUniform(1, 1), lvUniform(2, 2), lvUniform(3, 3), lvUniform(4, 4), lvUniform(5, 5), lvUniform(6, 6), lvUniform(8, 8)] },
+  // Solo las de hasta 16 cuadros (LV_MAX_CELLS); las mayores quedan en el cliente de escritorio.
+  { title: "Uniformes", layouts: [lvUniform(1, 1), lvUniform(2, 2), lvUniform(3, 3), lvUniform(4, 4)] },
   {
     title: "Con cuadro principal", layouts: [
       lvOneBig(3), lvOneBig(4), lvMap("9 con principal", "AABC", "AADE", "FGHI"), lvOneBig(5), lvOneBig(6), lvOneBig(8),
-      lvMap("17 con principal", "AAABC", "AAADE", "AAAFG", "HIJKL", "MNOPQ"),
     ],
   },
   {
@@ -107,10 +114,6 @@ const LV_LAYOUT_GROUPS = [
       lvMap("7 combinada B", "AAABBBCC", "AAABBBCC", "AAABBBDD", "EEEFFFDD", "EEEFFFGG", "EEEFFFGG"),
       lvUniform(3, 4, "12 combinada"),
       lvMap("13 combinada", "ABCD", "EFFG", "HFFI", "JKLM"),
-      lvMap("24 combinada", "AABBCCDD", "AABBCCDD", "EEFFGGHH", "EEFFGGHH", "IJKLMNOP", "QRSTUVWX"),
-      lvMap("32 combinada", "AABBCDE", "AABBFGH", "IIJJJKL", "IIJJJMN", "OPJJJQR", "STUVWXY", "Zabcdef"),
-      lvMap("36 combinada", "AABBCCDD", "AABBCCDD", "EFGHIJKL", "MNOPQRST", "UVWXYZab", "cdefghij"),
-      lvUniform(8, 6, "48 combinada"),
     ],
   },
 ];
@@ -122,8 +125,33 @@ function lvFindLayout(key) {
   key = LV_LEGACY_KEYS[key] ?? key;
   return LV_LAYOUTS.find((l) => l.key === key) ?? null;
 }
-/** División de una vista guardada: la del selector, o una grilla a medida del tamaño guardado. */
-function lvRestoreLayout(key, columns, rows) { return lvFindLayout(key) ?? lvGrid(columns || 2, rows || 2); }
+/**
+ * División de una vista guardada: la del selector, o una grilla a medida del
+ * tamaño guardado; null si es más grande de lo que admite el panel web (una
+ * vista armada en el cliente de escritorio con 25 o más cuadros).
+ */
+function lvRestoreLayout(key, columns, rows) {
+  const found = lvFindLayout(key);
+  if (found) return found;
+  const cols = columns || 2, rws = rows || 2;
+  return cols * rws <= LV_MAX_CELLS ? lvGrid(cols, rws) : null;
+}
+
+/**
+ * Cuadros de una vista guardada en esta grilla. Si la vista es más grande que
+ * lo que admite el panel web, sus cámaras se acomodan en orden en una división
+ * estándar de hasta 16 cuadros y las que sobran se omiten (compacted).
+ */
+function lvFitSavedItems(layout, items) {
+  const sorted = [...items].sort((a, b) => a.cellIndex - b.cellIndex);
+  if (layout && sorted.every((i) => i.cellIndex < layout.cells.length)) return { layout, items: sorted, compacted: false };
+  const kept = sorted.slice(0, LV_MAX_CELLS);
+  return {
+    layout: lvSmallestFor(Math.max(kept.length, 1)),
+    items: kept.map((item, index) => ({ ...item, cellIndex: index })),
+    compacted: true,
+  };
+}
 /** La división estándar más chica (uniformes o con principal) donde quepan count cuadros. */
 function lvSmallestFor(count) {
   const pool = [...LV_LAYOUT_GROUPS[0].layouts, ...LV_LAYOUT_GROUPS[1].layouts]
@@ -1567,10 +1595,8 @@ async function lvOpenMany(label, items) {
 /** Doble clic en un equipo o "Abrir sus cámaras" de una ubicación. */
 async function lvOpenAll(label, channels) {
   if (!channels.length) { lvStatus(`"${label}" no tiene canales habilitados.`); return; }
-  if (channels.length > 64) {
-    lvStatus(`"${label}" tiene ${channels.length} canales: se abren los primeros 64.`);
-    channels = channels.slice(0, 64);
-  }
+  const total = channels.length;
+  if (total > LV_MAX_CELLS) channels = channels.slice(0, LV_MAX_CELLS);
   if (lv.prefs.fitDevice) {
     lvApplyLayout(lvFitFor(channels.length)); // a medida: no queda como división recordada
   } else {
@@ -1582,6 +1608,8 @@ async function lvOpenAll(label, channels) {
   const profile = lvDefaultProfile();
   const n = Math.min(channels.length, lv.cells.length);
   await lvOpenMany(label, channels.slice(0, n).map((ch, i) => ({ ch, cell: lv.cells[i], profile })));
+  if (total > LV_MAX_CELLS)
+    lvStatus(`"${label}" tiene ${total} canales: el panel web abre hasta ${LV_MAX_CELLS} (para verlos todos, use el cliente de escritorio).`, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -1957,23 +1985,28 @@ async function lvApplyView(v) {
   let view = v;
   try { view = await Api.post(`/api/live-views/${v.id}/apply`); } // la versión vigente + bitácora
   catch (err) { lvStatus(err.error, true); return; }
-  const layout = lvRestoreLayout(view.layoutName, view.columns, view.rows);
-  lvApplyLayout(layout);
-  if (lvFindLayout(layout.key)) { lv.prefs.layout = layout.key; lvSavePrefs(); }
+  const fit = lvFitSavedItems(lvRestoreLayout(view.layoutName, view.columns, view.rows), view.items);
+  lvApplyLayout(fit.layout);
+  if (lvFindLayout(fit.layout.key)) { lv.prefs.layout = fit.layout.key; lvSavePrefs(); }
   lv.cells.forEach((c) => c.clear());
   lvSelectCell(null);
   lv.activeView = view.name;
   lvRenderViewsButton();
   const items = [];
   let missing = 0;
-  for (const item of view.items) {
+  for (const item of fit.items) {
     const ch = lv.channels.get(item.channelId);
     const cell = lv.cells[item.cellIndex];
     if (!ch || !cell) { missing++; continue; }
     items.push({ ch, cell, profile: item.streamType === 0 ? "Main" : "Sub" });
   }
   await lvOpenMany(view.name, items);
-  if (missing) lvStatus(`Vista "${view.name}": ${missing} cámara(s) ya no están disponibles y se omitieron.`, true);
+  const notes = [];
+  if (fit.compacted)
+    notes.push(`es de ${view.items.length} cámara(s) en división ${view.layoutName}; el panel web muestra hasta ${LV_MAX_CELLS} cuadros ` +
+      `(la vista completa, en el cliente de escritorio)`);
+  if (missing) notes.push(`${missing} cámara(s) ya no están disponibles y se omitieron`);
+  if (notes.length) lvStatus(`Vista "${view.name}": ${notes.join("; ")}.`, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -1998,9 +2031,11 @@ async function lvReopenLast() {
   let last = null;
   try { last = JSON.parse(localStorage.getItem(LV_LAST_KEY) || "null"); } catch { /* ilegible */ }
   if (!last?.items?.length) return;
-  lvApplyLayout(lvRestoreLayout(last.layout, last.columns, last.rows));
-  const items = last.items
-    .map((x) => ({ ch: lv.channels.get(x.ch), cell: lv.cells[x.i], profile: x.p === "Main" ? "Main" : "Sub" }))
+  const fit = lvFitSavedItems(lvRestoreLayout(last.layout, last.columns, last.rows),
+    last.items.map((x) => ({ cellIndex: x.i, channelId: x.ch, profile: x.p })));
+  lvApplyLayout(fit.layout);
+  const items = fit.items
+    .map((x) => ({ ch: lv.channels.get(x.channelId), cell: lv.cells[x.cellIndex], profile: x.profile === "Main" ? "Main" : "Sub" }))
     .filter((x) => x.ch && x.cell);
   if (items.length) await lvOpenMany("la última sesión", items);
 }
