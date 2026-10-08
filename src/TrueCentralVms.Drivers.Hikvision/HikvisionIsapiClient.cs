@@ -177,7 +177,8 @@ public sealed partial class HikvisionIsapiClient
     /// no se les manda una plantilla— y por eso no alcanza con el envío normal.
     /// </summary>
     public async Task<string?> RequestMultipartAsync(string path, string jsonPartName, string json,
-        string filePartName, string fileName, byte[] file, string fileContentType, CancellationToken ct)
+        string filePartName, string fileName, byte[] file, string fileContentType, CancellationToken ct,
+        HttpMethod? method = null)
     {
         HttpContent Build()
         {
@@ -199,7 +200,7 @@ public sealed partial class HikvisionIsapiClient
             return form;
         }
 
-        using var response = await SendAsync(HttpMethod.Post, path, null, "application/json", ct, content: Build);
+        using var response = await SendAsync(method ?? HttpMethod.Post, path, null, "application/json", ct, content: Build);
         string text = await ReadTextAsync(response, ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         if (!response.IsSuccessStatusCode)

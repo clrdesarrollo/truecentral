@@ -61,6 +61,8 @@ internal sealed class HikvisionAccessProfile
     public HashSet<string>? DoorCommands { get; private set; }
 
     public (int Min, int Max)? FingerprintReaders { get; private set; }
+    /// <summary><c>isSupportSetUp</c> de FingerPrintCfg: escribe, reemplaza y borra huellas con <c>FingerPrint/SetUp</c>.</summary>
+    public bool? FingerprintSetUp { get; private set; }
     public HashSet<string>? FingerprintDeleteModes { get; private set; }
     public HashSet<string>? UserDetailDeleteModes { get; private set; }
 
@@ -80,6 +82,16 @@ internal sealed class HikvisionAccessProfile
     /// <summary>Borra la persona con sus tarjetas, huellas, rostro y permisos (<c>UserInfoDetail/Delete</c>).</summary>
     public bool CanDeleteUserDetail =>
         Flag("isSupportUserInfoDetailDelete") != false && UserDetailDeleteModes?.Contains("byEmployeeNo") == true;
+
+    /// <summary>Crea, reemplaza o borra el rostro en una sola llamada (<c>FDLib/FDSetUp</c>).</summary>
+    public bool CanSetUpFace => FaceFunctions?.Contains("setUp") == true;
+
+    /// <summary>
+    /// ¿Tiene clave numérica? true si declara su rango; false si contestó sus
+    /// capacidades de personas sin ella (un terminal facial sin teclado); null
+    /// si no se sabe.
+    /// </summary>
+    public bool? Pin => PinLength is not null ? true : UserFunctions is not null ? false : null;
 
     /// <summary>¿Maneja huellas? null = no lo declara.</summary>
     public bool? Fingerprints => Flag("isSupportFingerPrintCfg") ?? (FingerprintReaders is not null ? true : null);
@@ -158,6 +170,11 @@ internal sealed class HikvisionAccessProfile
             var readers = Find(root, "enableCardReader", 4);
             if (Bound(readers, "min") is { } min && Bound(readers, "max") is { } max) p.FingerprintReaders = (min, max);
             else p.FingerprintReaders = (1, 1);   // contesta la ruta pero no dice dónde: al menos uno
+            // No lo documenta la guía, pero los terminales lo declaran (medido:
+            // DS-K1T321MFWX V3.9.20 y DS-K1T323MBWX V4.23).
+            if (Find(root, "isSupportSetUp", 3) is { } setUp)
+                p.FingerprintSetUp = setUp.ValueKind == JsonValueKind.True ||
+                                     (setUp.ValueKind == JsonValueKind.String && setUp.GetString() == "true");
         });
 
         await p.ReadJsonAsync(client, FingerDeleteCapsPath, ct, root =>
@@ -436,8 +453,10 @@ internal sealed class HikvisionAccessProfile
             new("Largo del nombre", NameMaxBytes is null ? AccessCapabilityState.NotDeclared : AccessCapabilityState.Supported,
                 NameMaxBytes is { } nameMax ? $"hasta {nameMax} bytes; lo que sobra se acorta" : "el VMS lo acota a 32 bytes",
                 $"{UserCapsPath} · name"),
-            new("Clave numérica (PIN)", PinLength is null ? AccessCapabilityState.NotDeclared : AccessCapabilityState.Supported,
-                PinLength is { } pin ? $"de {pin.Min} a {pin.Max} caracteres" : null, $"{UserCapsPath} · password"),
+            new("Clave numérica (PIN)", StateOf(Pin),
+                PinLength is { } pin ? $"de {Math.Max(pin.Min, 1)} a {pin.Max} dígitos; quitarla en el VMS la borra del equipo"
+                    : Pin == false ? "el equipo no tiene teclado: no se le manda la clave" : null,
+                $"{UserCapsPath} · password"),
         };
         used.Add("isSupportUserInfo");
         used.Add("isSupportUserInfoDetailDelete");
@@ -465,11 +484,22 @@ internal sealed class HikvisionAccessProfile
                     }))
                     : null,
                 FingerDeleteCapsPath),
+            new("Huellas en un paso", StateOf(FingerprintSetUp),
+                FingerprintSetUp == true
+                    ? "El VMS las escribe y borra con FingerPrint/SetUp, que contesta enseguida el resultado de cada lector."
+                    : FingerprintSetUp == false ? "El VMS borra, espera y escribe dedo por dedo." : null,
+                $"{FingerCapsPath} · isSupportSetUp"),
             Mark("isSupportCaptureFingerPrint"),
             new("Rostros", StateOf(Faces),
                 Join(FaceCapacity is { } faces ? $"cupo de {Count(faces)} rostros" : null,
                      FaceFunctions is { } ff ? Functions(ff) : null),
                 FaceCapsPath),
+            new("Rostro en un paso", FaceFunctions is null ? AccessCapabilityState.NotDeclared
+                    : CanSetUpFace ? AccessCapabilityState.Supported : AccessCapabilityState.NotSupported,
+                FaceFunctions is null ? null
+                    : CanSetUpFace ? "El VMS crea, reemplaza o borra el rostro con una sola llamada (FDSetUp)."
+                    : "El VMS borra el rostro anterior, espera y sube el nuevo.",
+                $"{FaceCapsPath} · supportFDFunction"),
             Mark("isSupportCaptureFace"),
         };
         used.Add("isSupportCardInfo");
