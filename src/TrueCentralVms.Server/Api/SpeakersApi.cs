@@ -146,14 +146,14 @@ public static class SpeakersApi
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.GroupName).ThenBy(s => s.Name).ToListAsync(ct);
-            return Results.Ok(speakers.Where(s => scope.CanView(s.LocationId)).Select(service.ToDto));
+            return Results.Ok(speakers.Where(s => scope.CanViewSpeaker(s.Id)).Select(service.ToDto));
         });
 
         app.MapGet("/api/speakers/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, SpeakerService service, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var speaker = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
-            return speaker is null || !(await ctx.ScopeAsync(session)).CanView(speaker.LocationId)
+            return speaker is null || !(await ctx.ScopeAsync(session)).CanViewSpeaker(speaker.Id)
                 ? Results.NotFound()
                 : Results.Ok(service.ToDto(speaker));
         });
@@ -328,7 +328,7 @@ public static class SpeakersApi
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var speaker = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
-            if (speaker is null || !(await ctx.ScopeAsync(session)).CanView(speaker.LocationId)) return Results.NotFound();
+            if (speaker is null || !(await ctx.ScopeAsync(session)).CanViewSpeaker(speaker.Id)) return Results.NotFound();
             if (!speaker.SupportsLibrary) return Results.Ok(Array.Empty<SpeakerAudioItemDto>());
             try
             {
@@ -346,7 +346,7 @@ public static class SpeakersApi
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var speaker = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
-            if (speaker is null || !(await ctx.ScopeAsync(session)).CanView(speaker.LocationId)) return Results.NotFound();
+            if (speaker is null || !(await ctx.ScopeAsync(session)).CanViewSpeaker(speaker.Id)) return Results.NotFound();
             if (!speaker.SupportsLibrary) return Error("El parlante no tiene biblioteca de audios.");
             try
             {
@@ -454,7 +454,7 @@ public static class SpeakersApi
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var speaker = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
-            if (speaker is null || !(await ctx.ScopeAsync(session)).CanView(speaker.LocationId)) return Results.NotFound();
+            if (speaker is null || !(await ctx.ScopeAsync(session)).CanViewSpeaker(speaker.Id)) return Results.NotFound();
             try
             {
                 var state = await service.DriverOf(speaker).GetPlaybackStateAsync(service.ConnectionOf(speaker), ct);
@@ -470,7 +470,7 @@ public static class SpeakersApi
             if (request.Volume is < 0 or > 100) return Error("El volumen debe estar entre 0 y 100.");
             var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.Id == id, ct);
             if (speaker is null) return Results.NotFound();
-            if (!(await ctx.ScopeAsync(session)).CanOperate(speaker.LocationId))
+            if (!(await ctx.ScopeAsync(session)).CanOperateSpeaker(speaker.Id))
                 return await ctx.OutOfScopeAsync(session, "speaker", id.ToString(), speaker.Name, "cambiar el volumen de");
             try
             {

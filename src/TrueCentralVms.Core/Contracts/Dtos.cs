@@ -34,9 +34,13 @@ public sealed record SetupAdminRequest(string Username, string Password);
 /// <param name="LocationIds">Ubicaciones de su alcance (cada una incluye sus sububicaciones).</param>
 /// <param name="Role">Nivel derivado de sus roles: "Admin" si tiene el rol Administrador, si no "Operator".</param>
 /// <param name="Editable">La sesión que lo pide puede modificarlo (no tiene más permisos ni más alcance que ella).</param>
+/// <param name="IsSuperAdmin">El administrador creado al activar la plataforma: acceso
+/// total sin importar los roles; solo él modifica su usuario y nadie lo elimina.</param>
+/// <param name="EffectiveScope">Lo que efectivamente ve y opera (roles + límite propio), en palabras.</param>
 public sealed record UserDto(int Id, string Username, string Role, bool Enabled, DateTime CreatedAt, DateTime PasswordChangedAt,
     bool RestrictToLocations = false, bool ViewOutsideScope = false, IReadOnlyList<int>? LocationIds = null,
-    IReadOnlyList<int>? RoleIds = null, IReadOnlyList<string>? RoleNames = null, bool Editable = true);
+    IReadOnlyList<int>? RoleIds = null, IReadOnlyList<string>? RoleNames = null, bool Editable = true,
+    bool IsSuperAdmin = false, string? EffectiveScope = null);
 
 /// <summary>
 /// Alta/edición de usuario. En edición, Password null o vacía = no cambiar; los
@@ -51,7 +55,7 @@ public sealed record UserWriteDto(string Username, string? Password, string? Rol
 
 /// <summary>Alcance del usuario conectado (para mostrarlo y adaptar la interfaz).</summary>
 /// <param name="Restricted">true = solo opera (y salvo <paramref name="ViewOutsideScope"/>, solo ve) sus ubicaciones.</param>
-/// <param name="Locations">Nombres (con su ruta) de las ubicaciones asignadas.</param>
+/// <param name="Locations">Lo que abarca, en palabras: ubicaciones (con su ruta) y recursos sueltos.</param>
 public sealed record UserScopeDto(bool Restricted, bool ViewOutsideScope, IReadOnlyList<int> LocationIds, IReadOnlyList<string> Locations);
 
 /// <summary>

@@ -70,9 +70,9 @@ public static class AnprApi
             var scope = await ctx.ScopeAsync(session);
             if (scope.FiltersView)
             {
-                var allowed = scope.Locations.ToList();
+                var allowed = scope.AllowedIds(ResourceKind.Camera).ToList();
                 query = query.Where(p => db.Channels.Any(c => c.DeviceId == p.DeviceId && c.ChannelNumber == p.ChannelNumber
-                                                              && c.LocationId != null && allowed.Contains(c.LocationId.Value)));
+                                                              && allowed.Contains(c.Id)));
             }
 
             var events = await query

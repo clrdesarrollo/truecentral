@@ -11,7 +11,8 @@ namespace TrueCentralVms.Server.Auth;
 /// nombran las APIs y los eventos (que no traen la ubicación): un canal por
 /// id, por equipo + número o por equipo + canal RTSP; un área o una zona por
 /// panel + número (la zona sin ubicación propia toma la de su área); una
-/// puerta por id o por equipo + número.
+/// puerta por id o por equipo + número. También a qué equipo pertenece cada
+/// recurso y su nombre (para los alcances por recurso suelto).
 /// </summary>
 public sealed class ScopeIndex
 {
@@ -26,6 +27,16 @@ public sealed class ScopeIndex
     /// <summary>Área y zona por su id de fila (como las nombra Recursos: "Zone:3").</summary>
     public IReadOnlyDictionary<int, int?> AreaRows { get; init; } = new Dictionary<int, int?>();
     public IReadOnlyDictionary<int, int?> ZoneRows { get; init; } = new Dictionary<int, int?>();
+    /// <summary>Id de fila de un área o zona por panel + número, y al revés.</summary>
+    public IReadOnlyDictionary<(int PanelId, int Number), int> AreaIdByNumber { get; init; } = new Dictionary<(int, int), int>();
+    public IReadOnlyDictionary<(int PanelId, int Number), int> ZoneIdByNumber { get; init; } = new Dictionary<(int, int), int>();
+    public IReadOnlyDictionary<int, (int PanelId, int Number)> AreaKeyByRow { get; init; } = new Dictionary<int, (int, int)>();
+    public IReadOnlyDictionary<int, (int PanelId, int Number)> ZoneKeyByRow { get; init; } = new Dictionary<int, (int, int)>();
+    /// <summary>Área (fila) a la que pertenece cada zona (fila), si tiene.</summary>
+    public IReadOnlyDictionary<int, int> ZoneArea { get; init; } = new Dictionary<int, int>();
+    /// <summary>Filas de áreas y zonas de cada panel.</summary>
+    public IReadOnlyDictionary<int, int[]> PanelAreaRows { get; init; } = new Dictionary<int, int[]>();
+    public IReadOnlyDictionary<int, int[]> PanelZoneRows { get; init; } = new Dictionary<int, int[]>();
     public IReadOnlyDictionary<int, int?[]> PanelLocations { get; init; } = new Dictionary<int, int?[]>();
     public IReadOnlyDictionary<int, int?> Doors { get; init; } = new Dictionary<int, int?>();
     public IReadOnlyDictionary<(int DeviceId, int Number), int> DoorByNumber { get; init; } = new Dictionary<(int, int), int>();
@@ -33,6 +44,8 @@ public sealed class ScopeIndex
     public IReadOnlyDictionary<int, int?> Cercos { get; init; } = new Dictionary<int, int?>();
     public IReadOnlyDictionary<int, int?> Speakers { get; init; } = new Dictionary<int, int?>();
     public IReadOnlyDictionary<int, int?> Intercoms { get; init; } = new Dictionary<int, int?>();
+    /// <summary>Nombre legible por (tipo de <see cref="ScopeKinds"/>, id): "DVR Norte · Acceso".</summary>
+    public IReadOnlyDictionary<(string Kind, int Id), string> Names { get; init; } = new Dictionary<(string, int), string>();
     /// <summary>Árbol de ubicaciones: id → (padre, nombre).</summary>
     public IReadOnlyDictionary<int, (int? ParentId, string Name)> Locations { get; init; } = new Dictionary<int, (int?, string)>();
 
@@ -54,6 +67,19 @@ public sealed class ScopeIndex
         return result;
     }
 
+    /// <summary>Las ubicaciones con todas las que las contienen (para armar el árbol que se muestra).</summary>
+    public HashSet<int> WithAncestors(IEnumerable<int> ids)
+    {
+        var result = new HashSet<int>();
+        foreach (int start in ids)
+        {
+            int? current = start;
+            while (current is { } id && Locations.TryGetValue(id, out var node) && result.Add(id))
+                current = node.ParentId;
+        }
+        return result;
+    }
+
     /// <summary>"Casa matriz › Edificio A" (para mostrar el alcance de un usuario).</summary>
     public string PathOf(int locationId)
     {
@@ -68,30 +94,53 @@ public sealed class ScopeIndex
         return string.Join(" › ", parts);
     }
 
+    /// <summary>Nombre de un recurso del alcance, o null si ya no existe.</summary>
+    public string? NameOf(string kind, int id) => Names.TryGetValue((kind, id), out var name) ? name : null;
+
+    /// <summary>"Cámara DVR Norte · Acceso" (o "(ya no existe)").</summary>
+    public string LabelOf(string kind, int id) =>
+        $"{ScopeKinds.Labels.GetValueOrDefault(kind, kind)} {NameOf(kind, id) ?? $"#{id} (ya no existe)"}";
+
     internal static async Task<ScopeIndex> LoadAsync(VmsDbContext db, CancellationToken ct)
     {
+        var devices = await db.Devices.AsNoTracking().Select(d => new { d.Id, d.Name }).ToListAsync(ct);
         var channels = await db.Channels.AsNoTracking()
-            .Select(c => new { c.Id, c.DeviceId, c.ChannelNumber, c.RtspChannel, c.LocationId }).ToListAsync(ct);
+            .Select(c => new { c.Id, c.DeviceId, c.ChannelNumber, c.RtspChannel, c.LocationId, c.Name }).ToListAsync(ct);
+        var panels = await db.AlarmPanels.AsNoTracking().Select(p => new { p.Id, p.Name }).ToListAsync(ct);
         var areas = await db.AlarmAreas.AsNoTracking()
-            .Select(a => new { a.Id, a.AlarmPanelId, a.Number, a.LocationId }).ToListAsync(ct);
+            .Select(a => new { a.Id, a.AlarmPanelId, a.Number, a.LocationId, a.Name }).ToListAsync(ct);
         var zones = await db.AlarmZones.AsNoTracking()
-            .Select(z => new { z.Id, z.AlarmPanelId, z.Number, z.AreaNumber, z.LocationId }).ToListAsync(ct);
+            .Select(z => new { z.Id, z.AlarmPanelId, z.Number, z.AreaNumber, z.LocationId, z.Name }).ToListAsync(ct);
+        var accessDevices = await db.AccessDevices.AsNoTracking().Select(d => new { d.Id, d.Name }).ToListAsync(ct);
         var doors = await db.AccessDoors.AsNoTracking()
-            .Select(d => new { d.Id, d.AccessDeviceId, d.Number, d.LocationId }).ToListAsync(ct);
+            .Select(d => new { d.Id, d.AccessDeviceId, d.Number, d.LocationId, d.Name }).ToListAsync(ct);
+        var cercos = await db.CercoPanels.AsNoTracking().Select(p => new { p.Id, p.LocationId, p.Name }).ToListAsync(ct);
+        var speakers = await db.Speakers.AsNoTracking().Select(s => new { s.Id, s.LocationId, s.Name }).ToListAsync(ct);
+        var intercoms = await db.Intercoms.AsNoTracking().Select(i => new { i.Id, i.LocationId, i.Name }).ToListAsync(ct);
         var locations = await db.Locations.AsNoTracking()
             .Select(l => new { l.Id, l.ParentId, l.Name }).ToListAsync(ct);
 
         var areaMap = new Dictionary<(int, int), int?>();
-        foreach (var a in areas) areaMap[(a.AlarmPanelId, a.Number)] = a.LocationId;
+        var areaIds = new Dictionary<(int, int), int>();
+        foreach (var a in areas)
+        {
+            areaMap[(a.AlarmPanelId, a.Number)] = a.LocationId;
+            areaIds[(a.AlarmPanelId, a.Number)] = a.Id;
+        }
         // La zona sin ubicación propia queda donde está su área.
         var zoneMap = new Dictionary<(int, int), int?>();
+        var zoneIds = new Dictionary<(int, int), int>();
         var zoneRows = new Dictionary<int, int?>();
+        var zoneArea = new Dictionary<int, int>();
         foreach (var z in zones)
         {
             int? location = z.LocationId
                 ?? (z.AreaNumber is { } an ? areaMap.GetValueOrDefault((z.AlarmPanelId, an)) : null);
             zoneMap[(z.AlarmPanelId, z.Number)] = location;
+            zoneIds[(z.AlarmPanelId, z.Number)] = z.Id;
             zoneRows[z.Id] = location;
+            if (z.AreaNumber is { } number && areaIds.TryGetValue((z.AlarmPanelId, number), out int areaRow))
+                zoneArea[z.Id] = areaRow;
         }
 
         var byNumber = new Dictionary<(int, int), int>();
@@ -104,6 +153,21 @@ public sealed class ScopeIndex
         var doorByNumber = new Dictionary<(int, int), int>();
         foreach (var d in doors) doorByNumber.TryAdd((d.AccessDeviceId, d.Number), d.Id);
 
+        var deviceNames = devices.ToDictionary(d => d.Id, d => d.Name);
+        var panelNames = panels.ToDictionary(p => p.Id, p => p.Name);
+        var accessNames = accessDevices.ToDictionary(d => d.Id, d => d.Name);
+        var names = new Dictionary<(string, int), string>();
+        foreach (var d in devices) names[(ScopeKinds.VideoDevice, d.Id)] = d.Name;
+        foreach (var c in channels) names[(ScopeKinds.Camera, c.Id)] = $"{deviceNames.GetValueOrDefault(c.DeviceId, "?")} · {c.Name}";
+        foreach (var p in panels) names[(ScopeKinds.AlarmPanel, p.Id)] = p.Name;
+        foreach (var a in areas) names[(ScopeKinds.Partition, a.Id)] = $"{panelNames.GetValueOrDefault(a.AlarmPanelId, "?")} · {a.Name}";
+        foreach (var z in zones) names[(ScopeKinds.Zone, z.Id)] = $"{panelNames.GetValueOrDefault(z.AlarmPanelId, "?")} · {z.Name}";
+        foreach (var d in accessDevices) names[(ScopeKinds.AccessDevice, d.Id)] = d.Name;
+        foreach (var d in doors) names[(ScopeKinds.Door, d.Id)] = $"{accessNames.GetValueOrDefault(d.AccessDeviceId, "?")} · {d.Name}";
+        foreach (var p in cercos) names[(ScopeKinds.Fence, p.Id)] = p.Name;
+        foreach (var s in speakers) names[(ScopeKinds.Speaker, s.Id)] = s.Name;
+        foreach (var i in intercoms) names[(ScopeKinds.Intercom, i.Id)] = i.Name;
+
         return new ScopeIndex
         {
             Channels = channels.ToDictionary(c => c.Id, c => c.LocationId),
@@ -114,47 +178,91 @@ public sealed class ScopeIndex
             Zones = zoneMap,
             AreaRows = areas.ToDictionary(a => a.Id, a => a.LocationId),
             ZoneRows = zoneRows,
+            AreaIdByNumber = areaIds,
+            ZoneIdByNumber = zoneIds,
+            AreaKeyByRow = areas.ToDictionary(a => a.Id, a => (a.AlarmPanelId, a.Number)),
+            ZoneKeyByRow = zones.ToDictionary(z => z.Id, z => (z.AlarmPanelId, z.Number)),
+            ZoneArea = zoneArea,
+            PanelAreaRows = areas.GroupBy(a => a.AlarmPanelId).ToDictionary(g => g.Key, g => g.Select(a => a.Id).ToArray()),
+            PanelZoneRows = zones.GroupBy(z => z.AlarmPanelId).ToDictionary(g => g.Key, g => g.Select(z => z.Id).ToArray()),
             PanelLocations = areaMap.Select(p => (p.Key.Item1, p.Value)).Concat(zoneMap.Select(p => (p.Key.Item1, p.Value)))
                 .GroupBy(p => p.Item1).ToDictionary(g => g.Key, g => g.Select(p => p.Value).Distinct().ToArray()),
             Doors = doors.ToDictionary(d => d.Id, d => d.LocationId),
             DoorByNumber = doorByNumber,
             AccessDeviceDoors = doors.GroupBy(d => d.AccessDeviceId).ToDictionary(g => g.Key, g => g.Select(d => d.Id).ToArray()),
-            Cercos = await db.CercoPanels.AsNoTracking().ToDictionaryAsync(p => p.Id, p => p.LocationId, ct),
-            Speakers = await db.Speakers.AsNoTracking().ToDictionaryAsync(s => s.Id, s => s.LocationId, ct),
-            Intercoms = await db.Intercoms.AsNoTracking().ToDictionaryAsync(i => i.Id, i => i.LocationId, ct),
+            Cercos = cercos.ToDictionary(p => p.Id, p => p.LocationId),
+            Speakers = speakers.ToDictionary(s => s.Id, s => s.LocationId),
+            Intercoms = intercoms.ToDictionary(i => i.Id, i => i.LocationId),
+            Names = names,
             Locations = locations.ToDictionary(l => l.Id, l => (l.ParentId, l.Name)),
         };
     }
 }
 
 /// <summary>
-/// Alcance por ubicación de un usuario. Un administrador, o un operador con
-/// "todas las ubicaciones", no tiene restricción. Un operador restringido ve y
-/// opera solo los recursos de sus ubicaciones (cada una con sus
-/// sububicaciones); con <see cref="ViewOutside"/> además VE el resto, sin
-/// operarlo. Los recursos "por ubicar" quedan fuera de todo alcance
-/// restringido, y lo que no se pudo ubicar en el índice también (falla cerrada).
+/// Un alcance tal como se configuró: el de un rol o el límite propio de un
+/// usuario. Sin <see cref="Restrict"/> no limita nada.
+/// </summary>
+public sealed record ScopeSpec(bool Restrict, bool ViewOutside, IReadOnlyCollection<int> Locations,
+    IReadOnlyCollection<(string Kind, int Id)> Items)
+{
+    public static readonly ScopeSpec Everything = new(false, false, [], []);
+}
+
+/// <summary>Lo que un alcance limitado deja operar, recurso por recurso (ids de fila).</summary>
+internal sealed class ScopeSets
+{
+    public static readonly ScopeSets Nothing = new();
+
+    /// <summary>Ubicaciones COMPLETAS (con sus sububicaciones): las órdenes por ubicación.</summary>
+    public HashSet<int> Locations { get; init; } = [];
+    /// <summary>Ubicaciones que se le muestran en el árbol (las completas y donde hay algo suyo).</summary>
+    public HashSet<int> VisibleTree { get; init; } = [];
+    public HashSet<int> Channels { get; init; } = [];
+    public HashSet<int> Doors { get; init; } = [];
+    public HashSet<int> Areas { get; init; } = [];
+    public HashSet<int> Zones { get; init; } = [];
+    public HashSet<int> Cercos { get; init; } = [];
+    public HashSet<int> Speakers { get; init; } = [];
+    public HashSet<int> Intercoms { get; init; } = [];
+}
+
+/// <summary>
+/// Alcance efectivo de un usuario: DÓNDE valen sus permisos. Un administrador
+/// (o el superadministrador) no tiene restricción. El resto suma el alcance de
+/// sus roles —un rol sin límite da todo; los limitados dan sus ubicaciones
+/// (con sububicaciones) y sus recursos sueltos— y, si tiene un límite propio
+/// por ubicación, de eso queda solo lo que está dentro de él. Lo limitado ve y
+/// opera solo lo suyo; con <see cref="ViewOutside"/> además VE el resto, sin
+/// operarlo. Lo que no se pudo ubicar en el índice queda fuera (falla cerrada).
 /// </summary>
 public sealed class UserScope
 {
-    private readonly ScopeIndex _index;
+    private static readonly IReadOnlySet<int> NoIds = new HashSet<int>();
 
-    internal UserScope(int userId, bool isAdmin, bool unrestricted, bool viewOutside,
-        IReadOnlyList<int> assigned, IReadOnlySet<int> locations, ScopeIndex index,
-        IReadOnlySet<string>? permissions = null)
+    private readonly ScopeIndex _index;
+    /// <summary>null = sin restricción.</summary>
+    private readonly ScopeSets? _sets;
+
+    internal UserScope(int userId, bool isAdmin, bool isSuperAdmin, bool viewOutside, ScopeSets? sets,
+        ScopeIndex index, IReadOnlySet<string>? permissions, IReadOnlyList<string>? labels,
+        IReadOnlyList<int>? grantedLocations)
     {
         UserId = userId;
-        IsAdmin = isAdmin;
+        IsAdmin = isAdmin || isSuperAdmin;
+        IsSuperAdmin = isSuperAdmin;
         Permissions = permissions ?? new HashSet<string>();
-        Unrestricted = unrestricted;
-        ViewOutside = viewOutside;
-        AssignedLocations = assigned;
-        Locations = locations;
+        _sets = IsAdmin ? null : sets;
+        ViewOutside = _sets is not null && viewOutside;
+        Labels = labels ?? [];
+        GrantedLocations = grantedLocations ?? [];
         _index = index;
     }
 
     public int UserId { get; }
     public bool IsAdmin { get; }
+    /// <summary>El administrador creado al activar la plataforma (no le afectan los roles).</summary>
+    public bool IsSuperAdmin { get; }
     /// <summary>Unión de los permisos de sus roles (el administrador los tiene todos, aunque no estén aquí).</summary>
     public IReadOnlySet<string> Permissions { get; }
 
@@ -164,30 +272,49 @@ public sealed class UserScope
     /// <summary>Las claves de permiso efectivas (todas, si es administrador).</summary>
     public IReadOnlyCollection<string> EffectivePermissions =>
         IsAdmin ? Core.Domain.Permissions.All.Select(p => p.Key).ToList() : Permissions.Order().ToList();
-    /// <summary>Ve y opera todo (administrador u operador con "todas las ubicaciones").</summary>
-    public bool Unrestricted { get; }
-    /// <summary>Restringido para operar, pero ve todo (supervisión).</summary>
+    /// <summary>Ve y opera todo (administrador, o roles sin límite y sin límite propio).</summary>
+    public bool Unrestricted => _sets is null;
+    /// <summary>Limitado para operar, pero ve todo (supervisión).</summary>
     public bool ViewOutside { get; }
-    /// <summary>Las ubicaciones asignadas, tal como se configuraron.</summary>
-    public IReadOnlyList<int> AssignedLocations { get; }
-    /// <summary>Las asignadas con todas sus sububicaciones.</summary>
-    public IReadOnlySet<int> Locations { get; }
+    /// <summary>Ubicaciones COMPLETAS que opera (con sus sububicaciones): las órdenes por ubicación.</summary>
+    public IReadOnlySet<int> Locations => _sets?.Locations ?? NoIds;
+    /// <summary>Las ubicaciones de sus roles y de su límite, tal como se configuraron (para mostrarlas).</summary>
+    public IReadOnlyList<int> GrantedLocations { get; }
+    /// <summary>El alcance en palabras: ubicaciones y recursos sueltos (vacío si no tiene restricción).</summary>
+    public IReadOnlyList<string> Labels { get; }
     /// <summary>Hay que filtrar lo que ve (listas, eventos, video).</summary>
     public bool FiltersView => !Unrestricted && !ViewOutside;
 
-    private bool InScope(int? locationId) => locationId is { } id && Locations.Contains(id);
+    private static bool In(HashSet<int> set, int? id) => id is { } value && set.Contains(value);
 
-    public bool CanView(int? locationId) => !FiltersView || InScope(locationId);
-    public bool CanOperate(int? locationId) => Unrestricted || InScope(locationId);
+    /// <summary>Una ubicación COMPLETA (órdenes y listados por ubicación).</summary>
+    public bool CanView(int? locationId) => !FiltersView || In(_sets!.Locations, locationId);
+    public bool CanOperate(int? locationId) => Unrestricted || In(_sets!.Locations, locationId);
+    /// <summary>La ubicación se le muestra en el árbol (completa o porque hay algo suyo adentro).</summary>
+    public bool CanSeeLocation(int locationId) => !FiltersView || _sets!.VisibleTree.Contains(locationId);
+    /// <summary>Ubicaciones que se le muestran en el árbol (solo con la vista filtrada).</summary>
+    public IReadOnlySet<int> VisibleLocations => _sets?.VisibleTree ?? NoIds;
+
+    /// <summary>Ids de fila de lo que opera de un tipo (para filtrar en SQL cuando <see cref="FiltersView"/>).</summary>
+    public IReadOnlySet<int> AllowedIds(ResourceKind kind) => _sets is not { } s ? NoIds : kind switch
+    {
+        ResourceKind.Camera => s.Channels,
+        ResourceKind.Door => s.Doors,
+        ResourceKind.Partition => s.Areas,
+        ResourceKind.Zone => s.Zones,
+        ResourceKind.Fence => s.Cercos,
+        ResourceKind.Speaker => s.Speakers,
+        ResourceKind.Intercom => s.Intercoms,
+        _ => NoIds,
+    };
 
     // ---------- Video ----------
 
-    private int? ChannelLocation(int channelId) => _index.Channels.GetValueOrDefault(channelId);
     private int? ChannelId(int deviceId, int number) => _index.ChannelByNumber.TryGetValue((deviceId, number), out int id) ? id : null;
     private int? RtspChannelId(int deviceId, int rtsp) => _index.ChannelByRtsp.TryGetValue((deviceId, rtsp), out int id) ? id : null;
 
-    public bool CanViewChannel(int channelId) => !FiltersView || InScope(ChannelLocation(channelId));
-    public bool CanOperateChannel(int channelId) => Unrestricted || InScope(ChannelLocation(channelId));
+    public bool CanViewChannel(int channelId) => !FiltersView || _sets!.Channels.Contains(channelId);
+    public bool CanOperateChannel(int channelId) => Unrestricted || _sets!.Channels.Contains(channelId);
     public bool CanViewChannel(int deviceId, int channelNumber) =>
         !FiltersView || (ChannelId(deviceId, channelNumber) is { } id && CanViewChannel(id));
     public bool CanOperateChannel(int deviceId, int channelNumber) =>
@@ -200,19 +327,21 @@ public sealed class UserScope
 
     // ---------- Alarmas ----------
 
-    private int? AreaLocation(int panelId, int number) => _index.Areas.GetValueOrDefault((panelId, number));
-    private int? ZoneLocation(int panelId, int number) => _index.Zones.GetValueOrDefault((panelId, number));
+    private int? AreaRow(int panelId, int number) => _index.AreaIdByNumber.TryGetValue((panelId, number), out int id) ? id : null;
+    private int? ZoneRow(int panelId, int number) => _index.ZoneIdByNumber.TryGetValue((panelId, number), out int id) ? id : null;
 
-    public bool CanViewArea(int panelId, int number) => !FiltersView || InScope(AreaLocation(panelId, number));
-    public bool CanOperateArea(int panelId, int number) => Unrestricted || InScope(AreaLocation(panelId, number));
-    public bool CanViewZone(int panelId, int number) => !FiltersView || InScope(ZoneLocation(panelId, number));
-    public bool CanOperateZone(int panelId, int number) => Unrestricted || InScope(ZoneLocation(panelId, number));
+    public bool CanViewArea(int panelId, int number) => !FiltersView || In(_sets!.Areas, AreaRow(panelId, number));
+    public bool CanOperateArea(int panelId, int number) => Unrestricted || In(_sets!.Areas, AreaRow(panelId, number));
+    public bool CanViewZone(int panelId, int number) => !FiltersView || In(_sets!.Zones, ZoneRow(panelId, number));
+    public bool CanOperateZone(int panelId, int number) => Unrestricted || In(_sets!.Zones, ZoneRow(panelId, number));
     /// <summary>Un panel se ve si se ve alguna de sus áreas o zonas.</summary>
     public bool CanViewPanel(int panelId) =>
-        !FiltersView || (_index.PanelLocations.TryGetValue(panelId, out var locations) && locations.Any(InScope));
+        !FiltersView ||
+        (_index.PanelAreaRows.TryGetValue(panelId, out var areas) && areas.Any(_sets!.Areas.Contains)) ||
+        (_index.PanelZoneRows.TryGetValue(panelId, out var zones) && zones.Any(_sets!.Zones.Contains));
     /// <summary>Las órdenes de "todo el panel" (área 0) exigen poder operar todas sus áreas.</summary>
     public bool CanOperateAllAreas(int panelId) =>
-        Unrestricted || (_index.Areas.Where(a => a.Key.PanelId == panelId).ToList() is { Count: > 0 } all && all.All(a => InScope(a.Value)));
+        Unrestricted || (_index.PanelAreaRows.TryGetValue(panelId, out var rows) && rows.Length > 0 && rows.All(_sets!.Areas.Contains));
     /// <summary>Evento de un panel: el de su zona, si no el de su área, si no el del panel.</summary>
     public bool CanViewAlarmEvent(int panelId, int? areaNumber, int? zoneNumber) =>
         !FiltersView || (zoneNumber is { } z ? CanViewZone(panelId, z)
@@ -223,10 +352,16 @@ public sealed class UserScope
     public static long AlarmKey(int panelId, int number) => (long)panelId * 100_000 + number;
 
     /// <summary>Áreas y zonas que ve (como <see cref="AlarmKey"/>) y los paneles con algo visible.</summary>
-    public (List<long> Areas, List<long> Zones, List<int> Panels) VisibleAlarmKeys() => (
-        _index.Areas.Where(a => InScope(a.Value)).Select(a => AlarmKey(a.Key.PanelId, a.Key.Number)).ToList(),
-        _index.Zones.Where(z => InScope(z.Value)).Select(z => AlarmKey(z.Key.PanelId, z.Key.Number)).ToList(),
-        _index.PanelLocations.Where(p => p.Value.Any(InScope)).Select(p => p.Key).ToList());
+    public (List<long> Areas, List<long> Zones, List<int> Panels) VisibleAlarmKeys()
+    {
+        var sets = _sets ?? ScopeSets.Nothing;
+        var areas = sets.Areas.Where(_index.AreaKeyByRow.ContainsKey).Select(r => _index.AreaKeyByRow[r]).ToList();
+        var zones = sets.Zones.Where(_index.ZoneKeyByRow.ContainsKey).Select(r => _index.ZoneKeyByRow[r]).ToList();
+        return (
+            areas.Select(k => AlarmKey(k.PanelId, k.Number)).ToList(),
+            zones.Select(k => AlarmKey(k.PanelId, k.Number)).ToList(),
+            areas.Select(k => k.PanelId).Concat(zones.Select(k => k.PanelId)).Distinct().ToList());
+    }
 
     /// <summary>El panel con solo las áreas y zonas que este usuario ve (null si no ve ninguna).</summary>
     public AlarmPanelDto? Visible(AlarmPanelDto panel)
@@ -240,8 +375,8 @@ public sealed class UserScope
 
     // ---------- Control de acceso ----------
 
-    public bool CanViewDoor(int doorId) => !FiltersView || InScope(_index.Doors.GetValueOrDefault(doorId));
-    public bool CanOperateDoor(int doorId) => Unrestricted || InScope(_index.Doors.GetValueOrDefault(doorId));
+    public bool CanViewDoor(int doorId) => !FiltersView || _sets!.Doors.Contains(doorId);
+    public bool CanOperateDoor(int doorId) => Unrestricted || _sets!.Doors.Contains(doorId);
     public bool CanViewDoor(int deviceId, int doorNumber) =>
         !FiltersView || (_index.DoorByNumber.TryGetValue((deviceId, doorNumber), out int id) && CanViewDoor(id));
     /// <summary>Un equipo de acceso se ve si se ve alguna de sus puertas.</summary>
@@ -263,12 +398,12 @@ public sealed class UserScope
 
     // ---------- Cerco, parlantes y citofonía ----------
 
-    public bool CanViewCerco(int panelId) => !FiltersView || InScope(_index.Cercos.GetValueOrDefault(panelId));
-    public bool CanOperateCerco(int panelId) => Unrestricted || InScope(_index.Cercos.GetValueOrDefault(panelId));
-    public bool CanViewSpeaker(int speakerId) => !FiltersView || InScope(_index.Speakers.GetValueOrDefault(speakerId));
-    public bool CanOperateSpeaker(int speakerId) => Unrestricted || InScope(_index.Speakers.GetValueOrDefault(speakerId));
-    public bool CanViewIntercom(int intercomId) => !FiltersView || InScope(_index.Intercoms.GetValueOrDefault(intercomId));
-    public bool CanOperateIntercom(int intercomId) => Unrestricted || InScope(_index.Intercoms.GetValueOrDefault(intercomId));
+    public bool CanViewCerco(int panelId) => !FiltersView || _sets!.Cercos.Contains(panelId);
+    public bool CanOperateCerco(int panelId) => Unrestricted || _sets!.Cercos.Contains(panelId);
+    public bool CanViewSpeaker(int speakerId) => !FiltersView || _sets!.Speakers.Contains(speakerId);
+    public bool CanOperateSpeaker(int speakerId) => Unrestricted || _sets!.Speakers.Contains(speakerId);
+    public bool CanViewIntercom(int intercomId) => !FiltersView || _sets!.Intercoms.Contains(intercomId);
+    public bool CanOperateIntercom(int intercomId) => Unrestricted || _sets!.Intercoms.Contains(intercomId);
 
     // ---------- Recursos (clave "Kind:Id" de Recursos y de las alertas) ----------
 
@@ -285,25 +420,16 @@ public sealed class UserScope
         _ => null,
     };
 
-    public bool CanViewResource(ResourceKind kind, int id) => !FiltersView || InScope(LocationOf(kind, id));
-    public bool CanOperateResource(ResourceKind kind, int id) => Unrestricted || InScope(LocationOf(kind, id));
+    public bool CanViewResource(ResourceKind kind, int id) => !FiltersView || AllowedIds(kind).Contains(id);
+    public bool CanOperateResource(ResourceKind kind, int id) => Unrestricted || AllowedIds(kind).Contains(id);
 
     /// <summary>Claves "Kind:Id" de todos los recursos que ve (para filtrar alertas en SQL).</summary>
     public List<string> VisibleResourceKeys()
     {
         var keys = new List<string>();
-        void Add(ResourceKind kind, IReadOnlyDictionary<int, int?> map)
-        {
-            foreach (var (id, location) in map)
-                if (InScope(location)) keys.Add($"{kind}:{id}");
-        }
-        Add(ResourceKind.Camera, _index.Channels);
-        Add(ResourceKind.Door, _index.Doors);
-        Add(ResourceKind.Partition, _index.AreaRows);
-        Add(ResourceKind.Zone, _index.ZoneRows);
-        Add(ResourceKind.Fence, _index.Cercos);
-        Add(ResourceKind.Speaker, _index.Speakers);
-        Add(ResourceKind.Intercom, _index.Intercoms);
+        foreach (var kind in Enum.GetValues<ResourceKind>())
+            foreach (int id in AllowedIds(kind))
+                keys.Add($"{kind}:{id}");
         return keys;
     }
 
@@ -313,21 +439,19 @@ public sealed class UserScope
     /// </summary>
     public OperableDto Operable()
     {
-        if (Unrestricted) return new OperableDto(true, [], [], [], [], [], [], [], [], []);
-        static List<int> Ids(IReadOnlyDictionary<int, int?> map, Func<int?, bool> inScope) =>
-            map.Where(p => inScope(p.Value)).Select(p => p.Key).Order().ToList();
+        if (_sets is not { } s) return new OperableDto(true, [], [], [], [], [], [], [], [], []);
         static string Key((int PanelId, int Number) k) => $"{k.PanelId}/{k.Number}";
         return new OperableDto(
             false,
-            Locations.Order().ToList(),
-            Ids(_index.Channels, InScope),
-            _index.Areas.Where(a => InScope(a.Value)).Select(a => Key(a.Key)).Order().ToList(),
-            _index.Zones.Where(z => InScope(z.Value)).Select(z => Key(z.Key)).Order().ToList(),
-            _index.Areas.Keys.Select(k => k.PanelId).Distinct().Where(CanOperateAllAreas).Order().ToList(),
-            Ids(_index.Doors, InScope),
-            Ids(_index.Cercos, InScope),
-            Ids(_index.Speakers, InScope),
-            Ids(_index.Intercoms, InScope));
+            s.Locations.Order().ToList(),
+            s.Channels.Order().ToList(),
+            s.Areas.Where(_index.AreaKeyByRow.ContainsKey).Select(r => Key(_index.AreaKeyByRow[r])).Order().ToList(),
+            s.Zones.Where(_index.ZoneKeyByRow.ContainsKey).Select(r => Key(_index.ZoneKeyByRow[r])).Order().ToList(),
+            _index.PanelAreaRows.Keys.Where(CanOperateAllAreas).Order().ToList(),
+            s.Doors.Order().ToList(),
+            s.Cercos.Order().ToList(),
+            s.Speakers.Order().ToList(),
+            s.Intercoms.Order().ToList());
     }
 
     /// <summary>Recurso por su clave "Kind:Id" (la de Recursos y de las alertas); sin clave no hay a qué restringir.</summary>
@@ -337,6 +461,165 @@ public sealed class UserScope
         var parts = key.Split(':');
         return parts.Length == 2 && Enum.TryParse<ResourceKind>(parts[0], out var kind) && int.TryParse(parts[1], out int id)
                && CanViewResource(kind, id);
+    }
+
+    /// <summary>
+    /// ¿El alcance de <paramref name="other"/> cabe en este? (contra el
+    /// escalamiento: nadie da más de lo que tiene). Sin restricción cabe todo;
+    /// si no, el otro debe estar limitado, a recursos que este opera, y sin
+    /// "ver el resto" si este no lo tiene.
+    /// </summary>
+    public bool Covers(UserScope other)
+    {
+        if (Unrestricted) return true;
+        if (other.Unrestricted) return false;
+        if (other.ViewOutside && !ViewOutside) return false;
+        var a = _sets!;
+        var b = other._sets!;
+        return b.Locations.IsSubsetOf(a.Locations) && b.Channels.IsSubsetOf(a.Channels) &&
+               b.Doors.IsSubsetOf(a.Doors) && b.Areas.IsSubsetOf(a.Areas) && b.Zones.IsSubsetOf(a.Zones) &&
+               b.Cercos.IsSubsetOf(a.Cercos) && b.Speakers.IsSubsetOf(a.Speakers) && b.Intercoms.IsSubsetOf(a.Intercoms);
+    }
+}
+
+/// <summary>
+/// Arma el alcance efectivo de un usuario a partir de sus roles y de su límite
+/// propio. Lo usa la foto de alcances y también la API de usuarios, para saber
+/// ANTES de guardar con qué alcance quedaría alguien.
+/// </summary>
+public static class ScopeBuilder
+{
+    private const int MaxLabels = 12;
+
+    public static UserScope Build(int userId, bool isAdmin, bool isSuperAdmin, IReadOnlySet<string> permissions,
+        IReadOnlyCollection<ScopeSpec> roles, ScopeSpec own, ScopeIndex index)
+    {
+        if (isAdmin || isSuperAdmin)
+            return new UserScope(userId, true, isSuperAdmin, false, null, index, permissions, null, null);
+
+        var limited = roles.Where(r => r.Restrict).ToList();
+        // Basta un rol sin límite para que sus roles den todo (los permisos también se suman).
+        bool rolesAll = roles.Count == 0 || limited.Count < roles.Count;
+        bool ownAll = !own.Restrict;
+        if (rolesAll && ownAll)
+            return new UserScope(userId, false, false, false, null, index, permissions, null, null);
+
+        bool viewOutside = (rolesAll || limited.Any(r => r.ViewOutside)) && (ownAll || own.ViewOutside);
+        var roleLocations = rolesAll ? [] : limited.SelectMany(r => r.Locations).Distinct().ToList();
+        HashSet<int>? granted = rolesAll ? null : index.Subtree(roleLocations);
+        HashSet<int>? limit = ownAll ? null : index.Subtree(own.Locations);
+        var items = rolesAll ? new Expanded() : Expand(limited.SelectMany(r => r.Items), index);
+
+        bool InLimit(int? location) => limit is null || (location is { } l && limit.Contains(l));
+        bool InGrant(int? location) => granted is null || (location is { } l && granted.Contains(l));
+        HashSet<int> Pick(IReadOnlyDictionary<int, int?> map, HashSet<int> explicitIds) =>
+            map.Where(p => (InGrant(p.Value) || explicitIds.Contains(p.Key)) && InLimit(p.Value))
+                .Select(p => p.Key).ToHashSet();
+
+        var channels = Pick(index.Channels, items.Channels);
+        var doors = Pick(index.Doors, items.Doors);
+        var areas = Pick(index.AreaRows, items.Areas);
+        var zones = Pick(index.ZoneRows, items.Zones);
+        var cercos = Pick(index.Cercos, items.Cercos);
+        var speakers = Pick(index.Speakers, items.Speakers);
+        var intercoms = Pick(index.Intercoms, items.Intercoms);
+        var wholeLocations = index.Locations.Keys.Where(id => InGrant(id) && InLimit(id)).ToHashSet();
+
+        // El árbol que se le muestra: las ubicaciones completas y, para lo que
+        // tiene suelto, la ubicación donde está con las que la contienen.
+        var looseLocations = new List<int?>();
+        void Add(IEnumerable<int> ids, IReadOnlyDictionary<int, int?> map)
+        {
+            foreach (int id in ids)
+                if (map.GetValueOrDefault(id) is { } l && !wholeLocations.Contains(l)) looseLocations.Add(l);
+        }
+        Add(channels, index.Channels);
+        Add(doors, index.Doors);
+        Add(areas, index.AreaRows);
+        Add(zones, index.ZoneRows);
+        Add(cercos, index.Cercos);
+        Add(speakers, index.Speakers);
+        Add(intercoms, index.Intercoms);
+        var tree = new HashSet<int>(wholeLocations);
+        tree.UnionWith(index.WithAncestors(looseLocations.OfType<int>()));
+
+        var sets = new ScopeSets
+        {
+            Locations = wholeLocations, VisibleTree = tree,
+            Channels = channels, Doors = doors, Areas = areas, Zones = zones,
+            Cercos = cercos, Speakers = speakers, Intercoms = intercoms,
+        };
+
+        // En palabras: lo de sus roles y el límite propio.
+        var labels = new List<string>();
+        if (!rolesAll)
+        {
+            var parts = roleLocations.Select(index.PathOf).Where(n => n.Length > 0).Order()
+                .Concat(limited.SelectMany(r => r.Items).Distinct().Select(i => index.LabelOf(i.Kind, i.Id)).Order())
+                .ToList();
+            labels.AddRange(parts.Take(MaxLabels));
+            if (parts.Count > MaxLabels) labels.Add($"… y {parts.Count - MaxLabels} más");
+            if (parts.Count == 0) labels.Add("Nada (sus roles no tienen ubicaciones ni recursos)");
+        }
+        if (!ownAll)
+        {
+            var names = own.Locations.Select(index.PathOf).Where(n => n.Length > 0).Order().ToList();
+            labels.Add(rolesAll
+                ? (names.Count > 0 ? string.Join(", ", names) : "Ninguna ubicación")
+                : "Solo dentro de: " + (names.Count > 0 ? string.Join(", ", names) : "ninguna ubicación"));
+        }
+        var grantedLocations = roleLocations.Concat(own.Locations).Distinct().Order().ToList();
+        return new UserScope(userId, false, false, viewOutside, sets, index, permissions, labels, grantedLocations);
+    }
+
+    /// <summary>"Todo el sistema", o el alcance en una línea (para listas y bitácora).</summary>
+    public static string Summary(UserScope scope) =>
+        scope.Unrestricted
+            ? "Todo el sistema"
+            : string.Join("; ", scope.Labels) + (scope.ViewOutside ? " (ve el resto sin operarlo)" : "");
+
+    /// <summary>Recursos sueltos expandidos a ids de fila (un equipo completo = todo lo que tiene).</summary>
+    private sealed class Expanded
+    {
+        public HashSet<int> Channels { get; } = [];
+        public HashSet<int> Doors { get; } = [];
+        public HashSet<int> Areas { get; } = [];
+        public HashSet<int> Zones { get; } = [];
+        public HashSet<int> Cercos { get; } = [];
+        public HashSet<int> Speakers { get; } = [];
+        public HashSet<int> Intercoms { get; } = [];
+    }
+
+    private static Expanded Expand(IEnumerable<(string Kind, int Id)> items, ScopeIndex index)
+    {
+        var result = new Expanded();
+        foreach (var (kind, id) in items)
+        {
+            switch (kind)
+            {
+                case ScopeKinds.Camera: result.Channels.Add(id); break;
+                case ScopeKinds.VideoDevice:
+                    if (index.DeviceChannels.TryGetValue(id, out var channels)) result.Channels.UnionWith(channels);
+                    break;
+                case ScopeKinds.Door: result.Doors.Add(id); break;
+                case ScopeKinds.AccessDevice:
+                    if (index.AccessDeviceDoors.TryGetValue(id, out var doors)) result.Doors.UnionWith(doors);
+                    break;
+                case ScopeKinds.Partition: result.Areas.Add(id); break;
+                case ScopeKinds.Zone: result.Zones.Add(id); break;
+                case ScopeKinds.AlarmPanel:
+                    if (index.PanelAreaRows.TryGetValue(id, out var areas)) result.Areas.UnionWith(areas);
+                    if (index.PanelZoneRows.TryGetValue(id, out var zones)) result.Zones.UnionWith(zones);
+                    break;
+                case ScopeKinds.Fence: result.Cercos.Add(id); break;
+                case ScopeKinds.Speaker: result.Speakers.Add(id); break;
+                case ScopeKinds.Intercom: result.Intercoms.Add(id); break;
+            }
+        }
+        // Un área incluye sus zonas.
+        foreach (var (zone, area) in index.ZoneArea)
+            if (result.Areas.Contains(area)) result.Zones.Add(zone);
+        return result;
     }
 }
 
@@ -369,14 +652,14 @@ public sealed class ScopeSnapshot
     /// <summary>El alcance del usuario; uno desconocido (borrado, deshabilitado) no ve nada.</summary>
     public UserScope For(int userId) => TryGet(userId, out var scope)
         ? scope
-        : new UserScope(userId, isAdmin: false, unrestricted: false, viewOutside: false, [], new HashSet<int>(), Index);
+        : new UserScope(userId, false, false, false, ScopeSets.Nothing, Index, null, null, null);
 }
 
 /// <summary>
-/// Alcances por ubicación de los usuarios, en memoria. Se rehacen al cambiar
-/// usuarios, ubicaciones o recursos de ubicación (<see cref="Invalidate"/>) y,
-/// por las dudas, cada 30 s: un recurso recién creado no tiene ubicación y
-/// queda fuera de todo alcance restringido hasta que se ubique.
+/// Alcances de los usuarios, en memoria. Se rehacen al cambiar usuarios, roles,
+/// ubicaciones o recursos (<see cref="Invalidate"/>) y, por las dudas, cada
+/// 30 s: un recurso recién creado no tiene ubicación y queda fuera de todo
+/// alcance limitado por ubicación hasta que se ubique.
 /// </summary>
 public sealed class UserScopeService(IServiceScopeFactory scopeFactory, ILogger<UserScopeService> logger)
 {
@@ -444,6 +727,12 @@ public sealed class UserScopeService(IServiceScopeFactory scopeFactory, ILogger<
         return (await SnapshotAsync(ct)).For(userId);
     }
 
+    /// <summary>El alcance que declara un rol (para armar el de sus usuarios).</summary>
+    public static ScopeSpec SpecOf(Data.Entities.Role role) => new(
+        role.RestrictScope, role.ViewOutsideScope,
+        role.Locations.Select(l => l.LocationId).ToList(),
+        role.Resources.Select(r => (r.Kind, r.ResourceId)).ToList());
+
     private async Task<ScopeSnapshot> BuildAsync(CancellationToken ct)
     {
         using var scope = scopeFactory.CreateScope();
@@ -453,27 +742,27 @@ public sealed class UserScopeService(IServiceScopeFactory scopeFactory, ILogger<
         var users = await db.Users.AsNoTracking().Where(u => u.Enabled)
             .Select(u => new
             {
-                u.Id, u.RestrictToLocations, u.ViewOutsideScope,
+                u.Id, u.IsSuperAdmin, u.RestrictToLocations, u.ViewOutsideScope,
                 Locations = u.Locations.Select(l => l.LocationId).ToList(),
                 RoleIds = u.Roles.Select(r => r.RoleId).ToList(),
             })
             .ToListAsync(ct);
         var roles = await db.Roles.AsNoTracking()
-            .Select(r => new { r.Id, r.SystemKey, Permissions = r.Permissions.Select(p => p.Permission).ToList() })
+            .Include(r => r.Permissions).Include(r => r.Locations).Include(r => r.Resources)
+            .AsSplitQuery()
             .ToDictionaryAsync(r => r.Id, ct);
 
         var map = new Dictionary<int, UserScope>();
         foreach (var u in users)
         {
-            bool admin = u.RoleIds.Any(id => roles.TryGetValue(id, out var r) && r.SystemKey == Data.Entities.Role.AdminKey);
+            var mine = u.RoleIds.Select(id => roles.GetValueOrDefault(id)).OfType<Data.Entities.Role>().ToList();
+            bool admin = mine.Any(r => r.IsAdmin);
             // Permisos = unión de los de sus roles; las claves que ya no están
             // en el catálogo (versión anterior) no cuentan.
-            var permissions = new HashSet<string>(u.RoleIds
-                .SelectMany(id => roles.TryGetValue(id, out var r) ? r.Permissions : [])
+            var permissions = new HashSet<string>(mine.SelectMany(r => r.Permissions.Select(p => p.Permission))
                 .Where(Core.Domain.Permissions.IsValid));
-            bool unrestricted = admin || !u.RestrictToLocations;
-            map[u.Id] = new UserScope(u.Id, admin, unrestricted, !unrestricted && u.ViewOutsideScope,
-                u.Locations, unrestricted ? new HashSet<int>() : index.Subtree(u.Locations), index, permissions);
+            var own = new ScopeSpec(u.RestrictToLocations, u.ViewOutsideScope, u.Locations, []);
+            map[u.Id] = ScopeBuilder.Build(u.Id, admin, u.IsSuperAdmin, permissions, mine.Select(SpecOf).ToList(), own, index);
         }
         return new ScopeSnapshot { Index = index, Users = map };
     }
@@ -490,12 +779,11 @@ public static class ScopeQueries
         IQueryable<Data.Entities.AccessEvent> query, UserScope scope)
     {
         if (!scope.FiltersView) return query;
-        var allowed = scope.Locations.ToList();
+        var allowed = scope.AllowedIds(ResourceKind.Door).ToList();
         return query.Where(e =>
             (e.DoorNumber != null && db.AccessDoors.Any(d => d.AccessDeviceId == e.AccessDeviceId && d.Number == e.DoorNumber
-                                                              && d.LocationId != null && allowed.Contains(d.LocationId.Value))) ||
-            (e.DoorNumber == null && db.AccessDoors.Any(d => d.AccessDeviceId == e.AccessDeviceId
-                                                              && d.LocationId != null && allowed.Contains(d.LocationId.Value))));
+                                                              && allowed.Contains(d.Id))) ||
+            (e.DoorNumber == null && db.AccessDoors.Any(d => d.AccessDeviceId == e.AccessDeviceId && allowed.Contains(d.Id))));
     }
 }
 
@@ -525,9 +813,9 @@ public static class ScopeHttp
         if (audit.ShouldLog($"scope-denied:{session.UserId}:{targetType}:{targetId}:{attempted}", TimeSpan.FromMinutes(5)))
             await audit.LogAsync(ctx, "auth", "scope-denied",
                 targetType: targetType, targetId: targetId, targetName: targetName,
-                detail: $"Intentó {attempted} '{targetName ?? targetId}', fuera de su alcance por ubicación.",
+                detail: $"Intentó {attempted} '{targetName ?? targetId}', fuera de su alcance.",
                 success: false);
-        return Results.Json(new { error = "Ese recurso está fuera de su alcance (las ubicaciones que tiene asignadas)." },
+        return Results.Json(new { error = "Ese recurso está fuera de su alcance (las ubicaciones y recursos de sus roles)." },
             statusCode: StatusCodes.Status403Forbidden);
     }
 }

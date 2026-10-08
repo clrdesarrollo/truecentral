@@ -14,8 +14,10 @@ namespace TrueCentralVms.Server.Api;
 /// <summary>
 /// Mantenedor de usuarios (permiso "Usuarios"). Quien no es administrador no
 /// otorga más de lo que tiene: solo asigna roles cuyos permisos son todos
-/// suyos, solo dentro de su propio alcance, y no toca a usuarios con más
-/// permisos o más alcance que él (ni a sí mismo).
+/// suyos, el usuario debe quedar con un alcance (roles + límite propio) dentro
+/// del suyo, y no toca a usuarios con más permisos o más alcance que él (ni a
+/// sí mismo). El superadministrador (el creado al activar la plataforma) no lo
+/// modifica nadie más que él, no se deshabilita y no se elimina.
 /// </summary>
 public static class UsersApi
 {
@@ -28,21 +30,36 @@ public static class UsersApi
     /// las fuentes de patentes y el muro; "locations", la página Recursos),
     /// más "scope" (cerco, alertas y el alcance que muestra el menú).
     /// </summary>
-    private static readonly string[] ScopeTopics =
+    internal static readonly string[] ScopeTopics =
         ["devices", "locations", "alarm-panels", "access-devices", "speakers", "intercoms", "scope"];
 
-    private static UserDto ToDto(User u, IReadOnlyDictionary<int, Role> roles, bool editable) => new(
+    private static UserDto ToDto(User u, IReadOnlyDictionary<int, Role> roles, bool editable, ScopeIndex index) => new(
         u.Id, u.Username, u.Role, u.Enabled, u.CreatedAt, u.PasswordChangedAt,
         u.RestrictToLocations, u.ViewOutsideScope, u.Locations.Select(l => l.LocationId).Order().ToList(),
         u.Roles.Select(r => r.RoleId).Order().ToList(),
         u.Roles.Select(r => roles.GetValueOrDefault(r.RoleId)?.Name).OfType<string>().Order().ToList(),
-        editable);
+        editable, u.IsSuperAdmin, ScopeBuilder.Summary(EffectiveOf(u, roles, index)));
+
+    /// <summary>
+    /// Con qué alcance queda (o quedaría) el usuario: sus roles más su límite
+    /// propio, armado igual que la foto de alcances (también para deshabilitados,
+    /// que la foto no incluye).
+    /// </summary>
+    private static UserScope EffectiveOf(User u, IReadOnlyDictionary<int, Role> roles, ScopeIndex index) =>
+        EffectiveOf(u.Id, u.IsSuperAdmin, u.Roles.Select(r => roles.GetValueOrDefault(r.RoleId)).OfType<Role>().ToList(),
+            new ScopeSpec(u.RestrictToLocations, u.ViewOutsideScope, u.Locations.Select(l => l.LocationId).ToList(), []), index);
+
+    private static UserScope EffectiveOf(int userId, bool superAdmin, IReadOnlyCollection<Role> chosen, ScopeSpec own, ScopeIndex index) =>
+        ScopeBuilder.Build(userId, chosen.Any(r => r.IsAdmin), superAdmin,
+            new HashSet<string>(chosen.SelectMany(r => r.Permissions.Select(p => p.Permission))),
+            chosen.Select(UserScopeService.SpecOf).ToList(), own, index);
 
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
 
     private static Task<Dictionary<int, Role>> RolesAsync(VmsDbContext db) =>
-        db.Roles.Include(r => r.Permissions).AsNoTracking().ToDictionaryAsync(r => r.Id);
+        db.Roles.Include(r => r.Permissions).Include(r => r.Locations).Include(r => r.Resources)
+            .AsSplitQuery().AsNoTracking().ToDictionaryAsync(r => r.Id);
 
     /// <summary>
     /// ¿Puede <paramref name="caller"/> modificar o eliminar a este usuario?
@@ -51,21 +68,30 @@ public static class UsersApi
     /// </summary>
     private static string? CannotManage(UserScope caller, User target, IReadOnlyDictionary<int, Role> roles, ScopeIndex index)
     {
+        // El superadministrador solo se modifica a sí mismo (nombre y contraseña).
+        if (target.IsSuperAdmin)
+            return target.Id == caller.UserId ? null
+                : $"'{target.Username}' es el superadministrador de la plataforma: solo él puede modificar su usuario.";
         if (caller.IsAdmin) return null;
         if (target.Id == caller.UserId)
             return "No puede modificar su propio usuario: pídaselo a otro administrador de usuarios.";
         if (target.Roles.Any(r => roles.TryGetValue(r.RoleId, out var role) && !RolesApi.CanGrant(caller, role)))
             return $"'{target.Username}' tiene permisos que usted no tiene: no puede modificarlo.";
-        if (!caller.Unrestricted && !WithinCallerScope(caller, target.RestrictToLocations, target.ViewOutsideScope,
-                target.Locations.Select(l => l.LocationId), index))
+        if (!caller.Covers(EffectiveOf(target, roles, index)))
             return $"'{target.Username}' tiene un alcance mayor que el suyo: no puede modificarlo.";
         return null;
     }
 
-    /// <summary>Un alcance cabe en el de quien lo asigna (restringido, a sus ubicaciones y sin "ver el resto" si él no lo tiene).</summary>
-    private static bool WithinCallerScope(UserScope caller, bool restrict, bool viewOutside, IEnumerable<int> locationIds, ScopeIndex index) =>
-        caller.Unrestricted ||
-        (restrict && (!viewOutside || caller.ViewOutside) && index.Subtree(locationIds).All(caller.Locations.Contains));
+    /// <summary>403 si el usuario quedaría con más alcance que quien lo asigna (roles + límite propio).</summary>
+    private static IResult? ExceedsCaller(UserScope caller, UserScope result) =>
+        caller.Covers(result) ? null
+        : Error(result.Unrestricted
+            ? "Usted tiene un alcance limitado: el usuario también debe quedar limitado a ubicaciones o recursos " +
+              "dentro del suyo (con roles limitados o con un límite propio)."
+            : result.ViewOutside && !caller.ViewOutside
+                ? "No puede dar \"ver el resto\": usted no lo tiene."
+                : "El usuario quedaría con ubicaciones o recursos fuera de su propio alcance.",
+            StatusCodes.Status403Forbidden);
 
     /// <summary>
     /// Roles pedidos: RoleIds; si no viene, según el Role de un cliente anterior
@@ -74,6 +100,9 @@ public static class UsersApi
     private static (List<Role>? Roles, IResult? Error) ResolveRoles(UserWriteDto request, User? current,
         IReadOnlyDictionary<int, Role> roles, UserScope caller)
     {
+        // Al superadministrador no le afectan los roles: conserva el Administrador.
+        if (current?.IsSuperAdmin == true)
+            return (roles.Values.Where(r => r.IsAdmin).ToList(), null);
         IEnumerable<int> ids;
         if (request.RoleIds is not null) ids = request.RoleIds;
         else if (!string.IsNullOrEmpty(request.Role))
@@ -117,10 +146,8 @@ public static class UsersApi
         var ids = restrict
             ? (request.LocationIds ?? current?.Locations.Select(l => l.LocationId).ToList() ?? []).Distinct().ToList()
             : [];
-        if (!WithinCallerScope(caller, restrict, viewOutside, ids, index))
-            return (null, Error(caller.ViewOutside || !viewOutside
-                ? "Solo puede asignar ubicaciones dentro de su propio alcance."
-                : "No puede dar \"ver el resto\": usted no lo tiene.", StatusCodes.Status403Forbidden));
+        // Que no supere el alcance de quien lo asigna se revisa después, con el
+        // alcance efectivo (roles + este límite): ExceedsCaller.
         if (!restrict) return (new ScopeRequest(false, false, []), null);
 
         if (ids.Count > MaxScopeLocations)
@@ -133,10 +160,10 @@ public static class UsersApi
         return (new ScopeRequest(true, viewOutside, ids), null);
     }
 
-    /// <summary>"todas las ubicaciones" o "solo Casa matriz › Edificio A, Portería (ve el resto sin operarlo)".</summary>
+    /// <summary>Límite propio: "sin límite propio" o "solo Casa matriz › Edificio A, Portería (ve el resto sin operarlo)".</summary>
     private static string ScopeText(bool restrict, bool viewOutside, IEnumerable<int> ids, ScopeIndex index)
     {
-        if (!restrict) return "todas las ubicaciones";
+        if (!restrict) return "sin límite propio";
         var names = ids.Select(index.PathOf).Where(n => n.Length > 0).Order().ToList();
         string text = names.Count == 0 ? "ninguna ubicación" : "solo " + string.Join(", ", names);
         return viewOutside ? text + " (ve el resto sin operarlo)" : text;
@@ -182,7 +209,7 @@ public static class UsersApi
             var roles = await RolesAsync(db);
             var index = (await scopes.SnapshotAsync(ctx.RequestAborted)).Index;
             var users = await db.Users.Include(u => u.Locations).Include(u => u.Roles).OrderBy(u => u.Username).ToListAsync();
-            return Results.Ok(users.Select(u => ToDto(u, roles, CannotManage(caller, u, roles, index) is null)));
+            return Results.Ok(users.Select(u => ToDto(u, roles, CannotManage(caller, u, roles, index) is null, index)));
         });
 
         app.MapPost("/api/users", async (HttpContext ctx, UserWriteDto request, VmsDbContext db, LicenseService license,
@@ -205,6 +232,8 @@ public static class UsersApi
             bool admin = chosen!.Any(r => r.IsAdmin);
             var (scope, scopeError) = await ResolveScopeAsync(db, request, null, admin, caller, index);
             if (scopeError is not null) return scopeError;
+            var effective = EffectiveOf(0, false, chosen!, new ScopeSpec(scope!.Restrict, scope.ViewOutside, scope.LocationIds, []), index);
+            if (ExceedsCaller(caller, effective) is { } exceeds) return exceeds;
             if (request.Enabled && license.Deny(null, LicenseFeatures.MaxUsers, await db.Users.CountAsync(u => u.Enabled)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "user", username);
             if (await passwords.ValidateNewPasswordAsync(db, null, request.Password) is { } error)
@@ -222,11 +251,12 @@ public static class UsersApi
                 targetType: "user", targetId: user.Id.ToString(), targetName: user.Username,
                 detail: $"Creó el usuario '{user.Username}' (roles: {RolesText(chosen!.Select(r => r.Id), roles)}, " +
                         $"{(user.Enabled ? "habilitado" : "deshabilitado")}" +
-                        (admin ? "" : $", alcance: {ScopeText(scope!.Restrict, scope.ViewOutside, scope.LocationIds, index)}") + ").",
+                        (admin ? "" : $", límite propio: {ScopeText(scope!.Restrict, scope.ViewOutside, scope.LocationIds, index)}" +
+                                      $", alcance efectivo: {ScopeBuilder.Summary(effective)}") + ").",
                 data: new { roleIds = chosen!.Select(r => r.Id).Order().ToList(), user.RestrictToLocations, user.ViewOutsideScope,
                             locationIds = scope!.LocationIds });
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "users");
-            return Results.Ok(ToDto(user, roles, true));
+            return Results.Ok(ToDto(user, roles, true, index));
         });
 
         app.MapPut("/api/users/{id:int}", async (HttpContext ctx, int id, UserWriteDto request, VmsDbContext db, LicenseService license,
@@ -253,6 +283,8 @@ public static class UsersApi
             if (await db.Users.AnyAsync(u => u.Id != id && u.Username == username))
                 return Error("Ya existe un usuario con ese nombre.", StatusCodes.Status409Conflict);
 
+            if (user.IsSuperAdmin && !request.Enabled)
+                return Error("El superadministrador de la plataforma no se puede deshabilitar.", StatusCodes.Status403Forbidden);
             // Siempre debe quedar al menos un administrador habilitado.
             bool losesAdmin = user.Role == Roles.Admin && user.Enabled && (!admin || !request.Enabled);
             if (losesAdmin && !await OtherAdminExistsAsync(db, id))
@@ -260,6 +292,10 @@ public static class UsersApi
 
             var (scope, scopeError) = await ResolveScopeAsync(db, request, user, admin, caller, index);
             if (scopeError is not null) return scopeError;
+            var effective = EffectiveOf(id, user.IsSuperAdmin, chosen!,
+                new ScopeSpec(scope!.Restrict, scope.ViewOutside, scope.LocationIds, []), index);
+            if (ExceedsCaller(caller, effective) is { } exceeds) return exceeds;
+            string effectiveBefore = ScopeBuilder.Summary(EffectiveOf(user, roles, index));
 
             if (!string.IsNullOrEmpty(request.Password))
             {
@@ -302,35 +338,36 @@ public static class UsersApi
             if (!user.Enabled || levelChanged || !string.IsNullOrEmpty(request.Password))
                 tokens.RevokeUser(id);
 
+            // Los roles también dan alcance: cambiarlos puede dejar cosas fuera.
+            // Su puesto rehace menús, árboles y listas, y el video que quedó
+            // fuera se corta ya.
+            int kicked = await RolesApi.ApplyToMembersAsync([id], db, mtx, scopedHub, scopes,
+                scopeChanged: rolesChanged || scopeChanged, permissionsChanged: rolesChanged);
+            string effectiveAfter = ScopeBuilder.Summary(effective);
+            string kickedText = kicked > 0 ? $" Se cortaron {kicked} sesión(es) de video que quedaron fuera." : "";
+
             if (rolesChanged)
-            {
                 await audit.LogAsync(ctx, "users", "user-roles-updated",
                     targetType: "user", targetId: user.Id.ToString(), targetName: user.Username,
-                    detail: $"Cambió los roles de '{user.Username}': {RolesText(rolesBefore, roles)} → {RolesText(rolesAfter, roles)}.",
-                    data: new { before = rolesBefore, after = rolesAfter });
-                // Su puesto rehace menús y botones con los permisos nuevos.
-                await scopedHub.ToUserAsync(id, VmsHubContract.ConfigChanged, "permissions");
-            }
+                    detail: $"Cambió los roles de '{user.Username}': {RolesText(rolesBefore, roles)} → {RolesText(rolesAfter, roles)}." +
+                            (effectiveBefore != effectiveAfter ? $" Alcance efectivo: {effectiveBefore} → {effectiveAfter}." : "") +
+                            (scopeChanged ? "" : kickedText),
+                    data: new { before = rolesBefore, after = rolesAfter, kickedSessions = kicked });
 
             if (scopeChanged)
             {
-                // Lo que quedó fuera deja de verse ya: video abierto incluido.
-                var newScope = await scopes.ForUserAsync(id);
-                int kicked = await SessionAccounting.KickOutOfScopeAsync(db, mtx, scopedHub, newScope);
-                string scopeAfter = ScopeText(user.RestrictToLocations, user.ViewOutsideScope, scope!.LocationIds, index);
+                string scopeAfter = ScopeText(user.RestrictToLocations, user.ViewOutsideScope, scope.LocationIds, index);
                 await audit.LogAsync(ctx, "users", "user-scope-updated",
                     targetType: "user", targetId: user.Id.ToString(), targetName: user.Username,
-                    detail: $"Cambió el alcance de '{user.Username}': {scopeBefore} → {scopeAfter}." +
-                            (kicked > 0 ? $" Se cortaron {kicked} sesión(es) de video que quedaron fuera." : ""),
+                    detail: $"Cambió el límite propio de '{user.Username}': {scopeBefore} → {scopeAfter}." +
+                            (effectiveBefore != effectiveAfter ? $" Alcance efectivo: {effectiveBefore} → {effectiveAfter}." : "") +
+                            kickedText,
                     data: new
                     {
                         before = dataBefore,
                         after = new { user.RestrictToLocations, user.ViewOutsideScope, locationIds = scope.LocationIds.Order().ToList() },
                         kickedSessions = kicked,
                     });
-                // Sus puestos recargan árboles y listas con el alcance nuevo.
-                foreach (string topic in ScopeTopics)
-                    await scopedHub.ToUserAsync(id, VmsHubContract.ConfigChanged, topic);
             }
             if (changes.Count > 0 || (!scopeChanged && !rolesChanged))
                 await audit.LogAsync(ctx, "users", "user-updated",
@@ -338,7 +375,7 @@ public static class UsersApi
                     detail: $"Modificó el usuario '{user.Username}': " +
                             (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "users");
-            return Results.Ok(ToDto(user, roles, true));
+            return Results.Ok(ToDto(user, roles, true, index));
         });
 
         app.MapDelete("/api/users/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
@@ -351,6 +388,9 @@ public static class UsersApi
             if (user is null) return Results.NotFound();
             if (session.UserId == id)
                 return Error("No puede eliminar su propio usuario.");
+            if (user.IsSuperAdmin)
+                return Error($"'{user.Username}' es el superadministrador de la plataforma y no se puede eliminar.",
+                    StatusCodes.Status403Forbidden);
             var roles = await RolesAsync(db);
             if (CannotManage(caller, user, roles, (await scopes.SnapshotAsync()).Index) is { } reason)
                 return Error(reason, StatusCodes.Status403Forbidden);

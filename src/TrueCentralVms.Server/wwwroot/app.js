@@ -1697,16 +1697,16 @@ async function renderUsers() {
       <tbody>
         ${users.map((u) => `
           <tr data-id="${u.id}">
-            <td>${esc(u.username)}</td>
+            <td>${esc(u.username)}${u.isSuperAdmin ? ` <span class="tag admin" title="Creado al activar la plataforma: acceso total sin importar los roles. Solo él modifica su usuario.">Superadministrador</span>` : ""}</td>
             <td>${userRolesHtml(u)}</td>
-            <td>${userScopeHtml(u, locations)}</td>
+            <td>${userScopeHtml(u)}</td>
             <td><span class="tag ${u.enabled ? "on" : "off"}">${u.enabled ? "Habilitado" : "Deshabilitado"}</span></td>
             <td class="muted">${formatDate(u.createdAt)}</td>
             <td class="muted">${formatDate(u.passwordChangedAt)}</td>
             <td class="row-actions">${u.editable === false
-              ? `<span class="muted" title="Tiene permisos o alcance que usted no tiene">Sin acceso</span>`
+              ? `<span class="muted" title="${u.isSuperAdmin ? "Solo el superadministrador modifica su usuario" : "Tiene permisos o alcance que usted no tiene"}">Sin acceso</span>`
               : `<button class="btn ghost btn-edit">Editar</button>
-              <button class="btn danger btn-delete">Eliminar</button>`}
+              ${u.isSuperAdmin ? "" : `<button class="btn danger btn-delete">Eliminar</button>`}`}
             </td>
           </tr>`).join("")}
       </tbody>
@@ -1733,19 +1733,6 @@ async function renderUsers() {
 // Alcance por ubicación de un usuario (qué ve y qué opera)
 // ---------------------------------------------------------------------------
 
-/** "Casa matriz › Edificio A" de una ubicación, con la lista plana del árbol. */
-function scopeLocationPath(id, byId) {
-  const parts = [];
-  const seen = new Set();
-  let current = byId.get(id);
-  while (current && !seen.has(current.id)) {
-    seen.add(current.id);
-    parts.unshift(current.name);
-    current = current.parentId != null ? byId.get(current.parentId) : null;
-  }
-  return parts.join(" › ");
-}
-
 /** La celda "Roles" de la tabla de usuarios. */
 function userRolesHtml(u) {
   const names = u.roleNames ?? (u.role === "Admin" ? ["Administrador"] : ["Operador"]);
@@ -1769,16 +1756,15 @@ function userRolesFieldHtml(roles, selected) {
   <div class="muted field-hint">Con varios roles, el usuario suma los permisos de todos.</div>`;
 }
 
-/** La celda "Alcance" de la tabla de usuarios. */
-function userScopeHtml(u, locations) {
+/** La celda "Alcance" de la tabla de usuarios: lo que efectivamente ve y opera (sus roles + su límite propio). */
+function userScopeHtml(u) {
+  if (u.isSuperAdmin) return `<span class="muted">Todo (superadministrador)</span>`;
   if (u.role === "Admin") return `<span class="muted">Todo (administrador)</span>`;
-  if (!u.restrictToLocations) return `<span class="muted">Todas las ubicaciones</span>`;
-  const byId = new Map(locations.map((l) => [l.id, l]));
-  const names = (u.locationIds || []).map((id) => scopeLocationPath(id, byId)).filter(Boolean).sort();
-  const shown = names.slice(0, 2).map(esc).join(", ");
-  const more = names.length > 2 ? ` <span class="muted">(+${names.length - 2})</span>` : "";
-  return `<span title="${esc(names.join("\n"))}">${names.length ? shown + more : `<span class="muted">Ninguna ubicación</span>`}</span>` +
-    (u.viewOutsideScope ? ` <span class="tag operator" title="Ve el resto sin poder operarlo">ve el resto</span>` : "");
+  const text = u.effectiveScope || "Todo el sistema";
+  if (text === "Todo el sistema") return `<span class="muted">Todo el sistema</span>`;
+  const short = text.length > 70 ? text.slice(0, 68) + "…" : text;
+  return `<span title="${esc(text)}">${esc(short)}</span>` +
+    (u.restrictToLocations ? ` <span class="tag operator" title="Tiene un límite propio por ubicación además de sus roles">límite propio</span>` : "");
 }
 
 /** Árbol de casillas: marcar una ubicación incluye sus sububicaciones (quedan marcadas y bloqueadas). */
@@ -1828,6 +1814,7 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0, roles: [] })
   const roleIds = new Set(user?.roleIds ?? (operatorRole?.assignable ? [operatorRole.id] : []));
   const selected = new Set(user?.locationIds || []);
   const restricted = !!user?.restrictToLocations;
+  const superAdmin = !!user?.isSuperAdmin;
   openModal(`
     <h3>${isNew ? "Agregar usuario" : "Editar usuario"}</h3>
     <div id="user-modal-error"></div>
@@ -1836,18 +1823,24 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0, roles: [] })
         <label>Nombre de usuario</label>
         <input id="uf-username" required minlength="3" maxlength="64" value="${esc(user?.username ?? "")}">
       </div>
+      ${superAdmin ? `
+      <div class="info-box"><b>Superadministrador de la plataforma.</b> Se creó al activar el sistema y tiene acceso total:
+        no le afectan los roles ni los alcances, no se deshabilita ni se elimina, y solo él puede cambiar su nombre y su contraseña.</div>` : `
       <div class="field">
         <label>Roles</label>
         <div id="uf-roles">${userRolesFieldHtml(scopeCtx.roles, roleIds)}</div>
       </div>
+      ${user?.effectiveScope ? `<div class="muted small" style="margin:-4px 0 10px">Alcance actual: ${esc(user.effectiveScope)}</div>` : ""}
       <div class="field" id="uf-scope">
-        <label>Alcance por ubicación</label>
+        <label>Límite propio por ubicación (opcional)</label>
         <div class="muted scope-admin-note" id="uf-scope-admin">Los administradores ven y operan todo.</div>
         <div id="uf-scope-edit">
+          <div class="muted scope-hint" style="margin:0 0 6px">El alcance lo dan sus roles (Seguridad → Roles: ubicaciones,
+            cámaras, puertas, equipos…). Aquí se puede limitar además a este usuario.</div>
           <label class="radio-row"><input type="radio" name="uf-scope-mode" value="all" ${restricted ? "" : "checked"}>
-            Todas las ubicaciones</label>
+            Sin límite propio: lo que le den sus roles</label>
           <label class="radio-row"><input type="radio" name="uf-scope-mode" value="some" ${restricted ? "checked" : ""}>
-            Solo estas ubicaciones (cada una con sus sububicaciones)</label>
+            De eso, solo lo que esté en estas ubicaciones (cada una con sus sububicaciones)</label>
           <div id="uf-scope-pick">
             <div class="scope-tree" id="uf-scope-tree">${userScopeTreeHtml(scopeCtx.locations, selected)}</div>
             <label class="checkbox-row" style="margin-top:8px">
@@ -1856,15 +1849,15 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0, roles: [] })
             </label>
             <div class="muted scope-hint">Fuera de su alcance no ve listas, eventos ni video, ni puede dar órdenes.
               ${scopeCtx.unassigned > 0
-                ? `Hay ${scopeCtx.unassigned} recurso(s) por ubicar: solo los ven los usuarios sin restricción.`
-                : "Lo que esté por ubicar solo lo ven los usuarios sin restricción."}</div>
+                ? `Hay ${scopeCtx.unassigned} recurso(s) por ubicar: quedan fuera de un límite propio.`
+                : "Lo que esté por ubicar queda fuera de un límite propio."}</div>
           </div>
         </div>
       </div>
       <div class="checkbox-row">
         <input type="checkbox" id="uf-enabled" ${user?.enabled !== false ? "checked" : ""}>
         <label for="uf-enabled" style="margin:0">Habilitado</label>
-      </div>
+      </div>`}
       <div class="field">
         <label>${isNew ? "Contraseña" : "Contraseña nueva (vacío = no cambiar)"}</label>
         <input id="uf-password" type="password" autocomplete="new-password" ${isNew ? "required" : ""}>
@@ -1877,7 +1870,31 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0, roles: [] })
     </form>`);
 
   bindPolicyList($("#uf-password"), "uf-policy");
-  // Alcance: se ve según el rol (el administrador no tiene) y el modo elegido.
+  $("#uf-cancel").addEventListener("click", closeModal);
+  if (superAdmin) {
+    // Solo nombre y contraseña: el servidor conserva su rol y su acceso total.
+    $("#user-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorBox = $("#user-modal-error");
+      errorBox.innerHTML = "";
+      const password = $("#uf-password").value;
+      if (password && !passwordOk(password)) {
+        errorBox.innerHTML = `<div class="error-box">La contraseña no cumple la política de seguridad.</div>`;
+        return;
+      }
+      try {
+        await Api.put(`/api/users/${user.id}`, {
+          username: $("#uf-username").value.trim(), password: password || null,
+          roleIds: user.roleIds, enabled: true,
+        });
+        closeModal();
+        toast("Usuario actualizado.");
+        renderUsers();
+      } catch (err) { errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`; }
+    });
+    return;
+  }
+  // Límite propio: se ve según el rol (el administrador no tiene) y el modo elegido.
   const scopeTree = $("#uf-scope-tree");
   const isAdminPicked = () => $$("#uf-roles input[data-role]").some((b) => b.checked && b.dataset.system === "admin");
   const refreshScope = () => {
@@ -1893,7 +1910,6 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0, roles: [] })
   scopeTree.addEventListener("change", () => userScopeSync(scopeTree));
   refreshScope();
 
-  $("#uf-cancel").addEventListener("click", closeModal);
   $("#user-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const errorBox = $("#user-modal-error");

@@ -14,15 +14,22 @@ public class User
     /// </summary>
     public string Role { get; set; } = Core.Domain.Roles.Operator;
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Superadministrador: el administrador que se crea al activar la plataforma.
+    /// Ve y opera todo sin importar sus roles ni su alcance, solo él modifica su
+    /// usuario (nombre y contraseña), no se deshabilita y no se elimina.
+    /// </summary>
+    public bool IsSuperAdmin { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     /// <summary>Última vez que se estableció la contraseña (para la caducidad configurable).</summary>
     public DateTime PasswordChangedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Alcance por ubicación (solo operadores: un administrador siempre ve y
-    /// opera todo). false = todas las ubicaciones; true = solo las de
-    /// <see cref="Locations"/>, cada una con sus sububicaciones. Los recursos
-    /// "por ubicar" quedan fuera de un alcance restringido.
+    /// Límite PROPIO por ubicación, además del alcance de sus roles (solo
+    /// operadores: un administrador siempre ve y opera todo). false = sin límite
+    /// propio (manda lo de sus roles); true = de lo que le dan sus roles, solo lo
+    /// que esté en <see cref="Locations"/>, cada una con sus sububicaciones. Los
+    /// recursos "por ubicar" quedan fuera de un límite propio.
     /// </summary>
     public bool RestrictToLocations { get; set; }
     /// <summary>Con alcance restringido: puede VER el resto, sin operarlo (supervisión).</summary>

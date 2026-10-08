@@ -178,7 +178,7 @@ public static class AccessCatalogApi
             var events = ScopeQueries.AccessEvents(db, db.AccessEvents.AsNoTracking(), scope);
 
             var doors = (await db.AccessDoors.AsNoTracking().Where(d => d.Enabled).ToListAsync(ct))
-                .Where(d => scope.CanView(d.LocationId)).ToList();
+                .Where(d => scope.CanViewDoor(d.Id)).ToList();
             var devices = (await db.AccessDevices.AsNoTracking().Select(d => new { d.Id, d.Status }).ToListAsync(ct))
                 .Where(d => scope.CanViewAccessDevice(d.Id)).ToList();
             var recent = await events.OrderByDescending(e => e.Timestamp).Take(15).ToListAsync(ct);
@@ -341,7 +341,7 @@ public static class AccessCatalogApi
                 .ThenBy(d => d.AccessDevice!.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(d => d.Number)
                 .ToList();
             var scope = await ctx.ScopeAsync(session);
-            return Results.Ok(doors.Where(d => scope.CanView(d.LocationId)).Select(service.ToDoorDto));
+            return Results.Ok(doors.Where(d => scope.CanViewDoor(d.Id)).Select(service.ToDoorDto));
         });
 
         // Renombrar o pausar una puerta. El nombre es del VMS: una revalidación
@@ -421,7 +421,7 @@ public static class AccessCatalogApi
             var device = door.AccessDevice!;
             string target = $"{device.Name} · {door.Name}";
             string action = CommandAudit(command);
-            if (!(await ctx.ScopeAsync(session)).CanOperate(door.LocationId))
+            if (!(await ctx.ScopeAsync(session)).CanOperateDoor(door.Id))
                 return await ctx.OutOfScopeAsync(session, "access-door", door.Id.ToString(), target, command switch
                 {
                     AccessDoorCommand.Open => "abrir",

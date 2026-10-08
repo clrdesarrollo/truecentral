@@ -159,14 +159,14 @@ public static class IntercomsApi
             var scope = await ctx.ScopeAsync(session);
             var intercoms = await db.Intercoms.AsNoTracking().Include(i => i.Channel).ThenInclude(c => c!.Device)
                 .OrderBy(i => i.GroupName).ThenBy(i => i.Name).ToListAsync(ct);
-            return Results.Ok(intercoms.Where(i => scope.CanView(i.LocationId)).Select(service.ToDto));
+            return Results.Ok(intercoms.Where(i => scope.CanViewIntercom(i.Id)).Select(service.ToDto));
         });
 
         app.MapGet("/api/intercoms/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, IntercomService service, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var intercom = await LoadAsync(db, id, ct);
-            return intercom is null || !(await ctx.ScopeAsync(session)).CanView(intercom.LocationId)
+            return intercom is null || !(await ctx.ScopeAsync(session)).CanViewIntercom(intercom.Id)
                 ? Results.NotFound()
                 : Results.Ok(service.ToDto(intercom));
         });
@@ -395,9 +395,8 @@ public static class IntercomsApi
             var scope = await ctx.ScopeAsync(session);
             if (scope.FiltersView)
             {
-                var allowed = scope.Locations.ToList();
-                query = query.Where(c => db.Intercoms.Any(i => i.Id == c.IntercomId && i.LocationId != null
-                                                               && allowed.Contains(i.LocationId.Value)));
+                var allowed = scope.AllowedIds(ResourceKind.Intercom).ToList();
+                query = query.Where(c => allowed.Contains(c.IntercomId));
             }
             if (intercomId is int iid) query = query.Where(c => c.IntercomId == iid);
             if (!string.IsNullOrWhiteSpace(state) && Enum.TryParse<IntercomCallState>(state, true, out var parsed))

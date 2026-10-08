@@ -240,7 +240,7 @@ public static class WorkflowsApi
             var channels = await db.Channels.AsNoTracking().Include(c => c.Device)
                 .Where(c => c.Enabled && (channelList.Contains(c.Id) || deviceList.Contains(c.DeviceId)))
                 .OrderBy(c => c.Id).Take(16).ToListAsync(ct);
-            channels = channels.Where(c => scope.CanView(c.LocationId)).ToList();
+            channels = channels.Where(c => scope.CanViewChannel(c.Id)).ToList();
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
@@ -289,7 +289,7 @@ public static class WorkflowsApi
             var scope = await ctx.ScopeAsync(session);
             var doors = await db.AccessDoors.AsNoTracking().Include(d => d.AccessDevice)
                 .OrderBy(d => d.AccessDevice!.Name).ThenBy(d => d.Number).ToListAsync(ct);
-            return Results.Ok(doors.Where(d => scope.CanView(d.LocationId)).Select(d => new WorkflowDoorDto(d.Id, d.AccessDeviceId, d.AccessDevice!.Name, d.Number, d.Name, d.Enabled)));
+            return Results.Ok(doors.Where(d => scope.CanViewDoor(d.Id)).Select(d => new WorkflowDoorDto(d.Id, d.AccessDeviceId, d.AccessDevice!.Name, d.Number, d.Name, d.Enabled)));
         });
 
         // Parlantes elegibles en la acción "sonar parlante IP" (inventario del módulo Parlantes).
@@ -298,7 +298,7 @@ public static class WorkflowsApi
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.GroupName).ThenBy(s => s.Name).ToListAsync(ct);
-            return Results.Ok(speakers.Where(s => scope.CanView(s.LocationId)).Select(s => new WorkflowSpeakerDto(s.Id, s.Name, s.GroupName, s.Enabled,
+            return Results.Ok(speakers.Where(s => scope.CanViewSpeaker(s.Id)).Select(s => new WorkflowSpeakerDto(s.Id, s.Name, s.GroupName, s.Enabled,
                 s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio)));
         });
 

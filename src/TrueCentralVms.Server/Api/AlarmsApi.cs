@@ -937,7 +937,7 @@ public static class AlarmsApi
             if (panel is null) return Results.NotFound();
             var target = panel.Zones.FirstOrDefault(z => z.Number == zone);
             if (target is null) return Error("La zona no existe en el panel.");
-            if (!(await ctx.ScopeAsync(session)).CanOperate(ZoneLocation(panel, target)))
+            if (!(await ctx.ScopeAsync(session)).CanOperateZone(panel.Id, target.Number))
                 return await ctx.OutOfScopeAsync(session, "alarm-zone", $"{id}/{zone}", $"{panel.Name} · {target.Name}",
                     request.Bypassed ? "anular" : "restituir");
             string action = request.Bypassed ? "zone-bypassed" : "zone-restored";
@@ -1042,16 +1042,12 @@ public static class AlarmsApi
     {
         var scope = await ctx.ScopeAsync(session);
         bool allowed = scope.Unrestricted || (area == 0
-            ? panel.Areas.Count > 0 && panel.Areas.All(a => scope.CanOperate(a.LocationId))
-            : panel.Areas.FirstOrDefault(a => a.Number == area) is { } target && scope.CanOperate(target.LocationId));
+            ? panel.Areas.Count > 0 && panel.Areas.All(a => scope.CanOperateArea(panel.Id, a.Number))
+            : panel.Areas.FirstOrDefault(a => a.Number == area) is { } target && scope.CanOperateArea(panel.Id, target.Number));
         return allowed
             ? null
             : await ctx.OutOfScopeAsync(session, "alarm-area", $"{panel.Id}/{area}", $"{panel.Name} · {AreaLabel(panel, area)}", attempted);
     }
-
-    /// <summary>La ubicación que vale para una zona: la suya o, si no tiene, la de su área.</summary>
-    private static int? ZoneLocation(AlarmPanel panel, AlarmZone zone) =>
-        zone.LocationId ?? panel.Areas.FirstOrDefault(a => a.Number == zone.AreaNumber)?.LocationId;
 
     private static string AreaLabel(AlarmPanel panel, int area) =>
         area <= 0 ? "todas las áreas" : $"el área '{panel.Areas.First(a => a.Number == area).Name}'";

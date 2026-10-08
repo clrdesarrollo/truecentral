@@ -1361,6 +1361,58 @@ rechazó la dirección, y el asistente no escribe contraseñas.
 - El cliente WPF real no se abrió por UI Automation: los bindings compilan, y la lógica se
   probó con el arnés.
 
+## Seguridad: alcance en el rol y superadministrador — 2026-10-08
+
+Pedido: usuarios y grupos de usuarios con acceso a grupos limitados de dispositivos o de áreas,
+incluso recursos sueltos de distintas ubicaciones ("solo la cámara del acceso principal", "las
+cajas", "el control de acceso n° 1 de cada sucursal"). El usuario eligió llevar el alcance AL
+ROL (no crear grupos de usuarios aparte). Y el admin que se crea al activar la plataforma debe
+ser superadministrador, sin que le afecten los roles.
+
+**Modelo:**
+- El rol dice QUÉ (permisos) y DÓNDE (alcance): `Role.RestrictScope` = false → todo el
+  sistema (todos los roles existentes, sin cambios); true → solo `RoleLocations` (cada una con
+  sus sububicaciones) y `RoleResources` (recursos sueltos: `Camera`, `Door`, `Partition`,
+  `Zone`, `Fence`, `Speaker`, `Intercom`, o equipos completos `VideoDevice`, `AccessDevice`,
+  `AlarmPanel`, que incluyen también lo que se les agregue después; un área incluye sus zonas).
+  `ViewOutsideScope` = ve el resto sin operarlo. Claves en `Core/Contracts/RoleDtos.cs`
+  (`ScopeKinds`).
+- Alcance efectivo de un usuario (`ScopeBuilder.Build`): **unión** de sus roles (basta un rol
+  sin límite para ver todo, igual que los permisos se suman) **∩** su límite propio por
+  ubicación (lo que antes era "el alcance del usuario"; se conserva tal cual, así las
+  instalaciones existentes no cambian). "Ve el resto" solo si cada nivel que limita lo permite.
+  Permisos y alcance se suman por separado (un rol no amarra sus permisos a sus ubicaciones).
+- `UserScope` dejó de validar por ubicación: arma conjuntos de ids por tipo (canales, puertas,
+  áreas, zonas, cercos, parlantes, citófonos) y cada endpoint valida el recurso concreto
+  (`CanViewChannel(id)`, `CanOperateDoor(id)`…; ~30 lugares cambiados). `Locations` quedó para
+  las órdenes por ubicación COMPLETA; `VisibleLocations` es el árbol que se muestra (las
+  completas y, para lo suelto, su ubicación con las que la contienen). Los filtros en SQL usan
+  `AllowedIds(kind)`. Un recurso por ubicar puede entrar como recurso suelto.
+- **Superadministrador** (`User.IsSuperAdmin`): lo marca `/api/setup/admin`; la migración
+  `RoleScopeAndSuperAdmin` marca en instalaciones existentes al administrador más antiguo que
+  conserve el rol Administrador. Acceso total aunque le cambien los roles (conserva siempre el
+  Administrador); solo él modifica su usuario (nombre y contraseña); no se deshabilita ni se
+  elimina; los demás administradores lo ven "Sin acceso".
+- Anti-escalamiento con el alcance efectivo (`UserScope.Covers`): quien está limitado solo deja
+  a un usuario con un alcance dentro del suyo (roles + límite propio) y solo crea o modifica
+  roles cuyo alcance cabe en el suyo (no puede tocar el Operador, que abarca todo). El catálogo
+  del editor (`GET /api/roles/scope-catalog`) solo le ofrece lo que él opera.
+- Cambiar el alcance de un rol, o los roles de un usuario, rige al instante (sin volver a
+  entrar): se invalida la foto de alcances, se corta el video que quedó fuera y sus puestos
+  recargan árboles y listas. Bitácora: `role-*` con el alcance antes → después; en usuarios,
+  también el alcance efectivo. Una ubicación que está en el alcance de un rol no se borra.
+- Web: Roles con sección "Alcance" (árbol de ubicaciones + buscador de recursos sueltos con
+  etiquetas); Usuarios muestra el alcance efectivo, la marca de superadministrador y el
+  "límite propio" como opción adicional. El cliente de escritorio no cambió (recibe el alcance
+  en palabras por `/api/auth/me`).
+- Probado contra un servidor aislado: 33 pruebas de API (recurso suelto, ubicación, equipo
+  completo con lo por ubicar, suma de roles, rol sin límite, límite propio, cambio en caliente,
+  anti-escalamiento de un gestor limitado, superadministrador) más la interfaz web de Roles y
+  Usuarios.
+- Vista en vivo web: limitada a divisiones de hasta 16 cuadros (pedido del usuario: el
+  navegador no es para uso rudo; las mayores siguen en el cliente de escritorio). Abrir un
+  equipo o una vista guardada de más cámaras abre las primeras 16 y avisa.
+
 ## Vista en vivo en el panel web (WebRTC) — 2026-10-08
 
 Aplicaciones → **Vista en vivo** (`#/live`, `wwwroot/live.js`, permiso `live.view`): la misma
@@ -1390,8 +1442,8 @@ interfaz de la Vista en vivo del cliente de escritorio, en el navegador.
   tildes, ▶ en los canales en pantalla, doble clic en canal (cuadro seleccionado o el primero
   libre, la selección avanza), en equipo o ubicación (abre todo; grilla a medida o la estándar
   más chica), clic derecho en ubicación (abrir cámaras y armar/desarmar sus áreas con
-  confirmación); las MISMAS divisiones y claves de `VideoLayouts.cs` (las vistas guardadas se
-  comparten con el cliente); barra por cuadro (audio exclusivo, P/S, captura JPG/PNG, grabación
+  confirmación); las divisiones y claves de `VideoLayouts.cs` de hasta 16 cuadros (las vistas
+  guardadas se comparten con el cliente; una más grande se acomoda en 16 con aviso); barra por cuadro (audio exclusivo, P/S, captura JPG/PNG, grabación
   local MP4/WebM con contador, cerrar); doble clic maximiza (sube a principal con el secundario
   estacionado: restaurar es instantáneo); arrastrar del árbol al cuadro y de un cuadro a otro
   (se mueve el escenario con sus `<video>`, el video no se corta); zoom digital (rueda, modo

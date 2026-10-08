@@ -158,7 +158,7 @@ public static class StreamsApi
                 statusCode: StatusCodes.Status422UnprocessableEntity));
         // Alcance por ubicación: es el único paso antes de MediaMTX (que solo
         // acepta tokens emitidos aquí), así que basta con validarlo aquí.
-        if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+        if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
             return new GrantResult(await ctx.OutOfScopeAsync(session, "channel", $"{channel.DeviceId}/{channel.RtspChannel}",
                 $"{channel.Device.Name} · {channel.Name}", "ver en vivo"));
 
