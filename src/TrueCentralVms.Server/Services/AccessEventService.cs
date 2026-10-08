@@ -16,10 +16,13 @@ namespace TrueCentralVms.Server.Services;
 /// <item><b>En vivo</b>: a los equipos que saben empujar sus eventos se les
 /// mantiene abierta una escucha, y lo que pasa en la puerta aparece en el
 /// monitoreo en el momento. Es la vía normal.</item>
-/// <item><b>Sondeo de respaldo</b>: cada 15 s se le pregunta a cada equipo qué
-/// pasó desde su MARCA DE AGUA. Cubre a los equipos que no empujan, y tapa los
-/// huecos de los que sí: mientras la escucha estaba caída (o el servidor
-/// apagado) igual se recupera lo que se perdió. La marca es el número de
+/// <item><b>Sondeo de respaldo</b>: se le pregunta a cada equipo qué pasó desde
+/// su MARCA DE AGUA. Cada 15 s a los que no tienen una escucha sana; a los que
+/// sí, cada <c>Access:LivePollMinutes</c> (5) y además enseguida al reconectar
+/// la escucha o al faltar un número de evento entre dos que llegaron. Cubre a
+/// los equipos que no empujan, y tapa los huecos de los que sí: mientras la
+/// escucha estaba caída (o el servidor apagado) igual se recupera lo que se
+/// perdió, sin cargar con consultas a los equipos que ya avisan solos. La marca es el número de
 /// evento del equipo (<c>serialNo</c>) cuando el equipo sabe buscar por él, y
 /// la hora del último evento si no.</item>
 /// </list>
@@ -66,6 +69,78 @@ public sealed class AccessEventService(
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _lastTimeCheck = new();
 
+    // ------------------------------------------------------------------
+    // Ritmo del sondeo según la salud de la escucha en vivo
+    // ------------------------------------------------------------------
+
+    /// <summary>Cuándo llegó algo por última vez de la escucha de cada equipo (evento o latido).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _liveAlive = new();
+
+    /// <summary>Cuándo se leyó por última vez el historial de cada equipo.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _lastPoll = new();
+
+    /// <summary>Equipos cuyo historial se pidió leer cuanto antes (reconexión o hueco de numeración).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _pollRequested = new();
+
+    /// <summary>Despierta la vuelta del sondeo antes de tiempo.</summary>
+    private readonly SemaphoreSlim _wake = new(0, 1);
+
+    /// <summary>
+    /// Una escucha está sana si llegó algo en este lapso: el driver corta la que
+    /// calla 120 s, así que pasado esto ya no se le puede creer.
+    /// </summary>
+    private static readonly TimeSpan LiveFreshness = TimeSpan.FromSeconds(150);
+
+    /// <summary>Mínimo entre dos lecturas del mismo equipo pedidas por la escucha (un equipo con muchos huecos no lo satura).</summary>
+    private static readonly TimeSpan MinRequestSpacing = TimeSpan.FromSeconds(10);
+
+    /// <summary>Mínimo entre dos vueltas del sondeo, aunque lo despierten seguido.</summary>
+    private static readonly TimeSpan MinLoopGap = TimeSpan.FromSeconds(2);
+
+    /// <summary>Respaldo de los equipos con escucha sana (<c>Access:LivePollMinutes</c>, 5 por omisión).</summary>
+    private TimeSpan LivePollInterval =>
+        TimeSpan.FromMinutes(Math.Clamp(config.GetValue("Access:LivePollMinutes", 5), 1, 60));
+
+    private bool IsLive(int deviceId, DateTime now) =>
+        _liveAlive.TryGetValue(deviceId, out var alive) && now - alive < LiveFreshness;
+
+    /// <summary>¿Le toca leer el historial a este equipo en esta vuelta?</summary>
+    private bool IsDue(int deviceId, DateTime now)
+    {
+        var since = _lastPoll.TryGetValue(deviceId, out var last) ? now - last : TimeSpan.MaxValue;
+        if (_pollRequested.ContainsKey(deviceId)) return since >= MinRequestSpacing;
+        // Las vueltas pueden adelantarse (las despierta otro equipo): sin escucha
+        // sana se sigue leyendo cada 15 s, no más seguido.
+        return since >= (IsLive(deviceId, now) ? LivePollInterval : PollInterval - MinLoopGap);
+    }
+
+    /// <summary>Pide leer el historial del equipo en la próxima vuelta, que se adelanta.</summary>
+    private void RequestPoll(int deviceId)
+    {
+        _pollRequested[deviceId] = DateTime.UtcNow;
+        try { if (_wake.CurrentCount == 0) _wake.Release(); }
+        catch (SemaphoreFullException) { /* ya estaba despierto */ }
+    }
+
+    private void OnStreamSignal(int deviceId, string deviceName, AccessStreamSignal signal)
+    {
+        switch (signal)
+        {
+            case AccessStreamSignal.Connected:
+                _liveAlive[deviceId] = DateTime.UtcNow;
+                // Lo que pasó mientras la escucha estaba caída se trae ya.
+                RequestPoll(deviceId);
+                break;
+            case AccessStreamSignal.Alive:
+                _liveAlive[deviceId] = DateTime.UtcNow;
+                break;
+            case AccessStreamSignal.Gap:
+                logger.LogDebug("Faltó un número de evento en la escucha de {Device}: se lee el historial.", deviceName);
+                RequestPoll(deviceId);
+                break;
+        }
+    }
+
     private DateTime _lastPurge = DateTime.MinValue;
 
     /// <summary>Escuchas abiertas, por equipo: para no abrir dos al mismo.</summary>
@@ -91,7 +166,12 @@ public sealed class AccessEventService(
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception ex) { logger.LogWarning(ex, "La lectura del historial de accesos falló."); }
 
-            try { await Task.Delay(PollInterval, stoppingToken); }
+            // La vuelta siguiente, o antes si la escucha pidió leer un equipo.
+            try
+            {
+                await Task.Delay(MinLoopGap, stoppingToken);
+                await _wake.WaitAsync(PollInterval - MinLoopGap, stoppingToken);
+            }
             catch (OperationCanceledException) { return; }
         }
     }
@@ -150,7 +230,9 @@ public sealed class AccessEventService(
                 logger.Log(primera || fallos > 0 ? LogLevel.Information : LogLevel.Debug,
                     "Escuchando los eventos de '{Device}' en vivo.", device.Name);
                 primera = false;
-                await foreach (var record in access.DriverOf(device).StreamEventsAsync(access.ConnectionOf(device), ct))
+                string name = device.Name;
+                await foreach (var record in access.DriverOf(device).StreamEventsAsync(access.ConnectionOf(device),
+                                   s => OnStreamSignal(deviceId, name, s), ct))
                 {
                     fallos = 0;   // llegó algo: la conexión está sana
                     await StoreAsync(device.Id, [record], ct);
@@ -162,6 +244,11 @@ public sealed class AccessEventService(
             {
                 fallos++;
                 logger.LogDebug(ex, "Se cortó la escucha de eventos de {Device}.", device.Name);
+            }
+            finally
+            {
+                // Sin escucha, el equipo vuelve al sondeo de cada 15 s.
+                _liveAlive.TryRemove(deviceId, out _);
             }
 
             try { await Task.Delay(TimeSpan.FromSeconds(Math.Min(5 * Math.Max(fallos, 1), 60)), ct); }
@@ -179,7 +266,14 @@ public sealed class AccessEventService(
                 .Where(d => d.Enabled && d.SupportsEvents && d.Status == AccessDeviceStatus.Online)
                 .ToListAsync(ct);
         }
+        var now = DateTime.UtcNow;
+        devices = devices.Where(d => IsDue(d.Id, now)).ToList();
         if (devices.Count == 0) return;
+        foreach (var device in devices)
+        {
+            _lastPoll[device.Id] = now;
+            _pollRequested.TryRemove(device.Id, out _);
+        }
 
         using var limiter = new SemaphoreSlim(Parallelism);
         await Task.WhenAll(devices.Select(async device =>

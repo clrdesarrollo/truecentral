@@ -246,9 +246,11 @@ public interface IAccessControlDriver
     /// Escucha los eventos que empuja el equipo, hasta que se cancele o se
     /// corte la conexión (solo si <see cref="SupportsEventStream"/>). El
     /// llamador se encarga de reconectar: acá una desconexión termina la
-    /// secuencia, no se disimula.
+    /// secuencia, no se disimula. <paramref name="signal"/> recibe, si el driver
+    /// los sabe dar, los avisos de salud de la conexión (ver <see cref="AccessStreamSignal"/>).
     /// </summary>
-    IAsyncEnumerable<AccessEventRecord> StreamEventsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+    IAsyncEnumerable<AccessEventRecord> StreamEventsAsync(AccessConnectionInfo info,
+        Action<AccessStreamSignal>? signal = null, CancellationToken ct = default) =>
         throw new DriverException("Este equipo no empuja eventos.");
 
     /// <summary>Deja la persona escrita en el equipo (la crea o la actualiza) con sus credenciales y permisos.</summary>

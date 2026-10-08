@@ -1208,13 +1208,22 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// conexión se da por muerta y se corta para que el llamador reconecte:
     /// sin esto, un equipo que se reinicia o un cable que se corta sin cerrar
     /// la conexión dejaba la escucha colgada para siempre.
+    ///
+    /// Avisos a <paramref name="signal"/>: <c>Connected</c> al abrir, <c>Alive</c>
+    /// con cada dato que llega (latido incluido) y <c>Gap</c> si entre dos eventos
+    /// falta un número (<c>serialNo</c>/<c>frontSerialNo</c>, que la guía define
+    /// para detectar pérdidas). El ruido de las propias consultas no se entrega,
+    /// pero sí cuenta para la numeración: también consume números.
     /// </summary>
     public async IAsyncEnumerable<AccessEventRecord> StreamEventsAsync(AccessConnectionInfo info,
+        Action<AccessStreamSignal>? signal = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         var client = Client(info);
         using var response = await client.OpenStreamAsync("/ISAPI/Event/notification/alertStream", ct);
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        signal?.Invoke(AccessStreamSignal.Connected);
+        long? lastSerial = null;
 
         string boundary = BoundaryOf(response.Content.Headers.ContentType?.Parameters) ?? "MIME_boundary";
         string separator = "--" + boundary;
@@ -1230,6 +1239,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         {
             int read = await ReadWithIdleTimeoutAsync(stream, buffer, ct);
             if (read <= 0) yield break;      // el equipo cerró o calló: que reconecte el llamador
+            signal?.Invoke(AccessStreamSignal.Alive);
             int decoded = decoder.GetChars(buffer, 0, read, chars, 0);
             pending.Append(chars, 0, decoded);
 
@@ -1240,7 +1250,10 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 if (at < 0) break;
                 string parte = texto[..at];
                 pending.Remove(0, at + separator.Length);
-                if (ParseStreamPart(parte) is { } evento) yield return evento;
+                if (ParseStreamPart(parte) is not { } part) continue;
+                if (IsSerialGap(lastSerial, part.Record.SerialNo, part.Front)) signal?.Invoke(AccessStreamSignal.Gap);
+                if (part.Record.SerialNo is long serial) lastSerial = serial;
+                if (!IsOwnSessionNoise(part.Record)) yield return part.Record;
             }
 
             // Un flujo sin separadores que crece sin límite es un equipo que
@@ -1280,7 +1293,20 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// de acceso (el equipo también empuja latidos y eventos de otros
     /// subsistemas por el mismo flujo).
     /// </summary>
-    private static AccessEventRecord? ParseStreamPart(string parte)
+    /// <summary>
+    /// ¿Se perdió algo entre el evento anterior y este? Con <c>frontSerialNo</c>
+    /// (el número del evento anterior según el equipo) se compara con el último
+    /// que llegó; sin él, que el número sea el siguiente. El primero de cada
+    /// conexión no se juzga: lo de antes lo cubre la lectura al reconectar.
+    /// Un número que no avanza (reenvío al reconectar) no es un hueco.
+    /// </summary>
+    private static bool IsSerialGap(long? lastSerial, long? serial, long? front)
+    {
+        if (lastSerial is not long previous || serial is not long current || current <= previous) return false;
+        return front is long declared ? declared != previous : current > previous + 1;
+    }
+
+    private static (AccessEventRecord Record, long? Front)? ParseStreamPart(string parte)
     {
         int cuerpo = parte.IndexOf("\r\n\r\n", StringComparison.Ordinal);
         string json = (cuerpo >= 0 ? parte[(cuerpo + 4)..] : parte).Trim();
@@ -1293,10 +1319,12 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             if (HikvisionAlarmPanelDriver.FindObject(root, "AccessControllerEvent") is not { } acs) return null;
 
             var record = ParseEvent(acs);
-            if (IsOwnSessionNoise(record)) return null;
             // La hora del evento va en la envoltura, no en el objeto interno.
             var cuando = ParseTime(HikvisionAlarmPanelDriver.GetString(root, "dateTime"));
-            return record with { Timestamp = cuando, RawJson = json };
+            string? front = HikvisionAlarmPanelDriver.GetString(acs, "frontSerialNo")
+                            ?? HikvisionAlarmPanelDriver.GetString(root, "frontSerialNo");
+            return (record with { Timestamp = cuando, RawJson = json },
+                long.TryParse(front, out long previous) && previous > 0 ? previous : null);
         }
         catch (JsonException)
         {
