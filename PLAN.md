@@ -1010,6 +1010,66 @@ ubicaciones) la interfaz ofrecía órdenes que el servidor rechazaba con 403.
   la columna "Credenciales" cuenta también huellas y rostro (antes mostraba "—" a una
   persona con 4 huellas). Solo lectura: no hay acción nueva que auditar.
 
+### El Facial Tablero no tiene lector de huellas — 2026-10-08
+
+Con la 0.5.11 instalada el terminal ya aceptaba las huellas (OK a cada `FingerPrintDownload`)
+pero la comprobación no encontraba ninguna. Preguntándole al equipo (solo lectura): **el
+DS-K1T323MBWX-QRE1 no trae sensor de huella** (sin la "F" del modelo). `CardReaderCfg/1` es
+el propio (`cardReaderFunction: ["face", "card"]`, descripción = el modelo) y el lector 2 es
+la **entrada de lector externo, vacía** (`cardReaderFunction: []`, sin descripción;
+`AcsWorkStatus.cardReaderOnlineStatus: [1]`). Lo que se leyó el 2026-10-07 como "el de
+huella es el 2" era solo que el firmware ubica ahí las huellas que vendrían de un lector
+externo. `GET /ISAPI/AccessControl/FingerPrintProgress` lo decía claro tras cada huella:
+`{"id": 2, "cardReaderRecvStatus": 8}` (8 = ese lector no tiene módulo de huella).
+
+- **Driver**: tras cada huella, `CheckFingerprintProgressAsync` lee `FingerPrintProgress`
+  (espera `totalStatus` 1) y traduce `cardReaderRecvStatus` (0 falló, 2 módulo
+  desconectado, 3 mala calidad, 4 memoria llena, 5 huella ya registrada, 6 dedo ocupado,
+  7 dedo inválido, 8 sin módulo, 10 módulo antiguo). Con un lector que la guardó alcanza;
+  si TODOS dicen 8 lanza `NoFingerprintReaderException` (Core), que `ApplyPersonAsync`
+  deja salir solo si tarjetas y rostro quedaron. Sin la ruta (firmware viejo) queda la
+  comprobación de siempre. En el sondeo, `HasFingerprintReaderAsync`: `SupportsFingerprint`
+  es falso solo si TODOS los lectores de `enableCardReader` son entradas vacías (ante
+  cualquier duda, sí).
+- **Servidor**: no se mandan huellas a un equipo con `SupportsFingerprint` falso (igual que
+  el rostro). Al recibir `NoFingerprintReaderException` lo anota en el equipo, da la fila
+  por `Synced` con el hash del plan sin huellas (el que calcula la pasada siguiente) y lo
+  audita como `access/device-fingerprint-unavailable` (sistema).
+- **Panel**: `AccessPersonDeviceDto` lleva las capacidades del equipo; el detalle dice
+  "Quedó escrita con lo que este equipo usa. No lleva sus huellas porque el equipo no tiene
+  lector de huellas" en vez de "todas sus credenciales".
+- **Probado**: driver real contra cuatro terminales simulados (perfil del DS-K1T323MBWX,
+  con huella, memoria llena y sin `FingerPrintProgress`) y el detalle en el navegador.
+  **Validado con la 0.5.12 instalada**: el Facial Tablero quedó "Al día" sin huellas y el
+  DS-K1T804AMF con todo. Para huellas en ese terminal hace falta un lector de huella externo
+  RS-485 en el lector 2.
+
+### La foto del rostro se arregla antes de mandarla — 2026-10-08
+
+Con las huellas resueltas, el DS-K1T321MFWX (192.168.10.77, V3.9.20) rechazaba el rostro con
+"no pudo reconocer una cara" usando una foto perfecta (de frente, 1200×1600). Probado en el
+equipo con la misma foto en variantes (persona 1000, borrar y grabar):
+
+| Foto | Respuesta |
+|---|---|
+| JPEG **progresivo** (el de WhatsApp), 184 KB | `SubpicAnalysisModelingError · saveFacePic` |
+| JPEG baseline, 214 KB | `badJsonContent · faceURL` (tope ~200 KB) |
+| JPEG baseline, 160 KB, mismo 1200×1600 | OK |
+| JPEG baseline 600×800, 76 KB | OK |
+
+El DS-K1T323MBWX V4.23 sí aceptaba la progresiva: es el firmware viejo. Arreglo:
+`Services\AccessFacePhotoNormalizer` (System.Drawing, solo Windows) lo aplica
+`AccessSyncService` al descifrar la foto, una vez por persona: aplica la orientación EXIF,
+lleva el lado mayor a 1024 px (o agranda a 400 px de lado corto si es menor que 300),
+redibuja sobre blanco y la codifica en JPEG baseline bajando la calidad (90→60) y después el
+tamaño hasta quedar ≤ 180 KB. Si GDI+ no la lee, va tal cual. La foto guardada no cambia.
+Es **determinista** (verificado: mismos bytes en dos pasadas), porque el plan se compara por
+hash; consecuencia esperada: tras instalar, las personas con rostro se reescriben UNA vez.
+El driver ahora deja la respuesta del equipo entre paréntesis en los rechazos de la foto y
+traduce `faceURL` a "pesa más de lo que acepta el equipo"; de paso "de el rostro" → "del
+rostro". Verificado: la foto normalizada (768×1024, 139 KB) entró en el DS-K1T321MFWX real y
+la persona quedó con `numOfFace: 1`; casos de prueba EXIF 6, PNG chico transparente y basura.
+
 ## Hora y mantenimiento de equipos — 2026-10-07
 
 Pedido del usuario a partir del Facial Tablero en zona China: ver y supervisar la hora de los

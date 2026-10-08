@@ -690,12 +690,25 @@ function accessPersonSyncModal(person, levels) {
   // Primero lo que falla, después lo que espera y al final lo que está al día.
   const ORDER = { Failed: 0, Pending: 1, NotApplicable: 2, Synced: 3 };
 
-  const deviceBlock = (d) => {
+  // Lo que la persona lleva y ESTE equipo no usa, así que no se le mandó: un
+  // terminal facial sin lector de huella está al día sin sus huellas, y decir
+  // "todas sus credenciales" ahí haría creer que con el dedo también entra.
+  const notCarried = (d, p) => [
+    p.fingerprints.length && d.supportsFingerprint === false
+      ? `No lleva ${p.fingerprints.length === 1 ? "su huella" : "sus huellas"} porque el equipo no tiene lector de huellas.`
+      : null,
+    p.face && d.supportsFace === false ? "No lleva su rostro porque el equipo no reconoce rostros." : null,
+  ].filter(Boolean);
+
+  const deviceBlock = (d, p) => {
     const state = ACCESS_SYNC_STATES[d.state] ?? ACCESS_SYNC_STATES.NotApplicable;
     const { text, raw } = accessSplitSyncError(d.error);
-    const body = d.state === "Synced"
-      ? `<div class="muted">Quedó escrita con todas sus credenciales.</div>`
-      : `<div>${esc(text || "Sin detalle del equipo.")}</div>`;
+    const missing = notCarried(d, p);
+    const body = d.state !== "Synced"
+      ? `<div>${esc(text || "Sin detalle del equipo.")}</div>`
+      : missing.length
+        ? `<div class="muted">Quedó escrita con lo que este equipo usa. ${esc(missing.join(" "))}</div>`
+        : `<div class="muted">Quedó escrita con todas sus credenciales.</div>`;
     return `
       <div class="sync-device ${d.state === "Failed" ? "failed" : d.state === "Pending" ? "pending" : ""}">
         <div class="sync-device-head">
@@ -736,7 +749,7 @@ function accessPersonSyncModal(person, levels) {
         ${failed === 1 ? "Un equipo no aceptó" : `${failed} equipos no aceptaron`} todo lo que se le mandó.
         Corrija lo que indique el equipo y vuelva a escribirla.</div>` : ""}
       <div id="psd-error"></div>
-      <div class="sync-device-list">${devices.map(deviceBlock).join("")}</div>
+      <div class="sync-device-list">${devices.map((d) => deviceBlock(d, p)).join("")}</div>
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="psd-close">Cerrar</button>
         <div style="flex:1"></div>

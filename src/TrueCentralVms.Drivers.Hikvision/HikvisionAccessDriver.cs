@@ -268,7 +268,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             SupportsRemoteControl: remoteControl,
             SupportsEvents: await AnswersAsync(client, "/ISAPI/AccessControl/AcsEvent/capabilities?format=json", ct),
             SupportsCards: await AnswersAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities?format=json", ct),
-            SupportsFingerprint: await AnswersAsync(client, "/ISAPI/AccessControl/FingerPrintCfg/capabilities?format=json", ct),
+            SupportsFingerprint: await HasFingerprintReaderAsync(client, ct),
             SupportsFace: await AnswersAsync(client, "/ISAPI/Intelligent/FDLib/capabilities?format=json", ct),
             UserCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/UserInfo/capabilities?format=json", ct),
             CardCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities?format=json", ct));
@@ -294,6 +294,57 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     {
         try { return await client.RequestAsync(HttpMethod.Get, path, ct: ct) is not null; }
         catch (DriverException) { return false; }   // 403 del usuario sin permiso, o función deshabilitada
+    }
+
+    /// <summary>
+    /// ¿Tiene el equipo dónde leer una huella? Que conteste la ruta de huellas
+    /// no alcanza: el DS-K1T323MBWX-QRE1 (facial, sin sensor) la contesta igual,
+    /// ubica las huellas en el lector 2 —la entrada para un lector externo— y
+    /// las acepta con OK para después tirarlas.
+    ///
+    /// Se mira cada lector donde el equipo dice grabar huellas
+    /// (<c>enableCardReader</c> de sus capacidades). Si TODOS son entradas
+    /// vacías —<c>cardReaderFunction</c> sin nada y sin descripción, que es como
+    /// se ve un lector externo sin conectar; el propio del terminal dice
+    /// <c>["face", "card"]</c> y su modelo— no hay dónde leer una huella. Ante
+    /// cualquier duda (ruta que no existe, campo que no viene, respuesta que no
+    /// se entiende) se contesta que sí: un "no" apaga las huellas en ese
+    /// equipo, y eso solo se hace si el equipo lo afirma.
+    /// </summary>
+    private static async Task<bool> HasFingerprintReaderAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        int[] readers;
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get,
+                    "/ISAPI/AccessControl/FingerPrintCfg/capabilities?format=json", ct: ct) is not { } json)
+                return false;   // no sabe de huellas
+            using var doc = JsonDocument.Parse(json);
+            if (RangeOf(doc.RootElement, "enableCardReader", depth: 4) is not { } range) return true;
+            readers = ReaderRange(range.Min, range.Max);
+        }
+        catch (DriverException) { return false; }   // 403 del usuario sin permiso, o función deshabilitada
+        catch (JsonException) { return true; }
+
+        foreach (int reader in readers)
+        {
+            try
+            {
+                if (await client.RequestAsync(HttpMethod.Get,
+                        $"/ISAPI/AccessControl/CardReaderCfg/{reader}?format=json", ct: ct) is not { } json)
+                    return true;
+                using var doc = JsonDocument.Parse(json);
+                if (HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "CardReaderCfg") is not { } cfg ||
+                    !cfg.TryGetProperty("cardReaderFunction", out var functions) ||
+                    functions.ValueKind != JsonValueKind.Array ||
+                    functions.GetArrayLength() > 0 ||
+                    !string.IsNullOrWhiteSpace(HikvisionAlarmPanelDriver.GetString(cfg, "cardReaderDescription")))
+                    return true;
+            }
+            catch (DriverException) { return true; }
+            catch (JsonException) { return true; }
+        }
+        return false;
     }
 
     /// <summary>Cupo declarado en una ruta de capacidades (<c>maxRecordNum</c> / <c>maxNum</c>).</summary>
@@ -1508,20 +1559,31 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         // final se cuenta lo que falló, que igual deja el equipo en rojo pero
         // diciendo QUÉ falta.
         var problemas = new List<string>();
+        NoFingerprintReaderException? sinLectorDeHuella = null;
         foreach (var (nombre, escribir) in new (string, Func<Task>)[]
                  {
-                     ("las tarjetas", () => ApplyCardsAsync(client, plan, ct)),
-                     ("las huellas", () => ApplyFingerprintsAsync(client, plan, ct)),
-                     ("el rostro", () => ApplyFaceAsync(client, plan, ct)),
+                     ("de las tarjetas", () => ApplyCardsAsync(client, plan, ct)),
+                     ("de las huellas", () => ApplyFingerprintsAsync(client, plan, ct)),
+                     ("del rostro", () => ApplyFaceAsync(client, plan, ct)),
                  })
         {
             try { await escribir(); }
+            catch (NoFingerprintReaderException ex) { sinLectorDeHuella = ex; }
             catch (DriverException ex) { problemas.Add($"{nombre}: {ex.Message}"); }
         }
 
-        if (problemas.Count == 0) return;
+        // Un equipo sin lector de huella no es una escritura fallida: quedó
+        // todo lo que ese equipo puede llevar. Se avisa aparte —y solo si no
+        // hubo otra cosa— para que el servidor lo anote en el equipo y no le
+        // vuelva a mandar huellas.
+        if (problemas.Count == 0)
+        {
+            if (sinLectorDeHuella is not null) throw sinLectorDeHuella;
+            return;
+        }
+        if (sinLectorDeHuella is not null) problemas.Add($"de las huellas: {sinLectorDeHuella.Message}");
         throw new DriverException(
-            "La persona quedó escrita en el equipo, pero falló la escritura de " +
+            "La persona quedó escrita en el equipo, pero falló la escritura " +
             $"{string.Join(" · ", problemas)} " +
             "El resto de sus credenciales sí quedó, así que puede entrar con las que sí entraron.");
     }
@@ -1656,16 +1718,16 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 "FaceDataRecord", meta,
                 "img", $"{plan.EmployeeNo}.{extension}", face.Image, face.ContentType, ct);
         }
-        catch (DriverException ex) when (IsFaceQuality(ex.Message))
+        catch (DriverException ex) when (FaceRejection(plan.Name, ex.Message) is { } explained)
         {
-            throw new DriverException(FaceQualityMessage(plan.Name));
+            throw new DriverException(explained);
         }
 
         if (response is null)
             throw new DriverException("Este equipo no acepta rostros desde el VMS: no tiene la biblioteca de caras.");
         if (FailureOf(response) is { } error)
             throw new DriverException(
-                IsFaceQuality(error) ? FaceQualityMessage(plan.Name)
+                FaceRejection(plan.Name, error) is { } explained ? explained
                 : error.Contains("AlreadyExistFace", StringComparison.OrdinalIgnoreCase)
                     ? $"El equipo todavía tiene el rostro anterior de {plan.Name} y no acepta el nuevo. " +
                       "Vuelva a enviarla en un momento."
@@ -1696,14 +1758,37 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         message.Contains("saveFacePic", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Lo primero que hay que mirar es el TAMAÑO: probado contra el
-    /// DS-K1T321MFWX, una foto de 135×189 px se rechaza y esa misma imagen al
-    /// doble se acepta. Después vienen la pose y la luz.
+    /// El rechazo de la foto en palabras que el operador pueda accionar, con
+    /// la respuesta del equipo entre paréntesis para quien tenga que mirarla;
+    /// null si no es un rechazo de la foto.
+    /// </summary>
+    private static string? FaceRejection(string name, string message)
+    {
+        if (IsFaceQuality(message)) return FaceQualityMessage(name) + DeviceDetail(message);
+        // Medido contra el DS-K1T321MFWX V3.9.20: pasado su tope de ~200 KB
+        // contesta "badJsonContent · faceURL", como si la foto tuviera que
+        // venir por URL. El servidor ya la manda por debajo del tope.
+        if (message.Contains("faceURL", StringComparison.OrdinalIgnoreCase))
+            return $"La foto de {name} pesa más de lo que acepta el equipo (unos 200 KB). " +
+                   "Cárguela de nuevo con una foto más liviana." + DeviceDetail(message);
+        return null;
+    }
+
+    /// <summary>La respuesta del equipo que trae el mensaje, entre paréntesis, o "" si no trae.</summary>
+    private static string DeviceDetail(string message) =>
+        System.Text.RegularExpressions.Regex.Match(message, @"\(([^()]*)\)\s*$") is { Success: true } m
+            ? $" ({m.Groups[1].Value})" : "";
+
+    /// <summary>
+    /// Con la foto ya arreglada por el servidor (JPEG normal, derecha, de
+    /// tamaño y peso razonables) lo que queda es la foto en sí. Antes de eso,
+    /// el "no reconoce una cara" del DS-K1T321MFWX era casi siempre el FORMATO:
+    /// un JPEG progresivo, como los que entrega WhatsApp, lo rechaza así
+    /// aunque la cara sea perfecta (<c>SubpicAnalysisModelingError · saveFacePic</c>).
     /// </summary>
     private static string FaceQualityMessage(string name) =>
         $"El equipo no pudo reconocer una cara en la foto de {name}. " +
-        "Suele ser porque la foto es chica: use una de al menos 300 px de lado. " +
-        "Además tiene que ser de frente, con la cara despejada y bien iluminada, " +
+        "Tiene que ser de frente, con la cara despejada y bien iluminada, " +
         "sin lentes oscuros ni gorro, y ocupando buena parte de la imagen.";
 
     /// <summary>
@@ -1822,10 +1907,115 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             // Si el equipo tuvo que bajar a menos lectores, las huellas que
             // siguen ya van con los que aceptó.
             readers = await DownloadFingerprintAsync(client, plan.EmployeeNo, readers, plan.Fingerprints[i], ct);
+            // Y se pregunta cómo le fue: el OK de arriba solo dice que el
+            // equipo recibió el pedido.
+            await CheckFingerprintProgressAsync(client, plan.Fingerprints[i], ct);
         }
 
         await VerifyFingerprintsAsync(client, plan, ct);
     }
+
+    /// <summary>
+    /// Cómo le fue a la huella recién bajada, lector por lector.
+    ///
+    /// El OK de <c>FingerPrintDownload</c> solo dice que el equipo recibió el
+    /// pedido. El resultado de verdad lo deja en <c>FingerPrintProgress</c>:
+    /// <c>totalStatus</c> 1 cuando terminó, y un <c>cardReaderRecvStatus</c> por
+    /// lector (1 = guardada). Medido contra el DS-K1T323MBWX-QRE1 V4.23.41: a
+    /// cada huella contestaba OK y ahí decía <c>{"id": 2, "cardReaderRecvStatus": 8}</c>
+    /// —ese lector no tiene módulo de huella—, mientras el VMS la daba por
+    /// escrita y recién la comprobación posterior la echaba de menos, sin poder
+    /// decir por qué.
+    ///
+    /// Con que UN lector la haya guardado alcanza. Si todos dicen que no tienen
+    /// módulo, el equipo no puede llevar huellas y se lanza
+    /// <see cref="NoFingerprintReaderException"/>. Cualquier otro rechazo se
+    /// traduce a palabras. Si el equipo no conoce la ruta o no termina a tiempo
+    /// no se inventa un veredicto: queda la comprobación de después.
+    /// </summary>
+    private static async Task CheckFingerprintProgressAsync(HikvisionIsapiClient client, AccessFingerprintData finger,
+        CancellationToken ct)
+    {
+        List<(int Reader, int Status, string? Message)>? statuses = null;
+        for (int attempt = 0; attempt < ProgressAttempts && statuses is null; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(TimeSpan.FromMilliseconds(ProgressDelayMs), ct);
+
+            string? response;
+            try
+            {
+                response = await client.RequestAsync(HttpMethod.Get,
+                    "/ISAPI/AccessControl/FingerPrintProgress?format=json", ct: ct);
+            }
+            catch (DriverException ex) when (IsBusy(ex.Message)) { continue; }
+            catch (DriverException) { return; }   // firmware que no la tiene
+            if (response is null) return;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(response);
+                if (HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "FingerPrintStatus") is not { } status) return;
+                if (HikvisionAlarmPanelDriver.GetInt(status, "totalStatus") is 0) continue;   // todavía aplicando
+                if (!status.TryGetProperty("StatusList", out var list) || list.ValueKind != JsonValueKind.Array) return;
+
+                var found = new List<(int, int, string?)>();
+                foreach (var item in list.EnumerateArray())
+                    if (HikvisionAlarmPanelDriver.GetInt(item, "cardReaderRecvStatus") is { } recv)
+                        found.Add((HikvisionAlarmPanelDriver.GetInt(item, "id") ?? 0, recv,
+                            HikvisionAlarmPanelDriver.GetString(item, "errorMsg")));
+                if (found.Count == 0) return;
+                statuses = found;
+            }
+            catch (JsonException) { return; }
+        }
+
+        if (statuses is null || statuses.Any(s => s.Status == ReaderStored)) return;
+
+        string raw = string.Join(" · ", statuses.Select(s =>
+            $"lector {s.Reader}: cardReaderRecvStatus {s.Status}" +
+            (string.IsNullOrWhiteSpace(s.Message) ? "" : $" {s.Message}")));
+
+        if (statuses.All(s => s.Status == ReaderWithoutModule))
+            throw new NoFingerprintReaderException(
+                "Este equipo no tiene lector de huellas: no trae sensor de huella y no hay un lector externo " +
+                $"de huella conectado. (FingerPrintProgress · {raw})");
+
+        string reasons = string.Join("; ", statuses
+            .Where(s => s.Status != ReaderWithoutModule)
+            .Select(s => ReaderStatusText(s.Reader, s.Status))
+            .Distinct());
+        throw new DriverException(
+            $"El equipo no guardó la huella de {FingerName(finger.Number)}: {reasons}. (FingerPrintProgress · {raw})");
+    }
+
+    /// <summary>Consultas a <c>FingerPrintProgress</c> antes de dejarle el veredicto a la comprobación.</summary>
+    private const int ProgressAttempts = 6;
+
+    /// <summary>Espera entre dos consultas mientras el equipo sigue aplicando (<c>totalStatus</c> 0).</summary>
+    private const int ProgressDelayMs = 500;
+
+    /// <summary><c>cardReaderRecvStatus</c>: el lector guardó la huella.</summary>
+    private const int ReaderStored = 1;
+
+    /// <summary><c>cardReaderRecvStatus</c>: ese lector no tiene módulo de huella ("no necesita configurarse").</summary>
+    private const int ReaderWithoutModule = 8;
+
+    /// <summary>
+    /// <c>cardReaderRecvStatus</c> en palabras (los mismos códigos que
+    /// <c>NET_DVR_FINGER_PRINT_STATUS</c> del SDK; el equipo declara 0..8).
+    /// </summary>
+    private static string ReaderStatusText(int reader, int status) => status switch
+    {
+        0 => $"el lector {reader} no pudo guardarla",
+        2 => $"el módulo de huella del lector {reader} está desconectado",
+        3 => "la plantilla es de mala calidad: vuelva a capturar ese dedo",
+        4 => "la memoria de huellas del equipo está llena",
+        5 => "esa huella ya está registrada en el equipo, probablemente a otra persona",
+        6 => "ese número de dedo ya está ocupado en el equipo",
+        7 => "el equipo no acepta ese número de dedo",
+        10 => $"el módulo de huella del lector {reader} es demasiado antiguo para esta escritura",
+        _ => $"el lector {reader} la rechazó (código {status})",
+    };
 
     /// <summary>
     /// Espera a que el equipo termine de borrar: pregunta hasta que conteste
@@ -2291,7 +2481,8 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         // El esquema de huellas del propio equipo trae enableCardReader con su
         // RANGO, y el rango entero es la respuesta: no siempre empieza en 1.
         // En el DS-K1T323MBWX-QRE1 (V4.23.41) el lector 1 es el de rostro y
-        // tarjeta y el de huella es el 2: declara {"@min": 2, "@max": 2} y
+        // tarjeta y las huellas van al 2 —la entrada de lector externo, porque
+        // el terminal no trae sensor—: declara {"@min": 2, "@max": 2} y
         // rechaza cualquier lista que incluya el 1 ("Exceeding the parameter
         // range limit … enableCardReader"). Tomar solo el @max como cantidad
         // —1..@max— fue lo que dejó a sus personas sin huellas.

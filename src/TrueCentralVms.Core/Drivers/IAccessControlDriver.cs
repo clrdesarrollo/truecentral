@@ -107,6 +107,18 @@ public sealed record AccessDoorRight(int DoorNumber, AccessWeekPlan Plan);
 public sealed record AccessFingerprintData(int Number, string Template);
 
 /// <summary>
+/// El equipo dijo, al recibir una huella, que no tiene dónde guardarla: ningún
+/// lector suyo tiene módulo de huella (un terminal facial sin sensor, o la
+/// entrada de lector externo sin nada conectado).
+///
+/// Va aparte de un <see cref="DriverException"/> común porque NO es una falla
+/// de la escritura: el driver lo lanza recién después de escribir todo lo
+/// demás, y solo si todo lo demás quedó. El servidor lo toma como "este equipo
+/// no lleva huellas": lo anota en el equipo y da a la persona por escrita.
+/// </summary>
+public sealed class NoFingerprintReaderException(string message) : DriverException(message);
+
+/// <summary>
 /// El rostro de una persona listo para bajar a un equipo: la FOTO tal cual, no
 /// una plantilla. A diferencia de la huella, el modelo lo arma el propio
 /// terminal a partir de la imagen —por eso puede rechazarla si no encuentra una
