@@ -118,7 +118,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         if (Profiles.TryGetValue(key, out var known)) return known;
         if (ProfileMisses.TryGetValue(key, out var missedAt) && DateTime.UtcNow - missedAt < ProfileRetry) return null;
 
-        var profile = await HikvisionAccessProfile.ReadAsync(client, ct);
+        var profile = await ReadProfileCoreAsync(client, ct);
         if (!profile.Usable)
         {
             ProfileMisses[key] = DateTime.UtcNow;
@@ -142,7 +142,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     {
         try
         {
-            var profile = await HikvisionAccessProfile.ReadAsync(client, ct);
+            var profile = await ReadProfileCoreAsync(client, ct);
             if (profile.Usable)
             {
                 Profiles[DeviceKey(info)] = profile;
@@ -153,6 +153,21 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             return profile.ToDisplay();
         }
         catch (DriverException) { return null; }   // la ficha es informativa: no tumba la validación
+    }
+
+    /// <summary>
+    /// Las capacidades declaradas más lo que el driver averigua aparte: si de
+    /// verdad hay un lector de huella (ver <see cref="HasFingerprintReaderAsync"/>).
+    /// Con eso, a un equipo sin sensor tampoco se le piden borrados de huellas.
+    /// </summary>
+    private static async Task<HikvisionAccessProfile> ReadProfileCoreAsync(HikvisionIsapiClient client,
+        CancellationToken ct)
+    {
+        var profile = await HikvisionAccessProfile.ReadAsync(client, ct);
+        profile.FingerprintReader = profile.DeclaresFingerprints == false
+            ? false
+            : await HasFingerprintReaderAsync(client, ct);
+        return profile;
     }
 
     /// <summary>
@@ -264,19 +279,23 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         int doorCount = DoorCountOf(doorCaps) ?? DoorCountOf(acsCaps) ?? 1;
         var doors = await ReadDoorsAsync(client, doorCount, ct);
 
+        // La ficha primero: ya averigua si hay lector de huella, y eso mismo es
+        // SupportsFingerprint (no se le pregunta dos veces al equipo).
+        var profile = await ReadProfileAsync(info, client, ct);
+
         var capabilities = new AccessCapabilities(
             DoorCount: doors.Count,
             SupportsRemoteControl: remoteControl,
             SupportsEvents: await AnswersAsync(client, "/ISAPI/AccessControl/AcsEvent/capabilities?format=json", ct),
             SupportsCards: await AnswersAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities?format=json", ct),
-            SupportsFingerprint: await HasFingerprintReaderAsync(client, ct),
+            SupportsFingerprint: CachedProfile(client)?.FingerprintReader ?? await HasFingerprintReaderAsync(client, ct),
             SupportsFace: await AnswersAsync(client, "/ISAPI/Intelligent/FDLib/capabilities?format=json", ct),
             UserCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/UserInfo/capabilities?format=json", ct),
             CardCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities?format=json", ct));
 
         var kind = ClassifyModel(model) ?? KindOfDoorCount(doors.Count);
         return new AccessDeviceInfo(model, Value("serialNumber"), Value("firmwareVersion"), Value("deviceType"),
-            Value("macAddress"), kind, capabilities, doors, await ReadProfileAsync(info, client, ct));
+            Value("macAddress"), kind, capabilities, doors, profile);
     }
 
     public async Task PingAsync(AccessConnectionInfo info, CancellationToken ct = default)

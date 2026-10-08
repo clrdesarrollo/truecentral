@@ -93,8 +93,18 @@ internal sealed class HikvisionAccessProfile
     /// </summary>
     public bool? Pin => PinLength is not null ? true : UserFunctions is not null ? false : null;
 
-    /// <summary>¿Maneja huellas? null = no lo declara.</summary>
-    public bool? Fingerprints => Flag("isSupportFingerPrintCfg") ?? (FingerprintReaders is not null ? true : null);
+    /// <summary>¿Declara la función de huellas? null = no lo dice.</summary>
+    public bool? DeclaresFingerprints => Flag("isSupportFingerPrintCfg") ?? (FingerprintReaders is not null ? true : null);
+
+    /// <summary>
+    /// ¿Tiene de verdad dónde leer una huella? Lo averigua el driver lector por
+    /// lector (<c>CardReaderCfg</c>): declarar la función no alcanza, el
+    /// DS-K1T323MBWX-QRE1 facial la declara y no trae sensor. null = no se miró.
+    /// </summary>
+    public bool? FingerprintReader { get; set; }
+
+    /// <summary>¿Maneja huellas? Lo que declara, salvo que no tenga lector. null = no se sabe.</summary>
+    public bool? Fingerprints => FingerprintReader == false ? false : DeclaresFingerprints;
     public bool? Cards => Flag("isSupportCardInfo") ?? (CardFunctions is not null ? true : null);
     public bool? Faces => Flag("isSupportFDLib") ?? (FaceFunctions is not null ? true : null);
 
@@ -502,6 +512,25 @@ internal sealed class HikvisionAccessProfile
                 $"{FaceCapsPath} · supportFDFunction"),
             Mark("isSupportCaptureFace"),
         };
+        if (FingerprintReader == false && DeclaresFingerprints == true)
+        {
+            // Declara la función pero no tiene sensor: la ficha no puede decir
+            // "huellas sí", y lo demás de huellas no aplica.
+            var fingerprintItems = new HashSet<string>
+                { "Huellas", "Borrado de huellas", "Huellas en un paso", FlagLabels["isSupportCaptureFingerPrint"] };
+            for (int i = 0; i < credentials.Count; i++)
+            {
+                if (!fingerprintItems.Contains(credentials[i].Label)) continue;
+                credentials[i] = credentials[i] with
+                {
+                    State = AccessCapabilityState.NotSupported,
+                    Detail = credentials[i].Label == "Huellas"
+                        ? "Declara la función, pero no tiene sensor de huella ni un lector externo de huella " +
+                          "conectado: el VMS no le manda huellas."
+                        : "No aplica: el equipo no tiene lector de huella.",
+                };
+            }
+        }
         used.Add("isSupportCardInfo");
         used.Add("isSupportFingerPrintCfg");
         used.Add("isSupportFingerPrintDelete");
