@@ -43,7 +43,7 @@ public sealed partial class HikvisionIsapiClient
 
     private sealed class Entry
     {
-        /// <summary>Con credenciales Digest (las negocia el handler ante el 401 con desafío).</summary>
+        /// <summary>Con credenciales Digest (las negocia <see cref="IsapiDigestHandler"/>).</summary>
         public required HttpClient Http;
         /// <summary>Mismo CookieContainer, SIN credenciales: en modo sesión el panel recibe solo la cookie.</summary>
         public required HttpClient PlainHttp;
@@ -94,11 +94,10 @@ public sealed partial class HikvisionIsapiClient
     private static Entry Create(AlarmConnectionInfo info)
     {
         var cookies = new CookieContainer();
+        // Digest lo negocia IsapiDigestHandler (no el de .NET, que repite cada
+        // petición tras un 401): este handler va SIN credenciales.
         var digestHandler = new HttpClientHandler
         {
-            // Digest lo negocia el propio handler ante el 401 con desafío.
-            Credentials = new NetworkCredential(info.Username, info.Password),
-            PreAuthenticate = true,
             CookieContainer = cookies,
             UseCookies = true,
             AllowAutoRedirect = false,
@@ -131,7 +130,7 @@ public sealed partial class HikvisionIsapiClient
 
         return new Entry
         {
-            Http = Configure(new HttpClient(digestHandler)),
+            Http = Configure(new HttpClient(new IsapiDigestHandler(info.Username, info.Password, digestHandler))),
             PlainHttp = Configure(new HttpClient(plainHandler)),
             // A propósito SIN Configure: ver LoginHttp.
             LoginHttp = new HttpClient(loginHandler) { Timeout = RequestTimeout },
@@ -633,6 +632,13 @@ public sealed partial class HikvisionIsapiClient
         }
 
         string detail = string.Join(" · ", new[] { statusString, subStatus, errorMsg }.Where(s => !string.IsNullOrWhiteSpace(s))!);
+        // Llega como 404, pero no es "no lo soporta": los cupos de suscripción a
+        // eventos están ocupados. Medido el 2026-10-08: los DS-K1T321MFWX y
+        // DS-K1T323MBWX admiten UNA sola escucha ISAPI, así que un segundo
+        // sistema (otro VMS, un servidor de prueba) se queda afuera.
+        if (detail.Contains("deployExceedMax", StringComparison.OrdinalIgnoreCase))
+            return $"El {noun} ya tiene ocupados sus cupos de suscripción a eventos: otro sistema está recibiendo sus " +
+                   "eventos en vivo. Vea quién en la pestaña Capacidades del equipo (Suscripciones abiertas)." + Suffix(detail);
         return status switch
         {
             HttpStatusCode.Forbidden => $"El {noun} denegó la operación (el usuario no tiene permiso)." + Suffix(detail),
