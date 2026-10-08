@@ -118,6 +118,7 @@ public sealed class AccessEventService(
     private async Task ListenAsync(int deviceId, CancellationToken ct)
     {
         int fallos = 0;
+        bool primera = true;
         while (!ct.IsCancellationRequested)
         {
             AccessDevice? device;
@@ -131,7 +132,11 @@ public sealed class AccessEventService(
 
             try
             {
-                logger.LogInformation("Escuchando los eventos de '{Device}' en vivo.", device.Name);
+                // El driver corta la escucha que queda en silencio (sin latido)
+                // para reconectar: esas vueltas sanas no ensucian el registro.
+                logger.Log(primera || fallos > 0 ? LogLevel.Information : LogLevel.Debug,
+                    "Escuchando los eventos de '{Device}' en vivo.", device.Name);
+                primera = false;
                 await foreach (var record in access.DriverOf(device).StreamEventsAsync(access.ConnectionOf(device), ct))
                 {
                     fallos = 0;   // llegó algo: la conexión está sana

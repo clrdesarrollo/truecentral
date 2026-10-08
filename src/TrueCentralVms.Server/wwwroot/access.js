@@ -433,6 +433,9 @@ function accessProbeResultHtml(r) {
 //     puerta, tiempos de apertura, umbrales del reconocimiento facial, LED
 //     del lector…), leídos del equipo al abrir la pestaña y escritos de
 //     vuelta al guardar cada bloque. El VMS no los guarda.
+//   · Capacidades: lo que el equipo DECLARA saber hacer (sus rutas de
+//     capacidades oficiales), leído al validarlo; el VMS lo usa para elegir
+//     cómo escribirle.
 //   · Hora y mantenimiento: el mismo apartado que tienen las fichas.
 // ---------------------------------------------------------------------------
 
@@ -440,6 +443,7 @@ const ACD_TABS = [
   { key: "connection", label: "Conexión" },
   { key: "doors", label: "Puertas" },
   { key: "readers", label: "Lectores" },
+  { key: "capabilities", label: "Capacidades" },
   { key: "maintenance", label: "Hora y mantenimiento" },
 ];
 
@@ -533,6 +537,9 @@ async function acdDrawTab() {
     case "readers":
       await acdDrawSettings(body, acdState.tab === "doors" ? "door" : "reader");
       break;
+    case "capabilities":
+      await acdDrawCapabilities(body);
+      break;
     case "maintenance":
       body.innerHTML = `<div class="acd-narrow"><div id="mt-section"><div class="muted" id="mt-section-body">Leyendo la hora del equipo…</div></div></div>`;
       maintFillDeviceSection("access", acdState.id);
@@ -540,6 +547,63 @@ async function acdDrawTab() {
     default:
       await acdDrawConnection(body);
   }
+}
+
+// ---------- Capacidades ----------
+// La ficha se guarda al validar o revalidar el equipo: abrir la pestaña no le
+// pregunta nada al equipo.
+
+const ACD_CAP_STATE = {
+  Supported: { icon: "✓", cls: "ok", title: "El equipo declara que lo soporta" },
+  NotSupported: { icon: "✕", cls: "no", title: "El equipo declara que no lo soporta" },
+  NotDeclared: { icon: "?", cls: "unk", title: "El equipo no lo declara: el VMS lo prueba al usarlo" },
+};
+
+async function acdDrawCapabilities(body) {
+  body.innerHTML = `<div class="muted">Cargando las capacidades…</div>`;
+  let data;
+  try { data = await Api.get(`/api/access/devices/${acdState.id}/capabilities`); }
+  catch (err) {
+    if (acdState.tab === "capabilities") body.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    return;
+  }
+  if (acdState.tab !== "capabilities") return;   // cambió de pestaña mientras cargaba
+  const isAdmin = Api.role === "Admin";
+  const p = data.profile;
+  if (!p) {
+    body.innerHTML = `<div class="acd-narrow"><div class="info-box">Todavía no se leyeron las capacidades de este
+      equipo: se validó antes de que el VMS las leyera, o su marca no las informa.${isAdmin
+        ? " Use <b>Revalidar</b> para leerlas ahora." : ""}</div></div>`;
+    return;
+  }
+  const when = new Date(p.readAtUtc).toLocaleString("es-CL");
+  body.innerHTML = `
+    <div class="acd-narrow">
+      <p class="muted res-tab-intro">Lo que el equipo declara saber hacer según sus propias capacidades
+        (leídas el ${esc(when)}). El VMS lo usa para elegir cómo escribirle y para no pedirle lo que no tiene.${isAdmin
+          ? " Para releerlo (por ejemplo, después de actualizar el firmware) use <b>Revalidar</b>." : ""}</p>
+      ${p.notes.length ? `<div class="info-box">${p.notes.map(esc).join("<br>")}</div>` : ""}
+      <div class="acd-cap-legend muted">${Object.values(ACD_CAP_STATE).map((s) =>
+        `<span><span class="acd-cap-icon ${s.cls}">${s.icon}</span> ${esc(s.title)}</span>`).join("")}</div>
+      ${p.groups.map((g) => `
+        <section class="acd-card">
+          <div class="acd-card-head"><h4>${esc(g.title)}</h4></div>
+          <ul class="acd-cap-list">${g.items.map(acdCapItemHtml).join("")}</ul>
+        </section>`).join("")}
+    </div>`;
+}
+
+function acdCapItemHtml(item) {
+  const s = ACD_CAP_STATE[item.state] ?? ACD_CAP_STATE.NotDeclared;
+  return `
+    <li>
+      <span class="acd-cap-icon ${s.cls}" title="${esc(s.title)}">${s.icon}</span>
+      <div class="acd-cap-text">
+        <div>${esc(item.label)}</div>
+        ${item.detail ? `<div class="muted acd-cap-detail">${esc(item.detail)}</div>` : ""}
+        ${item.source ? `<div class="acd-cap-source">${esc(item.source)}</div>` : ""}
+      </div>
+    </li>`;
 }
 
 // ---------- Conexión ----------

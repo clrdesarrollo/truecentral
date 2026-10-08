@@ -45,6 +45,14 @@ public class AccessDevice
     /// <summary>Cupo de tarjetas del equipo (null si no lo informa).</summary>
     public int? CardCapacity { get; set; }
 
+    /// <summary>
+    /// Ficha de capacidades que DECLARA el equipo (<see cref="TrueCentralVms.Core.Drivers.AccessCapabilityProfile"/>
+    /// en JSON), leída al validarlo o revalidarlo. Es lo que muestra la pestaña
+    /// Capacidades de la página del equipo; null si el driver no la sabe leer
+    /// o el equipo se validó antes de que existiera.
+    /// </summary>
+    public string? CapabilityProfileJson { get; set; }
+
     /// <summary>El servidor lo sondea y lo ofrece a operadores y automatizaciones.</summary>
     public bool Enabled { get; set; } = true;
 

@@ -34,7 +34,9 @@ public sealed record AccessDeviceInfo(
     string? MacAddress,
     AccessDeviceKind Kind,
     AccessCapabilities Capabilities,
-    IReadOnlyList<AccessDoorInfo> Doors);
+    IReadOnlyList<AccessDoorInfo> Doors,
+    /// <summary>Ficha de capacidades declaradas por el equipo; null si el driver no la sabe leer.</summary>
+    AccessCapabilityProfile? Profile = null);
 
 /// <summary>Lo que el equipo informa de una puerta en el monitoreo en vivo.</summary>
 public sealed record AccessDoorStatus(

@@ -30,7 +30,16 @@ namespace TrueCentralVms.Drivers.Hikvision;
 /// </summary>
 public sealed partial class HikvisionIsapiClient
 {
+    /// <summary>Espera por omisión de una petición.</summary>
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// Espera para los borrados. La guía ISAPI de control de acceso recomienda
+    /// 60 s para borrar personas y tarjetas: el equipo contesta recién cuando
+    /// terminó, y con muchos registros tarda. Cortar antes daba por fallido un
+    /// borrado que el equipo sí completaba.
+    /// </summary>
+    public static readonly TimeSpan DeleteTimeout = TimeSpan.FromSeconds(60);
 
     private sealed class Entry
     {
@@ -132,7 +141,9 @@ public sealed partial class HikvisionIsapiClient
 
         static HttpClient Configure(HttpClient http)
         {
-            http.Timeout = RequestTimeout;
+            // La espera la fija cada petición (ver SendOnceAsync): unas piden
+            // más que otras, y el flujo de eventos no debe cortarse nunca.
+            http.Timeout = Timeout.InfiniteTimeSpan;
             http.DefaultRequestHeaders.Accept.ParseAdd("application/json, application/xml, text/xml;q=0.9, */*;q=0.5");
             http.DefaultRequestHeaders.UserAgent.ParseAdd("CLRTrueCentralVMS/1.0");
             return http;
@@ -145,11 +156,13 @@ public sealed partial class HikvisionIsapiClient
     /// sesión caducó. Lanza <see cref="DriverException"/> con mensaje en
     /// español ante credenciales inválidas, bloqueo por intentos o panel
     /// inalcanzable. Un 404 devuelve null (recurso no soportado).
+    /// <paramref name="timeout"/> reemplaza la espera por omisión (15 s).
     /// </summary>
     public async Task<string?> RequestAsync(HttpMethod method, string path, string? body = null,
-        string contentType = "application/json", CancellationToken ct = default, bool allowNotFound = true)
+        string contentType = "application/json", CancellationToken ct = default, bool allowNotFound = true,
+        TimeSpan? timeout = null)
     {
-        using var response = await SendAsync(method, path, body, contentType, ct);
+        using var response = await SendAsync(method, path, body, contentType, ct, timeout: timeout);
         if (response.StatusCode == HttpStatusCode.NotFound && allowNotFound)
             return null;
         string text = await ReadTextAsync(response, ct);
@@ -209,12 +222,12 @@ public sealed partial class HikvisionIsapiClient
     }
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, string? body, string contentType,
-        CancellationToken ct, bool streaming = false, Func<HttpContent>? content = null)
+        CancellationToken ct, bool streaming = false, Func<HttpContent>? content = null, TimeSpan? timeout = null)
     {
         _entry.LastUsed = DateTime.UtcNow;
         if (!_entry.AuthProbed)
             await ProbeAuthAsync(ct);
-        var response = await SendOnceAsync(method, path, body, contentType, ct, streaming, content);
+        var response = await SendOnceAsync(method, path, body, contentType, ct, streaming, content, timeout);
         if (response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Redirect
             or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
         {
@@ -235,7 +248,7 @@ public sealed partial class HikvisionIsapiClient
         ThrowIfLocked(text);
 
         await SessionLoginAsync(ct);
-        response = await SendOnceAsync(method, path, body, contentType, ct, streaming, content);
+        response = await SendOnceAsync(method, path, body, contentType, ct, streaming, content, timeout);
         if (response.StatusCode != HttpStatusCode.Unauthorized)
             return response;
 
@@ -246,7 +259,7 @@ public sealed partial class HikvisionIsapiClient
     }
 
     private async Task<HttpResponseMessage> SendOnceAsync(HttpMethod method, string path, string? body, string contentType,
-        CancellationToken ct, bool streaming, Func<HttpContent>? content = null)
+        CancellationToken ct, bool streaming, Func<HttpContent>? content = null, TimeSpan? timeout = null)
     {
         var request = new HttpRequestMessage(method, BaseUrl + path);
         // El contenido se FABRICA en cada intento: un HttpContent ya enviado no
@@ -261,16 +274,20 @@ public sealed partial class HikvisionIsapiClient
         // intento de login fallido (el DS-PHA64-LP devuelve retryLoginTime
         // al rechazar un Digest).
         var http = _entry.SessionMode ? _entry.PlainHttp : _entry.Http;
+        // La espera cubre hasta tener la respuesta completa; en un flujo, solo
+        // hasta las cabeceras (lo que sigue lo vigila quien lee el flujo).
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(timeout ?? RequestTimeout);
         try
         {
             return await http.SendAsync(request,
-                streaming ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, ct);
+                streaming ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, limit.Token);
         }
         catch (HttpRequestException ex)
         {
             throw new DriverException($"No se pudo conectar con el {_noun} en {_entry.Info.Host}:{_entry.Info.Port}: {ex.Message}", ex);
         }
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             throw new DriverException($"El {_noun} en {_entry.Info.Host}:{_entry.Info.Port} no respondió a tiempo.");
         }

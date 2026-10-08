@@ -82,8 +82,85 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     {
         HikvisionIsapiClient.Forget(Transport(info));
         // Lo aprendido de sus lectores también: puede ser otro equipo en la misma dirección.
-        AcceptedReaders.TryRemove($"{(info.UseHttps ? "https" : "http")}://{info.Host}:{info.Port}", out _);
+        AcceptedReaders.TryRemove(DeviceKey(info), out _);
+        // Y lo que declaró: un firmware nuevo puede declarar otra cosa.
+        Profiles.TryRemove(DeviceKey(info), out _);
+        ProfileMisses.TryRemove(DeviceKey(info), out _);
     }
+
+    /// <summary>Clave de un equipo en las cachés del driver (esquema, dirección y puerto).</summary>
+    private static string DeviceKey(AccessConnectionInfo info) =>
+        $"{(info.UseHttps ? "https" : "http")}://{info.Host}:{info.Port}";
+
+    // ------------------------------------------------------------------
+    // Capacidades declaradas (ver HikvisionAccessProfile)
+    // ------------------------------------------------------------------
+
+    /// <summary>Lo que declaró cada equipo, leído al validarlo o la primera vez que hizo falta.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, HikvisionAccessProfile> Profiles = new();
+
+    /// <summary>Equipos que no entregaron capacidades: no se les vuelve a preguntar en cada vuelta.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> ProfileMisses = new();
+
+    private static readonly TimeSpan ProfileRetry = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Las capacidades del equipo, o null si no las declara (o todavía no se
+    /// pudieron leer): con null el driver sigue por el camino ya probado.
+    /// Tras un reinicio del servidor se releen una vez, en la primera operación.
+    /// </summary>
+    private static async Task<HikvisionAccessProfile?> ProfileOfAsync(AccessConnectionInfo info,
+        HikvisionIsapiClient client, CancellationToken ct)
+    {
+        string key = DeviceKey(info);
+        if (Profiles.TryGetValue(key, out var known)) return known;
+        if (ProfileMisses.TryGetValue(key, out var missedAt) && DateTime.UtcNow - missedAt < ProfileRetry) return null;
+
+        var profile = await HikvisionAccessProfile.ReadAsync(client, ct);
+        if (!profile.Usable)
+        {
+            ProfileMisses[key] = DateTime.UtcNow;
+            return null;
+        }
+        Profiles[key] = profile;
+        ProfileMisses.TryRemove(key, out _);
+        return profile;
+    }
+
+    /// <summary>Las capacidades ya leídas de este equipo, sin ir a buscarlas (null si no están).</summary>
+    private static HikvisionAccessProfile? CachedProfile(HikvisionIsapiClient client) =>
+        Profiles.TryGetValue(client.BaseUrl, out var profile) ? profile : null;
+
+    /// <summary>
+    /// Ficha de capacidades para el servidor, releída del equipo (es lo que
+    /// pide "Revalidar"). También deja al día la que usa el driver.
+    /// </summary>
+    private static async Task<AccessCapabilityProfile?> ReadProfileAsync(AccessConnectionInfo info,
+        HikvisionIsapiClient client, CancellationToken ct)
+    {
+        try
+        {
+            var profile = await HikvisionAccessProfile.ReadAsync(client, ct);
+            if (profile.Usable)
+            {
+                Profiles[DeviceKey(info)] = profile;
+                ProfileMisses.TryRemove(DeviceKey(info), out _);
+            }
+            return profile.ToDisplay();
+        }
+        catch (DriverException) { return null; }   // la ficha es informativa: no tumba la validación
+    }
+
+    /// <summary>
+    /// Ninguna operación de borrado sale sin persona. La guía ISAPI es
+    /// explícita: un <c>UserInfoDelCond</c>/<c>CardInfoDelCond</c> SIN lista de
+    /// personas borra a TODAS las personas o tarjetas del equipo.
+    /// </summary>
+    private static string RequireEmployeeNo(string? employeeNo) =>
+        string.IsNullOrWhiteSpace(employeeNo)
+            ? throw new DriverException("Falta el identificador de la persona: no se envía nada al equipo " +
+                                        "(sin identificador, el equipo borraría a todas las personas).")
+            : employeeNo.Trim();
 
     public void ForgetCachedSession(AccessConnectionInfo info) => Forget(info);
 
@@ -195,7 +272,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
         var kind = ClassifyModel(model) ?? KindOfDoorCount(doors.Count);
         return new AccessDeviceInfo(model, Value("serialNumber"), Value("firmwareVersion"), Value("deviceType"),
-            Value("macAddress"), kind, capabilities, doors);
+            Value("macAddress"), kind, capabilities, doors, await ReadProfileAsync(info, client, ct));
     }
 
     public async Task PingAsync(AccessConnectionInfo info, CancellationToken ct = default)
@@ -378,6 +455,13 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             _ => throw new DriverException($"Orden de puerta desconocida: {command}."),
         };
         var client = Client(info);
+        // Si el equipo declara qué órdenes acepta, se le pregunta antes de
+        // mandarle una que rechazaría (un torniquete sin "bloqueada permanente",
+        // por ejemplo): así el operador recibe el motivo y no un "badParameters".
+        if (await ProfileOfAsync(info, client, ct) is { DoorCommands: { Count: > 0 } accepted } && !accepted.Contains(cmd))
+            throw new DriverException(
+                $"Este equipo no acepta la orden «{HikvisionAccessProfile.DoorCommandName(cmd)}» según sus " +
+                $"propias capacidades (acepta: {string.Join(", ", accepted.Select(HikvisionAccessProfile.DoorCommandName))}).");
         string body = $"<RemoteControlDoor><cmd>{cmd}</cmd></RemoteControlDoor>";
         _ = await client.RequestAsync(HttpMethod.Put, $"/ISAPI/AccessControl/RemoteControl/door/{doorNumber}",
                 body, "application/xml", ct, allowNotFound: false)
@@ -454,15 +538,18 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     // Historial de accesos
     // ==================================================================
 
-    /// <summary>Cuántos renglones se piden por página al equipo (los firmware antiguos se atragantan con más).</summary>
     /// <summary>
-    /// Cuántos eventos se piden por página. Diez, no treinta: el DS-K1T804AMF
-    /// V1.4.0 declara <c>maxResults @max=10</c> en las capacidades de
-    /// <c>AcsEvent</c> y rechaza con <c>badParameters</c> cualquier número
-    /// mayor. Los firmware nuevos aceptan 30, pero pedir de a 10 en todos sale
-    /// más barato que preguntarle a cada equipo cuánto aguanta.
+    /// Cuántos eventos se piden por página cuando el equipo no declara su tope.
+    /// Diez, no treinta: el DS-K1T804AMF V1.4.0 declara <c>maxResults @max=10</c>
+    /// en las capacidades de <c>AcsEvent</c> y rechaza con <c>badParameters</c>
+    /// cualquier número mayor (la guía dice que el equipo debería recortarlo
+    /// solo, pero ese firmware no lo hace). Si el equipo declara su tope, se usa
+    /// ese: menos consultas para ponerse al día.
     /// </summary>
     private const int EventPageSize = 10;
+
+    /// <summary>Tope de página aunque el equipo declare más (la guía muestra 30 como máximo habitual).</summary>
+    private const int MaxEventPageSize = 30;
 
     /// <summary>
     /// Historial posterior a <paramref name="sinceUtc"/> con
@@ -475,26 +562,34 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         int max, CancellationToken ct = default)
     {
         var client = Client(info);
+        var profile = await ProfileOfAsync(info, client, ct);
+        int pageSize = profile?.EventMaxResults is { } declared and > 0
+            ? Math.Min(declared, MaxEventPageSize)
+            : EventPageSize;
+        // Sin fotos: la guía avisa que, si la respuesta lleva imágenes, llega
+        // en partes MIME y no como JSON. Solo se manda si el equipo declara el
+        // campo: los firmware viejos rechazan con badParameters lo que no conocen.
+        bool sendPicEnable = profile?.EventCondFields?.Contains("picEnable") == true;
+
         // El mismo id en todas las páginas (así se sigue UNA búsqueda), pero de
-        // 32 caracteres: ver SearchId.
+        // 16 caracteres: ver SearchId.
         string searchId = SearchId();
         var events = new List<AccessEventRecord>();
 
-        for (int position = 0; events.Count < max; position += EventPageSize)
+        for (int position = 0; events.Count < max;)
         {
-            string body = JsonSerializer.Serialize(new
+            var cond = new Dictionary<string, object>
             {
-                AcsEventCond = new
-                {
-                    searchID = searchId,
-                    searchResultPosition = position,
-                    maxResults = Math.Min(EventPageSize, max - events.Count),
-                    major = 0,
-                    minor = 0,
-                    startTime = IsapiTime(sinceUtc),
-                    endTime = IsapiTime(DateTime.UtcNow.AddMinutes(1)),
-                },
-            });
+                ["searchID"] = searchId,
+                ["searchResultPosition"] = position,
+                ["maxResults"] = Math.Min(pageSize, max - events.Count),
+                ["major"] = 0,
+                ["minor"] = 0,
+                ["startTime"] = IsapiTime(sinceUtc),
+                ["endTime"] = IsapiTime(DateTime.UtcNow.AddMinutes(1)),
+            };
+            if (sendPicEnable) cond["picEnable"] = false;
+            string body = JsonSerializer.Serialize(new Dictionary<string, object> { ["AcsEventCond"] = cond });
             string? json = await client.RequestAsync(HttpMethod.Post, "/ISAPI/AccessControl/AcsEvent?format=json",
                 body, ct: ct, allowNotFound: false);
             if (string.IsNullOrWhiteSpace(json)) break;
@@ -520,6 +615,9 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             }
 
             if (!status.Equals("MORE", StringComparison.OrdinalIgnoreCase) || matches == 0) break;
+            // Se avanza lo que el equipo ENTREGÓ, no lo que se pidió: puede
+            // devolver menos (su tope) y avanzar de a página saltaría eventos.
+            position += matches;
         }
 
         // El equipo entrega del más nuevo al más viejo en algunos firmware: el
@@ -959,6 +1057,13 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// Verificado contra un DS-K1T321MFWX: <c>multipart/mixed;
     /// boundary=MIME_boundary</c>, y cada parte trae <c>eventType</c> y, para lo
     /// que interesa acá, un objeto <c>AccessControllerEvent</c>.
+    ///
+    /// La guía pide vigilar el latido: el equipo manda uno cada tanto
+    /// (<c>eventType</c> "videoloss" con <c>eventState</c> "inactive") aunque
+    /// no pase nadie. Si en <see cref="StreamIdleTimeout"/> no llega NADA, la
+    /// conexión se da por muerta y se corta para que el llamador reconecte:
+    /// sin esto, un equipo que se reinicia o un cable que se corta sin cerrar
+    /// la conexión dejaba la escucha colgada para siempre.
     /// </summary>
     public async IAsyncEnumerable<AccessEventRecord> StreamEventsAsync(AccessConnectionInfo info,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
@@ -971,12 +1076,18 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         string separator = "--" + boundary;
 
         var buffer = new byte[8192];
+        // Decodificador CON estado: una letra con tilde (dos bytes en UTF-8)
+        // puede quedar partida entre dos lecturas, y decodificar cada lectura
+        // por separado la convertía en "�" en el nombre de la persona.
+        var decoder = Encoding.UTF8.GetDecoder();
+        var chars = new char[Encoding.UTF8.GetMaxCharCount(buffer.Length)];
         var pending = new StringBuilder();
         while (!ct.IsCancellationRequested)
         {
-            int read = await stream.ReadAsync(buffer, ct);
-            if (read <= 0) yield break;      // el equipo cerró: que reconecte el llamador
-            pending.Append(Encoding.UTF8.GetString(buffer, 0, read));
+            int read = await ReadWithIdleTimeoutAsync(stream, buffer, ct);
+            if (read <= 0) yield break;      // el equipo cerró o calló: que reconecte el llamador
+            int decoded = decoder.GetChars(buffer, 0, read, chars, 0);
+            pending.Append(chars, 0, decoded);
 
             while (true)
             {
@@ -996,6 +1107,25 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
     /// <summary>Tope del buffer del flujo (un evento con foto no llega a tanto).</summary>
     private const int MaxStreamBuffer = 512 * 1024;
+
+    /// <summary>
+    /// Silencio máximo del flujo de eventos antes de darlo por muerto. Holgado
+    /// a propósito: el latido llega mucho más seguido, y si un firmware no lo
+    /// manda, reconectar cada par de minutos no pierde nada (el sondeo del
+    /// historial cubre el hueco y los repetidos se descartan al guardar).
+    /// </summary>
+    private static readonly TimeSpan StreamIdleTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>Una lectura del flujo con tope de silencio; 0 si el equipo cerró o no mandó nada a tiempo.</summary>
+    private static async Task<int> ReadWithIdleTimeoutAsync(Stream stream, byte[] buffer, CancellationToken ct)
+    {
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        idle.CancelAfter(StreamIdleTimeout);
+        try { return await stream.ReadAsync(buffer, idle.Token); }
+        // El corte de una lectura de red llega como cancelación o como IOException
+        // según el punto en que la agarre: lo que importa es que lo pidió el tope.
+        catch (Exception) when (idle.IsCancellationRequested && !ct.IsCancellationRequested) { return 0; }
+    }
 
     private static string? BoundaryOf(ICollection<System.Net.Http.Headers.NameValueHeaderValue>? parameters) =>
         parameters?.FirstOrDefault(p => p.Name.Equals("boundary", StringComparison.OrdinalIgnoreCase))
@@ -1155,14 +1285,17 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     public async Task ApplyPersonAsync(AccessConnectionInfo info, AccessPersonPlan plan, CancellationToken ct = default)
     {
+        RequireEmployeeNo(plan.EmployeeNo);
         var client = Client(info);
+        var profile = await ProfileOfAsync(info, client, ct);
 
         var user = new Dictionary<string, object?>
         {
             ["employeeNo"] = plan.EmployeeNo,
             // El nombre de la persona SÍ se muestra en el terminal: se conservan
-            // los acentos y solo se acota al tope de bytes del equipo.
-            ["name"] = Truncate(plan.Name, MaxPersonNameBytes),
+            // los acentos y solo se acota al tope de bytes que declara el equipo
+            // (32 si no lo dice).
+            ["name"] = Truncate(plan.Name, profile?.NameMaxBytes is { } nameMax and > 0 ? nameMax : MaxPersonNameBytes),
             ["userType"] = "normal",
             ["Valid"] = new
             {
@@ -1185,11 +1318,16 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
         string body = JsonSerializer.Serialize(new Dictionary<string, object?> { ["UserInfo"] = user });
 
-        // Crear una persona que ya está da error; modificar una que no está,
-        // también. Se pregunta primero, y si el equipo no sabe buscar se
+        // Si el equipo declara "setUp" (UserInfo/capabilities), una sola llamada
+        // crea o edita según corresponda: es la ruta que da la guía ISAPI.
+        // Si no, crear una persona que ya está da error; modificar una que no
+        // está, también. Se pregunta primero, y si el equipo no sabe buscar se
         // intenta crear y, si no, modificar.
-        bool? exists = await PersonExistsAsync(client, plan.EmployeeNo, ct);
-        if (exists == true)
+        bool setUp = profile?.CanSetUpUser == true;
+        bool? exists = setUp ? null : await PersonExistsAsync(client, plan.EmployeeNo, ct);
+        if (setUp)
+            await WriteUserAsync(client, HttpMethod.Put, "/ISAPI/AccessControl/UserInfo/SetUp?format=json", body, ct);
+        else if (exists == true)
             await WriteUserAsync(client, HttpMethod.Put, "/ISAPI/AccessControl/UserInfo/Modify?format=json", body, ct);
         else if (exists == false)
             await WriteUserAsync(client, HttpMethod.Post, "/ISAPI/AccessControl/UserInfo/Record?format=json", body, ct);
@@ -1411,6 +1549,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     private static async Task DeleteFaceAsync(HikvisionIsapiClient client, string employeeNo, CancellationToken ct)
     {
+        employeeNo = RequireEmployeeNo(employeeNo);
         string body = JsonSerializer.Serialize(new
         {
             FPID = new[] { new { value = employeeNo } },
@@ -1488,6 +1627,10 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     private static async Task ApplyFingerprintsAsync(HikvisionIsapiClient client, AccessPersonPlan plan,
         CancellationToken ct)
     {
+        // Un equipo que declara que no maneja huellas (isSupportFingerPrintCfg
+        // en false) no puede tener ninguna que borrar: no se le pide nada.
+        if (plan.Fingerprints.Count == 0 && CachedProfile(client)?.Fingerprints == false) return;
+
         // Los lectores se averiguan primero porque el borrado también los
         // necesita: hay firmware que no borra si no se le dice de dónde.
         int[] readers = await CardReadersAsync(client, plan.Doors.Count, ct);
@@ -1781,6 +1924,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     private static async Task DeleteFingerprintsAsync(HikvisionIsapiClient client, string employeeNo,
         int[] readers, CancellationToken ct)
     {
+        employeeNo = RequireEmployeeNo(employeeNo);
         // Dos formas del mismo pedido. La DETALLADA nombra los lectores y los
         // diez dedos: es la que exige el DS-K1T804AMF V1.4.0 —su esquema los
         // declara y sin ellos contesta un `badParameters` que no dice cuál
@@ -2071,11 +2215,19 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         {
             using var doc = JsonDocument.Parse(response);
             var root = doc.RootElement;
-            if (HikvisionAlarmPanelDriver.GetInt(root, "statusCode") is { } code && code != 1)
-                return HikvisionAlarmPanelDriver.GetString(root, "statusString")
-                       ?? HikvisionAlarmPanelDriver.GetString(root, "subStatusCode")
-                       ?? $"código {code}";
-            return null;
+            if (HikvisionAlarmPanelDriver.GetInt(root, "statusCode") is not { } code || code == 1) return null;
+            // Las tres piezas de ResponseStatus, como las arma el transporte para
+            // un error HTTP: statusString dice la familia ("Device Busy" es todo
+            // statusCode 2, lo transitorio), subStatusCode el motivo
+            // ("notExist", "badJsonContent") y errorMsg el campo. Quedarse solo
+            // con la primera tapaba el motivo y los chequeos que lo buscan.
+            string detail = string.Join(" · ", new[]
+            {
+                HikvisionAlarmPanelDriver.GetString(root, "statusString"),
+                HikvisionAlarmPanelDriver.GetString(root, "subStatusCode"),
+                HikvisionAlarmPanelDriver.GetString(root, "errorMsg"),
+            }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            return detail.Length > 0 ? detail : $"código {code}";
         }
         catch (JsonException) { return null; }   // XML o texto: el transporte ya validó el HTTP
     }
@@ -2115,12 +2267,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     private static async Task ApplyCardsAsync(HikvisionIsapiClient client, AccessPersonPlan plan, CancellationToken ct)
     {
-        string deleteBody = JsonSerializer.Serialize(new
-        {
-            CardInfoDelCond = new { EmployeeNoList = new[] { new { employeeNo = plan.EmployeeNo } } },
-        });
-        try { _ = await client.RequestAsync(HttpMethod.Put, "/ISAPI/AccessControl/CardInfo/Delete?format=json", deleteBody, ct: ct); }
-        catch (DriverException) { /* no tenía tarjetas, o el firmware no expone la ruta */ }
+        await DeleteCardsAsync(client, plan.EmployeeNo, ct);
 
         foreach (string card in plan.Cards)
         {
@@ -2131,6 +2278,68 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             _ = await WriteAsync(client, HttpMethod.Post, "/ISAPI/AccessControl/CardInfo/Record?format=json",
                 body, $"grabar la tarjeta {card}", ct);
         }
+    }
+
+    /// <summary>
+    /// Borra TODAS las tarjetas de una persona en el equipo y se asegura de que
+    /// no quede ninguna.
+    ///
+    /// Antes un fallo acá se pasaba por alto ("no tenía tarjetas"), y si el
+    /// equipo estaba ocupado la tarjeta que se le había quitado a la persona
+    /// SEGUÍA abriendo la puerta mientras el VMS la daba por sincronizada. Ahora,
+    /// si el borrado no sale limpio, se le pregunta al equipo cuántas tarjetas
+    /// le quedan a la persona (<c>CardInfo/Count?employeeNo=</c>): solo un cero
+    /// afirmado por el equipo permite seguir.
+    /// </summary>
+    private static async Task DeleteCardsAsync(HikvisionIsapiClient client, string employeeNo, CancellationToken ct)
+    {
+        employeeNo = RequireEmployeeNo(employeeNo);
+        string deleteBody = JsonSerializer.Serialize(new
+        {
+            CardInfoDelCond = new { EmployeeNoList = new[] { new { employeeNo } } },
+        });
+
+        string? problem = null;
+        for (int attempt = 0; attempt < BusyRetries; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(TimeSpan.FromMilliseconds(BusyDelayMs * attempt), ct);
+            try
+            {
+                string? response = await client.RequestAsync(HttpMethod.Put, "/ISAPI/AccessControl/CardInfo/Delete?format=json",
+                    deleteBody, ct: ct, timeout: HikvisionIsapiClient.DeleteTimeout);
+                // 404: el equipo no maneja tarjetas, así que tampoco puede tener una.
+                if (response is null) return;
+                problem = FailureOf(response);
+                if (problem is null || IsHarmlessDeleteError(problem)) return;
+            }
+            catch (DriverException ex)
+            {
+                problem = ex.Message;
+                if (IsHarmlessDeleteError(problem)) return;
+            }
+            if (!IsBusy(problem)) break;
+        }
+
+        if (await CardCountAsync(client, employeeNo, ct) == 0) return;
+        throw new DriverException(
+            "No se pudieron borrar las tarjetas anteriores de la persona en el equipo, así que no se escribieron " +
+            $"las nuevas: una tarjeta quitada podría seguir abriendo la puerta. Detalle del equipo: {problem}");
+    }
+
+    /// <summary>Tarjetas que el equipo dice tener de una persona; null si no sabe contestar.</summary>
+    private static async Task<int?> CardCountAsync(HikvisionIsapiClient client, string employeeNo, CancellationToken ct)
+    {
+        try
+        {
+            string? json = await client.RequestAsync(HttpMethod.Get,
+                $"/ISAPI/AccessControl/CardInfo/Count?format=json&employeeNo={Uri.EscapeDataString(employeeNo)}", ct: ct);
+            if (json is null) return null;
+            using var doc = JsonDocument.Parse(json);
+            var count = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "CardInfoCount") ?? doc.RootElement;
+            return HikvisionAlarmPanelDriver.GetInt(count, "cardNumber");
+        }
+        catch (DriverException) { return null; }
+        catch (JsonException) { return null; }
     }
 
     /// <summary>
@@ -2157,33 +2366,116 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     public async Task RemovePersonAsync(AccessConnectionInfo info, string employeeNo, CancellationToken ct = default)
     {
+        employeeNo = RequireEmployeeNo(employeeNo);
         var client = Client(info);
+        var profile = await ProfileOfAsync(info, client, ct);
         var list = new { EmployeeNoList = new[] { new { employeeNo } } };
 
-        try
+        // Si el equipo lo declara, la baja completa va en UNA operación: la
+        // persona con sus tarjetas, huellas, rostro y permisos.
+        if (profile?.CanDeleteUserDetail == true && await DeleteUserDetailAsync(client, employeeNo, ct))
         {
-            _ = await client.RequestAsync(HttpMethod.Put, "/ISAPI/AccessControl/CardInfo/Delete?format=json",
-                JsonSerializer.Serialize(new { CardInfoDelCond = list }), ct: ct);
+            // La guía incluye el rostro en ese borrado; se repite el del rostro
+            // igual (no cuesta nada y no tener ninguno no es un fallo).
+            try { await DeleteFaceAsync(client, employeeNo, ct); }
+            catch (DriverException) { /* ya no estaba */ }
+            return;
         }
-        catch (DriverException) { /* si no tenía tarjetas, tampoco hay que borrarlas */ }
 
-        // Las huellas se borran aparte: hay firmware que las deja vivas al
-        // borrar la persona, y una huella huérfana sigue abriendo la puerta.
-        // Acá sí se tolera el fallo: enseguida se borra la persona entera, que
-        // es lo que de verdad le quita el acceso.
-        try { await DeleteFingerprintsAsync(client, employeeNo, await CardReadersAsync(client, 1, ct), ct); }
-        catch (DriverException) { /* no tenía huellas, o el firmware no sabe borrarlas */ }
+        // Si no, por partes. La guía es clara: borrar la persona
+        // (UserInfo/Delete) NO borra sus tarjetas, huellas ni rostro, y una
+        // credencial huérfana sigue abriendo la puerta. Por eso las tarjetas
+        // se borran con comprobación y un fallo corta la baja.
+        await DeleteCardsAsync(client, employeeNo, ct);
+
+        // Las huellas, igual de estricto cuando el equipo declara que las
+        // maneja. Si no lo declara se tolera el fallo, como antes: un equipo sin
+        // huellas no puede tener una, y no se le puede trabar la baja por eso.
+        if (profile?.Fingerprints == true)
+            await DeleteFingerprintsAsync(client, employeeNo, await CardReadersAsync(client, 1, ct), ct);
+        else if (profile?.Fingerprints is null)
+        {
+            try { await DeleteFingerprintsAsync(client, employeeNo, await CardReadersAsync(client, 1, ct), ct); }
+            catch (DriverException) { /* no tenía huellas, o el firmware no sabe borrarlas */ }
+        }
 
         // El rostro va por su propia biblioteca: borrar la persona no lo saca.
         try { await DeleteFaceAsync(client, employeeNo, ct); }
         catch (DriverException) { /* no tenía rostro, o el equipo no tiene cámara */ }
 
         string? response = await client.RequestAsync(HttpMethod.Put, "/ISAPI/AccessControl/UserInfo/Delete?format=json",
-            JsonSerializer.Serialize(new { UserInfoDelCond = list }), ct: ct, allowNotFound: false);
+            JsonSerializer.Serialize(new { UserInfoDelCond = list }), ct: ct, allowNotFound: false,
+            timeout: HikvisionIsapiClient.DeleteTimeout);
         // Que la persona no estuviera no es un error: el objetivo era que no esté.
         if (response is not null && FailureOf(response) is { } error &&
             !error.Contains("notExist", StringComparison.OrdinalIgnoreCase) &&
             !error.Contains("No Match", StringComparison.OrdinalIgnoreCase))
             throw new DriverException($"El equipo rechazó el borrado de la persona: {error}");
     }
+
+    /// <summary>
+    /// Baja completa con <c>PUT UserInfoDetail/Delete</c> (modo
+    /// <c>byEmployeeNo</c>). La ruta solo ARRANCA el borrado: el resultado se
+    /// lee de <c>UserInfoDetail/DeleteProcess</c> hasta que diga
+    /// <c>success</c> o <c>failed</c>, como pide la guía.
+    ///
+    /// Devuelve false si el equipo no tomó el pedido (para seguir por partes),
+    /// y lanza si lo tomó y falló o no terminó a tiempo: ahí no se sabe qué
+    /// quedó, y lo honesto es no dar la baja por hecha.
+    /// </summary>
+    private static async Task<bool> DeleteUserDetailAsync(HikvisionIsapiClient client, string employeeNo,
+        CancellationToken ct)
+    {
+        string body = JsonSerializer.Serialize(new
+        {
+            UserInfoDetail = new
+            {
+                mode = "byEmployeeNo",
+                EmployeeNoList = new[] { new { employeeNo = RequireEmployeeNo(employeeNo) } },
+            },
+        });
+        try
+        {
+            _ = await WriteAsync(client, HttpMethod.Put,
+                "/ISAPI/AccessControl/UserInfoDetail/Delete?format=json", body, "el borrado de la persona", ct);
+        }
+        catch (DriverException)
+        {
+            // Lo declaró pero no lo tomó (ocupado, rechazo, ruta que no
+            // atiende): se borra por partes, que comprueba cada credencial.
+            return false;
+        }
+
+        var until = DateTime.UtcNow + UserDetailDeleteWait;
+        string? status = null;
+        while (DateTime.UtcNow < until)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(UserDetailPollMs), ct);
+            try
+            {
+                string? json = await client.RequestAsync(HttpMethod.Get,
+                    "/ISAPI/AccessControl/UserInfoDetail/DeleteProcess?format=json", ct: ct);
+                if (json is null) break;
+                using var doc = JsonDocument.Parse(json);
+                var process = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "UserInfoDetailDeleteProcess")
+                              ?? doc.RootElement;
+                status = HikvisionAlarmPanelDriver.GetString(process, "status");
+            }
+            catch (DriverException ex) when (IsBusy(ex.Message)) { continue; }
+            catch (JsonException) { break; }
+
+            if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+                throw new DriverException("El equipo informó que no pudo completar el borrado de la persona " +
+                                          "(con sus tarjetas, huellas y rostro). Vuelva a intentarlo.");
+        }
+        throw new DriverException(
+            "El equipo empezó a borrar a la persona pero no confirmó que terminara " +
+            $"(último estado: {status ?? "sin respuesta"}). Vuelva a intentarlo en un momento.");
+    }
+
+    /// <summary>Cuánto se espera a que el equipo confirme una baja completa (la guía sugiere 60 s para borrados).</summary>
+    private static readonly TimeSpan UserDetailDeleteWait = TimeSpan.FromSeconds(60);
+
+    private const int UserDetailPollMs = 1000;
 }

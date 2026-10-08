@@ -1741,6 +1741,18 @@ a.res-open:hover { color: var(--accent); text-decoration: underline; }
   .acd-check { margin-top: 0; }
   .acd-status { align-items: flex-start; }
 }
+/* Pestaña Capacidades: lo que el equipo declara (✓ sí, ✕ no, ? no lo dice). */
+.acd-cap-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; margin: 0 0 12px; }
+.acd-cap-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.acd-cap-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px 18px; }
+.acd-cap-list li { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.acd-cap-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; font-size: 12px; font-weight: 700; }
+.acd-cap-icon.ok { background: rgba(34,197,94,.14); color: var(--ok); }
+.acd-cap-icon.no { background: rgba(239,68,68,.14); color: var(--danger); }
+.acd-cap-icon.unk { background: rgba(139,152,165,.15); color: var(--muted); }
+.acd-cap-text { min-width: 0; font-size: 13.5px; }
+.acd-cap-detail { font-size: 12.5px; margin-top: 1px; }
+.acd-cap-source { font-size: 11px; color: var(--muted); opacity: .75; font-family: Consolas, "Cascadia Mono", monospace; overflow-wrap: anywhere; margin-top: 2px; }
 
 /* ---------- Imagen actual en la ficha de un recurso ----------
    Para una cámara, su propia imagen; para una puerta u otro recurso, la de su
