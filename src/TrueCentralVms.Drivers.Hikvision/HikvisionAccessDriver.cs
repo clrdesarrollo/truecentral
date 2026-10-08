@@ -86,6 +86,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         // Y lo que declaró: un firmware nuevo puede declarar otra cosa.
         Profiles.TryRemove(DeviceKey(info), out _);
         ProfileMisses.TryRemove(DeviceKey(info), out _);
+        SerialSearchRefused.TryRemove(DeviceKey(info), out _);
     }
 
     /// <summary>Clave de un equipo en las cachés del driver (esquema, dirección y puerto).</summary>
@@ -145,6 +146,8 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             {
                 Profiles[DeviceKey(info)] = profile;
                 ProfileMisses.TryRemove(DeviceKey(info), out _);
+                // Un firmware nuevo puede respetar ahora la búsqueda por número.
+                SerialSearchRefused.TryRemove(DeviceKey(info), out _);
             }
             return profile.ToDisplay();
         }
@@ -563,6 +566,141 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     {
         var client = Client(info);
         var profile = await ProfileOfAsync(info, client, ct);
+        var (all, _) = await SearchEventsAsync(client, profile, new Dictionary<string, object>
+        {
+            ["startTime"] = IsapiTime(sinceUtc),
+            ["endTime"] = IsapiTime(DateTime.UtcNow.AddMinutes(1)),
+        }, max, ct);
+
+        // El equipo entrega del más nuevo al más viejo en algunos firmware: el
+        // servidor los quiere en orden cronológico para guardarlos de corrido.
+        return all.Where(e => !IsOwnSessionNoise(e) && e.Timestamp > sinceUtc).OrderBy(e => e.Timestamp).ToList();
+    }
+
+    /// <summary>
+    /// Historial por número de serie (<c>beginSerialNo</c> de
+    /// <c>AcsEventCond</c>): todo lo que el equipo numeró después de
+    /// <paramref name="afterSerial"/>. La guía define <c>serialNo</c> justamente
+    /// para detectar pérdida de eventos, y no depende de la hora: no se pierden
+    /// dos pasadas del mismo segundo ni lo que pasó mientras el reloj del
+    /// equipo estuvo corrido.
+    ///
+    /// Solo si el equipo declara <c>beginSerialNo</c> en sus capacidades. Y se
+    /// comprueba que lo respete: si devuelve un número que no es mayor al pedido
+    /// (o eventos sin número), el firmware ignora el filtro y para ese equipo se
+    /// vuelve a la búsqueda por hora (null), en vez de volcar su historial viejo.
+    /// </summary>
+    public async Task<AccessEventPage?> FetchEventsAfterSerialAsync(AccessConnectionInfo info, long afterSerial, int max,
+        CancellationToken ct = default)
+    {
+        var client = Client(info);
+        var profile = await ProfileOfAsync(info, client, ct);
+        string key = DeviceKey(info);
+        if (profile?.EventCondFields?.Contains("beginSerialNo") != true || SerialSearchRefused.ContainsKey(key))
+            return null;
+
+        var condition = new Dictionary<string, object> { ["beginSerialNo"] = afterSerial + 1 };
+        // Pedir orden cronológico si el equipo declara el campo: la guía dice
+        // que es lo de fábrica, pero hay firmware que entrega del más nuevo al
+        // más viejo.
+        if (profile?.EventCondFields?.Contains("timeReverseOrder") == true) condition["timeReverseOrder"] = false;
+
+        List<AccessEventRecord> all;
+        bool truncated;
+        try
+        {
+            (all, truncated) = await SearchEventsAsync(client, profile, condition, max, ct);
+            if (!Honors(all, afterSerial)) return Refuse(key);
+            if (all.Count == 0) return new AccessEventPage([], null);
+
+            // Se cortó por el tope: si llegó el número que sigue al pedido, el
+            // equipo entrega en orden y se lee hasta el último CONSECUTIVO. Si
+            // no llegó, está entregando del más nuevo al más viejo: se completa
+            // la lectura (con un tope mayor) y se toman los más antiguos, para no
+            // saltar los del medio.
+            if (truncated)
+            {
+                if (ConsecutiveEnd(all, afterSerial) is long end)
+                    return Page(all, end);
+                (all, truncated) = await SearchEventsAsync(client, profile, condition, DescendingCatchUp, ct);
+                if (!Honors(all, afterSerial)) return Refuse(key);
+                if (truncated)
+                    return ConsecutiveEnd(all, afterSerial) is long reachable ? Page(all, reachable) : Refuse(key);
+            }
+        }
+        catch (DriverException ex) when (IsRejectedCondition(ex.Message))
+        {
+            return Refuse(key);
+        }
+
+        // Lectura completa: no falta nada hasta el último número que llegó, así
+        // que se entregan los primeros max útiles en orden de número y la marca
+        // queda en el último entregado.
+        var ordered = all.OrderBy(e => e.SerialNo).ToList();
+        long cutoff = ordered[^1].SerialNo!.Value;
+        int useful = 0;
+        foreach (var e in ordered)
+        {
+            if (IsOwnSessionNoise(e) || ++useful < max) continue;
+            cutoff = e.SerialNo!.Value;
+            break;
+        }
+        return Page(ordered, cutoff);
+
+        static AccessEventPage Page(List<AccessEventRecord> events, long cutoff) => new(
+            events.Where(e => e.SerialNo <= cutoff && !IsOwnSessionNoise(e)).OrderBy(e => e.SerialNo).ToList(),
+            cutoff);
+
+        AccessEventPage? Refuse(string device)
+        {
+            SerialSearchRefused[device] = DateTime.UtcNow;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// El equipo respetó <c>beginSerialNo</c>: todo lo que entregó tiene número
+    /// y es mayor al pedido. Si no, el firmware ignora el filtro.
+    /// </summary>
+    private static bool Honors(List<AccessEventRecord> events, long afterSerial) =>
+        events.All(e => e.SerialNo is long serial && serial > afterSerial);
+
+    /// <summary>Último número consecutivo desde <paramref name="afterSerial"/> + 1; null si ese ni llegó.</summary>
+    private static long? ConsecutiveEnd(List<AccessEventRecord> events, long afterSerial)
+    {
+        var serials = events.Select(e => e.SerialNo!.Value).ToHashSet();
+        long next = afterSerial;
+        while (serials.Contains(next + 1)) next++;
+        return next > afterSerial ? next : null;
+    }
+
+    /// <summary>
+    /// Tope de eventos útiles al ponerse al día con un equipo que entrega del más
+    /// nuevo al más viejo. Más allá, ese equipo se lee por hora.
+    /// </summary>
+    private const int DescendingCatchUp = 5000;
+
+    /// <summary>Equipos que declararon <c>beginSerialNo</c> pero no lo respetan: se leen por hora.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> SerialSearchRefused = new();
+
+    /// <summary>El equipo rechazó la condición de búsqueda (no un problema de red ni de ocupado).</summary>
+    private static bool IsRejectedCondition(string message) =>
+        message.Contains("badParameters", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("Invalid Content", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("Invalid Message", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("rechazó la solicitud", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Búsqueda de <c>POST /ISAPI/AccessControl/AcsEvent</c> con la condición
+    /// dada, paginando mientras el equipo conteste <c>MORE</c>. Devuelve TODO lo
+    /// que entregó, incluido el ruido de las propias consultas (lo filtra quien
+    /// llama: su número de serie también cuenta para avanzar), y si se cortó
+    /// por haber juntado <paramref name="max"/> eventos útiles con más por leer.
+    /// </summary>
+    private static async Task<(List<AccessEventRecord> All, bool Truncated)> SearchEventsAsync(
+        HikvisionIsapiClient client, HikvisionAccessProfile? profile, Dictionary<string, object> condition, int max,
+        CancellationToken ct)
+    {
         int pageSize = profile?.EventMaxResults is { } declared and > 0
             ? Math.Min(declared, MaxEventPageSize)
             : EventPageSize;
@@ -575,19 +713,20 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         // 16 caracteres: ver SearchId.
         string searchId = SearchId();
         var events = new List<AccessEventRecord>();
+        int useful = 0;
+        bool more = false;
 
-        for (int position = 0; events.Count < max;)
+        for (int position = 0; useful < max;)
         {
             var cond = new Dictionary<string, object>
             {
                 ["searchID"] = searchId,
                 ["searchResultPosition"] = position,
-                ["maxResults"] = Math.Min(pageSize, max - events.Count),
+                ["maxResults"] = Math.Min(pageSize, max - useful),
                 ["major"] = 0,
                 ["minor"] = 0,
-                ["startTime"] = IsapiTime(sinceUtc),
-                ["endTime"] = IsapiTime(DateTime.UtcNow.AddMinutes(1)),
             };
+            foreach (var (name, value) in condition) cond[name] = value;
             if (sendPicEnable) cond["picEnable"] = false;
             string body = JsonSerializer.Serialize(new Dictionary<string, object> { ["AcsEventCond"] = cond });
             string? json = await client.RequestAsync(HttpMethod.Post, "/ISAPI/AccessControl/AcsEvent?format=json",
@@ -605,7 +744,11 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 using var doc = JsonDocument.Parse(json);
                 var search = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "AcsEvent") ?? doc.RootElement;
                 foreach (var item in InfoList(search))
-                    if (ParseEvent(item) is var record && !IsOwnSessionNoise(record)) events.Add(record);
+                {
+                    var record = ParseEvent(item);
+                    events.Add(record);
+                    if (!IsOwnSessionNoise(record)) useful++;
+                }
                 status = HikvisionAlarmPanelDriver.GetString(search, "responseStatusStrg") ?? "OK";
                 matches = HikvisionAlarmPanelDriver.GetInt(search, "numOfMatches") ?? 0;
             }
@@ -614,15 +757,14 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 throw new DriverException("El equipo respondió el historial de accesos en un formato que no se entiende.");
             }
 
-            if (!status.Equals("MORE", StringComparison.OrdinalIgnoreCase) || matches == 0) break;
+            more = status.Equals("MORE", StringComparison.OrdinalIgnoreCase) && matches > 0;
+            if (!more) break;
             // Se avanza lo que el equipo ENTREGÓ, no lo que se pidió: puede
             // devolver menos (su tope) y avanzar de a página saltaría eventos.
             position += matches;
         }
 
-        // El equipo entrega del más nuevo al más viejo en algunos firmware: el
-        // servidor los quiere en orden cronológico para guardarlos de corrido.
-        return events.Where(e => e.Timestamp > sinceUtc).OrderBy(e => e.Timestamp).ToList();
+        return (events, more);
     }
 
     /// <summary>La lista de eventos de la respuesta, sin importar cómo la nombre el firmware.</summary>
@@ -681,7 +823,9 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             CardNumber: string.IsNullOrWhiteSpace(cardNo) || cardNo.Trim('0').Length == 0 ? null : cardNo.Trim(),
             MajorType: major,
             MinorType: minor,
-            RawJson: item.GetRawText());
+            RawJson: item.GetRawText(),
+            SerialNo: long.TryParse(HikvisionAlarmPanelDriver.GetString(item, "serialNo"), out long serial) && serial > 0
+                ? serial : null);
     }
 
     /// <summary>Hora del equipo ("2026-09-09T10:15:00-03:00") a UTC; sin desfase se asume la hora del servidor.</summary>

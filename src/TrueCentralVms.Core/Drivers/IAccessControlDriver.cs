@@ -62,7 +62,20 @@ public sealed record AccessEventRecord(
     /// <summary>Códigos del fabricante (Hikvision: major/minor), para diagnóstico.</summary>
     int? MajorType,
     int? MinorType,
-    string? RawJson);
+    string? RawJson,
+    /// <summary>
+    /// Número correlativo del evento en el equipo (Hikvision: <c>serialNo</c>),
+    /// el que permite pedir "lo que vino después" sin depender de la hora;
+    /// null si el equipo no lo informa.
+    /// </summary>
+    long? SerialNo = null);
+
+/// <summary>
+/// Una lectura del historial por número de serie: los eventos (ya sin el ruido
+/// que el driver descarta) y el último número que el equipo entregó, CONTANDO
+/// lo descartado, para que la próxima lectura empiece después de él.
+/// </summary>
+public sealed record AccessEventPage(IReadOnlyList<AccessEventRecord> Events, long? LastSerial);
 
 /// <summary>Un tramo horario de un día de la semana, en minutos desde medianoche.</summary>
 public sealed record AccessTimeSegment(int Day, int StartMinutes, int EndMinutes)
@@ -217,6 +230,17 @@ public interface IAccessControlDriver
     Task<IReadOnlyList<AccessEventRecord>> FetchEventsAsync(AccessConnectionInfo info, DateTime sinceUtc, int max,
         CancellationToken ct = default) =>
         throw new DriverException("Este equipo no entrega el historial de accesos.");
+
+    /// <summary>
+    /// Eventos con número de serie mayor que <paramref name="afterSerial"/>, a
+    /// lo sumo <paramref name="max"/>. Es la forma preferida de ponerse al día:
+    /// no pierde dos eventos del mismo segundo ni se confunde si el reloj del
+    /// equipo retrocede. null = este equipo no sabe buscar por número de serie
+    /// (el servidor sigue con <see cref="FetchEventsAsync"/>).
+    /// </summary>
+    Task<AccessEventPage?> FetchEventsAfterSerialAsync(AccessConnectionInfo info, long afterSerial, int max,
+        CancellationToken ct = default) =>
+        Task.FromResult<AccessEventPage?>(null);
 
     /// <summary>
     /// Escucha los eventos que empuja el equipo, hasta que se cancele o se

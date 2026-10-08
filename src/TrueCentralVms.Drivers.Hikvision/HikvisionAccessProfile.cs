@@ -497,6 +497,15 @@ internal sealed class HikvisionAccessProfile
         {
             new("Historial de accesos", StateOf(Flag("isSupportAcsEvent") ?? (EventCondFields is null ? null : true)),
                 EventMaxResults is { } maxEvents ? $"hasta {maxEvents} eventos por consulta" : null, EventCapsPath),
+            new("Lectura por número de evento",
+                EventCondFields is null ? AccessCapabilityState.NotDeclared
+                    : EventCondFields.Contains("beginSerialNo") ? AccessCapabilityState.Supported
+                    : AccessCapabilityState.NotSupported,
+                EventCondFields is null ? null
+                    : EventCondFields.Contains("beginSerialNo")
+                        ? "El VMS sigue el historial por el número correlativo de cada evento: no pierde dos pasadas del mismo segundo ni lo que pasó con el reloj corrido."
+                        : "El VMS sigue el historial por la hora de los eventos.",
+                $"{EventCapsPath} · beginSerialNo"),
             Mark("isSupportAcsEventTotalNum"),
             Mark("isSupportRemoteCheck"),
         };

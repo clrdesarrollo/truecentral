@@ -297,4 +297,11 @@ public class AccessEvent
     public int? MajorType { get; set; }
     public int? MinorType { get; set; }
     public string? RawJson { get; set; }
+
+    /// <summary>
+    /// Número correlativo del evento en el equipo (Hikvision: <c>serialNo</c>).
+    /// Junto con la hora identifica el evento al descartar repetidos: dos
+    /// pasadas del mismo segundo ya no se confunden.
+    /// </summary>
+    public long? SerialNo { get; set; }
 }

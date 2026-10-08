@@ -68,6 +68,15 @@ public class AccessDevice
     public DateTime? LastEventAt { get; set; }
 
     /// <summary>
+    /// Último número de evento (<c>serialNo</c>) que se leyó del historial del
+    /// equipo. Es la marca de agua preferida: el sondeo pide lo que vino
+    /// DESPUÉS de este número, sin depender de la hora. La adelanta solo la
+    /// lectura del historial (no la escucha en vivo, que tras un corte saltaría
+    /// lo perdido); null mientras no se conozca, y entonces se lee por hora.
+    /// </summary>
+    public long? LastEventSerial { get; set; }
+
+    /// <summary>
     /// El VMS lo pone en hora solo cuando se desfasa o tiene otra zona (si la
     /// política lo hace). Se apaga para un equipo cuya hora la maneja otro
     /// sistema y no conviene pelearle.
