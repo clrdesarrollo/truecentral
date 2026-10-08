@@ -645,7 +645,8 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
         // El equipo entrega del más nuevo al más viejo en algunos firmware: el
         // servidor los quiere en orden cronológico para guardarlos de corrido.
-        return all.Where(e => !IsOwnSessionNoise(e) && e.Timestamp > sinceUtc).OrderBy(e => e.Timestamp).ToList();
+        return await WithDeviceNamesAsync(client,
+            all.Where(e => !IsOwnSessionNoise(e) && e.Timestamp > sinceUtc).OrderBy(e => e.Timestamp), ct);
     }
 
     /// <summary>
@@ -670,7 +671,15 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         if (profile?.EventCondFields?.Contains("beginSerialNo") != true || SerialSearchRefused.ContainsKey(key))
             return null;
 
-        var condition = new Dictionary<string, object> { ["beginSerialNo"] = afterSerial + 1 };
+        // endSerialNo es OBLIGATORIO en los equipos reales aunque la guía lo
+        // marque opcional: sin él el DS-K1T323MBWX contesta badJsonContent y el
+        // DS-K1T804AMF badParameters (medido el 2026-10-08). Una ventana amplia
+        // alcanza para ponerse al día; el máximo de 32 bits lo rechazan.
+        var condition = new Dictionary<string, object>
+        {
+            ["beginSerialNo"] = afterSerial + 1,
+            ["endSerialNo"] = afterSerial + SerialWindow,
+        };
         // Pedir orden cronológico si el equipo declara el campo: la guía dice
         // que es lo de fábrica, pero hay firmware que entrega del más nuevo al
         // más viejo.
@@ -692,11 +701,11 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             if (truncated)
             {
                 if (ConsecutiveEnd(all, afterSerial) is long end)
-                    return Page(all, end);
+                    return await Page(all, end);
                 (all, truncated) = await SearchEventsAsync(client, profile, condition, DescendingCatchUp, ct);
                 if (!Honors(all, afterSerial)) return Refuse(key);
                 if (truncated)
-                    return ConsecutiveEnd(all, afterSerial) is long reachable ? Page(all, reachable) : Refuse(key);
+                    return ConsecutiveEnd(all, afterSerial) is long reachable ? await Page(all, reachable) : Refuse(key);
             }
         }
         catch (DriverException ex) when (IsRejectedCondition(ex.Message))
@@ -716,10 +725,11 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             cutoff = e.SerialNo!.Value;
             break;
         }
-        return Page(ordered, cutoff);
+        return await Page(ordered, cutoff);
 
-        static AccessEventPage Page(List<AccessEventRecord> events, long cutoff) => new(
-            events.Where(e => e.SerialNo <= cutoff && !IsOwnSessionNoise(e)).OrderBy(e => e.SerialNo).ToList(),
+        async Task<AccessEventPage> Page(List<AccessEventRecord> events, long cutoff) => new(
+            await WithDeviceNamesAsync(client,
+                events.Where(e => e.SerialNo <= cutoff && !IsOwnSessionNoise(e)).OrderBy(e => e.SerialNo), ct),
             cutoff);
 
         AccessEventPage? Refuse(string device)
@@ -750,6 +760,9 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// nuevo al más viejo. Más allá, ese equipo se lee por hora.
     /// </summary>
     private const int DescendingCatchUp = 5000;
+
+    /// <summary>Ancho de la ventana de números que se pide de una vez (ver FetchEventsAfterSerialAsync).</summary>
+    private const long SerialWindow = 100_000;
 
     /// <summary>Equipos que declararon <c>beginSerialNo</c> pero no lo respetan: se leen por hora.</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> SerialSearchRefused = new();
@@ -838,6 +851,66 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         return (events, more);
     }
 
+    /// <summary>
+    /// Nombre de una persona según el equipo, para los eventos que traen el
+    /// legajo pero no el nombre (el DS-K1T804AMF V1.4.0 nunca lo manda). Sin
+    /// esto, alguien dado de alta directo en el equipo —que el VMS no conoce—
+    /// aparecía como "—". Se guarda por equipo y legajo (también el "no está").
+    /// </summary>
+    private static async Task<string?> DeviceNameAsync(HikvisionIsapiClient client, string employeeNo,
+        CancellationToken ct)
+    {
+        string key = client.BaseUrl + "|" + employeeNo;
+        if (DeviceNames.TryGetValue(key, out var known) && DateTime.UtcNow - known.At < DeviceNameTtl) return known.Name;
+
+        string? name = null;
+        string body = JsonSerializer.Serialize(new
+        {
+            UserInfoSearchCond = new
+            {
+                searchID = SearchId(),
+                searchResultPosition = 0,
+                maxResults = 1,
+                EmployeeNoList = new[] { new { employeeNo } },
+            },
+        });
+        try
+        {
+            string? json = await client.RequestAsync(HttpMethod.Post, "/ISAPI/AccessControl/UserInfo/Search?format=json", body, ct: ct);
+            if (json is not null)
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "UserInfoSearch") is { } search &&
+                    search.TryGetProperty("UserInfo", out var list) && list.ValueKind == JsonValueKind.Array &&
+                    list.GetArrayLength() > 0)
+                    name = HikvisionAlarmPanelDriver.GetString(list[0], "name")?.Trim() is { Length: > 0 } n ? n : null;
+            }
+        }
+        catch (DriverException) { return null; }   // sin respuesta: no se guarda, se reintenta en el próximo evento
+        catch (JsonException) { }
+        DeviceNames[key] = (name, DateTime.UtcNow);
+        return name;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string? Name, DateTime At)> DeviceNames = new();
+    private static readonly TimeSpan DeviceNameTtl = TimeSpan.FromMinutes(30);
+
+    /// <summary>Completa el nombre de los eventos que traen legajo y no nombre.</summary>
+    private static async Task<AccessEventRecord> WithDeviceNameAsync(HikvisionIsapiClient client, AccessEventRecord record,
+        CancellationToken ct) =>
+        record.PersonName is null && record.EmployeeNo is { } employeeNo &&
+        await DeviceNameAsync(client, employeeNo, ct) is { } name
+            ? record with { PersonName = name }
+            : record;
+
+    private static async Task<List<AccessEventRecord>> WithDeviceNamesAsync(HikvisionIsapiClient client,
+        IEnumerable<AccessEventRecord> records, CancellationToken ct)
+    {
+        var result = new List<AccessEventRecord>();
+        foreach (var record in records) result.Add(await WithDeviceNameAsync(client, record, ct));
+        return result;
+    }
+
     /// <summary>La lista de eventos de la respuesta, sin importar cómo la nombre el firmware.</summary>
     private static IEnumerable<JsonElement> InfoList(JsonElement search)
     {
@@ -875,9 +948,11 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         string? cardNo = HikvisionAlarmPanelDriver.GetString(item, "cardNo");
         var (kind, credential, text) = Classify(major, minor);
 
-        // El modo de verificación que informa el equipo es más fiable que
-        // deducir la credencial del código del evento, y existe en todos los
-        // firmware con lector biométrico.
+        // currentVerifyMode es el MODO configurado del lector, no lo que la
+        // persona usó: con "cardOrFace" el DS-K1T323MBWX informa así un acceso
+        // con ROSTRO (minor 0x4b), y tomarlo por su primer factor lo mostraba
+        // como tarjeta. Solo se le cree cuando nombra un único factor; si es
+        // combinado, manda el código del evento.
         var verified = CredentialOf(HikvisionAlarmPanelDriver.GetString(item, "currentVerifyMode"));
         if (verified != AccessCredentialKind.Unknown) credential = verified;
         else if (credential == AccessCredentialKind.Unknown && !string.IsNullOrWhiteSpace(cardNo))
@@ -914,8 +989,9 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     {
         string mode = (verifyMode ?? "").ToLowerInvariant();
         if (mode.Length == 0) return AccessCredentialKind.Unknown;
-        // Los modos combinados ("cardOrFace", "cardAndPw") se resuelven por el
-        // primer factor que nombran, que es el que la persona usó.
+        // Un modo combinado ("cardOrFace", "cardAndPw", "faceOrFpOrCardOrPw")
+        // no dice qué factor se usó: no se adivina (ver ParseEvent).
+        if (System.Text.RegularExpressions.Regex.IsMatch(verifyMode!, "(Or|And)[A-Z]")) return AccessCredentialKind.Unknown;
         if (mode.StartsWith("face")) return AccessCredentialKind.Face;
         if (mode.StartsWith("fp") || mode.StartsWith("finger")) return AccessCredentialKind.Fingerprint;
         if (mode.StartsWith("card")) return AccessCredentialKind.Card;
@@ -1316,7 +1392,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 if (ParseStreamPart(HikvisionIsapiClient.DecodeBody(body)) is not { } part) continue;
                 if (IsSerialGap(lastSerial, part.Record.SerialNo, part.Front)) signal?.Invoke(AccessStreamSignal.Gap);
                 if (part.Record.SerialNo is long serial) lastSerial = serial;
-                if (!IsOwnSessionNoise(part.Record)) yield return part.Record;
+                if (!IsOwnSessionNoise(part.Record)) yield return await WithDeviceNameAsync(client, part.Record, ct);
             }
 
             // Un flujo sin separadores que crece sin límite es un equipo que
