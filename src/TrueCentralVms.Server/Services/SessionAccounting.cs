@@ -16,6 +16,7 @@ namespace TrueCentralVms.Server.Services;
 public sealed class SessionAccounting(
     IServiceScopeFactory scopeFactory,
     MediaMtxManager mtx,
+    StreamTokenService streamTokens,
     ScopedHub hub,
     AuditService audit,
     ILogger<SessionAccounting> logger) : BackgroundService
@@ -77,6 +78,7 @@ public sealed class SessionAccounting(
 
             session.EndedAt = DateTime.UtcNow;
             changed = true;
+            bool fromWeb = streamTokens.TakeWebSession(session.MtxSessionId);
             logger.LogInformation("Streaming: {User} dejó de ver {Device} canal {Channel} ({Profile}).",
                 session.Username, session.DeviceName, session.RtspChannel, session.Profile);
             if (session.Profile is "main" or "sub")
@@ -88,7 +90,7 @@ public sealed class SessionAccounting(
                     detail: $"Dejó de ver '{session.DeviceName}' canal {session.RtspChannel} " +
                             $"(duración {(int)duration.TotalMinutes} min {duration.Seconds} s).",
                     userId: session.UserId, username: session.Username, clientIp: session.ClientIp,
-                    origin: "client", data: new { session.StartedAt, session.EndedAt, session.Profile });
+                    origin: fromWeb ? "web" : "client", data: new { session.StartedAt, session.EndedAt, session.Profile });
             }
         }
         if (changed)
@@ -98,11 +100,15 @@ public sealed class SessionAccounting(
         }
     }
 
-    /// <summary>Identificadores vivos según MediaMTX (sesiones y conexiones RTSP).</summary>
+    /// <summary>Identificadores vivos según MediaMTX (sesiones y conexiones
+    /// RTSP, y sesiones WebRTC del panel web si está habilitado: con WebRTC
+    /// apagado su lista no existe y fallaría la pasada completa).</summary>
     private async Task<HashSet<string>?> GetLiveIdsAsync(CancellationToken ct)
     {
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string endpoint in new[] { "/v3/rtspsessions/list", "/v3/rtspconns/list" })
+        var endpoints = new List<string> { "/v3/rtspsessions/list", "/v3/rtspconns/list" };
+        if (mtx.WebRtcEnabled) endpoints.Add("/v3/webrtcsessions/list");
+        foreach (string endpoint in endpoints)
         {
             try
             {

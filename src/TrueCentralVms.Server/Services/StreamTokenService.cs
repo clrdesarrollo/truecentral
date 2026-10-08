@@ -60,6 +60,20 @@ public sealed class StreamTokenService
     /// </summary>
     public bool TryMarkSessionRecorded(string token) => _recorded.TryAdd(token, true);
 
+    private readonly ConcurrentDictionary<string, bool> _webSessions = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Sesión de MediaMTX abierta desde el panel web (WebRTC): el
+    /// cierre se audita con ese origen. Vive en memoria: tras un reinicio no
+    /// queda ninguna sesión abierta que recordar.</summary>
+    public void MarkWebSession(string mtxSessionId)
+    {
+        if (!string.IsNullOrEmpty(mtxSessionId)) _webSessions[mtxSessionId] = true;
+    }
+
+    /// <summary>¿Era del panel web? La consulta la olvida (se llama al cerrarla).</summary>
+    public bool TakeWebSession(string? mtxSessionId) =>
+        !string.IsNullOrEmpty(mtxSessionId) && _webSessions.TryRemove(mtxSessionId, out _);
+
     private void PruneExpired()
     {
         var now = DateTime.UtcNow;

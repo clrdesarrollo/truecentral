@@ -2173,6 +2173,7 @@ const routes = {
   "#/alarms": renderAlarmMonitor,
   "#/cerco": renderCercoMonitor,
   "#/cerco-panels": renderCercoPanels,
+  "#/live": renderLiveView,
   "#/event-center": renderEventCenter,
   "#/videowall": renderVideowall,
   "#/intercom-console": renderIntercomConsole,
@@ -2280,6 +2281,7 @@ function leaveCurrentPage() {
   clearInterval(videowallTimer); // ídem el del puesto de videowall
   document.getElementById("vw-menu")?.remove();
   intercomConsoleLeave();        // timbre, conversación y sondeo de la citofonía
+  liveViewLeave();               // video en vivo (WebRTC), grabaciones locales, PTZ y voz
 }
 
 function navigate() {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=43">
+  <link rel="stylesheet" href="styles.css?v=44">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -36,6 +36,7 @@
         <a href="#/sounds" data-route="sounds" data-perm="sounds.manage">Biblioteca de sonidos</a>
 
         <div class="nav-divider">Aplicaciones</div>
+        <a href="#/live" data-route="live" data-perm="live.view">Vista en vivo</a>
         <a href="#/alarms" data-route="alarms" data-perm="alarms.monitor">Alarmas</a>
         <a href="#/cerco" data-route="cerco" data-perm="cerco.monitor">Cerco eléctrico</a>
         <a href="#/event-center" data-route="event-center" data-perm="events.attend">Centro de eventos</a>
@@ -176,7 +177,9 @@
   <script src="cerco.js?v=9"></script>
   <script src="cerco-alarm.js?v=4"></script>
   <script src="resources.js?v=7"></script>
+  <!-- live.js va DESPUÉS de resources.js: usa sus íconos de ubicación. -->
+  <script src="live.js?v=1"></script>
   <script src="roles.js?v=1"></script>
-  <script src="app.js?v=52"></script>
+  <script src="app.js?v=53"></script>
 </body>
 </html>

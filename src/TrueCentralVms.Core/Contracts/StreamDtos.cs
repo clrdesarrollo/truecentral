@@ -14,6 +14,14 @@ public sealed record StreamRequestDto(int DeviceId, int RtspChannel, StreamProfi
 /// arranca exactamente en el instante pedido (ONVIF Perfil G).</param>
 public sealed record StreamGrantDto(string RtspUrl, string Token, DateTime ExpiresAt, bool ExactSeek = true);
 
+/// <summary>Vista en vivo del panel web: oferta SDP del navegador (WebRTC,
+/// solo recepción) para un canal y perfil.</summary>
+public sealed record WebRtcOfferDto(int DeviceId, int RtspChannel, StreamProfile Profile, string Offer);
+
+/// <summary>Respuesta SDP del media server y el identificador con que el
+/// navegador cierra la sesión (DELETE /api/streams/webrtc/{Session}).</summary>
+public sealed record WebRtcAnswerDto(string Answer, string Session);
+
 /// <summary>Sesión de streaming activa (para el dashboard de administración).</summary>
 public sealed record ActiveSessionDto(
     int Id,

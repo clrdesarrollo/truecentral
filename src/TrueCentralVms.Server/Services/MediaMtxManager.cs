@@ -18,7 +18,8 @@ namespace TrueCentralVms.Server.Services;
 ///
 /// Seguridad: toda lectura pasa por la autorización HTTP delegada a
 /// /api/streaming/auth (tokens de StreamTokenService); la API de control
-/// queda en 127.0.0.1; RTMP/HLS/WebRTC/SRT/MoQ deshabilitados. Las
+/// queda en 127.0.0.1; RTMP/HLS/SRT/MoQ deshabilitados y WebRTC (vista en
+/// vivo del panel web) con su señalización también en 127.0.0.1. Las
 /// credenciales de los equipos SOLO existen dentro del yml generado.
 /// </summary>
 public sealed partial class MediaMtxManager(
@@ -40,6 +41,18 @@ public sealed partial class MediaMtxManager(
     public int RtspPort => config.GetValue("Streaming:RtspPort", 8654);
     public int ApiPort => config.GetValue("Streaming:ApiPort", 9911);
     public string ApiBaseUrl => $"http://127.0.0.1:{ApiPort}";
+
+    /// <summary>Señalización WebRTC (WHEP) de MediaMTX: SOLO en loopback. El
+    /// navegador nunca le habla directo; el servidor la intermedia en
+    /// /api/streams/webrtc con la misma concesión de token que el RTSP.</summary>
+    public int WebRtcPort => config.GetValue("Streaming:WebRtcPort", 9914);
+    public string WebRtcBaseUrl => $"http://127.0.0.1:{WebRtcPort}";
+
+    /// <summary>Puerto del medio WebRTC (ICE), UDP y TCP: es el único que el
+    /// navegador abre directo hacia este equipo (el instalador lo habilita
+    /// en el firewall). 0 = vista en vivo web deshabilitada.</summary>
+    public int WebRtcIcePort => config.GetValue("Streaming:WebRtcIcePort", 8660);
+    public bool WebRtcEnabled => WebRtcIcePort > 0;
 
     /// <summary>
     /// Secreto por arranque que autoriza a los relés FFmpeg locales (rutas con
@@ -207,10 +220,10 @@ public sealed partial class MediaMtxManager(
 
                 rtmp: no
                 hls: no
-                webrtc: no
                 srt: no
                 moq: no
 
+                {WebRtcSection()}
                 pathDefaults:
                   sourceOnDemand: yes
                   sourceOnDemandStartTimeout: 15s
@@ -291,6 +304,43 @@ public sealed partial class MediaMtxManager(
         {
             _configLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Bloque WebRTC del yml (vista en vivo del panel web). La señalización
+    /// WHEP escucha solo en loopback y la intermedia el servidor, que agrega
+    /// X-Forwarded-For: por eso 127.0.0.1 es proxy de confianza y MediaMTX
+    /// informa al callback de autorización la IP real del navegador. El medio
+    /// va directo navegador ↔ MediaMTX por el puerto ICE (UDP, y TCP para
+    /// redes que bloquean UDP). Con NAT, PublicHost y
+    /// Streaming:WebRtcAdditionalHosts se anuncian como candidatos extra.
+    /// </summary>
+    private string WebRtcSection()
+    {
+        if (!WebRtcEnabled) return "webrtc: no\n";
+        var hosts = new List<string>();
+        if (config["Streaming:PublicHost"] is { Length: > 0 } publicHost) hosts.Add(publicHost.Trim());
+        // Lista JSON (["a","b"]) o texto separado por comas.
+        foreach (var child in config.GetSection("Streaming:WebRtcAdditionalHosts").GetChildren())
+            if (child.Value is { Length: > 0 } value) hosts.Add(value.Trim());
+        if (config["Streaming:WebRtcAdditionalHosts"] is { Length: > 0 } csv)
+            hosts.AddRange(csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        string additional = string.Join(", ", hosts.Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(h => $"'{h.Replace("'", "''")}'"));
+        return $"""
+            # Vista en vivo del panel web (WebRTC). Señalización solo en
+            # loopback (la intermedia el servidor); el medio va por el puerto ICE.
+            webrtc: yes
+            webrtcAddress: 127.0.0.1:{WebRtcPort}
+            webrtcEncryption: no
+            webrtcTrustedProxies: ['127.0.0.1', '::1']
+            webrtcLocalUDPAddress: :{WebRtcIcePort}
+            webrtcLocalTCPAddress: :{WebRtcIcePort}
+            webrtcIPsFromInterfaces: yes
+            webrtcAdditionalHosts: [{additional}]
+            webrtcICEServers2: []
+
+            """;
     }
 
     public static string PathName(int deviceId, int rtspChannel, StreamProfile profile) =>
@@ -472,22 +522,102 @@ public sealed partial class MediaMtxManager(
     }
 
     /// <summary>
-    /// Expulsa a un lector cortando su sesión RTSP en MediaMTX. El espectador
-    /// puede volver a pedir una concesión (sigue autenticado): expulsar corta
-    /// la sesión en curso, no bloquea la cuenta.
+    /// Expulsa a un lector cortando su sesión en MediaMTX (RTSP del cliente de
+    /// escritorio o WebRTC del panel web: se prueba en ese orden). El
+    /// espectador puede volver a pedir una concesión (sigue autenticado):
+    /// expulsar corta la sesión en curso, no bloquea la cuenta.
     /// </summary>
     public async Task<bool> KickSessionAsync(string mtxSessionId, CancellationToken ct = default)
     {
         if (!IsRunning || string.IsNullOrEmpty(mtxSessionId)) return false;
+        foreach (string kind in new[] { "rtspsessions", "webrtcsessions" })
+        {
+            try
+            {
+                using var response = await ApiHttp.PostAsync(
+                    $"{ApiBaseUrl}/v3/{kind}/kick/{Uri.EscapeDataString(mtxSessionId)}", null, ct);
+                if (response.IsSuccessStatusCode) return true;
+            }
+            catch
+            {
+                // MediaMTX ocupado o reiniciando: se prueba el otro tipo igual.
+            }
+        }
+        return false;
+    }
+
+    // ------------------------------------------------------------------
+    // WebRTC (WHEP) del panel web, intermediado por el servidor. La oferta
+    // SDP del navegador se reenvía a la señalización local de MediaMTX con el
+    // token de la concesión; la respuesta trae la URL de la sesión WHEP
+    // (Location), que es lo que permite cerrarla al instante.
+    // ------------------------------------------------------------------
+
+    /// <summary>El arranque bajo demanda de la fuente puede tardar hasta
+    /// sourceOnDemandStartTimeout (15 s) antes de que MediaMTX conteste.</summary>
+    private static readonly HttpClient WhepHttp = new() { Timeout = TimeSpan.FromSeconds(25) };
+
+    public sealed record WhepAnswer(int Status, string Body, string? SessionUrl);
+
+    /// <summary>Envía la oferta SDP a la ruta; devuelve el estado HTTP de
+    /// MediaMTX, el cuerpo (SDP de respuesta o JSON de error) y la URL
+    /// absoluta (loopback) de la sesión creada.</summary>
+    public async Task<WhepAnswer> WhepOfferAsync(string path, string token, string offerSdp, string? clientIp,
+        CancellationToken ct)
+    {
+        var baseUri = new Uri(WebRtcBaseUrl + "/");
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            new Uri(baseUri, $"{path}/whep?token={Uri.EscapeDataString(token)}"))
+        {
+            Content = new StringContent(offerSdp, Encoding.UTF8),
+        };
+        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/sdp");
+        if (clientIp is { Length: > 0 }) request.Headers.TryAddWithoutValidation("X-Forwarded-For", clientIp);
+        using var response = await WhepHttp.SendAsync(request, ct);
+        string body = await response.Content.ReadAsStringAsync(ct);
+        string? session = response.Headers.Location is { } location
+            ? new Uri(baseUri, location).ToString()
+            : null;
+        return new WhepAnswer((int)response.StatusCode, body, session);
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (int UserId, string Url, DateTime Created)> _whepSessions = new();
+
+    /// <summary>Anota la sesión WHEP creada para el usuario y devuelve el
+    /// identificador opaco que recibe el navegador (la URL interna de MediaMTX
+    /// no sale del servidor).</summary>
+    public string RegisterWhepSession(int userId, string sessionUrl)
+    {
+        // Las que nadie cerró (pestaña cerrada de golpe) se olvidan al día.
+        var stale = DateTime.UtcNow.AddHours(-24);
+        foreach (var pair in _whepSessions)
+            if (pair.Value.Created < stale) _whepSessions.TryRemove(pair.Key, out _);
+        string id = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+        _whepSessions[id] = (userId, sessionUrl, DateTime.UtcNow);
+        return id;
+    }
+
+    /// <summary>URL interna de la sesión, solo para su dueño (y la olvida).</summary>
+    public string? TakeWhepSession(string id, int userId)
+    {
+        if (!_whepSessions.TryGetValue(id, out var entry) || entry.UserId != userId) return null;
+        _whepSessions.TryRemove(id, out _);
+        return entry.Url;
+    }
+
+    /// <summary>Cierra una sesión WHEP (el navegador cerró el cuadro).</summary>
+    public async Task<bool> WhepDeleteAsync(string sessionUrl, CancellationToken ct)
+    {
+        // Solo URLs de la señalización local: nunca un destino arbitrario.
+        if (!sessionUrl.StartsWith(WebRtcBaseUrl + "/", StringComparison.OrdinalIgnoreCase)) return false;
         try
         {
-            using var response = await ApiHttp.PostAsync(
-                $"{ApiBaseUrl}/v3/rtspsessions/kick/{Uri.EscapeDataString(mtxSessionId)}", null, ct);
+            using var response = await ApiHttp.DeleteAsync(sessionUrl, ct);
             return response.IsSuccessStatusCode;
         }
         catch
         {
-            return false;
+            return false; // MediaMTX ya la había cerrado o se reinició
         }
     }
 
