@@ -88,6 +88,8 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         ProfileMisses.TryRemove(DeviceKey(info), out _);
         SerialSearchRefused.TryRemove(DeviceKey(info), out _);
         SetUpDeleteRefused.TryRemove(DeviceKey(info), out _);
+        // Lo que se cambie desde Hora y mantenimiento tiene que verse ya.
+        DeviceZones.TryRemove(DeviceKey(info), out _);
     }
 
     /// <summary>Clave de un equipo en las cachés del driver (esquema, dirección y puerto).</summary>
@@ -895,13 +897,64 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string? Name, DateTime At)> DeviceNames = new();
     private static readonly TimeSpan DeviceNameTtl = TimeSpan.FromMinutes(30);
 
-    /// <summary>Completa el nombre de los eventos que traen legajo y no nombre.</summary>
+    /// <summary>
+    /// Completa lo que el evento no trae bien: el nombre (si viene solo el
+    /// legajo) y la hora en UTC calculada con la regla de zona del equipo en vez
+    /// de la etiqueta de desfase que pone (ver <see cref="DeviceTimeZones.OffsetAtLocal"/>).
+    /// </summary>
     private static async Task<AccessEventRecord> WithDeviceNameAsync(HikvisionIsapiClient client, AccessEventRecord record,
-        CancellationToken ct) =>
-        record.PersonName is null && record.EmployeeNo is { } employeeNo &&
-        await DeviceNameAsync(client, employeeNo, ct) is { } name
-            ? record with { PersonName = name }
-            : record;
+        CancellationToken ct)
+    {
+        if (record.PersonName is null && record.EmployeeNo is { } employeeNo &&
+            await DeviceNameAsync(client, employeeNo, ct) is { } name)
+            record = record with { PersonName = name };
+        if (await DeviceZoneAsync(client, ct) is { } zone && CorrectedUtc(record, zone) is { } utc)
+            record = record with { Timestamp = utc };
+        return record;
+    }
+
+    /// <summary>
+    /// La hora del evento en UTC según la regla de zona del equipo, o null si no
+    /// hace falta corregirla (o no se puede). La hora local del evento es la del
+    /// reloj del equipo; lo que puede estar mal es solo la etiqueta.
+    /// </summary>
+    private static DateTime? CorrectedUtc(AccessEventRecord record, DeviceTimeZones.PosixZone zone)
+    {
+        if (record.RawJson is null) return null;
+        string? text;
+        try
+        {
+            using var doc = JsonDocument.Parse(record.RawJson);
+            text = HikvisionAlarmPanelDriver.GetString(doc.RootElement, "dateTime")
+                   ?? HikvisionAlarmPanelDriver.GetString(doc.RootElement, "time");
+        }
+        catch (JsonException) { return null; }
+        if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var labeled)) return null;
+        if (DeviceTimeZones.OffsetAtLocal(zone, labeled.DateTime) is not { } offset || offset == labeled.Offset) return null;
+        return DateTime.SpecifyKind(labeled.DateTime - offset, DateTimeKind.Utc);
+    }
+
+    /// <summary>Zona POSIX que tiene configurada el equipo (<c>/ISAPI/System/time</c>), en caché una hora.</summary>
+    private static async Task<DeviceTimeZones.PosixZone?> DeviceZoneAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        if (DeviceZones.TryGetValue(client.BaseUrl, out var known) && DateTime.UtcNow - known.At < DeviceZoneTtl)
+            return known.Zone;
+        DeviceTimeZones.PosixZone? zone = null;
+        try
+        {
+            string? xml = await client.RequestAsync(HttpMethod.Get, "/ISAPI/System/time", null, "application/xml", ct);
+            if (xml is not null)
+                zone = DeviceTimeZones.ParsePosix(XDocument.Parse(xml).Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "timeZone")?.Value);
+        }
+        catch (DriverException) { return known.Zone; }
+        catch (System.Xml.XmlException) { }
+        DeviceZones[client.BaseUrl] = (zone, DateTime.UtcNow);
+        return zone;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DeviceTimeZones.PosixZone? Zone, DateTime At)> DeviceZones = new();
+    private static readonly TimeSpan DeviceZoneTtl = TimeSpan.FromHours(1);
 
     private static async Task<List<AccessEventRecord>> WithDeviceNamesAsync(HikvisionIsapiClient client,
         IEnumerable<AccessEventRecord> records, CancellationToken ct)
