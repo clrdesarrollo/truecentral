@@ -6,6 +6,7 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -25,7 +26,7 @@ public static class AccessSettingsApi
         app.MapGet("/api/access/devices/{id:int}/settings", async (HttpContext ctx, int id, VmsDbContext db,
             IEnumerable<IAccessDeviceSettingsProvider> providers, AccessControlService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             var device = await db.AccessDevices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
             var provider = providers.FirstOrDefault(p => p.DriverKey.Equals(device.DriverKey, StringComparison.OrdinalIgnoreCase));
@@ -46,7 +47,7 @@ public static class AccessSettingsApi
             AccessSettingsWriteDto request, VmsDbContext db, IEnumerable<IAccessDeviceSettingsProvider> providers,
             AccessControlService service, AuditService audit, IHubContext<VmsHub> hub, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             if (request?.Values is null || request.Values.Count == 0) return Error("No hay cambios que guardar.");
             var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();

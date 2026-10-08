@@ -216,8 +216,79 @@ function showAuthScreen() {
 function showAppShell() {
   $("#auth-screen").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
-  $("#current-user").textContent = `${Api.username} (${Api.role === "Admin" ? "Administrador" : "Operador"})`;
+  showCurrentUser();
   showUserScope();
+}
+
+/** Nombre y roles del usuario conectado, en la barra superior. */
+function showCurrentUser() {
+  const roles = Perms.roles.length ? Perms.roles.join(", ") : (Api.role === "Admin" ? "Administrador" : "Operador");
+  $("#current-user").textContent = `${Api.username} (${roles})`;
+}
+
+// ---------------------------------------------------------------------------
+// Qué puede HACER esta sesión según sus roles (la unión de sus permisos). La
+// interfaz oculta las páginas y botones que el servidor rechazaría; el servidor
+// valida igual cada solicitud. Las páginas preguntan con Perms.can("clave") o,
+// si basta con uno de varios, Perms.can("clave1|clave2"). Los enlaces del menú
+// llevan data-perm con la misma sintaxis.
+// ---------------------------------------------------------------------------
+const Perms = {
+  admin: false,
+  keys: new Set(),
+  roles: [],
+  loaded: false,
+  async load() {
+    let me;
+    try { me = await Api.get("/api/auth/me"); } catch { return false; }
+    const p = me.permissions;
+    if (p) {
+      this.admin = !!p.isAdmin;
+      this.keys = new Set(p.permissions ?? []);
+      this.roles = p.roles ?? [];
+    } else {
+      // Servidor anterior a los roles: el administrador puede todo y el resto, lo de siempre.
+      this.admin = me.role === "Admin";
+      this.keys = new Set();
+      this.roles = [];
+    }
+    this.loaded = true;
+    applyNavPermissions();
+    showCurrentUser();
+    return true;
+  },
+  can(spec) {
+    if (this.admin || !spec) return true;
+    if (!this.loaded) return Api.role === "Admin";
+    return String(spec).split("|").some((k) => this.keys.has(k.trim()));
+  },
+  reset() { this.admin = false; this.keys = new Set(); this.roles = []; this.loaded = false; },
+};
+
+/** Oculta del menú lo que sus roles no permiten (y los grupos y títulos que quedan vacíos). */
+function applyNavPermissions() {
+  $$("#nav a[data-perm]").forEach((a) => { a.hidden = !Perms.can(a.dataset.perm); });
+  // Grupos de adentro hacia afuera: uno anidado vacío deja vacío a su padre.
+  [...$$("#nav .nav-group")].reverse().forEach((g) => {
+    g.hidden = !g.querySelector(":scope > .nav-children a:not([hidden])");
+  });
+  // Un título de sección sin nada visible hasta el próximo título, también se oculta.
+  const items = [...$("#nav").children];
+  items.forEach((el, i) => {
+    if (!el.classList.contains("nav-divider")) return;
+    let any = false;
+    for (let j = i + 1; j < items.length && !items[j].classList.contains("nav-divider"); j++)
+      if (!items[j].hidden) { any = true; break; }
+    el.hidden = !any;
+  });
+}
+
+/** Los permisos del usuario cambiaron (sus roles o un rol suyo): se rehace menú y página. */
+async function onPermissionsChanged() {
+  if (!(await Perms.load())) return;
+  Operable.schedule();
+  navigate();
+  toast("Sus permisos cambiaron: la pantalla se actualizó.");
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +374,7 @@ new MutationObserver((mutations) => {
 function onOperableTopic(topic) {
   if (OP_TOPICS.has(topic)) Operable.schedule();
   if (topic === "scope") showUserScope();
+  if (topic === "permissions") onPermissionsChanged();
 }
 function onOperableReconnected() { Operable.schedule(); }
 
@@ -497,7 +569,7 @@ async function renderDashboard() {
   try { devices = await Api.get("/api/devices"); } catch { /* sin sesión aún */ }
   let usersCount = "—";
   let sessionsCount = "—";
-  if (Api.role === "Admin") {
+  if (Perms.can("users.manage|sessions.manage")) {
     try { usersCount = (await Api.get("/api/users")).length; } catch { /* sin permiso */ }
     try { sessionsCount = (await Api.get("/api/streams/active")).length; } catch { /* sin permiso */ }
   }
@@ -526,7 +598,7 @@ async function renderDashboard() {
         <div class="card-label">Dispositivos</div>
         <div class="card-value">${devices.length}<span class="muted" style="font-size:13px"> (${online} en línea)</span></div>
       </div>
-      ${Api.role === "Admin" ? `
+      ${Perms.can("sessions.manage") ? `
       <div class="card">
         <div class="card-label">Sesiones de video activas</div>
         <div class="card-value">${esc(sessionsCount)}</div>
@@ -607,8 +679,8 @@ function desktopSeatsHtml(data) {
 
 async function renderSessions() {
   $("#page-title").textContent = "Sesiones";
-  if (Api.role !== "Admin") {
-    $("#view").innerHTML = `<div class="warn-box">Requiere rol administrador.</div>`;
+  if (!Perms.can("sessions.manage")) {
+    $("#view").innerHTML = `<div class="warn-box">Sus roles no incluyen las sesiones de video.</div>`;
     return;
   }
 
@@ -732,7 +804,7 @@ async function renderDevices() {
   try { devices = await Api.get("/api/devices"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("devices.manage");
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Dispositivos administrados</h3>
@@ -1515,7 +1587,7 @@ async function channelsModal(device) {
   try { channels = await Api.get(`/api/devices/${device.id}/channels`); }
   catch (err) { toast(err.error, true); return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("devices.manage");
   // Hubo cambios: al cerrar se vuelve a pintar la tabla (contador habilitados / total).
   let changed = false;
   const pendingOnline = channels.filter((c) => !c.enabled && c.isOnline).length;
@@ -1545,8 +1617,8 @@ async function channelsModal(device) {
               <input type="checkbox" class="ch-enabled" ${c.enabled ? "checked" : ""} ${isAdmin ? "" : "disabled"}> Habilitado
             </label>
             <label class="checkbox-row" style="margin:0"
-                   title="Mostrar control PTZ. Se detecta automático; márquelo a mano para domos que el equipo no reporta (ej. conectados por ONVIF al DVR).">
-              <input type="checkbox" class="ch-ptz" ${c.supportsPtz ? "checked" : ""} ${isAdmin ? "" : "disabled"}> PTZ
+                   title="Mostrar control PTZ (mover, zoom, foco). Se detecta automático cuando el equipo lo informa; márquelo a mano para domos y cámaras con lente varifocal motorizado conectados por coaxial a un DVR (se controlan por el cable, pero el grabador no lo informa) o por ONVIF al grabador.">
+              <input type="checkbox" class="ch-ptz" ${c.supportsPtz ? "checked" : ""} ${isAdmin ? "" : "disabled"}> PTZ / lente
             </label>
             <label class="checkbox-row" style="margin:0"
                    title="Para cámaras que anuncian mal su audio (SDP inválido que el servidor de media rechaza): el video pasa por un relé FFmpeg y se ve SIN audio. Márquelo si el canal da error de reproducción pese a estar en línea.">
@@ -1595,21 +1667,23 @@ async function channelsModal(device) {
 
 async function renderUsers() {
   $("#page-title").textContent = "Usuarios";
-  if (Api.role !== "Admin") {
-    $("#view").innerHTML = `<div class="warn-box">Requiere rol administrador.</div>`;
+  if (!Perms.can("users.manage")) {
+    $("#view").innerHTML = `<div class="warn-box">Sus roles no incluyen la administración de usuarios.</div>`;
     return;
   }
-  let users, locations, unassigned;
+  let users, locations, unassigned, roles;
   try {
-    // El árbol de ubicaciones y lo "por ubicar" sirven para el alcance de cada usuario.
-    [users, locations, unassigned] = await Promise.all([
+    // El árbol de ubicaciones y lo "por ubicar" sirven para el alcance de cada
+    // usuario; los roles, para elegirlos (con lo que esta sesión puede asignar).
+    [users, locations, unassigned, roles] = await Promise.all([
       Api.get("/api/users"),
       Api.get("/api/locations").catch(() => []),
       Api.get("/api/resources?unassigned=true").catch(() => []),
+      Api.get("/api/roles"),
     ]);
   }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
-  const scopeCtx = { locations, unassigned: unassigned.length };
+  const scopeCtx = { locations, unassigned: unassigned.length, roles };
 
   $("#view").innerHTML = `
     <div class="toolbar">
@@ -1618,20 +1692,21 @@ async function renderUsers() {
     </div>
     <table class="grid">
       <thead><tr>
-        <th>Usuario</th><th>Rol</th><th>Alcance</th><th>Estado</th><th>Creado</th><th>Última clave</th><th></th>
+        <th>Usuario</th><th>Roles</th><th>Alcance</th><th>Estado</th><th>Creado</th><th>Última clave</th><th></th>
       </tr></thead>
       <tbody>
         ${users.map((u) => `
           <tr data-id="${u.id}">
             <td>${esc(u.username)}</td>
-            <td><span class="tag ${u.role === "Admin" ? "admin" : "operator"}">${u.role === "Admin" ? "Administrador" : "Operador"}</span></td>
+            <td>${userRolesHtml(u)}</td>
             <td>${userScopeHtml(u, locations)}</td>
             <td><span class="tag ${u.enabled ? "on" : "off"}">${u.enabled ? "Habilitado" : "Deshabilitado"}</span></td>
             <td class="muted">${formatDate(u.createdAt)}</td>
             <td class="muted">${formatDate(u.passwordChangedAt)}</td>
-            <td class="row-actions">
-              <button class="btn ghost btn-edit">Editar</button>
-              <button class="btn danger btn-delete">Eliminar</button>
+            <td class="row-actions">${u.editable === false
+              ? `<span class="muted" title="Tiene permisos o alcance que usted no tiene">Sin acceso</span>`
+              : `<button class="btn ghost btn-edit">Editar</button>
+              <button class="btn danger btn-delete">Eliminar</button>`}
             </td>
           </tr>`).join("")}
       </tbody>
@@ -1669,6 +1744,29 @@ function scopeLocationPath(id, byId) {
     current = current.parentId != null ? byId.get(current.parentId) : null;
   }
   return parts.join(" › ");
+}
+
+/** La celda "Roles" de la tabla de usuarios. */
+function userRolesHtml(u) {
+  const names = u.roleNames ?? (u.role === "Admin" ? ["Administrador"] : ["Operador"]);
+  if (!names.length) return `<span class="muted">Sin roles</span>`;
+  return names.map((n) => `<span class="tag ${n === "Administrador" && u.role === "Admin" ? "admin" : "operator"}">${esc(n)}</span>`).join(" ");
+}
+
+/** Casillas de roles del formulario de usuario: los que esta sesión no puede asignar quedan bloqueados. */
+function userRolesFieldHtml(roles, selected) {
+  if (!roles?.length) return `<div class="muted">No se pudieron leer los roles.</div>`;
+  return `<div class="role-pick">${roles.map((r) => {
+    const on = selected.has(r.id);
+    const locked = !r.assignable && !on;
+    const count = r.systemKey === "admin" ? "todos los permisos" : `${r.permissions.length} permiso(s)`;
+    return `<label class="role-pick-item${locked ? " locked" : ""}" title="${locked ? "Tiene permisos que usted no tiene" : esc(r.description || "")}">
+      <input type="checkbox" data-role="${r.id}" data-system="${esc(r.systemKey ?? "")}" ${on ? "checked" : ""} ${locked ? "disabled" : ""}>
+      <span><b>${esc(r.name)}</b> <span class="muted">· ${count}</span>
+        ${r.description ? `<br><span class="muted small">${esc(r.description)}</span>` : ""}</span>
+    </label>`;
+  }).join("")}</div>
+  <div class="muted field-hint">Con varios roles, el usuario suma los permisos de todos.</div>`;
 }
 
 /** La celda "Alcance" de la tabla de usuarios. */
@@ -1724,8 +1822,10 @@ function userScopeSync(tree) {
   }
 }
 
-function userModal(user, scopeCtx = { locations: [], unassigned: 0 }) {
+function userModal(user, scopeCtx = { locations: [], unassigned: 0, roles: [] }) {
   const isNew = !user;
+  const operatorRole = scopeCtx.roles?.find((r) => r.systemKey === "operator");
+  const roleIds = new Set(user?.roleIds ?? (operatorRole?.assignable ? [operatorRole.id] : []));
   const selected = new Set(user?.locationIds || []);
   const restricted = !!user?.restrictToLocations;
   openModal(`
@@ -1737,11 +1837,8 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0 }) {
         <input id="uf-username" required minlength="3" maxlength="64" value="${esc(user?.username ?? "")}">
       </div>
       <div class="field">
-        <label>Rol</label>
-        <select id="uf-role">
-          <option value="Operator" ${user?.role === "Operator" ? "selected" : ""}>Operador</option>
-          <option value="Admin" ${user?.role === "Admin" ? "selected" : ""}>Administrador</option>
-        </select>
+        <label>Roles</label>
+        <div id="uf-roles">${userRolesFieldHtml(scopeCtx.roles, roleIds)}</div>
       </div>
       <div class="field" id="uf-scope">
         <label>Alcance por ubicación</label>
@@ -1782,15 +1879,16 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0 }) {
   bindPolicyList($("#uf-password"), "uf-policy");
   // Alcance: se ve según el rol (el administrador no tiene) y el modo elegido.
   const scopeTree = $("#uf-scope-tree");
+  const isAdminPicked = () => $$("#uf-roles input[data-role]").some((b) => b.checked && b.dataset.system === "admin");
   const refreshScope = () => {
-    const admin = $("#uf-role").value === "Admin";
+    const admin = isAdminPicked();
     const some = $("input[name=uf-scope-mode]:checked")?.value === "some";
     $("#uf-scope-admin").classList.toggle("hidden", !admin);
     $("#uf-scope-edit").classList.toggle("hidden", admin);
     $("#uf-scope-pick").classList.toggle("hidden", !some);
     userScopeSync(scopeTree);
   };
-  $("#uf-role").addEventListener("change", refreshScope);
+  $("#uf-roles").addEventListener("change", refreshScope);
   $$("input[name=uf-scope-mode]").forEach((r) => r.addEventListener("change", refreshScope));
   scopeTree.addEventListener("change", () => userScopeSync(scopeTree));
   refreshScope();
@@ -1805,7 +1903,12 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0 }) {
       errorBox.innerHTML = `<div class="error-box">La contraseña no cumple la política de seguridad.</div>`;
       return;
     }
-    const restrict = $("#uf-role").value !== "Admin" && $("input[name=uf-scope-mode]:checked")?.value === "some";
+    const pickedRoles = $$("#uf-roles input[data-role]").filter((b) => b.checked).map((b) => Number(b.dataset.role));
+    if (pickedRoles.length === 0) {
+      errorBox.innerHTML = `<div class="error-box">Marque al menos un rol.</div>`;
+      return;
+    }
+    const restrict = !isAdminPicked() && $("input[name=uf-scope-mode]:checked")?.value === "some";
     // Solo las marcadas a mano: las incluidas por una de arriba ya van con ella.
     const locationIds = restrict
       ? $$("input[data-loc]", scopeTree).filter((b) => b.checked && b.dataset.inherited !== "1").map((b) => Number(b.dataset.loc))
@@ -1818,7 +1921,7 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0 }) {
     const body = {
       username: $("#uf-username").value.trim(),
       password: password || null,
-      role: $("#uf-role").value,
+      roleIds: pickedRoles,
       enabled: $("#uf-enabled").checked,
       restrictToLocations: restrict,
       viewOutsideScope: viewOutside,
@@ -1837,7 +1940,7 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0 }) {
 }
 
 // ---------------------------------------------------------------------------
-// Auditoría (bitácora ISO 27001, solo administradores)
+// Auditoría (bitácora ISO 27001, permiso "Bitácora de auditoría")
 // ---------------------------------------------------------------------------
 let auditCatalog = null;           // catálogo de categorías/acciones (se pide una vez)
 const auditState = { page: 1 };    // filtros vigentes entre búsquedas
@@ -1874,8 +1977,8 @@ function auditFilterQuery() {
 
 async function renderAudit() {
   $("#page-title").textContent = "Auditoría";
-  if (Api.role !== "Admin") {
-    $("#view").innerHTML = `<div class="warn-box">Requiere rol administrador.</div>`;
+  if (!Perms.can("audit.view")) {
+    $("#view").innerHTML = `<div class="warn-box">Sus roles no incluyen la bitácora de auditoría.</div>`;
     return;
   }
 
@@ -2078,6 +2181,7 @@ const routes = {
   "#/resources": renderResources,
   "#/sessions": renderSessions,
   "#/users": renderUsers,
+  "#/roles": renderRoles,
   "#/audit": renderAudit,
   "#/services": renderServices,
   "#/license": renderLicense,
@@ -2170,6 +2274,7 @@ function leaveCurrentPage() {
   if (typeof cercoDetachHub === "function") cercoDetachHub(); // suelta hub + delegaciones de cerco
   if (typeof accessDetachHub === "function") accessDetachHub(); // ídem el monitoreo de puertas
   if (typeof resourcesDetachHub === "function") resourcesDetachHub(); // ídem la página Recursos
+  if (typeof rolesDetachHub === "function") rolesDetachHub(); // ídem la página Roles
   clearInterval(eventCenterTimer); // ídem el del centro de eventos
   evcStopSound();                // y su alarma sonora no sigue en otra página
   clearInterval(videowallTimer); // ídem el del puesto de videowall
@@ -2193,6 +2298,17 @@ function navigate() {
     if (on) active = a;
   });
   revealActiveNav(active);
+  // Una página que sus roles no permiten (enlace guardado, historial, o le
+  // quitaron el permiso estando en ella) no se dibuja: el servidor la
+  // rechazaría a medias, solicitud por solicitud.
+  const routePerm = active?.dataset.perm;
+  if (routePerm && !Perms.can(routePerm)) {
+    $("#view").className = "";
+    $("#page-title").textContent = active.textContent.trim();
+    $("#view").innerHTML = `<div class="info-box" style="margin:24px">Sus roles no incluyen el acceso a esta página.
+      Si lo necesita, pídaselo a quien administra los usuarios.</div>`;
+    return;
+  }
   // Las páginas a pantalla completa (editor de automatizaciones) cambian la
   // clase del contenedor; cada navegación parte limpia.
   $("#view").className = "";
@@ -2304,7 +2420,9 @@ window.addEventListener("storage", (e) => {
   else location.reload();
 });
 
-function enterApp() {
+async function enterApp() {
+  Perms.reset();
+  await Perms.load();          // qué puede hacer: el menú y las páginas se adaptan
   showAppShell();
   SessionWatch.start();        // avisa apenas termine la sesión, aunque nadie toque nada
   Operable.load();             // qué puede operar: lo demás se deshabilita
@@ -2416,7 +2534,7 @@ $("#btn-about").addEventListener("click", async () => {
     <div class="muted" style="font-size:11px;margin-top:10px">${esc(a.copyright ?? "")}</div>
     <div class="modal-actions">
       <button class="btn ghost" type="button" id="about-copy">Copiar datos</button>
-      ${Api.role === "Admin" ? `<button class="btn ghost" type="button" id="about-license">Ver licencia</button>` : ""}
+      ${Perms.can("system.license") ? `<button class="btn ghost" type="button" id="about-license">Ver licencia</button>` : ""}
       <button class="btn" type="button" id="about-close">Cerrar</button>
     </div>`);
   $("#about-close").addEventListener("click", closeModal);

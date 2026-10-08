@@ -76,7 +76,7 @@ async function renderVideowall() {
   try { vwWalls = await Api.get("/api/walls"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
   if (!vwWalls.length) {
-    $("#view").innerHTML = `<div class="info-box">No hay muros de video configurados. ${Api.role === "Admin"
+    $("#view").innerHTML = `<div class="info-box">No hay muros de video configurados. ${Perms.can("devices.manage")
       ? "Créelos en Configuración → Dispositivos → Videowalls → Muro de video." : "Un administrador debe configurarlos."}</div>`;
     return;
   }

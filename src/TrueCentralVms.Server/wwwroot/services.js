@@ -75,7 +75,7 @@ function serviceRowHtml(s, isAdmin) {
     <td class="row-actions">${isAdmin ? `
       <button class="btn ghost" data-act="start" ${canStart ? "" : "disabled"}>Iniciar</button>
       <button class="btn ghost" data-act="stop" ${canStop ? "" : "disabled"} title="${s.canStop ? "" : "Servicio esencial: solo se puede reiniciar"}">Detener</button>
-      <button class="btn ghost" data-act="restart" ${canRestart ? "" : "disabled"}>Reiniciar</button>` : `<span class="muted">Solo administradores</span>`}</td>`;
+      <button class="btn ghost" data-act="restart" ${canRestart ? "" : "disabled"}>Reiniciar</button>` : `<span class="muted" title="Requiere el permiso Servicios del servidor">Sin permiso</span>`}</td>`;
 }
 
 function serverCardsHtml(server, services) {
@@ -116,7 +116,7 @@ function serverCardsHtml(server, services) {
 
 async function renderServices() {
   $("#page-title").textContent = "Servicios";
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("system.services");
   let data;
   try { data = await Api.get("/api/system/services"); }
   catch (e) { $("#view").innerHTML = `<div class="error-box">${esc(e.error)}</div>`; return; }
@@ -160,7 +160,7 @@ async function refreshServices() {
   try { data = await Api.get("/api/system/services"); }
   catch { return; }
   if (!$("#svc-table")) return;
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("system.services");
 
   const cards = $("#svc-cards");
   if (cards) cards.innerHTML = serverCardsHtml(data.server, data.services);

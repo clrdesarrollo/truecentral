@@ -19,7 +19,7 @@ async function renderDecoders() {
   try { decoders = await Api.get("/api/decoders"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("devices.manage");
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Decodificadores de muro</h3>
@@ -222,7 +222,7 @@ async function renderWalls() {
   try { walls = await Api.get("/api/walls"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("devices.manage");
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Muros de video</h3>

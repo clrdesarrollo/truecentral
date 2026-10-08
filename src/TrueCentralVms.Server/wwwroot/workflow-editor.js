@@ -98,8 +98,8 @@ async function renderWorkflowEditor() {
   $("#view").classList.add("view-editor");
   $("#view").innerHTML = `<div class="info-box" style="margin:24px">Cargando el editor…</div>`;
 
-  if (Api.role !== "Admin") {
-    $("#view").innerHTML = `<div class="error-box" style="margin:24px">Solo un administrador puede crear o editar automatizaciones.</div>`;
+  if (!Perms.can("workflows.manage")) {
+    $("#view").innerHTML = `<div class="error-box" style="margin:24px">Sus roles no incluyen editar automatizaciones (permiso Editar automatizaciones).</div>`;
     return;
   }
 

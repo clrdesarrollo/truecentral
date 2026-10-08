@@ -85,7 +85,7 @@ function licenseCardsHtml(s) {
 
 async function renderLicense() {
   $("#page-title").textContent = "Licencia";
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("system.license");
   let s;
   try { s = await Api.get("/api/system/license"); }
   catch (e) { $("#view").innerHTML = `<div class="error-box">${esc(e.error)}</div>`; return; }

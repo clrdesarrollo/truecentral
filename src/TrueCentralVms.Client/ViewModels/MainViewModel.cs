@@ -73,6 +73,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenWall()
     {
+        if (!CanWall) return;
         IsWallOpen = true;
         ActiveSection = "Wall";
         StatusMessage = WallHintMessage;
@@ -114,6 +115,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenIntercom()
     {
+        if (!CanIntercom) return;
         IsIntercomOpen = true;
         ActiveSection = "Intercom";
         StatusMessage = "Citofonía: las llamadas suenan y se abren solas; desde aquí puede ver y hablarle a un frente o abrir su puerta.";
@@ -142,6 +144,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenAlarms()
     {
+        if (!CanAlarms) return;
         IsAlarmsOpen = true;
         ActiveSection = "Alarms";
         StatusMessage = AlarmsHintMessage;
@@ -170,6 +173,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenCerco()
     {
+        if (!CanCerco) return;
         IsCercoOpen = true;
         ActiveSection = "Cerco";
         StatusMessage = CercoHintMessage;
@@ -406,6 +410,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenLpr()
     {
+        if (!CanLpr) return;
         IsLprOpen = true;
         ActiveSection = "Lpr";
         StatusMessage = LprHintMessage;
@@ -433,6 +438,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenPlayback()
     {
+        if (!CanPlayback) return;
         IsPlaybackOpen = true;
         ActiveSection = "Playback";
         StatusMessage = "Reproducción: doble clic en un canal del árbol y luego clic en la línea de tiempo.";
@@ -455,6 +461,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenLiveView()
     {
+        if (!CanLiveView) return;
         IsLiveViewOpen = true;
         ActiveSection = "Live";
         StatusMessage = HintMessage;
@@ -495,6 +502,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenEventCenter()
     {
+        if (!CanEvents) return;
         if (_eventWindow is not null)
         {
             // Ya está afuera: se trae al frente en vez de duplicarlo.
@@ -612,9 +620,19 @@ public partial class MainViewModel : ObservableObject
             UpdatePtzPanel();
     }
 
+    /// <summary>
+    /// El nodo vigente del árbol para el canal de un cuadro. Al recargar el
+    /// árbol (un administrador marcó el PTZ, renombró el canal…) los cuadros
+    /// abiertos siguen con el nodo viejo y sus datos de entonces; se busca el
+    /// nuevo por Id. Si el canal ya no está en el árbol, queda el del cuadro.
+    /// </summary>
+    private ChannelNode? CurrentTreeNode(ChannelNode? node) => node is null ? null
+        : Devices.SelectMany(d => d.Channels).FirstOrDefault(c => c.Channel.Id == node.Channel.Id) ?? node;
+
     private void UpdatePtzPanel()
     {
-        _ptzChannel = SelectedCell?.AssignedChannel is { Channel.SupportsPtz: true } node ? node : null;
+        var assigned = CurrentTreeNode(SelectedCell?.AssignedChannel);
+        _ptzChannel = assigned is { Channel.SupportsPtz: true } ? assigned : null;
         // Alcance por ubicación: la cámara de otro lugar se ve, pero su PTZ no se mueve.
         bool operable = _ptzChannel is not null && OperableScope.Current.CanOperateChannel(_ptzChannel.Channel.Id);
         IsPtzAvailable = operable;
@@ -629,7 +647,7 @@ public partial class MainViewModel : ObservableObject
 
     private void SyncTreeSelection()
     {
-        var node = SelectedCell?.AssignedChannel;
+        var node = CurrentTreeNode(SelectedCell?.AssignedChannel);
         if (_treeSelected == node) return;
         if (_treeSelected is not null) _treeSelected.IsSelected = false;
         _treeSelected = node;
@@ -793,8 +811,10 @@ public partial class MainViewModel : ObservableObject
     /// menú de la sesión (el rol y el servidor viven dentro de ese menú).</summary>
     public string UserLabel => _api.Username ?? "";
 
-    /// <summary>Rol de la sesión, para el menú del usuario.</summary>
-    public string RoleLabel => _api.Role == "Admin" ? "Administrador" : "Operador";
+    /// <summary>Roles de la sesión, para el menú del usuario.</summary>
+    public string RoleLabel => PermissionScope.Current.Roles.Count > 0
+        ? string.Join(", ", PermissionScope.Current.Roles)
+        : _api.Role == "Admin" ? "Administrador" : "Operador";
 
     /// <summary>Servidor al que está conectada esta sesión (menú del usuario).</summary>
     public string ServerLabel => _api.BaseUrl ?? "";
@@ -825,6 +845,9 @@ public partial class MainViewModel : ObservableObject
             if (entity is "scope" or "locations" or "devices" or "channels" or "alarm-panels"
                 or "access-devices" or "speakers" or "intercoms")
                 Application.Current.Dispatcher.InvokeAsync(ScheduleOperableReload);
+            // Un administrador cambió los roles de este usuario o un rol suyo.
+            if (entity is "permissions")
+                Application.Current.Dispatcher.InvokeAsync(() => _ = LoadPermissionsAsync());
         };
         _hub.DeviceStatusChanged += dto => Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -895,6 +918,9 @@ public partial class MainViewModel : ObservableObject
         _ = LoadScopeAsync();
         OperableScope.Current.Changed += OnOperableChanged;
         _ = LoadOperableAsync();
+        // Módulos según sus roles (riel e inicio).
+        PermissionScope.Current.Changed += OnPermissionsChanged;
+        _ = LoadPermissionsAsync();
 
         // Preferencia local: se abre con la última división que usó el usuario
         // (asíncrono: las celdas se crean por tandas sin congelar el arranque).
@@ -962,6 +988,7 @@ public partial class MainViewModel : ObservableObject
             await LoadLocationTreeAsync(); // mismos nodos de cámara, agrupados por ubicación
             ApplySearchFilter(); // el árbol nuevo debe respetar el filtro vigente
             RefreshLiveChannels(); // y marcar lo que ya está en pantalla
+            UpdatePtzPanel(); // un PTZ marcado o desmarcado recién se aplica al cuadro abierto
             StatusMessage = IsLiveViewOpen ? HintMessage : ReadyMessage;
         }
         catch (ApiException ex)

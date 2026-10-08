@@ -545,7 +545,8 @@
                     <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,6">
                         <Button Style="{StaticResource RailDownloadButton}" Content="&#xE896;"
                                 ToolTip="Centro de descargas"
-                                Command="{Binding OpenDownloadCenterCommand}"/>
+                                Command="{Binding OpenDownloadCenterCommand}"
+                                Visibility="{Binding CanDownloads, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         <Button Style="{StaticResource RailButton}" Content="&#xE713;"
                                 ToolTip="Configuración"
                                 Command="{Binding OpenSettingsCommand}"/>
@@ -554,23 +555,29 @@
                         <Button Style="{StaticResource RailHomeButton}" Content="&#xE80F;" ToolTip="Inicio"
                                 Command="{Binding GoHomeCommand}"/>
                         <Button Style="{StaticResource RailLiveButton}" Content="&#xE714;" ToolTip="Vista en Vivo"
-                                Command="{Binding OpenLiveViewCommand}"/>
+                                Command="{Binding OpenLiveViewCommand}"
+                                Visibility="{Binding CanLiveView, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         <Button Style="{StaticResource RailPlaybackButton}" Content="&#xE768;"
                                 ToolTip="Reproducción"
-                                Command="{Binding OpenPlaybackCommand}"/>
+                                Command="{Binding OpenPlaybackCommand}"
+                                Visibility="{Binding CanPlayback, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         <Button Style="{StaticResource RailWallButton}" Content="&#xE7F4;"
                                 ToolTip="Muro de video"
-                                Command="{Binding OpenWallCommand}"/>
+                                Command="{Binding OpenWallCommand}"
+                                Visibility="{Binding CanWall, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         <Button Style="{StaticResource RailAlarmsButton}" Content="&#xE730;"
                                 ToolTip="Paneles de alarma"
-                                Command="{Binding OpenAlarmsCommand}"/>
+                                Command="{Binding OpenAlarmsCommand}"
+                                Visibility="{Binding CanAlarms, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         <Button Style="{StaticResource RailCercoButton}" Content="&#xE945;"
                                 ToolTip="Cerco eléctrico"
-                                Command="{Binding OpenCercoCommand}"/>
+                                Command="{Binding OpenCercoCommand}"
+                                Visibility="{Binding CanCerco, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         <Button Style="{StaticResource RailIntercomButton}" Content="&#xE717;"
                                 ToolTip="Citofonía"
-                                Command="{Binding OpenIntercomCommand}"/>
-                        <Grid>
+                                Command="{Binding OpenIntercomCommand}"
+                                Visibility="{Binding CanIntercom, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <Grid Visibility="{Binding CanEvents, Converter={x:Static vm:BoolToVisibility.Instance}}">
                             <Button Style="{StaticResource RailEventsButton}" Content="&#xE7BA;"
                                     ToolTip="Centro de eventos — alertas y acuse de recibo"
                                     Command="{Binding OpenEventCenterCommand}"/>
@@ -589,7 +596,8 @@
                         <Separator Background="{StaticResource BorderBrush}" Margin="12,7" Height="1"/>
                         <Button Style="{StaticResource RailLprButton}" Content="&#xE804;"
                                 ToolTip="Aplicaciones · Reconocimiento de patentes"
-                                Command="{Binding OpenLprCommand}"/>
+                                Command="{Binding OpenLprCommand}"
+                                Visibility="{Binding CanLpr, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                     </StackPanel>
                 </DockPanel>
             </Border>

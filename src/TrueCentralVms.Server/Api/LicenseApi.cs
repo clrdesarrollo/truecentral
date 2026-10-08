@@ -3,6 +3,7 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Services;
 using TrueCentralVms.Server.Services.Licensing;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -26,7 +27,7 @@ public static class LicenseApi
         app.MapPost("/api/system/license/activate", async (HttpContext ctx, LicenseActivateRequest request,
             LicenseService license, AuditService audit, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SystemLicense, out _) is { } failure) return failure;
             var result = await license.ActivateOnlineAsync(request.ActivationCode ?? "", ct);
             await audit.LogAsync(ctx, "license", "license-activated", targetType: "license",
                 targetId: Trim(request.ActivationCode), detail: result.Message, success: result.Success);
@@ -40,7 +41,7 @@ public static class LicenseApi
         app.MapPost("/api/system/license/request", async (HttpContext ctx, LicenseActivateRequest request,
             LicenseService license, AuditService audit) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SystemLicense, out _) is { } failure) return failure;
             var file = license.BuildActivationRequest(request.ActivationCode ?? "");
             await audit.LogAsync(ctx, "license", "license-request-generated", targetType: "license",
                 targetId: Trim(request.ActivationCode),
@@ -51,7 +52,7 @@ public static class LicenseApi
         app.MapPost("/api/system/license/import", async (HttpContext ctx, LicenseImportRequest request,
             LicenseService license, AuditService audit, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SystemLicense, out _) is { } failure) return failure;
             var result = await license.ImportAsync(request.LicenseFile ?? "", ct);
             await audit.LogAsync(ctx, "license", "license-imported", targetType: "license",
                 targetId: license.Snapshot.Payload?.LicenseKey, detail: result.Message, success: result.Success);
@@ -63,7 +64,7 @@ public static class LicenseApi
         app.MapPost("/api/system/license/refresh", async (HttpContext ctx, LicenseService license, AuditService audit,
             VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SystemLicense, out _) is { } failure) return failure;
             var result = await license.RefreshAsync(ct);
             await audit.LogAsync(ctx, "license", "license-refresh-requested", targetType: "license",
                 targetId: license.Snapshot.Payload?.LicenseKey, detail: result.Message, success: result.Success);
@@ -75,7 +76,7 @@ public static class LicenseApi
         app.MapPost("/api/system/license/deactivate", async (HttpContext ctx, LicenseService license, AuditService audit,
             VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SystemLicense, out _) is { } failure) return failure;
             string? key = license.Snapshot.Payload?.LicenseKey;
             var result = await license.DeactivateAsync(ct);
             await audit.LogAsync(ctx, "license", "license-deactivated", targetType: "license",

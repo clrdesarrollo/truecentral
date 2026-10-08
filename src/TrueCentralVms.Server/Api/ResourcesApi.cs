@@ -6,6 +6,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -68,7 +69,7 @@ public static class ResourcesApi
             ResourceProfileUpdateRequest request, VmsDbContext db, IHubContext<VmsHub> hub, ScopedHub scopedHub,
             UserScopeService scopes, AccessControlService access, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
             if (ParseKind(kind) is not { } k) return Results.NotFound();
             var before = await ResourceDetails.LoadAsync(db, k, id, ct);
             if (before is null) return Results.NotFound();
@@ -171,7 +172,7 @@ public static class ResourcesApi
         app.MapPut("/api/resources/{kind}/{id:int}/cameras", async (HttpContext ctx, string kind, int id,
             ResourceCamerasRequest request, VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
             if (ParseKind(kind) is not { } k) return Results.NotFound();
             if (k == ResourceKind.Camera) return Error("Una cámara no tiene cámaras asociadas.");
             var detail = await ResourceDetails.LoadAsync(db, k, id, ct);

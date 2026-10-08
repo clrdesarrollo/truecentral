@@ -9,6 +9,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -279,7 +280,7 @@ public static class DevicesApi
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
             Services.MediaMtxManager mtx, AuditService audit, LicenseService license, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (license.Deny(LicenseFeatures.ModuleVideo, null, 0, 0) is { } denied)
                 return await license.DenyAsync(ctx, denied, "device", request.Name?.Trim());
@@ -351,7 +352,7 @@ public static class DevicesApi
             Services.MediaMtxManager mtx, Services.AnprService anpr, AuditService audit, LicenseService license,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
 
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -435,7 +436,7 @@ public static class DevicesApi
             IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, Services.WallService walls,
             Services.AnprService anpr, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var device = await db.Devices.FindAsync([id], ct);
             if (device is null) return Results.NotFound();
 
@@ -468,7 +469,7 @@ public static class DevicesApi
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
             Services.MediaMtxManager mtx, AuditService audit, LicenseService license, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
 
@@ -504,7 +505,7 @@ public static class DevicesApi
             DriverRegistry drivers, CredentialProtector protector, AuditService audit, LicenseService license,
             int? deviceId, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
 
             string? password = request.Password;
@@ -560,7 +561,7 @@ public static class DevicesApi
             ChannelWriteDto request, VmsDbContext db, IHubContext<VmsHub> hub,
             Services.MediaMtxManager mtx, AuditService audit, LicenseService license, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
             if (channel is null) return Results.NotFound();
@@ -609,7 +610,7 @@ public static class DevicesApi
             IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, AuditService audit, LicenseService license,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
             if (device.Status != DeviceStatus.Online)
@@ -661,7 +662,7 @@ public static class DevicesApi
             int channelNumber, PtzRequestDto request, VmsDbContext db, DriverRegistry drivers,
             CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.LivePtz, out var session) is { } failure) return failure;
 
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == id && c.ChannelNumber == channelNumber, ct);
@@ -708,7 +709,7 @@ public static class DevicesApi
             int channelNumber, PtzPresetRequestDto request, VmsDbContext db, DriverRegistry drivers,
             CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.LivePtz, out var session) is { } failure) return failure;
             if (request.Index is < 1 or > 300)
                 return Error("El preset debe estar entre 1 y 300.");
 
@@ -761,7 +762,7 @@ public static class DevicesApi
             VmsDbContext db, DriverRegistry drivers, CredentialProtector protector, IMemoryCache cache,
             AuditService audit, int? maxAge, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.EventsAttend, Permissions.DevicesManage) is { } failure) return failure;
             // Alcance por ubicación, ANTES de la caché (que comparten todos los usuarios).
             if (!(await ctx.ScopeAsync(session)).CanViewChannel(id, channelNumber))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{id}/{channelNumber}", null, "ver la imagen de");

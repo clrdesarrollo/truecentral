@@ -134,7 +134,7 @@ public sealed class SessionAccounting(
             .OrderBy(s => s.StartedAt)
             .Select(s => new ActiveSessionDto(s.Id, s.Username, s.DeviceName, s.RtspChannel, s.Profile, s.ClientIp, s.StartedAt))
             .ToListAsync(ct);
-        await hub.ToAdminsAsync(VmsHubContract.SessionsChanged, active, ct);
+        await hub.ToPermittedAsync(Core.Domain.Permissions.SessionsManage, VmsHubContract.SessionsChanged, active, ct);
     }
 
     /// <summary>

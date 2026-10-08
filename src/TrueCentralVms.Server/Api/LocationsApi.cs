@@ -7,6 +7,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -145,7 +146,7 @@ public static class LocationsApi
         app.MapPost("/api/locations", async (HttpContext ctx, LocationSaveRequest request, VmsDbContext db,
             IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
             if (Validate(request) is { } invalid) return Error(invalid);
 
             var all = await db.Locations.AsNoTracking().ToListAsync(ct);
@@ -182,7 +183,7 @@ public static class LocationsApi
         app.MapPut("/api/locations/{id:int}", async (HttpContext ctx, int id, LocationSaveRequest request,
             VmsDbContext db, IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
             if (Validate(request) is { } invalid) return Error(invalid);
 
             var location = await db.Locations.FirstOrDefaultAsync(l => l.Id == id, ct);
@@ -249,7 +250,7 @@ public static class LocationsApi
         app.MapDelete("/api/locations/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
             var location = await db.Locations.FirstOrDefaultAsync(l => l.Id == id, ct);
             if (location is null) return Results.NotFound();
             int children = await db.Locations.CountAsync(l => l.ParentId == id, ct);
@@ -300,7 +301,7 @@ public static class LocationsApi
         app.MapPost("/api/locations/{id:int}/command", async (HttpContext ctx, int id, LocationCommandRequest request,
             VmsDbContext db, AlarmPanelService alarms, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.LocationsCommand, out var session) is { } failure) return failure;
             string command = (request.Command ?? "").Trim().ToLowerInvariant();
             if (command is not ("arm-away" or "arm-stay" or "disarm"))
                 return Error("Orden no válida: use arm-away, arm-stay o disarm.");
@@ -412,7 +413,7 @@ public static class LocationsApi
         app.MapPut("/api/resources/location", async (HttpContext ctx, ResourceLocationRequest request,
             VmsDbContext db, IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
             if (request.Resources is not { Count: > 0 }) return Error("No se indicó ningún recurso.");
             if (request.Resources.Count > MaxBatch)
                 return Error($"Demasiados recursos en una sola operación (máximo {MaxBatch}).");

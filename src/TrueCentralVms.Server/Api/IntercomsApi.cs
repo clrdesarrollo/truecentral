@@ -145,7 +145,7 @@ public static class IntercomsApi
         // Canales de video elegibles como cámara del frente (selector del mantenedor).
         app.MapGet("/api/intercoms/channels", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             var channels = await db.Channels.AsNoTracking()
                 .OrderBy(c => c.Device.Name).ThenBy(c => c.ChannelNumber)
                 .Select(c => new { c.Id, Name = c.Device.Name + " · " + c.Name, c.Device.Host, c.Enabled })
@@ -175,7 +175,7 @@ public static class IntercomsApi
             LicenseService license, CredentialProtector protector, IHubContext<VmsHub> hub, IntercomService service, AuditService audit,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (string.IsNullOrEmpty(request.Password)) return Error("La contraseña del frente es obligatoria.");
             if (await ValidateChannelAsync(db, request.ChannelId, ct) is { } badChannel) return badChannel;
@@ -243,7 +243,7 @@ public static class IntercomsApi
             IntercomDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub, IntercomService service,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (await ValidateChannelAsync(db, request.ChannelId, ct) is { } badChannel) return badChannel;
             var intercom = await LoadAsync(db, id, ct);
@@ -329,7 +329,7 @@ public static class IntercomsApi
         app.MapDelete("/api/intercoms/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, IHubContext<VmsHub> hub,
             IntercomService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             var intercom = await db.Intercoms.FindAsync([id], ct);
             if (intercom is null) return Results.NotFound();
             if (service.ActiveCallOf(id) is { State: IntercomCallState.InCall } call)
@@ -350,7 +350,7 @@ public static class IntercomsApi
         app.MapPost("/api/intercoms/probe", async (HttpContext ctx, IntercomWriteDto request, VmsDbContext db, IntercomDriverRegistry drivers,
             CredentialProtector protector, AuditService audit, int? intercomId, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             string? password = request.Password;
             if (string.IsNullOrEmpty(password) && intercomId is int existingId &&
@@ -381,7 +381,7 @@ public static class IntercomsApi
         // ------------------------------------------------------------------
         app.MapGet("/api/intercoms/calls/active", async (HttpContext ctx, IntercomService service) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomAnswer, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             return Results.Ok(service.ActiveCalls().Where(c => scope.CanViewIntercom(c.IntercomId)));
         });
@@ -389,7 +389,7 @@ public static class IntercomsApi
         app.MapGet("/api/intercoms/calls", async (HttpContext ctx, VmsDbContext db, AuditService audit, int? intercomId, string? state,
             DateTime? from, DateTime? to, int? skip, int? take, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomAnswer, out var session) is { } failure) return failure;
             var query = db.IntercomCalls.AsNoTracking();
             // Alcance por ubicación: solo llamadas de frentes de sus ubicaciones (en la consulta).
             var scope = await ctx.ScopeAsync(session);
@@ -419,7 +419,7 @@ public static class IntercomsApi
         app.MapPost("/api/intercoms/calls/{callId:long}/answer", async (HttpContext ctx, long callId, IntercomService service,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomAnswer, out var session) is { } failure) return failure;
             if (await CallOutOfScopeAsync(ctx, session, callId, "contestar la llamada de") is { } outOfScope) return outOfScope;
             var result = await service.AnswerAsync(callId, session.UserId, session.Username, ct);
             await audit.LogAsync(ctx, "intercom", result.Success ? "call-answered" : "call-command-failed", targetType: "intercom",
@@ -434,7 +434,7 @@ public static class IntercomsApi
         app.MapPost("/api/intercoms/calls/{callId:long}/reject", async (HttpContext ctx, long callId, IntercomService service,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomAnswer, out var session) is { } failure) return failure;
             if (await CallOutOfScopeAsync(ctx, session, callId, "rechazar la llamada de") is { } outOfScope) return outOfScope;
             var result = await service.RejectAsync(callId, session.UserId, session.Username, ct);
             await audit.LogAsync(ctx, "intercom", result.Success ? "call-rejected" : "call-command-failed", targetType: "intercom",
@@ -449,7 +449,7 @@ public static class IntercomsApi
         app.MapPost("/api/intercoms/calls/{callId:long}/hangup", async (HttpContext ctx, long callId, IntercomService service,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomAnswer, out var session) is { } failure) return failure;
             if (await CallOutOfScopeAsync(ctx, session, callId, "colgar la llamada de") is { } outOfScope) return outOfScope;
             var result = await service.HangUpAsync(callId, session.UserId, session.Username, session.Role == Roles.Admin, ct);
             if (!result.Success)
@@ -463,7 +463,7 @@ public static class IntercomsApi
         app.MapPost("/api/intercoms/{id:int}/doors/{door:int}/open", async (HttpContext ctx, int id, int door, IntercomService service,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.IntercomAnswer, out var session) is { } failure) return failure;
             if (!(await ctx.ScopeAsync(session)).CanOperateIntercom(id))
                 return await ctx.OutOfScopeAsync(session, "intercom", id.ToString(), null, $"abrir la puerta {door} de");
             var result = await service.OpenDoorAsync(id, door, session.Username, ct);

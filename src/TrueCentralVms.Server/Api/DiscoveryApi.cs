@@ -6,6 +6,7 @@ using TrueCentralVms.Drivers.Dahua;
 using TrueCentralVms.Drivers.Hikvision;
 using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -31,7 +32,7 @@ public static partial class DiscoveryApi
         app.MapGet("/api/discovery/scan", async (HttpContext ctx, ILogger<Program> logger,
             Services.AuditService audit, Data.VmsDbContext db, string? host, string? kind, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.DevicesManage, Permissions.AccessConfigure, Permissions.AlarmsConfigure, Permissions.SpeakersConfigure, Permissions.IntercomConfigure) is { } failure) return failure;
             // kind=decoders: solo decodificadores de muro (Hikvision DS-64/69/C10, Dahua NVD);
             // el resto de los equipos de video se omite (lo usa la página Decodificadores).
             bool decodersOnly = string.Equals(kind, "decoders", StringComparison.OrdinalIgnoreCase);
@@ -175,7 +176,7 @@ public static partial class DiscoveryApi
         app.MapPost("/api/discovery/dahua/initialize", async (HttpContext ctx, DahuaInitializeRequest request,
             ILogger<Program> logger, Services.AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.AccessConfigure, Permissions.AlarmsConfigure, Permissions.SpeakersConfigure, Permissions.IntercomConfigure) is { } failure) return failure;
 
             string mac = (request.Mac ?? "").Trim();
             string target = mac;
@@ -244,7 +245,7 @@ public static partial class DiscoveryApi
         app.MapPost("/api/discovery/hikvision/activate", async (HttpContext ctx, DahuaInitializeRequest request,
             ILogger<Program> logger, Services.AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.AccessConfigure, Permissions.AlarmsConfigure, Permissions.SpeakersConfigure, Permissions.IntercomConfigure) is { } failure) return failure;
 
             string mac = (request.Mac ?? "").Trim();
             string target = mac;
@@ -331,7 +332,7 @@ public static partial class DiscoveryApi
         // puerta de enlace al cambiar la IP de un equipo.
         app.MapGet("/api/discovery/local-networks", (HttpContext ctx) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.AccessConfigure, Permissions.AlarmsConfigure, Permissions.SpeakersConfigure, Permissions.IntercomConfigure) is { } failure) return failure;
             var networks = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
                 .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up &&
                             n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
@@ -362,7 +363,7 @@ public static partial class DiscoveryApi
         // el cambio de IP vuelve a comprobarlo antes de aplicar.
         app.MapGet("/api/discovery/ip-in-use", async (HttpContext ctx, string? ip) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.AccessConfigure, Permissions.AlarmsConfigure, Permissions.SpeakersConfigure, Permissions.IntercomConfigure) is { } failure) return failure;
             if (!TryParseV4((ip ?? "").Trim(), out var address))
                 return Results.Json(new { error = "La IP debe ser una dirección IPv4." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
@@ -372,7 +373,7 @@ public static partial class DiscoveryApi
         app.MapPost("/api/discovery/change-ip", async (HttpContext ctx, ChangeIpRequest request,
             ILogger<Program> logger, Services.AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.AccessConfigure, Permissions.AlarmsConfigure, Permissions.SpeakersConfigure, Permissions.IntercomConfigure) is { } failure) return failure;
 
             bool hikvision = string.Equals(request.Brand, "Hikvision", StringComparison.OrdinalIgnoreCase);
             bool dahua = string.Equals(request.Brand, "Dahua", StringComparison.OrdinalIgnoreCase);

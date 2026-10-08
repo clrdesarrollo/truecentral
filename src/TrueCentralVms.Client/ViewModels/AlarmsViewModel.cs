@@ -93,7 +93,8 @@ public sealed partial class AlarmsViewModel : ObservableObject
 
     public bool HasPanels => Panels.Count > 0;
     public bool HasActiveAlarms => ActiveAlarmCount > 0;
-    public bool IsAdmin => _api.Role == "Admin";
+    /// <summary>Puede agregar paneles (para el aviso de "no hay paneles").</summary>
+    public bool IsAdmin => Services.PermissionScope.Current.Has(Core.Domain.Permissions.AlarmsConfigure);
 
     /// <summary>Opciones del filtro de eventos (etiqueta → clave).</summary>
     public IReadOnlyList<KeyValuePair<string, string>> KindOptions { get; } =

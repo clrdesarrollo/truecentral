@@ -182,7 +182,7 @@ const WF_FIELDS = {
     { k: "severity", t: "select", label: "Importancia", def: "Warning",
       options: [["Critical", "Crítica"], ["Warning", "Advertencia"], ["Info", "Informativa"]] },
     { k: "userIds", t: "users", label: "Destinatarios",
-      help: "Sin ninguno marcado, el aviso llega a todos los operadores conectados. Un operador solo ve las alertas dirigidas a él o a todos; el administrador las ve todas." },
+      help: "Sin ninguno marcado, el aviso llega a todos los operadores conectados. Quien atiende alertas ve las dirigidas a él o a todos; el administrador las ve todas." },
     { k: "attachSnapshot", t: "check", label: "Mostrar la foto capturada en el aviso", def: true },
     { k: "requireAck", t: "check", label: "Exigir que un operador se dé por enterado", def: true,
       help: "El aviso queda en pantalla y en la lista de alertas hasta que alguien lo confirme; se registra quién y cuándo." },
@@ -264,7 +264,7 @@ async function renderWorkflows() {
     return;
   }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("workflows.manage");
   const actionLabel = (key) => catalog.actions.find((a) => a.key === key)?.label ?? key;
   const triggerLabel = (key) => catalog.triggers.find((t) => t.key === key)?.label ?? key;
   const stepsOf = (w) => (w.graph?.nodes || []).filter((n) => n.kind !== "trigger").length;
@@ -1096,7 +1096,7 @@ function wfLevelBar(peakDb) {
 
 async function renderSounds() {
   $("#page-title").textContent = "Biblioteca de sonidos";
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("sounds.manage");
   let items, catalog, speakers;
   try {
     [items, catalog, speakers] = await Promise.all([Api.get("/api/workflows/audio"), wfCatalog(), Api.get("/api/speakers").catch(() => [])]);

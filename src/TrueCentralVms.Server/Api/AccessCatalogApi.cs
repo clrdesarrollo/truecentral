@@ -8,6 +8,7 @@ using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
 using TrueCentralVms.Server.Services.Licensing;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -259,7 +260,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/sync", async (HttpContext ctx, AccessSyncService sync, AuditService audit,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.PersonsManage, Permissions.AccessConfigure) is { } failure) return failure;
             int done = await sync.SyncPendingAsync(ct);
             await audit.LogAsync(ctx, "access", "sync-requested",
                 detail: $"Escribió en los equipos lo que estaba pendiente: {done} persona(s) procesada(s).");
@@ -273,7 +274,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/sync/full", async (HttpContext ctx, VmsDbContext db, AccessSyncService sync,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.PersonsManage, Permissions.AccessConfigure) is { } failure) return failure;
             int marked = await AccessSyncService.MarkForResendAsync(db, null, ct);
             await db.SaveChangesAsync(ct);
             int done = await sync.SyncPendingAsync(ct);
@@ -288,7 +289,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/devices/{id:int}/resync", async (HttpContext ctx, int id, VmsDbContext db,
             AccessControlService access, AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.PersonsManage, Permissions.AccessConfigure) is { } failure) return failure;
             var device = await db.AccessDevices.FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
             if (!access.SupportsPersonSync(device.DriverKey))
@@ -349,7 +350,7 @@ public static class AccessCatalogApi
             VmsDbContext db, AccessControlService service, ScopedHub hub, AccessSyncService sync,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre de la puerta es obligatorio (máximo 128 caracteres).");
             var door = await db.AccessDoors.Include(d => d.AccessDevice).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -389,7 +390,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/devices/{id:int}/capture-card", async (HttpContext ctx, int id,
             int? cardReaderNo, VmsDbContext db, AccessControlService service, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out var session) is { } failure) return failure;
             var device = await db.AccessDevices.FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
             if (!(await ctx.ScopeAsync(session)).CanOperateAccessDevice(id))
@@ -411,7 +412,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/doors/{id:int}/command", async (HttpContext ctx, int id, AccessDoorCommandDto request,
             VmsDbContext db, AccessControlService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessDoors, out var session) is { } failure) return failure;
             if (!Enum.TryParse<AccessDoorCommand>(request.Command, ignoreCase: true, out var command))
                 return Error($"Orden desconocida: '{request.Command}'.");
 
@@ -477,7 +478,7 @@ public static class AccessCatalogApi
     {
         app.MapGet("/api/access/schedules", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.PersonsView, Permissions.AccessConfigure) is { } failure) return failure;
             var schedules = await db.AccessSchedules.AsNoTracking().Include(s => s.Segments)
                 .OrderByDescending(s => s.IsBuiltIn).ThenBy(s => s.Name).ToListAsync(ct);
             var counts = await db.AccessLevels.GroupBy(l => l.AccessScheduleId)
@@ -489,7 +490,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/schedules", async (HttpContext ctx, AccessScheduleWriteDto request, VmsDbContext db,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre del horario es obligatorio (máximo 128 caracteres).");
             if (ValidateSegments(request.Segments) is { } invalid) return Error(invalid);
@@ -519,7 +520,7 @@ public static class AccessCatalogApi
         app.MapPut("/api/access/schedules/{id:int}", async (HttpContext ctx, int id, AccessScheduleWriteDto request,
             VmsDbContext db, AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var schedule = await db.AccessSchedules.Include(s => s.Segments).FirstOrDefaultAsync(s => s.Id == id, ct);
             if (schedule is null) return Results.NotFound();
             if (schedule.IsBuiltIn)
@@ -558,7 +559,7 @@ public static class AccessCatalogApi
         app.MapDelete("/api/access/schedules/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var schedule = await db.AccessSchedules.Include(s => s.Segments).FirstOrDefaultAsync(s => s.Id == id, ct);
             if (schedule is null) return Results.NotFound();
             if (schedule.IsBuiltIn) return Error("El horario 24/7 es del sistema y no se puede borrar.");
@@ -596,7 +597,7 @@ public static class AccessCatalogApi
     {
         app.MapGet("/api/access/levels", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.PersonsView, Permissions.AccessConfigure) is { } failure) return failure;
             var levels = await LevelQuery(db).AsNoTracking().OrderBy(l => l.Name).ToListAsync(ct);
             return Results.Ok(levels.Select(ToDto));
         });
@@ -604,7 +605,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/levels", async (HttpContext ctx, AccessLevelWriteDto request, VmsDbContext db,
             AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             if (await ValidateLevelAsync(db, request, null, ct) is { } invalid) return Error(invalid);
 
             var level = new AccessLevel
@@ -630,7 +631,7 @@ public static class AccessCatalogApi
         app.MapPut("/api/access/levels/{id:int}", async (HttpContext ctx, int id, AccessLevelWriteDto request,
             VmsDbContext db, AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var level = await db.AccessLevels.Include(l => l.Doors).Include(l => l.AccessSchedule)
                 .FirstOrDefaultAsync(l => l.Id == id, ct);
             if (level is null) return Results.NotFound();
@@ -669,7 +670,7 @@ public static class AccessCatalogApi
         app.MapDelete("/api/access/levels/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var level = await db.AccessLevels.Include(l => l.Persons).FirstOrDefaultAsync(l => l.Id == id, ct);
             if (level is null) return Results.NotFound();
 
@@ -692,7 +693,7 @@ public static class AccessCatalogApi
         app.MapPut("/api/access/levels/{id:int}/persons", async (HttpContext ctx, int id, AccessAssignDto request,
             VmsDbContext db, AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var level = await db.AccessLevels.Include(l => l.Persons).FirstOrDefaultAsync(l => l.Id == id, ct);
             if (level is null) return Results.NotFound();
 
@@ -747,7 +748,7 @@ public static class AccessCatalogApi
         app.MapGet("/api/access/persons", async (HttpContext ctx, VmsDbContext db, string? q, string? department,
             int? levelId, string? state, int? page, int? pageSize, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsView, out _) is { } failure) return failure;
             (int pageNumber, int size) = Paging(page, pageSize);
 
             var query = PersonQuery(db).AsNoTracking().AsQueryable();
@@ -782,14 +783,14 @@ public static class AccessCatalogApi
         // escribiendo. Esta ruta los junta para ofrecerlos en los filtros.
         app.MapGet("/api/access/departments", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsView, out _) is { } failure) return failure;
             return Results.Ok(await db.AccessPersons.Where(p => p.Department != null)
                 .Select(p => p.Department!).Distinct().OrderBy(d => d).ToListAsync(ct));
         });
 
         app.MapGet("/api/access/persons/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsView, out _) is { } failure) return failure;
             var person = await PersonQuery(db).AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
             return person is null ? Results.NotFound() : Results.Ok(AccessSyncService.ToPersonDto(person));
         });
@@ -797,7 +798,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/persons", async (HttpContext ctx, AccessPersonWriteDto request, VmsDbContext db,
             CredentialProtector protector, AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             if (await ValidatePersonAsync(db, request, null, ct) is { } invalid) return Error(invalid);
 
             string employeeNo = string.IsNullOrWhiteSpace(request.EmployeeNo)
@@ -850,7 +851,7 @@ public static class AccessCatalogApi
             VmsDbContext db, CredentialProtector protector, AccessSyncService sync, AuditService audit,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var person = await db.AccessPersons.Include(p => p.Cards).Include(p => p.Fingerprints)
                 .Include(p => p.Face).Include(p => p.Levels)
                 .FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -929,7 +930,7 @@ public static class AccessCatalogApi
         app.MapGet("/api/access/persons/{id:int}/face", async (HttpContext ctx, int id, VmsDbContext db,
             CredentialProtector protector, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.PersonsView, Permissions.AccessMonitor) is { } failure) return failure;
             var face = await db.AccessFaces.AsNoTracking().FirstOrDefaultAsync(f => f.AccessPersonId == id, ct);
             if (face is null) return Results.NotFound();
             return Results.File(protector.UnprotectBytes(face.ImageCiphertext), face.ContentType);
@@ -938,7 +939,7 @@ public static class AccessCatalogApi
         app.MapDelete("/api/access/persons/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             AccessControlService access, AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var person = await db.AccessPersons.Include(p => p.Devices).ThenInclude(d => d.AccessDevice)
                 .FirstOrDefaultAsync(p => p.Id == id, ct);
             if (person is null) return Results.NotFound();
@@ -975,7 +976,7 @@ public static class AccessCatalogApi
         app.MapPost("/api/access/persons/{id:int}/sync", async (HttpContext ctx, int id, VmsDbContext db,
             AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var person = await db.AccessPersons.Include(p => p.Devices).FirstOrDefaultAsync(p => p.Id == id, ct);
             if (person is null) return Results.NotFound();
 

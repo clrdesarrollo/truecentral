@@ -109,7 +109,7 @@ public static class AuthApi
             return Results.Ok();
         });
 
-        app.MapGet("/api/auth/me", async (HttpContext ctx, UserScopeService scopes) =>
+        app.MapGet("/api/auth/me", async (HttpContext ctx, UserScopeService scopes, VmsDbContext db) =>
         {
             if (ApiSecurity.CurrentSession(ctx) is not { } s) return Results.Unauthorized();
             // Su alcance por ubicación, para mostrarlo (el servidor ya filtra todo lo demás).
@@ -117,7 +117,11 @@ public static class AuthApi
             var index = (await scopes.SnapshotAsync(ctx.RequestAborted)).Index;
             var dto = new UserScopeDto(!scope.Unrestricted, scope.ViewOutside, scope.AssignedLocations,
                 scope.AssignedLocations.Select(index.PathOf).Where(n => n.Length > 0).Order().ToList());
-            return Results.Ok(new { s.UserId, s.Username, s.Role, s.ExpiresAt, Scope = dto });
+            // Sus permisos (unión de sus roles): la interfaz oculta lo demás.
+            var roleNames = await db.UserRoles.Where(ur => ur.UserId == s.UserId)
+                .Join(db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => r.Name).OrderBy(n => n).ToListAsync();
+            var permissions = new MyPermissionsDto(scope.IsAdmin, scope.EffectivePermissions.ToList(), roleNames);
+            return Results.Ok(new { s.UserId, s.Username, s.Role, s.ExpiresAt, Scope = dto, Permissions = permissions });
         });
 
         // Qué puede operar esta sesión: la interfaz deshabilita el resto (el

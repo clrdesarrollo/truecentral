@@ -8,6 +8,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -38,13 +39,13 @@ public static class DeviceMaintenanceApi
         app.MapGet("/api/maintenance/clocks", async (HttpContext ctx, VmsDbContext db, AccessControlService access,
             DeviceClockService clocks, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.MaintenanceView, out var session) is { } failure) return failure;
             return Results.Ok(await OverviewAsync(ctx, session, db, access, clocks, ct));
         });
 
         app.MapGet("/api/maintenance/time-zones", (HttpContext ctx) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.MaintenanceView, out _) is { } failure) return failure;
             return Results.Ok(TimeZoneInfo.GetSystemTimeZones()
                 .Select(tz => new TimeZoneOptionDto(tz.Id, tz.DisplayName, DeviceTimeZones.Describe(tz))));
         });
@@ -53,7 +54,7 @@ public static class DeviceMaintenanceApi
         app.MapPost("/api/maintenance/clocks/check", async (HttpContext ctx, DeviceSelectionDto? request, VmsDbContext db,
             AccessControlService access, DeviceClockService clocks, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.MaintenanceView, out var session) is { } failure) return failure;
             var policy = await DeviceClockService.LoadPolicyAsync(db, ct);
             var devices = await VisibleAccessDevicesAsync(ctx, session, db, access, request?.Devices, ct);
             using var limiter = new SemaphoreSlim(4);
@@ -73,7 +74,7 @@ public static class DeviceMaintenanceApi
         app.MapPut("/api/maintenance/clock-policy", async (HttpContext ctx, DeviceClockPolicyWriteDto request,
             VmsDbContext db, DeviceClockService clocks, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.MaintenanceManage, out _) is { } failure) return failure;
             if (request.TimeZoneId is { Length: > 0 } zoneId && FindZone(zoneId) is null)
                 return Error($"Zona horaria desconocida: '{zoneId}'.");
             if (request.Mode == DeviceTimeMode.Ntp && string.IsNullOrWhiteSpace(request.NtpServer))
@@ -114,7 +115,7 @@ public static class DeviceMaintenanceApi
         app.MapPost("/api/maintenance/clocks/sync", async (HttpContext ctx, DeviceSelectionDto? request, VmsDbContext db,
             AccessControlService access, DeviceClockService clocks, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.MaintenanceManage, out var session) is { } failure) return failure;
             var policy = await DeviceClockService.LoadPolicyAsync(db, ct);
             var zone = policy.Zone();
             var devices = await VisibleAccessDevicesAsync(ctx, session, db, access, request?.Devices, ct);
@@ -161,7 +162,7 @@ public static class DeviceMaintenanceApi
             DeviceClockWriteDto request, VmsDbContext db, AccessControlService access, DeviceClockService clocks,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.MaintenanceManage, out var session) is { } failure) return failure;
             if (await FindAccessAsync(ctx, session, kind, id, db, access, ct) is not { } device) return Results.NotFound();
 
             var policy = await DeviceClockService.LoadPolicyAsync(db, ct);
@@ -207,7 +208,7 @@ public static class DeviceMaintenanceApi
             DeviceAutoCorrectDto request, VmsDbContext db, AccessControlService access, AuditService audit,
             DeviceClockService clocks, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.MaintenanceManage, out var session) is { } failure) return failure;
             if (await FindAccessAsync(ctx, session, kind, id, db, access, ct) is not { } device) return Results.NotFound();
             if (device.ClockAutoCorrect == request.Enabled) return Results.Ok();
             device.ClockAutoCorrect = request.Enabled;
@@ -229,7 +230,7 @@ public static class DeviceMaintenanceApi
         app.MapPost("/api/maintenance/devices/{kind}/{id:int}/reboot", async (HttpContext ctx, string kind, int id,
             VmsDbContext db, AccessControlService access, DeviceClockService clocks, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.MaintenanceManage, out var session) is { } failure) return failure;
             if (await FindAccessAsync(ctx, session, kind, id, db, access, ct) is not { } device) return Results.NotFound();
             try
             {
@@ -255,7 +256,7 @@ public static class DeviceMaintenanceApi
             DeviceResetRequestDto request, VmsDbContext db, AccessControlService access, DeviceClockService clocks,
             IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.MaintenanceManage, out var session) is { } failure) return failure;
             if (await FindAccessAsync(ctx, session, kind, id, db, access, ct) is not { } device) return Results.NotFound();
             // La confirmación se revisa también acá: la pantalla la exige, pero
             // un restablecimiento no puede depender solo del navegador.

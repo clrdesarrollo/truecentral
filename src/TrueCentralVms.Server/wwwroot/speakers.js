@@ -75,7 +75,7 @@ async function renderSpeakers() {
   try { speakers = await Api.get("/api/speakers"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("speakers.configure");
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Parlantes IP <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
@@ -221,7 +221,7 @@ function closeSpeakerVolumePopover() {
 async function renderSpeakerLibrary(speaker) {
   const cell = $(`#view tr[data-detail="${speaker.id}"] td`);
   if (!cell) return;
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("speakers.configure");
   cell.innerHTML = `<div class="info-box" style="margin:8px 4px">Leyendo la biblioteca del parlante…</div>`;
   let items;
   try { items = await Api.get(`/api/speakers/${speaker.id}/library`); }

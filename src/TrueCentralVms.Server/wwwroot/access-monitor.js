@@ -238,7 +238,7 @@ function accessVisibleDoors() {
 
 async function renderAccessMonitor() {
   $("#page-title").textContent = "Control de acceso · Monitoreo";
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("access.doors");
   let doors;
   try { doors = (await Api.get("/api/access/doors")).map(accessNormalizeDoor); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }

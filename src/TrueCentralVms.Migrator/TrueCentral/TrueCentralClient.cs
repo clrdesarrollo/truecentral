@@ -67,9 +67,19 @@ public sealed class TrueCentralClient : IDisposable
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
         Username = login.Username;
         Role = login.Role;
-        if (!string.Equals(login.Role, "Admin", StringComparison.OrdinalIgnoreCase))
-            throw new TrueCentralException($"El usuario '{login.Username}' tiene rol {login.Role}: para dar de alta personas hace falta un administrador.");
+        if (string.Equals(login.Role, "Admin", StringComparison.OrdinalIgnoreCase)) return;
+        // Con roles basta el permiso "Administrar personas" (servidores anteriores: solo el administrador).
+        var me = await SendAsync<MeResponse>(HttpMethod.Get, "/api/auth/me", null, ct);
+        if (me.Permissions is { } p)
+        {
+            Role = p.Roles.Count > 0 ? string.Join(", ", p.Roles) : login.Role;
+            if (p.IsAdmin || p.Permissions.Contains(Core.Domain.Permissions.PersonsManage)) return;
+        }
+        throw new TrueCentralException($"El usuario '{login.Username}' ({Role}) no tiene el permiso " +
+                                       "\"Administrar personas\": hace falta para dar de alta personas.");
     }
+
+    private sealed record MeResponse(MyPermissionsDto? Permissions);
 
     /// <summary>Todo el padrón actual (paginado de a 500).</summary>
     public async Task<List<ExistingPerson>> GetPersonsAsync(CancellationToken ct)

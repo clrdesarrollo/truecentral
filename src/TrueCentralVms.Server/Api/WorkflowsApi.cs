@@ -11,6 +11,7 @@ using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
 using TrueCentralVms.Server.Services.Workflows;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -61,12 +62,15 @@ public static class WorkflowsApi
         return scope.FiltersView ? dto with { ChannelIds = dto.ChannelIds.Where(id => scope.CanViewChannel(id)).ToList() } : dto;
     }
 
-    /// <summary>Quién recibe una alerta por el hub: los destinatarios elegidos o, si es para todos, quien ve su recurso.</summary>
+    /// <summary>
+    /// Quién recibe una alerta por el hub: los destinatarios elegidos o, si es
+    /// para todos, quien atiende alertas (permiso de su rol) y ve su recurso.
+    /// </summary>
     public static bool ReceivesAlert(UserScope scope, string? recipientUserIds, string? resourceKey) =>
         scope.IsAdmin
         || (recipientUserIds is not null
             ? recipientUserIds.Contains($",{scope.UserId},")
-            : scope.CanViewResourceKey(resourceKey));
+            : scope.Has(Permissions.EventsAttend) && scope.CanViewResourceKey(resourceKey));
 
     /// <summary>Marcas comunes a todos los disparadores.</summary>
     private static readonly WorkflowPlaceholderDto[] Placeholders =
@@ -175,7 +179,7 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/catalog", async (HttpContext ctx, WorkflowEngine engine, SmtpSender smtp,
             VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out _) is { } failure) return failure;
             var settings = await smtp.LoadAsync(ct);
             // Destinatarios posibles de un aviso (solo nombre y rol: nada sensible).
             var users = await db.Users.AsNoTracking().OrderBy(u => u.Username)
@@ -195,7 +199,7 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/cameras", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var channels = await db.Channels.AsNoTracking().Include(c => c.Device)
                 .Where(c => c.Enabled)
@@ -222,7 +226,7 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/analytics-rules", async (HttpContext ctx, string? channelIds, string? deviceIds,
             string? kinds, VmsDbContext db, DriverRegistry drivers, CredentialProtector protector, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             static List<int> Ids(string? csv) => (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(v => int.TryParse(v, out int n) ? n : 0).Where(n => n > 0).Distinct().ToList();
@@ -267,7 +271,7 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/devices", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var devices = await db.Devices.AsNoTracking().OrderBy(d => d.Name).ToListAsync(ct);
             return Results.Ok(devices.Where(d => scope.CanViewDevice(d.Id)).Select(d =>
@@ -281,7 +285,7 @@ public static class WorkflowsApi
         // Puertas del control de acceso (acción "orden a una puerta" y filtros).
         app.MapGet("/api/workflows/doors", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var doors = await db.AccessDoors.AsNoTracking().Include(d => d.AccessDevice)
                 .OrderBy(d => d.AccessDevice!.Name).ThenBy(d => d.Number).ToListAsync(ct);
@@ -291,7 +295,7 @@ public static class WorkflowsApi
         // Parlantes elegibles en la acción "sonar parlante IP" (inventario del módulo Parlantes).
         app.MapGet("/api/workflows/speakers", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.GroupName).ThenBy(s => s.Name).ToListAsync(ct);
             return Results.Ok(speakers.Where(s => scope.CanView(s.LocationId)).Select(s => new WorkflowSpeakerDto(s.Id, s.Name, s.GroupName, s.Enabled,
@@ -303,7 +307,7 @@ public static class WorkflowsApi
         // ------------------------------------------------------------------
         app.MapGet("/api/workflows", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out _) is { } failure) return failure;
             var workflows = await db.Workflows.AsNoTracking().Include(w => w.Actions)
                 .OrderBy(w => w.Name).ToListAsync(ct);
             return Results.Ok(workflows.Select(WorkflowMapper.ToDto));
@@ -311,7 +315,7 @@ public static class WorkflowsApi
 
         app.MapGet("/api/workflows/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out _) is { } failure) return failure;
             var workflow = await db.Workflows.AsNoTracking().Include(w => w.Actions)
                 .FirstOrDefaultAsync(w => w.Id == id, ct);
             return workflow is null ? Results.NotFound() : Results.Ok(WorkflowMapper.ToDto(workflow));
@@ -320,7 +324,7 @@ public static class WorkflowsApi
         app.MapPost("/api/workflows", async (HttpContext ctx, WorkflowWriteDto request, VmsDbContext db, LicenseService license,
             WorkflowEngine engine, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out var session) is { } failure) return failure;
             if (Validate(request, engine) is { } invalid) return Error(invalid);
             if (await db.Workflows.AnyAsync(w => w.Name == request.Name.Trim(), ct))
                 return Error("Ya existe una automatización con ese nombre.");
@@ -355,7 +359,7 @@ public static class WorkflowsApi
         app.MapPut("/api/workflows/{id:int}", async (HttpContext ctx, int id, WorkflowWriteDto request, VmsDbContext db, LicenseService license,
             WorkflowEngine engine, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out _) is { } failure) return failure;
             if (Validate(request, engine) is { } invalid) return Error(invalid);
 
             var workflow = await db.Workflows.Include(w => w.Actions).FirstOrDefaultAsync(w => w.Id == id, ct);
@@ -400,7 +404,7 @@ public static class WorkflowsApi
         app.MapDelete("/api/workflows/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             WorkflowEngine engine, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out _) is { } failure) return failure;
             var workflow = await db.Workflows.FindAsync([id], ct);
             if (workflow is null) return Results.NotFound();
 
@@ -420,7 +424,7 @@ public static class WorkflowsApi
         app.MapPost("/api/workflows/{id:int}/duplicate", async (HttpContext ctx, int id, VmsDbContext db, LicenseService license,
             WorkflowEngine engine, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out var session) is { } failure) return failure;
             var source = await db.Workflows.AsNoTracking().Include(w => w.Actions).FirstOrDefaultAsync(w => w.Id == id, ct);
             if (source is null) return Results.NotFound();
             if (license.Deny(LicenseFeatures.ModuleAutomation, null, 0) is { } denied)
@@ -474,7 +478,7 @@ public static class WorkflowsApi
         app.MapPost("/api/workflows/{id:int}/test", async (HttpContext ctx, int id, WorkflowEngine engine,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out var session) is { } failure) return failure;
             var run = await engine.TestAsync(id, session.Username, ct);
             if (run is null) return Results.NotFound();
 
@@ -490,7 +494,7 @@ public static class WorkflowsApi
         // pide al elegir ese disparador; se guarda con las condiciones).
         app.MapPost("/api/workflows/hook-key", (HttpContext ctx) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out _) is { } failure) return failure;
             return Results.Ok(new { key = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(20)) });
         });
 
@@ -546,7 +550,7 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/runs", async (HttpContext ctx, VmsDbContext db, AuditService audit,
             int? workflowId, bool? onlyErrors, int? skip, int? take, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
 
             var query = db.WorkflowRuns.AsNoTracking().AsQueryable();
             if ((await ctx.ScopeAsync(session)).FiltersView)
@@ -574,7 +578,7 @@ public static class WorkflowsApi
 
         app.MapGet("/api/workflows/runs/{id:long}", async (HttpContext ctx, long id, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
             var run = await db.WorkflowRuns.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
             if (run is null) return Results.NotFound();
             if ((await ctx.ScopeAsync(session)).FiltersView &&
@@ -586,7 +590,7 @@ public static class WorkflowsApi
         // Foto capturada por una ejecución (la ruta viene del propio historial).
         app.MapGet("/api/workflows/files/{**path}", async (HttpContext ctx, string path, WorkflowStore store, VmsDbContext db) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.EventsAttend, Permissions.WorkflowsView) is { } failure) return failure;
             // Con la vista filtrada, solo las fotos de alertas que puede ver.
             if ((await ctx.ScopeAsync(session)).FiltersView &&
                 !await (await VisibleAlertsAsync(ctx, db, session)).AnyAsync(a =>
@@ -603,7 +607,7 @@ public static class WorkflowsApi
         app.MapGet("/api/workflows/alerts", async (HttpContext ctx, VmsDbContext db,
             bool? pending, int? skip, int? take, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.EventsAttend, out var session) is { } failure) return failure;
 
             // Un operador ve las alertas dirigidas a todos o a él; el
             // administrador las ve todas (es quien responde "quién la vio").
@@ -625,7 +629,7 @@ public static class WorkflowsApi
 
         app.MapGet("/api/workflows/alerts/{id:long}", async (HttpContext ctx, long id, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.EventsAttend, out var session) is { } failure) return failure;
             var alert = await (await VisibleAlertsAsync(ctx, db, session)).FirstOrDefaultAsync(a => a.Id == id, ct);
             return alert is null ? Results.NotFound() : Results.Ok(ScopedDto(alert, await ctx.ScopeAsync(session)));
         });
@@ -636,7 +640,7 @@ public static class WorkflowsApi
         app.MapPost("/api/workflows/alerts/{id:long}/ack", async (HttpContext ctx, long id, VmsDbContext db,
             ScopedHub hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.EventsAttend, out var session) is { } failure) return failure;
 
             // Solo puede darse por enterado de lo que puede ver (destinatarios y alcance).
             if (!await (await VisibleAlertsAsync(ctx, db, session)).AnyAsync(a => a.Id == id, ct))
@@ -676,7 +680,7 @@ public static class WorkflowsApi
         // ------------------------------------------------------------------
         app.MapGet("/api/workflows/smtp", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out _) is { } failure) return failure;
             var settings = await db.SmtpSettings.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
             return Results.Ok(settings is null
                 ? new SmtpSettingsDto(false, "", 587, SmtpSecurity.StartTls, "", false, false, "", "CLR TrueCentral VMS", null)
@@ -686,7 +690,7 @@ public static class WorkflowsApi
         app.MapPut("/api/workflows/smtp", async (HttpContext ctx, SmtpSettingsWriteDto request, VmsDbContext db,
             CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out _) is { } failure) return failure;
             if (request.Enabled)
             {
                 if (string.IsNullOrWhiteSpace(request.Host)) return Error("Indique el servidor de correo saliente.");
@@ -727,7 +731,7 @@ public static class WorkflowsApi
         app.MapPost("/api/workflows/smtp/test", async (HttpContext ctx, SmtpTestRequestDto request, SmtpSender smtp,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out var session) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.To)) return Error("Indique a qué dirección enviar la prueba.");
 
             var settings = await smtp.LoadAsync(ct);
@@ -777,7 +781,7 @@ public static class WorkflowsApi
         app.MapPost("/api/workflows/audio", async (HttpContext ctx, IFormFile file, WorkflowStore store,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SoundsManage, out _) is { } failure) return failure;
             if (file.Length == 0) return Error("El archivo está vacío.");
             if (file.Length > MaxAudioBytes) return Error("El sonido no puede pesar más de 8 MB.");
 
@@ -798,7 +802,7 @@ public static class WorkflowsApi
         app.MapDelete("/api/workflows/audio/{name}", async (HttpContext ctx, string name, WorkflowStore store,
             AuditService audit) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SoundsManage, out _) is { } failure) return failure;
             if (!store.DeleteAudio(name)) return Results.NotFound();
             await audit.LogAsync(ctx, "workflows", "audio-deleted",
                 targetType: "audio", targetName: name,
@@ -822,7 +826,7 @@ public static class WorkflowsApi
         app.MapPost("/api/workflows/audio/{name}/gain", async (HttpContext ctx, string name, WorkflowAudioGainRequestDto? request,
             WorkflowStore store, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SoundsManage, out _) is { } failure) return failure;
             if (store.FindAudio(name) is null) return Results.NotFound();
             var (applied, error) = await store.ApplyGainAsync(name, request?.GainDb, ct);
             await audit.LogAsync(ctx, "workflows", "audio-gain",

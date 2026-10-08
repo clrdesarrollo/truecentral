@@ -99,7 +99,7 @@ async function renderAccessDevices() {
   try { devices = await Api.get("/api/access/devices"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("access.configure");
   // El último sondeo es global: solo sirve si es el de ESTA página (si no, la
   // tabla mostraría cámaras hasta que termine el primer sondeo de acceso).
   const scanReady = discoveryOptions === ACCESS_DISCOVERY && lastScan;
@@ -473,7 +473,7 @@ async function renderAccessDevicePage() {
 function acdDrawPage() {
   const { device: d, tab } = acdState;
   $("#page-title").textContent = `Control de acceso · ${d.name}`;
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("access.configure");
   const meta = [
     accessBrandOf(d.driverKey),
     ACCESS_KIND_LABELS[d.kind] && d.kind !== "Unknown" ? ACCESS_KIND_LABELS[d.kind] : null,
@@ -570,7 +570,7 @@ async function acdDrawCapabilities(body) {
     return;
   }
   if (acdState.tab !== "capabilities") return;   // cambió de pestaña mientras cargaba
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("access.configure");
   const p = data.profile;
   if (!p) {
     body.innerHTML = `<div class="acd-narrow"><div class="info-box">Todavía no se leyeron las capacidades de este
@@ -612,7 +612,7 @@ function acdCapItemHtml(item) {
 
 async function acdDrawConnection(body) {
   const d = acdState.device;
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("access.configure");
   let drivers, places;
   try { [drivers, places] = await Promise.all([getAccessDrivers(), loadLocationChoices()]); }
   catch (err) { body.innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
@@ -774,8 +774,8 @@ async function acdLoadSettings() {
 
 async function acdDrawSettings(body, kind) {
   const state = acdState;
-  if (Api.role !== "Admin") {
-    body.innerHTML = `<div class="info-box">Solo un administrador puede ver y cambiar la configuración propia del equipo
+  if (!Perms.can("access.configure")) {
+    body.innerHTML = `<div class="info-box">Solo quien tiene el permiso <b>Equipos de acceso</b> puede ver y cambiar la configuración propia del equipo
       (parámetros de sus puertas y de sus lectores).</div>`;
     return;
   }
@@ -797,7 +797,7 @@ async function acdDrawSettings(body, kind) {
     ? "Parámetros de cada puerta tal como están en el equipo: se leen al abrir esta pestaña y se escriben al guardar. Son los mismos que muestra la página web del equipo o HikCentral."
     : "Parámetros de cada lector del equipo. Un terminal trae su propio lector (rostro, tarjeta, huella según el modelo) y una entrada para un lector externo; una controladora, los lectores cableados a ella.";
   body.innerHTML = `
-    <p class="muted res-tab-intro">${intro}${Api.role === "Admin" ? "" : " Solo un administrador puede cambiarlos."}</p>
+    <p class="muted res-tab-intro">${intro}${Perms.can("access.configure") ? "" : " Cambiarlos requiere el permiso Equipos de acceso."}</p>
     ${state.settings.notes.length ? `<div class="info-box">${state.settings.notes.map(esc).join("<br>")}</div>` : ""}
     ${sections.length ? sections.map(acdSectionHtml).join("")
       : `<div class="info-box">El equipo no informó ${kind === "door" ? "puertas" : "lectores"} configurables.</div>`}`;
@@ -805,7 +805,7 @@ async function acdDrawSettings(body, kind) {
 }
 
 function acdSectionHtml(s) {
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("access.configure");
   return `
     <section class="acd-card" data-section="${esc(s.key)}">
       <div class="acd-card-head">
