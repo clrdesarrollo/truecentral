@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
@@ -129,7 +130,9 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
             {
                 case AccessSettingType.Password:
                     if (string.IsNullOrEmpty(value)) continue;   // vacío = no cambiar
-                    doc.SetString(entry.Key, value);
+                    if (value.Length > 8 || !value.All(char.IsAsciiDigit))
+                        throw new DriverException($"'{entry.Label}' debe tener de 1 a 8 dígitos (se teclea en el equipo).");
+                    doc.SetString(entry.Key, entry.Base64 ? Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) : value);
                     break;
                 case AccessSettingType.Boolean:
                     if (TryParseBool(value) is not { } flag)
@@ -144,7 +147,9 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
                 case AccessSettingType.Choice:
                     if (string.IsNullOrEmpty(value))
                         throw new DriverException($"Elija un valor para '{entry.Label}'.");
-                    doc.SetString(entry.Key, value);
+                    // Muchas listas son números con significado (nivel de huella 1..18,
+                    // nivel de seguridad facial 1..3): se escriben con el tipo que tenía el campo.
+                    doc.SetChoice(entry.Key, value);
                     break;
                 default:
                     doc.SetString(entry.Key, value ?? "");
@@ -254,6 +259,9 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
             used.Add(entry.Key);
             var cap = CapOf(caps, entry.Key);
             string? value = entry.Type == AccessSettingType.Password ? null : doc.Get(entry.Key);
+            // Un dato de solo lectura con nombres conocidos se muestra traducido ("cardOrFace" → "Tarjeta o rostro").
+            if (entry.Type == AccessSettingType.Info && value is not null && entry.Labels?.GetValueOrDefault(value) is { } named)
+                value = named;
             IReadOnlyList<AccessSettingOption>? options = null;
             if (entry.Type == AccessSettingType.Choice)
             {
@@ -281,7 +289,9 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
     // ==================================================================
 
     private sealed record Entry(string Key, string Label, AccessSettingType Type, string? Unit = null, string? Help = null,
-        IReadOnlyDictionary<string, string>? Labels = null);
+        IReadOnlyDictionary<string, string>? Labels = null,
+        /// <summary>El equipo espera el valor en Base64 (las claves de la puerta, según la guía ISAPI).</summary>
+        bool Base64 = false);
 
     private static readonly Dictionary<string, string> ContactLabels = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -289,18 +299,29 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
         ["alwaysOpen"] = "Normalmente abierto",
     };
 
+    private static readonly Dictionary<string, string> YesNoLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["true"] = "Sí",
+        ["false"] = "No",
+    };
+
+    private static readonly Dictionary<string, string> TerminalModeLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["preventCutAndShort"] = "Supervisadas (corte y cortocircuito)",
+        ["common"] = "Comunes",
+    };
+
+    private static readonly Dictionary<string, string> LeaderCardLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["disable"] = "Desactivado",
+        ["alwaysOpen"] = "Queda abierta con la primera tarjeta",
+        ["authorize"] = "La primera tarjeta habilita la puerta",
+    };
+
     private static readonly Dictionary<string, string> PolarityLabels = new(StringComparer.OrdinalIgnoreCase)
     {
         ["anode"] = "Ánodo",
         ["cathode"] = "Cátodo",
-    };
-
-    private static readonly Dictionary<string, string> QualityLabels = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["low"] = "Baja",
-        ["middle"] = "Media",
-        ["medium"] = "Media",
-        ["high"] = "Alta",
     };
 
     private static readonly Dictionary<string, string> LightLabels = new(StringComparer.OrdinalIgnoreCase)
@@ -359,34 +380,80 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
             "Avisa si la hoja sigue abierta pasado este tiempo; 0 = sin alarma."),
         new("enableDoorLock", "Trabar la cerradura apenas se cierra la hoja", AccessSettingType.Boolean,
             Help: "Si no, espera a que termine el tiempo de apertura."),
-        new("enableLeaderCard", "Tarjeta de primera apertura", AccessSettingType.Boolean,
-            Help: "La puerta recién funciona cuando pasó una tarjeta autorizada a abrir el día."),
-        new("leaderCardOpenDuration", "Duración tras la primera tarjeta", AccessSettingType.Integer, "min"),
+        new("enableLeaderCard", "Abrir con la primera tarjeta", AccessSettingType.Boolean,
+            Help: "La puerta queda abierta cuando pasa una tarjeta autorizada a abrir el día."),
+        new("leaderCardMode", "Modo de primera tarjeta", AccessSettingType.Choice,
+            Help: "Qué hace la primera tarjeta del día; si está, manda sobre la casilla anterior.", Labels: LeaderCardLabels),
+        new("leaderCardOpenDuration", "Duración tras la primera tarjeta", AccessSettingType.Integer, "s"),
+        new("openButton", "Botón de salida habilitado", AccessSettingType.Boolean),
         new("lockInputCheck", "Supervisar el estado de la cerradura", AccessSettingType.Boolean),
         new("lockInputType", "Entrada de estado de la cerradura", AccessSettingType.Choice, Labels: ContactLabels),
+        new("doorTerminalMode", "Entradas de la puerta", AccessSettingType.Choice,
+            Help: "Supervisadas: el equipo detecta un cable cortado o en corto.", Labels: TerminalModeLabels),
+        new("ladderControlDelayTime", "Retardo del control de ascensor (visitas)", AccessSettingType.Integer, "min"),
         new("stressPassword", "Código de coacción", AccessSettingType.Password,
-            Help: "Al teclearlo la puerta abre igual, pero el equipo manda una alarma silenciosa. Vacío = no cambiar."),
+            Help: "1 a 8 dígitos. Al teclearlo la puerta abre igual, pero el equipo manda una alarma silenciosa. Vacío = no cambiar.",
+            Base64: true),
         new("superPassword", "Contraseña maestra", AccessSettingType.Password,
-            Help: "Abre la puerta desde el teclado sin credencial. Vacío = no cambiar."),
+            Help: "1 a 8 dígitos. Abre la puerta desde el teclado sin credencial. Vacío = no cambiar.", Base64: true),
         new("unlockPassword", "Código de desbloqueo", AccessSettingType.Password,
-            Help: "Cancela una alarma desde el teclado. Vacío = no cambiar."),
-        new("useLocalController", "Usa una controladora local", AccessSettingType.Info),
+            Help: "1 a 8 dígitos. Cancela una alarma desde el teclado. Vacío = no cambiar.", Base64: true),
+        new("remoteControlPWStatus", "Contraseña de apertura remota configurada", AccessSettingType.Info, Labels: YesNoLabels),
+        new("useLocalController", "Usa una controladora local", AccessSettingType.Info, Labels: YesNoLabels),
         new("localControllerID", "Controladora local", AccessSettingType.Info),
         new("localControllerDoorNumber", "Puerta en la controladora local", AccessSettingType.Info),
+        new("localControllerStatus", "Estado de la controladora local", AccessSettingType.Info),
     ];
 
     private static readonly HashSet<string> DoorHidden = new(StringComparer.OrdinalIgnoreCase) { "doorNo" };
+
+    /// <summary>Nivel de huella (<c>fingerPrintCheckLevel</c>): un entero que codifica la tasa de falsa aceptación.</summary>
+    private static readonly Dictionary<string, string> FingerLevelLabels = new()
+    {
+        ["1"] = "1/10", ["2"] = "1/100", ["3"] = "1/1.000", ["4"] = "1/10.000", ["5"] = "1/100.000",
+        ["6"] = "1/1.000.000", ["7"] = "1/10.000.000", ["8"] = "1/100.000.000",
+        ["9"] = "3/100", ["10"] = "3/1.000", ["11"] = "3/10.000", ["12"] = "3/100.000",
+        ["13"] = "3/1.000.000", ["14"] = "3/10.000.000", ["15"] = "3/100.000.000",
+        ["16"] = "Automático normal", ["17"] = "Automático seguro", ["18"] = "Automático más seguro",
+    };
+
+    private static readonly Dictionary<string, string> FingerQualityLabels = new()
+    {
+        ["1"] = "Baja", ["2"] = "Media", ["3"] = "Alta", ["4"] = "Máxima",
+        ["5"] = "Baja (algoritmo V2)", ["6"] = "Media (algoritmo V2)", ["7"] = "Alta (algoritmo V2)", ["8"] = "Máxima (algoritmo V2)",
+    };
+
+    private static readonly Dictionary<string, string> SecurityLevelLabels = new()
+    {
+        ["1"] = "Normal", ["2"] = "Alto", ["3"] = "Más alto",
+    };
+
+    private static readonly Dictionary<string, string> FaceEnableLabels = new()
+    {
+        ["1"] = "Activado", ["2"] = "Desactivado", ["3"] = "Asistencia: varias caras a la vez",
+    };
+
+    private static readonly Dictionary<string, string> LiveLevelLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["low"] = "Bajo", ["middle"] = "Medio", ["high"] = "Alto",
+    };
+
+    private static readonly Dictionary<string, string> EnvirLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["indoor"] = "Interior", ["other"] = "Otro (exterior)",
+    };
 
     private static readonly Entry[] ReaderCatalog =
     [
         new("enable", "Lector habilitado", AccessSettingType.Boolean),
         new("cardReaderDescription", "Descripción", AccessSettingType.Info),
-        new("defaultVerifyMode", "Modo de verificación", AccessSettingType.Choice,
-            Help: "Con qué se identifica la gente en este lector.", Labels: VerifyModeLabels),
+        new("defaultVerifyMode", "Modo de verificación de fábrica", AccessSettingType.Info, Labels: VerifyModeLabels),
         new("offlineCheckTime", "Detección de lector desconectado", AccessSettingType.Integer, "s",
-            "Cada cuánto el equipo comprueba que el lector responde; 0 = sin detección."),
-        new("swipeInterval", "Intervalo mínimo entre pasadas de tarjeta", AccessSettingType.Integer, "s",
-            "Dos pasadas de la misma tarjeta más seguidas que esto se ignoran; 0 = sin límite."),
+            "Cuánto espera sin respuesta del lector antes de darlo por desconectado; 0 = sin detección."),
+        new("swipeInterval", "Intervalo mínimo entre autenticaciones", AccessSettingType.Integer, "s",
+            "Dos pasadas seguidas (tarjeta, huella o rostro) más juntas que esto se ignoran; 0 = sin límite."),
+        new("independSwipeIntervals", "Intervalo mínimo por persona", AccessSettingType.Integer, "s",
+            "Como el anterior, pero contado para cada persona por separado."),
         new("pressTimeout", "Borrar lo tecleado tras", AccessSettingType.Integer, "s",
             "Si alguien deja una clave a medias, el teclado se limpia pasado este tiempo."),
         new("enableFailAlarm", "Alarma por intentos fallidos", AccessSettingType.Boolean),
@@ -396,33 +463,45 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
         new("okLedPolarity", "Polaridad del LED de OK", AccessSettingType.Choice, Labels: PolarityLabels),
         new("errorLedPolarity", "Polaridad del LED de error", AccessSettingType.Choice, Labels: PolarityLabels),
         new("buzzerPolarity", "Polaridad del zumbador", AccessSettingType.Choice, Labels: PolarityLabels),
-        new("buzzerTime", "Duración del zumbador", AccessSettingType.Integer, "s"),
+        new("buzzerTime", "Duración del zumbador", AccessSettingType.Integer, "s", "0 = suena hasta que se atienda."),
         new("enableReverseCardNo", "Invertir el número de tarjeta", AccessSettingType.Boolean,
             Help: "Lee los bytes del número al revés (lectores Wiegand de otra marca)."),
         new("fingerPrintCheckLevel", "Nivel de reconocimiento de huella", AccessSettingType.Choice,
-            Help: "Tasa de falsa aceptación: más estricto es más seguro, pero rechaza más dedos."),
-        new("fingerPrintImageQuality", "Calidad exigida a la huella", AccessSettingType.Choice, Labels: QualityLabels),
-        new("fingerPrintContrastTimeOut", "Tiempo de espera de la huella", AccessSettingType.Integer, "s"),
-        new("fingerPrintRecogizeInterval", "Intervalo entre huellas", AccessSettingType.Integer, "s"),
-        new("fingerPrintMatchFastMode", "Modo rápido de comparación de huella", AccessSettingType.Integer),
-        new("fingerPrintModuleSensitive", "Sensibilidad del módulo de huella", AccessSettingType.Integer),
+            Help: "Tasa de falsa aceptación: más estricto es más seguro, pero rechaza más dedos.", Labels: FingerLevelLabels),
+        new("fingerPrintImageQuality", "Calidad exigida a la huella", AccessSettingType.Choice, Labels: FingerQualityLabels),
+        new("fingerPrintContrastTimeOut", "Tiempo de espera de la huella", AccessSettingType.Integer, "s", "255 = sin límite."),
+        new("fingerPrintRecogizeInterval", "Intervalo entre huellas", AccessSettingType.Integer, "s", "255 = sin espera."),
+        new("fingerPrintMatchFastMode", "Modo rápido de comparación de huella", AccessSettingType.Integer, null, "1 a 5; 255 = automático."),
+        new("fingerPrintModuleSensitive", "Sensibilidad del módulo de huella", AccessSettingType.Integer, null, "1 a 8."),
         new("fingerPrintModuleLightCondition", "Iluminación del módulo de huella", AccessSettingType.Choice, Labels: LightLabels),
-        new("faceRecogizeEnable", "Reconocimiento facial habilitado", AccessSettingType.Boolean),
+        new("faceRecogizeEnable", "Reconocimiento facial", AccessSettingType.Choice, Labels: FaceEnableLabels),
+        new("envirMode", "Modo de aplicación del reconocimiento facial", AccessSettingType.Choice,
+            Help: "Dónde está el terminal (HikCentral: Face Recognition Application Mode).", Labels: EnvirLabels),
         new("faceMatchThresholdN", "Umbral de coincidencia facial 1:N", AccessSettingType.Integer, "%",
             "Parecido mínimo contra todo el padrón (HikCentral: Face 1:N Matching Threshold)."),
         new("faceMatchThreshold1", "Umbral de coincidencia facial 1:1", AccessSettingType.Integer, "%",
             "Parecido mínimo contra la persona de la tarjeta o del número tecleado."),
+        new("faceMatchNSecurityLevel", "Nivel de seguridad facial 1:N", AccessSettingType.Choice, Labels: SecurityLevelLabels),
+        new("faceMatch1SecurityLevel", "Nivel de seguridad facial 1:1", AccessSettingType.Choice, Labels: SecurityLevelLabels),
         new("maskFaceMatchThresholdN", "Umbral 1:N con mascarilla", AccessSettingType.Integer, "%"),
         new("maskFaceMatchThreshold1", "Umbral 1:1 con mascarilla", AccessSettingType.Integer, "%"),
         new("faceQuality", "Calidad mínima del rostro", AccessSettingType.Integer),
         new("faceRecogizeTimeOut", "Tiempo de espera del reconocimiento facial", AccessSettingType.Integer, "s",
-            "Cuánto intenta reconocer una cara antes de darse por vencido."),
+            "Cuánto intenta reconocer una cara antes de darse por vencido; 255 = sin límite."),
         new("faceRecogizeInterval", "Intervalo entre reconocimientos faciales", AccessSettingType.Integer, "s",
-            "Después de reconocer a alguien, cuánto espera antes de intentar con la siguiente cara."),
+            "Después de reconocer a alguien, cuánto espera antes de intentar con la siguiente cara; 255 = sin espera."),
         new("livingBodyDetect", "Antisuplantación facial (detección de vida)", AccessSettingType.Boolean,
-            Help: "Rechaza fotos y pantallas puestas frente a la cámara."),
-        new("faceImageSensitometry", "Exposición de la cámara facial", AccessSettingType.Integer),
-        new("useLocalController", "Usa una controladora local", AccessSettingType.Info),
+            Help: "Rechaza fotos y pantallas puestas frente a la cámara (HikCentral: Face Anti-Spoofing)."),
+        new("liveDetLevelSet", "Nivel de antisuplantación", AccessSettingType.Choice,
+            Help: "Más alto rechaza más intentos de engaño, y también a más personas reales.", Labels: LiveLevelLabels),
+        new("enableLiveDetAntiAttack", "Bloqueo por intentos de suplantación", AccessSettingType.Boolean),
+        new("liveDetAntiAttackCntLimit", "Intentos de suplantación antes del bloqueo", AccessSettingType.Integer),
+        new("faceImageSensitometry", "Exposición de la cámara facial", AccessSettingType.Info),
+        new("fingerPrintCapacity", "Cupo de huellas", AccessSettingType.Info),
+        new("fingerPrintNum", "Huellas guardadas", AccessSettingType.Info),
+        new("FPAlgorithmVersion", "Algoritmo de huella", AccessSettingType.Info),
+        new("cardReaderVersion", "Versión del lector", AccessSettingType.Info),
+        new("useLocalController", "Usa una controladora local", AccessSettingType.Info, Labels: YesNoLabels),
         new("localControllerID", "Controladora local", AccessSettingType.Info),
         new("localControllerReaderID", "Lector en la controladora local", AccessSettingType.Info),
         new("cardReaderChannel", "Canal del lector", AccessSettingType.Info),
@@ -629,6 +708,22 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
         public void SetBool(string key, bool value) => Set(key, JsonValue.Create(value), value ? "true" : "false");
         public void SetInt(string key, int value) => Set(key, JsonValue.Create(value), value.ToString(CultureInfo.InvariantCulture));
         public void SetString(string key, string value) => Set(key, JsonValue.Create(value), value);
+
+        /// <summary>
+        /// Una opción de lista, conservando el tipo con que el equipo entregó el
+        /// campo: si era un número (nivel 1..18) se escribe un número, si era un
+        /// booleano, un booleano, y si no, texto. En XML todo es texto.
+        /// </summary>
+        public void SetChoice(string key, string value)
+        {
+            if (_json is not null && Property(_json, key) is JsonValue current)
+            {
+                if (current.TryGetValue(out bool _) && TryParseBool(value) is { } flag) { SetBool(key, flag); return; }
+                if (!current.TryGetValue(out string? _) && current.TryGetValue(out double _) &&
+                    int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)) { SetInt(key, n); return; }
+            }
+            SetString(key, value);
+        }
 
         private void Set(string key, JsonNode node, string text)
         {

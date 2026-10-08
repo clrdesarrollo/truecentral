@@ -1181,9 +1181,14 @@ umbrales y tiempos del rostro, antisuplantación): ¿dónde queda todo eso en el
   JSON pobre, dos `CardReaderCfg` en JSON, PUT con validación de rangos): alta, página
   completa, guardar en puerta (PUT XML entero) y lector (PUT JSON), rechazo del equipo
   (502 con su `subStatusCode`), bloque o clave desconocidos, auditoría, enlace desde la
-  ficha de la puerta y el refresco de la imagen. **Falta** verlo contra el DS-K1T321MFWX y el
-  DS-K1T323MBWX reales (nombres exactos de `faceAntiSpoofingLevel`/modo interior-exterior
-  aparecen en «Otros» hasta ponerles nombre en el catálogo).
+  ficha de la puerta y el refresco de la imagen. Catálogo contrastado con la guía oficial
+  (`markitdown/isapi1.md`, B.1): `fingerPrintCheckLevel` (1..18), `fingerPrintImageQuality`,
+  `faceRecogizeEnable` (1/2/3) y los niveles de seguridad facial son ENTEROS con nombre
+  (se escriben con el tipo que traía el campo); `defaultVerifyMode` es solo lectura; el
+  «Face Anti-Spoofing Security Level» de HikCentral es `liveDetLevelSet` y el «Application
+  Mode» es `envirMode`; las claves de la puerta (coacción, maestra, desbloqueo) van en
+  **Base64** y son de 1 a 8 dígitos; `leaderCardOpenDuration` es en segundos. **Falta**
+  verlo contra el DS-K1T321MFWX y el DS-K1T323MBWX reales.
 
 ## Pendientes (al 2026-10-07)
 
