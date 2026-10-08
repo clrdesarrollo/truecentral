@@ -73,6 +73,16 @@ public sealed class LiveSessionScreen : LiveSessionGrid
     public bool Maximized { get; set; }
 }
 
+/// <summary>Lugar de una ventana en el escritorio (unidades de WPF) y si estaba maximizada.</summary>
+public sealed class WindowBounds
+{
+    public double Left { get; set; }
+    public double Top { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+    public bool Maximized { get; set; }
+}
+
 /// <summary>Preferencias locales del cliente (%AppData%\CLRTrueCentralVMS\client.json).</summary>
 public sealed class ClientSettings
 {
@@ -122,6 +132,17 @@ public sealed class ClientSettings
     public bool RestoreLastSession { get; set; }
     /// <summary>Lo que había en pantalla la última vez (se guarda a medida que cambia).</summary>
     public LiveSession? LastSession { get; set; }
+
+    // ---------- Ventana de alarma ----------
+
+    /// <summary>
+    /// Abrir la ventana de alarma donde quedó la última vez (monitor, posición
+    /// y tamaño) en vez de centrada. Sirve en puestos con dos pantallas: las
+    /// cámaras en una y la alarma en la de trabajo, donde el guardia la opera.
+    /// </summary>
+    public bool AlertWindowRememberPlacement { get; set; }
+    /// <summary>Último lugar de la ventana de alarma (se anota siempre al cerrarla).</summary>
+    public WindowBounds? AlertWindowBounds { get; set; }
 
     // ---------- Exportación de grabaciones (diálogo Exportar) ----------
 

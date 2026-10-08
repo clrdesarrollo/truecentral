@@ -43,6 +43,7 @@ public partial class SettingsWindow : Window
         TimeoutBox.Text = settings.ApiTimeoutSeconds.ToString();
 
         AutoLoginCheck.IsChecked = settings.AutoLogin;
+        AlertPlacementCheck.IsChecked = settings.AlertWindowRememberPlacement;
         AutoLoginAccountText.Text = settings.Username is { Length: > 0 } user
             ? $"Cuenta del inicio automático: {user} en {settings.ServerUrl}"
             : "";
@@ -143,6 +144,7 @@ public partial class SettingsWindow : Window
         // Apagar el inicio automático rige desde el próximo arranque del
         // cliente; la contraseña recordada se administra en el propio login.
         _settings.AutoLogin = AutoLoginCheck.IsChecked == true;
+        _settings.AlertWindowRememberPlacement = AlertPlacementCheck.IsChecked == true;
         _settings.Save();
         DialogResult = true;
     }

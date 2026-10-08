@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -53,10 +54,17 @@ public partial class AlertWindow : Window
         _sound = sound;
         _findChannel = findChannel;
         InitializeComponent();
-        StateChanged += (_, _) => MaxGlyph.Text = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
+        StateChanged += (_, _) =>
+        {
+            MaxGlyph.Text = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
+            TrackPlacement();
+        };
+        LocationChanged += (_, _) => TrackPlacement();
+        SizeChanged += (_, _) => TrackPlacement();
         Closed += (_, _) =>
         {
             if (_current == this) _current = null;
+            SavePlacement();
             // Cerrar la ventana calla la alarma y suelta las concesiones de
             // video: nada puede quedar sonando ni consumiendo sesiones RTSP.
             _sound.Stop();
@@ -102,7 +110,12 @@ public partial class AlertWindow : Window
         int position = target is { } id ? window._alerts.FindIndex(a => a.Id == id) : -1;
         window._index = position >= 0 ? position : window._alerts.Count - 1;
 
-        if (!window.IsVisible) window.Show();
+        if (!window.IsVisible)
+        {
+            bool maximize = window.ApplySavedPlacement(owner);
+            window.Show();
+            if (maximize) window.WindowState = WindowState.Maximized;
+        }
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
         window.Activate();
         _ = window.RenderAsync();
@@ -124,6 +137,91 @@ public partial class AlertWindow : Window
     {
         if (_current is { } window && window._alerts.All(a => !a.Pending)) window.Close();
     }
+
+    // ------------------------------------------------------------------
+    // Lugar de la ventana: si el puesto lo pide (Configuración → Sistema),
+    // la alarma vuelve a abrirse en el monitor y la posición donde quedó la
+    // última vez, no centrada sobre la ventana principal.
+    // ------------------------------------------------------------------
+
+    /// <summary>Límites en estado normal (sin maximizar) vistos por última vez.</summary>
+    private Rect _normalBounds = Rect.Empty;
+    private bool _maximized;
+
+    private void TrackPlacement()
+    {
+        switch (WindowState)
+        {
+            case WindowState.Normal:
+                if (!double.IsNaN(Left) && !double.IsNaN(Top) && ActualWidth > 0 && ActualHeight > 0)
+                    _normalBounds = new Rect(Left, Top, ActualWidth, ActualHeight);
+                _maximized = false;
+                break;
+            case WindowState.Maximized:
+                if (!RestoreBounds.IsEmpty) _normalBounds = RestoreBounds;
+                _maximized = true;
+                break;
+            // Minimizada: queda lo último que estuvo a la vista.
+        }
+    }
+
+    /// <summary>Anota el lugar al cerrar (siempre, para que encender la opción rija desde la próxima alarma).</summary>
+    private void SavePlacement()
+    {
+        if (_normalBounds.IsEmpty) return;
+        _settings.AlertWindowBounds = new WindowBounds
+        {
+            Left = _normalBounds.Left,
+            Top = _normalBounds.Top,
+            Width = _normalBounds.Width,
+            Height = _normalBounds.Height,
+            Maximized = _maximized,
+        };
+        _settings.Save();
+    }
+
+    /// <summary>
+    /// Ubica la ventana (aún sin mostrar) donde quedó la última vez. Si ese
+    /// lugar ya no cae en ningún monitor —se desconectó la segunda pantalla,
+    /// cambió la disposición—, sigue centrada como siempre. Devuelve si hay
+    /// que maximizarla después de mostrarla.
+    /// </summary>
+    private bool ApplySavedPlacement(Window? owner)
+    {
+        if (!_settings.AlertWindowRememberPlacement || _settings.AlertWindowBounds is not { } saved) return false;
+        if (!double.IsFinite(saved.Left) || !double.IsFinite(saved.Top) ||
+            !double.IsFinite(saved.Width) || !double.IsFinite(saved.Height) ||
+            saved.Width <= 0 || saved.Height <= 0) return false;
+
+        // La aplicación es system-DPI-aware: una sola escala para todos los monitores.
+        Visual? reference = owner ?? Application.Current?.MainWindow;
+        var dpi = reference is not null ? VisualTreeHelper.GetDpi(reference) : new DpiScale(1, 1);
+        double width = Math.Max(MinWidth, saved.Width);
+        double height = Math.Max(MinHeight, saved.Height);
+        // Tienen que quedar a la vista el centro y la barra de título (para poder arrastrarla).
+        double centerX = saved.Left + width / 2;
+        if (!OnAnyMonitor(centerX, saved.Top + height / 2, dpi) || !OnAnyMonitor(centerX, saved.Top + 19, dpi))
+            return false;
+
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = saved.Left;
+        Top = saved.Top;
+        Width = width;
+        Height = height;
+        return saved.Maximized;
+    }
+
+    private static bool OnAnyMonitor(double x, double y, DpiScale dpi) =>
+        MonitorFromPoint(new POINT { X = (int)(x * dpi.DpiScaleX), Y = (int)(y * dpi.DpiScaleY) },
+            MONITOR_DEFAULTTONULL) != IntPtr.Zero;
+
+    private const uint MONITOR_DEFAULTTONULL = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(POINT pt, uint flags);
 
     // ------------------------------------------------------------------
     // Pintado
