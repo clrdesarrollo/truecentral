@@ -2078,3 +2078,32 @@ body.live-aux .sidebar, body.live-aux .topbar, body.live-aux #license-banner { d
 .lv-ctx button:hover:not(:disabled) { background: var(--panel-2); }
 .lv-ctx button:disabled { color: var(--muted); cursor: default; }
 .lv-ctx hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+
+/* --- Roles: alcance (ubicaciones + recursos sueltos) -------------------- */
+.rl-card-scope { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-card-scope.limited { color: var(--warn); }
+.rl-scope { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin: 6px 0 12px; }
+.rl-scope .radio-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; cursor: pointer; }
+.rl-scope .radio-row input { width: auto; margin: 0; }
+.rl-scope-pick { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 14px; margin-top: 8px; }
+.rl-scope-col-title { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+.rl-scope-col .scope-tree { max-height: 320px; }
+.rl-scope-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; max-height: 110px; overflow: auto; }
+.rl-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; background: rgba(59,130,246,.12);
+  border: 1px solid rgba(59,130,246,.35); border-radius: 999px; padding: 2px 4px 2px 9px; }
+.rl-chip button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 4px; }
+.rl-chip button:hover { color: var(--danger); }
+.rl-scope-search { display: flex; gap: 6px; margin-bottom: 6px; }
+.rl-scope-search select, .rl-scope-search input { padding: 6px 8px; font: inherit; font-size: 12.5px; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.rl-scope-search input { flex: 1; min-width: 0; }
+.rl-scope-results { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.rl-scope-row { display: grid; grid-template-columns: auto 110px minmax(0, 1fr) minmax(0, .8fr); gap: 8px; align-items: center;
+  padding: 5px 8px; font-size: 12.5px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.rl-scope-row:last-child { border-bottom: 0; }
+.rl-scope-row:hover { background: var(--panel); }
+.rl-scope-row input { width: auto; margin: 0; }
+.rl-scope-kind { color: var(--muted); font-size: 11.5px; }
+.rl-scope-name, .rl-scope-loc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-scope-hint { margin-top: 8px; }
+@media (max-width: 1100px) { .rl-scope-pick { grid-template-columns: 1fr; } }

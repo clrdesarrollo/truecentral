@@ -551,7 +551,7 @@ public static class DevicesApi
             var scope = await ctx.ScopeAsync(session);
             if (scope.FiltersView)
             {
-                channels = channels.Where(c => scope.CanView(c.LocationId)).ToList();
+                channels = channels.Where(c => scope.CanViewChannel(c.Id)).ToList();
                 if (channels.Count == 0) return Results.NotFound();
             }
             return Results.Ok(channels.Select(c => ToDto(c, device.Status)));
@@ -667,7 +667,7 @@ public static class DevicesApi
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == id && c.ChannelNumber == channelNumber, ct);
             if (channel is null) return Results.NotFound();
-            if (!(await ctx.ScopeAsync(session)).CanOperate(channel.LocationId))
+            if (!(await ctx.ScopeAsync(session)).CanOperateChannel(channel.Id))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{id}/{channelNumber}",
                     $"{channel.Device.Name} · {channel.Name}", "mover el PTZ de");
             if (!channel.SupportsPtz)
@@ -716,7 +716,7 @@ public static class DevicesApi
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == id && c.ChannelNumber == channelNumber, ct);
             if (channel is null) return Results.NotFound();
-            if (!(await ctx.ScopeAsync(session)).CanOperate(channel.LocationId))
+            if (!(await ctx.ScopeAsync(session)).CanOperateChannel(channel.Id))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{id}/{channelNumber}",
                     $"{channel.Device.Name} · {channel.Name}", "usar los presets de");
             if (!channel.SupportsPtz)

@@ -16,6 +16,9 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     /// <summary>Roles (conjuntos de permisos) y su asignación a usuarios.</summary>
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    /// <summary>Alcance de cada rol: ubicaciones y recursos sueltos.</summary>
+    public DbSet<RoleLocation> RoleLocations => Set<RoleLocation>();
+    public DbSet<RoleResource> RoleResources => Set<RoleResource>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Channel> Channels => Set<Channel>();
@@ -134,6 +137,23 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.HasKey(x => new { x.RoleId, x.Permission });
             e.Property(x => x.Permission).HasMaxLength(48);
             e.HasOne<Role>().WithMany(r => r.Permissions).HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RoleLocation>(e =>
+        {
+            e.HasKey(x => new { x.RoleId, x.LocationId });
+            e.HasOne<Role>().WithMany(r => r.Locations).HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
+            // Como en el alcance de un usuario: la API exige sacarla de los roles
+            // antes de borrar la ubicación (y la base lo respalda).
+            e.HasOne<Location>().WithMany().HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.LocationId);
+        });
+
+        modelBuilder.Entity<RoleResource>(e =>
+        {
+            e.HasKey(x => new { x.RoleId, x.Kind, x.ResourceId });
+            e.Property(x => x.Kind).HasMaxLength(24);
+            e.HasOne<Role>().WithMany(r => r.Resources).HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<UserRole>(e =>

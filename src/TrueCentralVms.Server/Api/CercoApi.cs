@@ -111,9 +111,8 @@ public static class CercoApi
     private static IQueryable<CercoEvent> InScope(VmsDbContext db, IQueryable<CercoEvent> query, UserScope scope)
     {
         if (!scope.FiltersView) return query;
-        var allowed = scope.Locations.ToList();
-        return query.Where(e => db.CercoPanels.Any(p => p.Id == e.CercoPanelId && p.LocationId != null
-                                                        && allowed.Contains(p.LocationId.Value)));
+        var allowed = scope.AllowedIds(ResourceKind.Fence).ToList();
+        return query.Where(e => allowed.Contains(e.CercoPanelId));
     }
 
     public static void MapCercoApi(this WebApplication app)
@@ -124,7 +123,7 @@ public static class CercoApi
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var panels = await db.CercoPanels.Include(p => p.Zones).AsNoTracking().OrderBy(p => p.Name).ToListAsync(ct);
-            return Results.Ok(panels.Where(p => scope.CanView(p.LocationId))
+            return Results.Ok(panels.Where(p => scope.CanViewCerco(p.Id))
                 .Select(p => CercoMapper.ToDto(p, conns.IsConnected(p.DeviceId))).ToList());
         });
 
@@ -132,7 +131,7 @@ public static class CercoApi
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var panel = await db.CercoPanels.Include(p => p.Zones).AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
-            return panel is null || !(await ctx.ScopeAsync(session)).CanView(panel.LocationId)
+            return panel is null || !(await ctx.ScopeAsync(session)).CanViewCerco(panel.Id)
                 ? Results.NotFound()
                 : Results.Ok(CercoMapper.ToDto(panel, conns.IsConnected(panel.DeviceId)));
         });
@@ -401,7 +400,7 @@ public static class CercoApi
 
             var panel = await db.CercoPanels.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
-            if (!(await ctx.ScopeAsync(session)).CanOperate(panel.LocationId))
+            if (!(await ctx.ScopeAsync(session)).CanOperateCerco(panel.Id))
                 return await ctx.OutOfScopeAsync(session, "cerco-panel", id.ToString(), panel.Name, $"dar la orden '{cmd}' a");
             if (!conns.IsConnected(panel.DeviceId))
             {

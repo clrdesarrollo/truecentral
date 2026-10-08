@@ -36,7 +36,7 @@ public static class PlaybackApi
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.ChannelNumber == channelNumber, ct);
             if (channel is null) return Results.NotFound();
-            if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+            if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{deviceId}/{channelNumber}",
                     $"{channel.Device.Name} · {channel.Name}", "buscar grabaciones de");
 
@@ -120,7 +120,7 @@ public static class PlaybackApi
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.ChannelNumber == channelNumber, ct);
             if (channel is null) return Results.NotFound();
-            if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+            if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{deviceId}/{channelNumber}",
                     $"{channel.Device.Name} · {channel.Name}", "buscar grabaciones de");
 
@@ -168,7 +168,7 @@ public static class PlaybackApi
             if (!channel.Enabled)
                 return Results.Json(new { error = "El canal está deshabilitado." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
-            if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+            if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{request.DeviceId}/{request.RtspChannel}",
                     $"{channel.Device.Name} · {channel.Name}", "reproducir grabaciones de");
 
@@ -287,7 +287,7 @@ public static class PlaybackApi
                 .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.RtspChannel == rtspChannel, ct);
             if (channel is null) return Results.NotFound();
             // La descarga no pasa por MediaMTX: el alcance se valida aquí.
-            if (!(await ctx.ScopeAsync(session)).CanView(channel.LocationId))
+            if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{deviceId}/{rtspChannel}",
                     $"{channel.Device.Name} · {channel.Name}", "descargar grabaciones de");
 

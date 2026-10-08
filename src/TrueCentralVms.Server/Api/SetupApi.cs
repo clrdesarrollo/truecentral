@@ -52,7 +52,12 @@ public static class SetupApi
 
                 // Rol de sistema Administrador (lo crea la migración UserRoles).
                 var adminRole = await db.Roles.FirstAsync(r => r.SystemKey == Role.AdminKey);
-                var user = new User { Username = username, Role = Roles.Admin, Roles = [new UserRole { RoleId = adminRole.Id }] };
+                // Es el SUPERADMINISTRADOR: no le afectan los roles y solo él modifica su usuario.
+                var user = new User
+                {
+                    Username = username, Role = Roles.Admin, IsSuperAdmin = true,
+                    Roles = [new UserRole { RoleId = adminRole.Id }],
+                };
                 passwords.SetPassword(user, request.Password);
                 db.Users.Add(user);
                 await db.SaveChangesAsync();

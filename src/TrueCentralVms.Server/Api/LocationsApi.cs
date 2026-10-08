@@ -132,12 +132,15 @@ public static class LocationsApi
             var scope = await ctx.ScopeAsync(session);
             if (scope.FiltersView)
             {
-                // Alcance por ubicación: solo su parte del árbol; sus ubicaciones de
-                // más arriba quedan como raíces (el padre que no ve no se entrega).
-                return Results.Ok(locations.Where(l => scope.Locations.Contains(l.Id))
+                // Alcance limitado: solo su parte del árbol (las ubicaciones completas
+                // y donde tiene recursos sueltos, con las que las contienen); lo de
+                // más arriba de sus ubicaciones completas no se entrega y ellas
+                // quedan como raíces.
+                var visible = scope.VisibleLocations;
+                return Results.Ok(locations.Where(l => visible.Contains(l.Id))
                     .Select(l => ToDto(l, counts.GetValueOrDefault(l.Id)) with
                     {
-                        ParentId = l.ParentId is { } parent && scope.Locations.Contains(parent) ? parent : null,
+                        ParentId = l.ParentId is { } parent && visible.Contains(parent) ? parent : null,
                     }));
             }
             return Results.Ok(locations.Select(l => ToDto(l, counts.GetValueOrDefault(l.Id))));
@@ -264,6 +267,13 @@ public static class LocationsApi
                 return Error($"\"{location.Name}\" está en el alcance de {scopedUsers.Count} usuario(s) " +
                              $"({string.Join(", ", scopedUsers.Take(5))}{(scopedUsers.Count > 5 ? "…" : "")}): " +
                              "quítela de su alcance (Seguridad → Usuarios) antes de eliminarla.",
+                    StatusCodes.Status409Conflict);
+            var scopedRoles = await db.RoleLocations.Where(rl => rl.LocationId == id)
+                .Join(db.Roles, rl => rl.RoleId, r => r.Id, (rl, r) => r.Name).OrderBy(n => n).ToListAsync(ct);
+            if (scopedRoles.Count > 0)
+                return Error($"\"{location.Name}\" está en el alcance de {scopedRoles.Count} rol(es) " +
+                             $"({string.Join(", ", scopedRoles.Take(5))}{(scopedRoles.Count > 5 ? "…" : "")}): " +
+                             "quítela de su alcance (Seguridad → Roles) antes de eliminarla.",
                     StatusCodes.Status409Conflict);
 
             var byId = await db.Locations.AsNoTracking().ToDictionaryAsync(l => l.Id, ct);
@@ -393,20 +403,20 @@ public static class LocationsApi
             ResourceCatalog.Filter filter;
             if (unassigned == true)
             {
-                // Lo "por ubicar" queda fuera de todo alcance restringido.
-                if (scope.FiltersView) return Results.Ok(Array.Empty<ResourceDto>());
+                // Lo "por ubicar" solo entra en un alcance limitado como recurso suelto de un rol.
                 filter = new(UnassignedOnly: true);
             }
             else if (locationId is { } id)
             {
                 var all = await db.Locations.AsNoTracking().ToListAsync(ct);
-                if (all.All(l => l.Id != id) || !scope.CanView(id)) return Results.NotFound();
+                if (all.All(l => l.Id != id) || !scope.CanSeeLocation(id)) return Results.NotFound();
                 filter = new(LocationIds: SubtreeOf(id, all));
             }
             else
-                filter = scope.FiltersView ? new(LocationIds: scope.Locations.ToList()) : new();
+                filter = new();
             var resources = await ResourceCatalog.ListAsync(db, filter, ct);
-            return Results.Ok(resources);
+            // Alcance limitado: recurso por recurso (sus roles pueden dar recursos sueltos).
+            return Results.Ok(scope.FiltersView ? resources.Where(r => scope.CanViewResource(r.Kind, r.Id)).ToList() : resources);
         });
 
         // Ubicar recursos en bloque (LocationId null = devolverlos a "por ubicar").

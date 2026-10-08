@@ -109,14 +109,12 @@ public static class AuthApi
             return Results.Ok();
         });
 
-        app.MapGet("/api/auth/me", async (HttpContext ctx, UserScopeService scopes, VmsDbContext db) =>
+        app.MapGet("/api/auth/me", async (HttpContext ctx, VmsDbContext db) =>
         {
             if (ApiSecurity.CurrentSession(ctx) is not { } s) return Results.Unauthorized();
-            // Su alcance por ubicación, para mostrarlo (el servidor ya filtra todo lo demás).
+            // Su alcance (roles + límite propio), para mostrarlo: el servidor ya filtra todo lo demás.
             var scope = await ctx.ScopeAsync(s);
-            var index = (await scopes.SnapshotAsync(ctx.RequestAborted)).Index;
-            var dto = new UserScopeDto(!scope.Unrestricted, scope.ViewOutside, scope.AssignedLocations,
-                scope.AssignedLocations.Select(index.PathOf).Where(n => n.Length > 0).Order().ToList());
+            var dto = new UserScopeDto(!scope.Unrestricted, scope.ViewOutside, scope.GrantedLocations, scope.Labels);
             // Sus permisos (unión de sus roles): la interfaz oculta lo demás.
             var roleNames = await db.UserRoles.Where(ur => ur.UserId == s.UserId)
                 .Join(db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => r.Name).OrderBy(n => n).ToListAsync();
