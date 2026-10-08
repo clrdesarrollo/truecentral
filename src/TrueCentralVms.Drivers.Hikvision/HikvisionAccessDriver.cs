@@ -1226,31 +1226,23 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         long? lastSerial = null;
 
         string boundary = BoundaryOf(response.Content.Headers.ContentType?.Parameters) ?? "MIME_boundary";
-        string separator = "--" + boundary;
+        // Partes por Content-Length (sin esperar a la siguiente) y en bytes:
+        // ver HikvisionMultipartReader.
+        var reader = new HikvisionMultipartReader(boundary);
 
         var buffer = new byte[8192];
-        // Decodificador CON estado: una letra con tilde (dos bytes en UTF-8)
-        // puede quedar partida entre dos lecturas, y decodificar cada lectura
-        // por separado la convertía en "�" en el nombre de la persona.
-        var decoder = Encoding.UTF8.GetDecoder();
-        var chars = new char[Encoding.UTF8.GetMaxCharCount(buffer.Length)];
-        var pending = new StringBuilder();
         while (!ct.IsCancellationRequested)
         {
             int read = await ReadWithIdleTimeoutAsync(stream, buffer, ct);
             if (read <= 0) yield break;      // el equipo cerró o calló: que reconecte el llamador
             signal?.Invoke(AccessStreamSignal.Alive);
-            int decoded = decoder.GetChars(buffer, 0, read, chars, 0);
-            pending.Append(chars, 0, decoded);
+            reader.Append(buffer.AsSpan(0, read));
 
-            while (true)
+            foreach (var (contentType, body) in reader.TakeParts())
             {
-                string texto = pending.ToString();
-                int at = texto.IndexOf(separator, StringComparison.Ordinal);
-                if (at < 0) break;
-                string parte = texto[..at];
-                pending.Remove(0, at + separator.Length);
-                if (ParseStreamPart(parte) is not { } part) continue;
+                // Las fotos del evento viajan en su propia parte: no son el evento.
+                if (contentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true) continue;
+                if (ParseStreamPart(HikvisionIsapiClient.DecodeBody(body)) is not { } part) continue;
                 if (IsSerialGap(lastSerial, part.Record.SerialNo, part.Front)) signal?.Invoke(AccessStreamSignal.Gap);
                 if (part.Record.SerialNo is long serial) lastSerial = serial;
                 if (!IsOwnSessionNoise(part.Record)) yield return part.Record;
@@ -1258,12 +1250,12 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
             // Un flujo sin separadores que crece sin límite es un equipo que
             // no habla lo que dijo: se corta en vez de comerse la memoria.
-            if (pending.Length > MaxStreamBuffer) yield break;
+            if (reader.Buffered > MaxStreamBuffer) yield break;
         }
     }
 
-    /// <summary>Tope del buffer del flujo (un evento con foto no llega a tanto).</summary>
-    private const int MaxStreamBuffer = 512 * 1024;
+    /// <summary>Tope de lo retenido esperando completar una parte (una foto de evento cabe holgada).</summary>
+    private const int MaxStreamBuffer = 2 * 1024 * 1024;
 
     /// <summary>
     /// Silencio máximo del flujo de eventos antes de darlo por muerto. Holgado
@@ -1289,11 +1281,6 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             ?.Value?.Trim('"');
 
     /// <summary>
-    /// Una parte del multipart a evento, o null si no es un evento de control
-    /// de acceso (el equipo también empuja latidos y eventos de otros
-    /// subsistemas por el mismo flujo).
-    /// </summary>
-    /// <summary>
     /// ¿Se perdió algo entre el evento anterior y este? Con <c>frontSerialNo</c>
     /// (el número del evento anterior según el equipo) se compara con el último
     /// que llegó; sin él, que el número sea el siguiente. El primero de cada
@@ -1306,10 +1293,14 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         return front is long declared ? declared != previous : current > previous + 1;
     }
 
-    private static (AccessEventRecord Record, long? Front)? ParseStreamPart(string parte)
+    /// <summary>
+    /// El cuerpo de una parte del multipart a evento, o null si no es un evento
+    /// de control de acceso (el equipo también empuja latidos en XML y eventos de
+    /// otros subsistemas por el mismo flujo).
+    /// </summary>
+    private static (AccessEventRecord Record, long? Front)? ParseStreamPart(string body)
     {
-        int cuerpo = parte.IndexOf("\r\n\r\n", StringComparison.Ordinal);
-        string json = (cuerpo >= 0 ? parte[(cuerpo + 4)..] : parte).Trim();
+        string json = body.Trim();
         if (json.Length < 2 || json[0] != '{') return null;
 
         try
