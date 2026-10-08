@@ -9,6 +9,7 @@ using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
 using TrueCentralVms.Server.Services.Licensing;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -182,7 +183,7 @@ public static class AccessApi
             AccessDriverRegistry drivers, LicenseService license, CredentialProtector protector, IHubContext<VmsHub> hub,
             AccessControlService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             // Con clave de comunicación, vacío es un valor válido: significa 0.
             if (drivers.Find(request.DriverKey)!.AuthMode == AccessAuthMode.UserPassword &&
@@ -251,7 +252,7 @@ public static class AccessApi
             AccessDriverRegistry drivers, LicenseService license, CredentialProtector protector, IHubContext<VmsHub> hub,
             AccessControlService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
@@ -334,7 +335,7 @@ public static class AccessApi
         app.MapDelete("/api/access/devices/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, IHubContext<VmsHub> hub,
             AccessControlService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
             service.ForgetSessionOf(device);
@@ -354,7 +355,7 @@ public static class AccessApi
             AccessDriverRegistry drivers, IHubContext<VmsHub> hub, AccessControlService service, AuditService audit,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
 
@@ -387,7 +388,7 @@ public static class AccessApi
         app.MapPost("/api/access/probe", async (HttpContext ctx, AccessDeviceWriteDto request, VmsDbContext db,
             AccessDriverRegistry drivers, CredentialProtector protector, AuditService audit, int? deviceId, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             string? password = request.Password;
             if (string.IsNullOrEmpty(password) && deviceId is int existingId &&

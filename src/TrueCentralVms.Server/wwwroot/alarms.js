@@ -70,7 +70,7 @@ async function renderAlarmPanels() {
   try { panels = await Api.get("/api/alarms/panels"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("alarms.configure");
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Paneles de alarma <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>

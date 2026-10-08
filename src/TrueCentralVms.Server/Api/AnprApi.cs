@@ -7,6 +7,7 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -34,7 +35,7 @@ public static class AnprApi
         app.MapGet("/api/anpr/events", async (HttpContext ctx, VmsDbContext db, AuditService audit,
             int? deviceId, string? plate, DateTime? from, DateTime? to, int? take) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AnprView, out var session) is { } failure) return failure;
 
             // Las patentes son datos personales: toda búsqueda con filtros se
             // audita; la carga inicial de la pantalla, una vez cada 5 min.
@@ -98,7 +99,7 @@ public static class AnprApi
         app.MapGet("/api/anpr/events/{id:long}/{kind}", async (HttpContext ctx, VmsDbContext db, AnprStore store,
             long id, string kind) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AnprView, out var session) is { } failure) return failure;
             if (kind is not ("scene" or "plate"))
                 return Error("Imagen desconocida: use 'scene' o 'plate'.", StatusCodes.Status404NotFound);
 
@@ -150,7 +151,7 @@ public static class AnprApi
         app.MapPut("/api/anpr/sources/{deviceId:int}", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers, LicenseService license,
             AnprService anpr, IHubContext<VmsHub> hub, AuditService audit, int deviceId, AnprSourceWriteDto request) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
 
             var device = await db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId);
             if (device is null)
@@ -185,7 +186,7 @@ public static class AnprApi
         app.MapDelete("/api/anpr/events/{id:long}", async (HttpContext ctx, VmsDbContext db, AnprStore store,
             AuditService audit, long id) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AnprDelete, out _) is { } failure) return failure;
             var record = await db.PlateEvents.FirstOrDefaultAsync(p => p.Id == id);
             if (record is null)
                 return Error("El reconocimiento no existe.", StatusCodes.Status404NotFound);

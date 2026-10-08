@@ -212,7 +212,7 @@ async function resLoad({ quiet = false } = {}) {
 async function renderResources() {
   $("#page-title").textContent = "Recursos";
   resourcesDetachHub();
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("resources.manage");
   // #/resources?r=Door:12&tab=history abre la ficha de ese recurso (se puede enlazar).
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   const [openKind, openId] = (params.get("r") || "").split(":");
@@ -264,7 +264,7 @@ function resDraw() {
 }
 
 function resDrawTree() {
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("resources.manage");
   const counts = resSubtreeCounts();
   const pending = resState.resources.filter((r) => r.locationId == null).length;
   const sel = resState.selected;
@@ -305,7 +305,7 @@ function resDrawTree() {
 }
 
 function resDrawHead() {
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("resources.manage");
   const sel = resState.selected;
   let crumb = "", title, kindTag = "", actions = "", note = "";
   if (sel === "all") {
@@ -415,7 +415,7 @@ function resWhere(r) {
 }
 
 function resDrawList() {
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("resources.manage");
   const inSelection = resInSelection();
 
   // Chips por tipo, con cuántos hay en la selección (antes de los demás filtros).
@@ -466,7 +466,7 @@ function resDrawList() {
 }
 
 function resDrawBulk(list) {
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("resources.manage");
   const checked = resState.resources.filter((r) => resState.checked.has(resKey(r)));
   if (!isAdmin || checked.length === 0) { $("#res-bulk").innerHTML = ""; return; }
   const hidden = checked.length - list.filter((r) => resState.checked.has(resKey(r))).length;
@@ -997,7 +997,7 @@ function resSheetGeneralHtml(d) {
   const r = d.resource;
   const snapshot = resSnapshotHtml(d, "Imagen actual");
   const wrap = (main) => snapshot ? `<div class="res-general"><div class="res-general-main">${main}</div>${snapshot}</div>` : main;
-  if (Api.role !== "Admin") {
+  if (!Perms.can("resources.manage")) {
     return wrap(`
       <dl class="res-dl wide">
         <dt>Ubicación</dt><dd>${d.locationPath ? esc(d.locationPath) : "Por ubicar"}</dd>
@@ -1079,7 +1079,7 @@ function resBindSheetDevice() {
 // ---------- Cámaras asociadas ----------
 
 function resSheetCamerasHtml(d) {
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("resources.manage");
   const editable = d.cameras.filter((c) => !c.fixed);
   const cards = d.cameras.map((c, i) => {
     const position = editable.indexOf(c);
@@ -1175,7 +1175,7 @@ async function resSaveCameras(ids) {
 // ---------- Automatizaciones ----------
 
 function resSheetWorkflowsHtml(w) {
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("workflows.view");
   const role = { trigger: "La dispara", condition: "La consulta", action: "Actúa sobre él" };
   const general = w.generalCount > 0
     ? `<p class="muted res-tab-intro">Además, ${w.generalCount} automatización(es) ${esc(w.generalNote)}: también lo alcanzan aunque no lo nombren.</p>`
@@ -1218,6 +1218,6 @@ function resSheetHistoryHtml(items) {
         <div class="res-hist-user muted">${esc(h.user ?? "")}</div>
       </div>`).join("")}
     </div>
-    <p class="muted res-tab-intro">Las ${items.length} entradas más recientes.${Api.role === "Admin"
+    <p class="muted res-tab-intro">Las ${items.length} entradas más recientes.${Perms.can("audit.view")
       ? ` La bitácora completa está en <a href="#/audit">Seguridad → Auditoría</a>.` : ""}</p>`;
 }

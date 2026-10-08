@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=42">
+  <link rel="stylesheet" href="styles.css?v=43">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -32,16 +32,16 @@
       </div>
       <nav id="nav">
         <a href="#/" data-route="dashboard">Panel</a>
-        <a href="#/workflows" data-route="workflows">Automatizaciones</a>
-        <a href="#/sounds" data-route="sounds">Biblioteca de sonidos</a>
+        <a href="#/workflows" data-route="workflows" data-perm="workflows.view">Automatizaciones</a>
+        <a href="#/sounds" data-route="sounds" data-perm="sounds.manage">Biblioteca de sonidos</a>
 
         <div class="nav-divider">Aplicaciones</div>
-        <a href="#/alarms" data-route="alarms">Alarmas</a>
-        <a href="#/cerco" data-route="cerco">Cerco eléctrico</a>
-        <a href="#/event-center" data-route="event-center">Centro de eventos</a>
-        <a href="#/videowall" data-route="videowall">Videowall</a>
-        <a href="#/intercom-console" data-route="intercom-console">Citofonía</a>
-        <a href="#/anpr" data-route="anpr">ANPR</a>
+        <a href="#/alarms" data-route="alarms" data-perm="alarms.monitor">Alarmas</a>
+        <a href="#/cerco" data-route="cerco" data-perm="cerco.monitor">Cerco eléctrico</a>
+        <a href="#/event-center" data-route="event-center" data-perm="events.attend">Centro de eventos</a>
+        <a href="#/videowall" data-route="videowall" data-perm="wall.operate">Videowall</a>
+        <a href="#/intercom-console" data-route="intercom-console" data-perm="intercom.answer">Citofonía</a>
+        <a href="#/anpr" data-route="anpr" data-perm="anpr.view">ANPR</a>
 
         <div class="nav-divider">Configuración</div>
 
@@ -50,20 +50,20 @@
             <span class="caret" aria-hidden="true"></span><span>Dispositivos</span>
           </button>
           <div class="nav-children">
-            <a href="#/devices" data-route="devices">Fuentes de video</a>
-            <a href="#/alarm-panels" data-route="alarm-panels">Paneles de alarma</a>
-            <a href="#/cerco-panels" data-route="cerco-panels">Paneles de cerco</a>
-            <a href="#/access" data-route="access">Control de acceso</a>
-            <a href="#/speakers" data-route="speakers">Parlantes IP</a>
-            <a href="#/intercoms" data-route="intercoms">Citofonía</a>
-            <a href="#/device-maintenance" data-route="device-maintenance">Hora y mantenimiento</a>
+            <a href="#/devices" data-route="devices" data-perm="devices.manage">Fuentes de video</a>
+            <a href="#/alarm-panels" data-route="alarm-panels" data-perm="alarms.configure">Paneles de alarma</a>
+            <a href="#/cerco-panels" data-route="cerco-panels" data-perm="cerco.configure">Paneles de cerco</a>
+            <a href="#/access" data-route="access" data-perm="access.configure">Control de acceso</a>
+            <a href="#/speakers" data-route="speakers" data-perm="speakers.configure|speakers.play">Parlantes IP</a>
+            <a href="#/intercoms" data-route="intercoms" data-perm="intercom.configure">Citofonía</a>
+            <a href="#/device-maintenance" data-route="device-maintenance" data-perm="maintenance.view">Hora y mantenimiento</a>
             <div class="nav-group" data-group="videowall">
               <button type="button" class="nav-toggle">
                 <span class="caret" aria-hidden="true"></span><span>Videowalls</span>
               </button>
               <div class="nav-children">
-                <a href="#/decoders" data-route="decoders">Decodificadores</a>
-                <a href="#/walls" data-route="walls">Muro de video</a>
+                <a href="#/decoders" data-route="decoders" data-perm="devices.manage">Decodificadores</a>
+                <a href="#/walls" data-route="walls" data-perm="devices.manage">Muro de video</a>
               </div>
             </div>
           </div>
@@ -75,11 +75,11 @@
             <span class="caret" aria-hidden="true"></span><span>Control de acceso</span>
           </button>
           <div class="nav-children">
-            <a href="#/access-monitor" data-route="access-monitor">Monitoreo</a>
-            <a href="#/access-persons" data-route="access-persons">Personas</a>
-            <a href="#/access-levels" data-route="access-levels">Niveles de acceso</a>
-            <a href="#/access-schedules" data-route="access-schedules">Horarios</a>
-            <a href="#/access-events" data-route="access-events">Registros de acceso</a>
+            <a href="#/access-monitor" data-route="access-monitor" data-perm="access.monitor">Monitoreo</a>
+            <a href="#/access-persons" data-route="access-persons" data-perm="persons.view">Personas</a>
+            <a href="#/access-levels" data-route="access-levels" data-perm="persons.view">Niveles de acceso</a>
+            <a href="#/access-schedules" data-route="access-schedules" data-perm="persons.view">Horarios</a>
+            <a href="#/access-events" data-route="access-events" data-perm="access.monitor">Registros de acceso</a>
           </div>
         </div>
 
@@ -88,8 +88,9 @@
             <span class="caret" aria-hidden="true"></span><span>Seguridad</span>
           </button>
           <div class="nav-children">
-            <a href="#/users" data-route="users">Usuarios</a>
-            <a href="#/audit" data-route="audit">Auditoría</a>
+            <a href="#/users" data-route="users" data-perm="users.manage">Usuarios</a>
+            <a href="#/roles" data-route="roles" data-perm="roles.manage">Roles</a>
+            <a href="#/audit" data-route="audit" data-perm="audit.view">Auditoría</a>
           </div>
         </div>
 
@@ -98,7 +99,7 @@
             <span class="caret" aria-hidden="true"></span><span>Streaming</span>
           </button>
           <div class="nav-children">
-            <a href="#/sessions" data-route="sessions">Sesiones</a>
+            <a href="#/sessions" data-route="sessions" data-perm="sessions.manage">Sesiones</a>
           </div>
         </div>
 
@@ -152,29 +153,30 @@
 
   <script src="api.js?v=2"></script>
   <!-- walls.js va ANTES: app.js referencia sus funciones al armar las rutas. -->
-  <script src="walls.js?v=3"></script>
-  <script src="alarms.js?v=11"></script>
-  <script src="speakers.js?v=9"></script>
-  <script src="intercoms.js?v=4"></script>
-  <script src="access.js?v=8"></script>
-  <script src="maintenance.js?v=1"></script>
+  <script src="walls.js?v=4"></script>
+  <script src="alarms.js?v=12"></script>
+  <script src="speakers.js?v=10"></script>
+  <script src="intercoms.js?v=5"></script>
+  <script src="access.js?v=9"></script>
+  <script src="maintenance.js?v=2"></script>
   <script src="enroll.js?v=1"></script>
-  <script src="access-catalog.js?v=15"></script>
-  <script src="access-monitor.js?v=5"></script>
-  <script src="workflows.js?v=15"></script>
-  <script src="workflow-editor.js?v=6"></script>
-  <script src="services.js?v=1"></script>
-  <script src="license.js?v=2"></script>
-  <script src="anpr.js?v=1"></script>
+  <script src="access-catalog.js?v=16"></script>
+  <script src="access-monitor.js?v=6"></script>
+  <script src="workflows.js?v=16"></script>
+  <script src="workflow-editor.js?v=7"></script>
+  <script src="services.js?v=2"></script>
+  <script src="license.js?v=3"></script>
+  <script src="anpr.js?v=2"></script>
   <script src="alarm-monitor.js?v=2"></script>
   <script src="event-center.js?v=2"></script>
-  <script src="videowall.js?v=1"></script>
+  <script src="videowall.js?v=2"></script>
   <script src="intercom-console.js?v=2"></script>
   <script src="signalr.min.js?v=1"></script>
   <script src="hub.js?v=2"></script>
-  <script src="cerco.js?v=8"></script>
-  <script src="cerco-alarm.js?v=3"></script>
-  <script src="resources.js?v=6"></script>
-  <script src="app.js?v=51"></script>
+  <script src="cerco.js?v=9"></script>
+  <script src="cerco-alarm.js?v=4"></script>
+  <script src="resources.js?v=7"></script>
+  <script src="roles.js?v=1"></script>
+  <script src="app.js?v=52"></script>
 </body>
 </html>

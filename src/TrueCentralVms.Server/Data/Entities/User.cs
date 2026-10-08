@@ -7,7 +7,11 @@ public class User
     public string Username { get; set; } = "";
     public string PasswordHash { get; set; } = "";
     public string PasswordSalt { get; set; } = "";
-    /// <summary>Rol según <see cref="Core.Domain.Roles"/> (Admin / Operator).</summary>
+    /// <summary>
+    /// Nivel según <see cref="Core.Domain.Roles"/>: Admin si tiene el rol de
+    /// sistema Administrador, si no Operator. Se deriva de <see cref="Roles"/>
+    /// al guardarlos (lo usan la sesión y la bitácora); los permisos salen de los roles.
+    /// </summary>
     public string Role { get; set; } = Core.Domain.Roles.Operator;
     public bool Enabled { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -26,6 +30,7 @@ public class User
 
     public List<PasswordHistory> PasswordHistories { get; set; } = [];
     public List<UserLocation> Locations { get; set; } = [];
+    public List<UserRole> Roles { get; set; } = [];
 }
 
 /// <summary>Ubicación asignada al alcance de un usuario (incluye sus sububicaciones).</summary>

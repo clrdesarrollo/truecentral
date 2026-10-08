@@ -197,7 +197,7 @@ function accessPollGuard(hash, timer) {
 
 async function renderAccessSchedules() {
   $("#page-title").textContent = "Control de acceso · Horarios";
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("persons.manage");
   let schedules;
   try { schedules = await Api.get("/api/access/schedules"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
@@ -377,7 +377,7 @@ function accessScheduleModal(schedule) {
 
 async function renderAccessLevels() {
   $("#page-title").textContent = "Control de acceso · Niveles";
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("persons.manage");
   let levels, doors, schedules;
   try {
     [levels, doors, schedules] = await Promise.all([
@@ -649,7 +649,7 @@ function accessCredentialSummary(person) {
  * hasta el tercer paso para encontrar el motivo.
  */
 function accessPersonSyncModal(person, levels) {
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("persons.manage");
   // Primero lo que falla, después lo que espera y al final lo que está al día.
   const ORDER = { Failed: 0, Pending: 1, NotApplicable: 2, Synced: 3 };
 
@@ -751,7 +751,7 @@ function accessPersonSyncModal(person, levels) {
 
 async function renderAccessPersons() {
   $("#page-title").textContent = "Control de acceso · Personas";
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("persons.manage");
   let levels, departments;
   try {
     [levels, departments] = await Promise.all([
@@ -938,7 +938,7 @@ async function resendAccessPadron(button, levels) {
 async function loadAccessPersons(levels) {
   const box = $("#access-person-results");
   if (!box) return;
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("persons.manage");
   const query = new URLSearchParams({ page: accessPersonState.page, pageSize: 50 });
   if (accessPersonState.q) query.set("q", accessPersonState.q);
   if (accessPersonState.department) query.set("department", accessPersonState.department);

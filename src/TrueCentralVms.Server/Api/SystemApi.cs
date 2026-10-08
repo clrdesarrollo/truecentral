@@ -6,6 +6,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Services;
 using TrueCentralVms.Server.Services.Licensing;
 using TrueCentralVms.Server.Services.Supervisor;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -75,7 +76,7 @@ public static class SystemApi
         // un administrador lo libera sin reiniciar el servidor.
         app.MapGet("/api/system/desktop-seats", (HttpContext ctx, TokenService tokens, LicenseService license) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SessionsManage, out _) is { } failure) return failure;
             var seats = tokens.DesktopSeats();
             return Results.Ok(new
             {
@@ -88,7 +89,7 @@ public static class SystemApi
         app.MapPost("/api/system/desktop-seats/release", async (HttpContext ctx, DesktopSeatReleaseRequest request,
             TokenService tokens, AuditService audit) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SessionsManage, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Seat))
                 return Results.Json(new { error = "Indique el equipo cuyo puesto quiere liberar." }, statusCode: 422);
             var seat = tokens.DesktopSeats().FirstOrDefault(s =>
@@ -131,7 +132,7 @@ public static class SystemApi
         // Windows). Se audita ANTES de pedirlo: después ya no hay quien escriba.
         app.MapPost("/api/system/restart", async (HttpContext ctx, ServiceSupervisor supervisor, AuditService audit) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SystemServices, out _) is { } failure) return failure;
             await audit.LogAsync(ctx, "system", "server-restart-requested",
                 targetType: "server", targetId: ServiceSupervisor.WindowsServiceName,
                 detail: "Reinicio completo del servidor solicitado desde el panel.");
@@ -155,7 +156,7 @@ public static class SystemApi
     private static async Task<IResult> CommandAsync(HttpContext ctx, AuditService audit, string action, string id,
         Func<Task<ServiceSupervisor.CommandResult>> command, object? data = null)
     {
-        if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+        if (ApiSecurity.Require(ctx, Permissions.SystemServices, out _) is { } failure) return failure;
         var result = await command();
         if (result.StatusCode != StatusCodes.Status404NotFound)
         {

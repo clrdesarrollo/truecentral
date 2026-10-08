@@ -50,7 +50,9 @@ public static class SetupApi
                 if (await passwords.ValidateNewPasswordAsync(db, null, request.Password) is { } error)
                     return Results.Json(new { error }, statusCode: StatusCodes.Status422UnprocessableEntity);
 
-                var user = new User { Username = username, Role = Roles.Admin };
+                // Rol de sistema Administrador (lo crea la migración UserRoles).
+                var adminRole = await db.Roles.FirstAsync(r => r.SystemKey == Role.AdminKey);
+                var user = new User { Username = username, Role = Roles.Admin, Roles = [new UserRole { RoleId = adminRole.Id }] };
                 passwords.SetPassword(user, request.Password);
                 db.Users.Add(user);
                 await db.SaveChangesAsync();

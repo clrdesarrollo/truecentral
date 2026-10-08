@@ -5,6 +5,7 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -160,7 +161,7 @@ public static class WallsApi
         app.MapPost("/api/walls", async (HttpContext ctx, WallWriteDto request, VmsDbContext db, LicenseService license,
             WallService walls, DecoderSessionManager sessions, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name))
                 return Error("El nombre es obligatorio.");
             if (license.Deny(LicenseFeatures.ModuleVideowall, LicenseFeatures.Videowalls, await db.Walls.CountAsync(ct)) is { } denied)
@@ -196,7 +197,7 @@ public static class WallsApi
         app.MapPut("/api/walls/{id:int}", async (HttpContext ctx, int id, WallWriteDto request, VmsDbContext db,
             WallService walls, DecoderSessionManager sessions, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var wall = await db.Walls.Include(w => w.Screens).ThenInclude(s => s.Windows)
                 .FirstOrDefaultAsync(w => w.Id == id, ct);
             if (wall is null) return Results.NotFound();
@@ -242,7 +243,7 @@ public static class WallsApi
         app.MapDelete("/api/walls/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             WallService walls, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var wall = await db.Walls.FindAsync([id], ct);
             if (wall is null) return Results.NotFound();
             db.Walls.Remove(wall);
@@ -258,7 +259,7 @@ public static class WallsApi
         // apagado al guardar o alguien lo cambió con otra herramienta).
         app.MapPost("/api/walls/{id:int}/sync", (HttpContext ctx, int id, WallService walls,
             VmsDbContext db, AuditService audit) =>
-            ApiSecurity.RequireUser(ctx, out _) is { } failure
+            ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                 ? Task.FromResult(failure)
                 : RunAuditedAsync(ctx, audit, db, id, "wall-synced",
                     "Re-sincronizó la configuración contra el decodificador",
@@ -269,7 +270,7 @@ public static class WallsApi
         // ------------------------------------------------------------------
         app.MapPost("/api/walls/{id:int}/assign", (HttpContext ctx, int id, AssignRequest request, WallService walls,
             VmsDbContext db, AuditService audit) =>
-            ApiSecurity.RequireUser(ctx, out _) is { } failure
+            ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                 ? Task.FromResult(failure)
                 : RunAuditedAsync(ctx, audit, db, id, "window-assigned",
                     $"Puso {{channel}} en la ventana {request.WindowId}",
@@ -280,7 +281,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/assign-external",
             (HttpContext ctx, int id, ExternalAssignRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "external-assigned",
                         $"Proyectó la fuente externa '{request.Label}' en la ventana {request.WindowId}",
@@ -288,7 +289,7 @@ public static class WallsApi
 
         app.MapPost("/api/walls/{id:int}/clear", (HttpContext ctx, int id, ClearRequest request, WallService walls,
             VmsDbContext db, AuditService audit) =>
-            ApiSecurity.RequireUser(ctx, out _) is { } failure
+            ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                 ? Task.FromResult(failure)
                 : RunAuditedAsync(ctx, audit, db, id, "window-cleared",
                     $"Limpió la ventana {request.WindowId}",
@@ -296,7 +297,7 @@ public static class WallsApi
 
         app.MapPost("/api/walls/{id:int}/clear-all", (HttpContext ctx, int id, WallService walls,
             VmsDbContext db, AuditService audit) =>
-            ApiSecurity.RequireUser(ctx, out _) is { } failure
+            ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                 ? Task.FromResult(failure)
                 : RunAuditedAsync(ctx, audit, db, id, "wall-cleared",
                     "Limpió todas las ventanas",
@@ -304,7 +305,7 @@ public static class WallsApi
 
         app.MapPost("/api/walls/{id:int}/swap", (HttpContext ctx, int id, SwapRequest request, WallService walls,
             VmsDbContext db, AuditService audit) =>
-            ApiSecurity.RequireUser(ctx, out _) is { } failure
+            ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                 ? Task.FromResult(failure)
                 : RunAuditedAsync(ctx, audit, db, id, "windows-swapped",
                     $"Intercambió las ventanas {request.WindowAId} y {request.WindowBId}",
@@ -315,7 +316,7 @@ public static class WallsApi
         app.MapPut("/api/walls/{id:int}/screens/{screenId:int}/window-mode",
             (HttpContext ctx, int id, int screenId, ScreenWindowModeRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "window-mode-changed",
                         $"Cambió la división del monitor {screenId} a {request.WindowMode} ventana(s)",
@@ -324,7 +325,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/screens/{screenId:int}/group",
             (HttpContext ctx, int id, int screenId, GroupRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "windows-grouped",
                         $"Agrupó {request.WindowIds.Count} ventanas del monitor {screenId}",
@@ -332,7 +333,7 @@ public static class WallsApi
 
         app.MapPost("/api/walls/{id:int}/windows/{windowId:int}/ungroup",
             (HttpContext ctx, int id, int windowId, WallService walls, VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "window-ungrouped",
                         $"Desagrupó la ventana {windowId}",
@@ -341,7 +342,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/windows/{windowId:int}/subdivide",
             (HttpContext ctx, int id, int windowId, SubdivideRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "window-subdivided",
                         $"Subdividió la ventana {windowId} en {request.Parts} partes",
@@ -351,7 +352,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/fullscreen",
             (HttpContext ctx, int id, FullscreenRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "fullscreen-entered",
                         $"Puso la ventana {request.WindowId} a pantalla completa de su monitor",
@@ -359,7 +360,7 @@ public static class WallsApi
 
         app.MapPost("/api/walls/{id:int}/screens/{screenId:int}/exit-fullscreen",
             (HttpContext ctx, int id, int screenId, WallService walls, VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "fullscreen-exited",
                         $"Sacó el monitor {screenId} de pantalla completa",
@@ -368,7 +369,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/wall-fullscreen",
             (HttpContext ctx, int id, FullscreenRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "wall-fullscreen-entered",
                         $"Puso la ventana {request.WindowId} a pantalla completa del muro",
@@ -376,7 +377,7 @@ public static class WallsApi
 
         app.MapPost("/api/walls/{id:int}/exit-wall-fullscreen",
             (HttpContext ctx, int id, WallService walls, VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "wall-fullscreen-exited",
                         "Sacó el muro de pantalla completa",
@@ -388,7 +389,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/floating",
             (HttpContext ctx, int id, FloatingCreateRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "floating-created",
                         "Creó una ventana flotante con {channel}",
@@ -397,7 +398,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/floating-external",
             (HttpContext ctx, int id, FloatingExternalCreateRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "floating-created",
                         $"Creó una ventana flotante con la fuente externa '{request.Label}'",
@@ -406,7 +407,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/floating/{floatingId:int}/assign-external",
             (HttpContext ctx, int id, int floatingId, FloatingExternalAssignRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "floating-assigned",
                         $"Proyectó la fuente externa '{request.Label}' en la flotante {floatingId}",
@@ -415,7 +416,7 @@ public static class WallsApi
         app.MapPut("/api/walls/{id:int}/floating/{floatingId:int}",
             (HttpContext ctx, int id, int floatingId, FloatingMoveRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "floating-moved",
                         $"Movió o redimensionó la ventana flotante {floatingId}",
@@ -423,7 +424,7 @@ public static class WallsApi
 
         app.MapPost("/api/walls/{id:int}/floating/{floatingId:int}/fullscreen",
             (HttpContext ctx, int id, int floatingId, WallService walls, VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "floating-fullscreen",
                         $"Alternó la pantalla completa de la flotante {floatingId}",
@@ -432,7 +433,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/floating/{floatingId:int}/assign",
             (HttpContext ctx, int id, int floatingId, FloatingAssignRequest request, WallService walls,
                 VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "floating-assigned",
                         $"Puso {{channel}} en la ventana flotante {floatingId}",
@@ -440,7 +441,7 @@ public static class WallsApi
 
         app.MapDelete("/api/walls/{id:int}/floating/{floatingId:int}",
             (HttpContext ctx, int id, int floatingId, WallService walls, VmsDbContext db, AuditService audit) =>
-                ApiSecurity.RequireUser(ctx, out _) is { } failure
+                ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure
                     ? Task.FromResult(failure)
                     : RunAuditedAsync(ctx, audit, db, id, "floating-deleted",
                         $"Eliminó la ventana flotante {floatingId}",
@@ -451,7 +452,7 @@ public static class WallsApi
         // ------------------------------------------------------------------
         app.MapGet("/api/walls/{id:int}/layouts", async (HttpContext ctx, int id, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WallOperate, out _) is { } failure) return failure;
             var layouts = await db.WallLayouts
                 .Include(l => l.Items).Include(l => l.Screens)
                 .Where(l => l.VideoWallId == id)
@@ -467,7 +468,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/layouts", async (HttpContext ctx, int id, LayoutSaveRequest request,
             VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WallLayouts, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name))
                 return Error("El nombre del layout es obligatorio.");
             var wall = await db.Walls.Include(w => w.Screens).ThenInclude(s => s.Windows)
@@ -509,7 +510,7 @@ public static class WallsApi
         app.MapDelete("/api/walls/{id:int}/layouts/{layoutId:int}",
             async (HttpContext ctx, int id, int layoutId, VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.WallLayouts, out _) is { } failure) return failure;
             var layout = await db.WallLayouts.FirstOrDefaultAsync(l => l.Id == layoutId && l.VideoWallId == id, ct);
             if (layout is null) return Results.NotFound();
             db.WallLayouts.Remove(layout);
@@ -523,7 +524,7 @@ public static class WallsApi
         app.MapPost("/api/walls/{id:int}/layouts/{layoutId:int}/apply",
             async (HttpContext ctx, int id, int layoutId, WallService walls, VmsDbContext db, AuditService audit) =>
             {
-                if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+                if (ApiSecurity.Require(ctx, Permissions.WallOperate, out var session) is { } failure) return failure;
                 string layoutName = await db.WallLayouts.Where(l => l.Id == layoutId && l.VideoWallId == id)
                     .Select(l => l.Name).FirstOrDefaultAsync() ?? $"layout {layoutId}";
                 // Un layout con cámaras fuera del alcance no se aplica (pondría en el muro lo que no puede ver).

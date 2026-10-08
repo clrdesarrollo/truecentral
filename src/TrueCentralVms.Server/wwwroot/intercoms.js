@@ -53,7 +53,7 @@ async function renderIntercoms() {
   try { intercoms = await Api.get("/api/intercoms"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("intercom.configure");
   // El último sondeo es global: solo sirve si es el de ESTA página.
   const scanReady = discoveryOptions === INTERCOM_DISCOVERY && lastScan;
   const knownDevices = intercoms.map((i) => ({ host: i.host }));

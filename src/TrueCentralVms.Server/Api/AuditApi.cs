@@ -5,6 +5,7 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -64,7 +65,7 @@ public static class AuditApi
             DateTime? from, DateTime? to, string? category, string? action, string? username,
             string? text, bool? success, int? page, int? pageSize, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AuditView, out _) is { } failure) return failure;
 
             var query = Filter(db, from, to, category, action, username, text, success);
             long total = await query.LongCountAsync(ct);
@@ -87,7 +88,7 @@ public static class AuditApi
         // ------------------------------------------------------------------
         app.MapGet("/api/audit/catalog", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AuditView, out _) is { } failure) return failure;
             var usernames = await db.AuditEvents.AsNoTracking()
                 .Where(e => e.Username != "")
                 .Select(e => e.Username)
@@ -115,7 +116,7 @@ public static class AuditApi
             DateTime? from, DateTime? to, string? category, string? action, string? username,
             string? text, bool? success, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AuditView, out _) is { } failure) return failure;
 
             var labels = AuditCatalog.Categories.ToDictionary(c => c.Key, c => c);
             var rows = await Filter(db, from, to, category, action, username, text, success)

@@ -308,6 +308,10 @@ app.Use(async (context, next) =>
     {
         context.Items["session"] = session;
         context.Items["token"] = token;
+        // Alcance y permisos de sus roles (en memoria): las guardas
+        // ApiSecurity.Require los consultan sin volver a la base.
+        context.Items["scope"] = await context.RequestServices.GetRequiredService<UserScopeService>()
+            .ForUserAsync(session.UserId, context.RequestAborted);
     }
     else if (context.Request.Path.StartsWithSegments(VmsHubContract.HubPath))
     {
@@ -353,6 +357,7 @@ app.MapGet("/api/health", () => Results.Ok(new { ok = true, time = DateTime.UtcN
 app.MapSetupApi(serverVersion);
 app.MapAuthApi();
 app.MapUsersApi();
+app.MapRolesApi();
 app.MapDevicesApi();
 app.MapStreamsApi();
 app.MapStreamingAuthApi();

@@ -24,6 +24,7 @@ public static class AuditCatalog
             new("password-changed", "Cambio de contraseña"),
             new("setup-admin", "Creación del primer administrador"),
             new("scope-denied", "Acción fuera del alcance por ubicación rechazada"),
+            new("permission-denied", "Acción rechazada por falta de permiso en sus roles"),
         ]),
         new("users", "Usuarios",
         [
@@ -31,6 +32,13 @@ public static class AuditCatalog
             new("user-updated", "Usuario modificado"),
             new("user-deleted", "Usuario eliminado"),
             new("user-scope-updated", "Alcance por ubicación de un usuario modificado"),
+            new("user-roles-updated", "Roles de un usuario modificados"),
+        ]),
+        new("roles", "Roles y permisos",
+        [
+            new("role-created", "Rol creado"),
+            new("role-updated", "Rol modificado"),
+            new("role-deleted", "Rol eliminado"),
         ]),
         new("devices", "Dispositivos",
         [

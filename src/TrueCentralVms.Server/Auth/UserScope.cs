@@ -140,10 +140,12 @@ public sealed class UserScope
     private readonly ScopeIndex _index;
 
     internal UserScope(int userId, bool isAdmin, bool unrestricted, bool viewOutside,
-        IReadOnlyList<int> assigned, IReadOnlySet<int> locations, ScopeIndex index)
+        IReadOnlyList<int> assigned, IReadOnlySet<int> locations, ScopeIndex index,
+        IReadOnlySet<string>? permissions = null)
     {
         UserId = userId;
         IsAdmin = isAdmin;
+        Permissions = permissions ?? new HashSet<string>();
         Unrestricted = unrestricted;
         ViewOutside = viewOutside;
         AssignedLocations = assigned;
@@ -153,6 +155,15 @@ public sealed class UserScope
 
     public int UserId { get; }
     public bool IsAdmin { get; }
+    /// <summary>Unión de los permisos de sus roles (el administrador los tiene todos, aunque no estén aquí).</summary>
+    public IReadOnlySet<string> Permissions { get; }
+
+    /// <summary>¿Su rol le permite esto? (QUÉ puede hacer; DÓNDE lo dicen CanView/CanOperate).</summary>
+    public bool Has(string permission) => IsAdmin || Permissions.Contains(permission);
+
+    /// <summary>Las claves de permiso efectivas (todas, si es administrador).</summary>
+    public IReadOnlyCollection<string> EffectivePermissions =>
+        IsAdmin ? Core.Domain.Permissions.All.Select(p => p.Key).ToList() : Permissions.Order().ToList();
     /// <summary>Ve y opera todo (administrador u operador con "todas las ubicaciones").</summary>
     public bool Unrestricted { get; }
     /// <summary>Restringido para operar, pero ve todo (supervisión).</summary>
@@ -442,18 +453,27 @@ public sealed class UserScopeService(IServiceScopeFactory scopeFactory, ILogger<
         var users = await db.Users.AsNoTracking().Where(u => u.Enabled)
             .Select(u => new
             {
-                u.Id, u.Role, u.RestrictToLocations, u.ViewOutsideScope,
+                u.Id, u.RestrictToLocations, u.ViewOutsideScope,
                 Locations = u.Locations.Select(l => l.LocationId).ToList(),
+                RoleIds = u.Roles.Select(r => r.RoleId).ToList(),
             })
             .ToListAsync(ct);
+        var roles = await db.Roles.AsNoTracking()
+            .Select(r => new { r.Id, r.SystemKey, Permissions = r.Permissions.Select(p => p.Permission).ToList() })
+            .ToDictionaryAsync(r => r.Id, ct);
 
         var map = new Dictionary<int, UserScope>();
         foreach (var u in users)
         {
-            bool admin = u.Role == Roles.Admin;
+            bool admin = u.RoleIds.Any(id => roles.TryGetValue(id, out var r) && r.SystemKey == Data.Entities.Role.AdminKey);
+            // Permisos = unión de los de sus roles; las claves que ya no están
+            // en el catálogo (versión anterior) no cuentan.
+            var permissions = new HashSet<string>(u.RoleIds
+                .SelectMany(id => roles.TryGetValue(id, out var r) ? r.Permissions : [])
+                .Where(Core.Domain.Permissions.IsValid));
             bool unrestricted = admin || !u.RestrictToLocations;
             map[u.Id] = new UserScope(u.Id, admin, unrestricted, !unrestricted && u.ViewOutsideScope,
-                u.Locations, unrestricted ? new HashSet<int>() : index.Subtree(u.Locations), index);
+                u.Locations, unrestricted ? new HashSet<int>() : index.Subtree(u.Locations), index, permissions);
         }
         return new ScopeSnapshot { Index = index, Users = map };
     }

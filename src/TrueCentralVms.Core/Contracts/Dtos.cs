@@ -32,15 +32,22 @@ public sealed record SetupAdminRequest(string Username, string Password);
 /// <param name="RestrictToLocations">Alcance por ubicación (solo operadores): false = todas las ubicaciones.</param>
 /// <param name="ViewOutsideScope">Con alcance restringido: ve el resto sin poder operarlo.</param>
 /// <param name="LocationIds">Ubicaciones de su alcance (cada una incluye sus sububicaciones).</param>
+/// <param name="Role">Nivel derivado de sus roles: "Admin" si tiene el rol Administrador, si no "Operator".</param>
+/// <param name="Editable">La sesión que lo pide puede modificarlo (no tiene más permisos ni más alcance que ella).</param>
 public sealed record UserDto(int Id, string Username, string Role, bool Enabled, DateTime CreatedAt, DateTime PasswordChangedAt,
-    bool RestrictToLocations = false, bool ViewOutsideScope = false, IReadOnlyList<int>? LocationIds = null);
+    bool RestrictToLocations = false, bool ViewOutsideScope = false, IReadOnlyList<int>? LocationIds = null,
+    IReadOnlyList<int>? RoleIds = null, IReadOnlyList<string>? RoleNames = null, bool Editable = true);
 
 /// <summary>
 /// Alta/edición de usuario. En edición, Password null o vacía = no cambiar; los
 /// campos del alcance en null = no cambiar (un cliente anterior no lo borra).
+/// <paramref name="RoleIds"/> null = según <paramref name="Role"/> (clientes
+/// anteriores a los roles: "Admin" → Administrador, "Operator" → Operador) o,
+/// en edición sin Role, conservar los actuales.
 /// </summary>
-public sealed record UserWriteDto(string Username, string? Password, string Role, bool Enabled,
-    bool? RestrictToLocations = null, bool? ViewOutsideScope = null, IReadOnlyList<int>? LocationIds = null);
+public sealed record UserWriteDto(string Username, string? Password, string? Role, bool Enabled,
+    bool? RestrictToLocations = null, bool? ViewOutsideScope = null, IReadOnlyList<int>? LocationIds = null,
+    IReadOnlyList<int>? RoleIds = null);
 
 /// <summary>Alcance del usuario conectado (para mostrarlo y adaptar la interfaz).</summary>
 /// <param name="Restricted">true = solo opera (y salvo <paramref name="ViewOutsideScope"/>, solo ve) sus ubicaciones.</param>

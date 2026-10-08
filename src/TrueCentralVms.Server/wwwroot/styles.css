@@ -1775,3 +1775,80 @@ a.res-open:hover { color: var(--accent); text-decoration: underline; }
 .res-snap-when { font-size: 11.5px; margin-top: -4px; }
 .res-snap .res-snapshot { margin-bottom: 8px; width: 100%; object-fit: contain; }
 @media (max-width: 1100px) { .res-general { grid-template-columns: 1fr; } }
+
+/* ---------- Seguridad → Roles (lista a la izquierda, permisos a la derecha) ---------- */
+.small { font-size: 12px; }
+.warn-text { color: var(--warn); }
+.rl-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
+.rl-list {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0;
+}
+.rl-list-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 6px;
+  font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.rl-card {
+  display: flex; flex-direction: column; gap: 5px; text-align: left; width: 100%;
+  background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 9px 10px;
+  color: var(--text); font: inherit; cursor: pointer;
+}
+.rl-card:hover { background: var(--panel-2); }
+.rl-card.active { background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.35); }
+.rl-card-name { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.rl-card-meta { font-size: 12px; color: var(--muted); }
+.rl-card-new { cursor: default; }
+.rl-meter { height: 4px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.rl-meter i { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.rl-editor { min-width: 0; }
+.rl-intro { margin: 0 0 10px; }
+.rl-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 14px; }
+.rl-toolbar { display: flex; align-items: center; gap: 12px; margin: 4px 0 12px; }
+.rl-toolbar input[type=search] {
+  width: 280px; max-width: 100%; padding: 7px 10px; border-radius: 8px; font: inherit;
+  background: var(--bg); border: 1px solid var(--border); color: var(--text); outline: none;
+}
+.rl-toolbar input[type=search]:focus { border-color: var(--accent); }
+.rl-summary { color: var(--muted); font-size: 13px; margin-left: auto; }
+.rl-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+.rl-group { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.rl-group-head { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+.rl-group-name { font-weight: 600; }
+.rl-group-actions { margin-left: auto; display: flex; gap: 4px; }
+.rl-perm { display: flex; gap: 10px; align-items: flex-start; padding: 7px 4px; border-radius: 6px; cursor: pointer; }
+.rl-perm:hover { background: var(--panel-2); }
+.rl-perm.locked { opacity: .5; cursor: not-allowed; }
+.rl-perm-text { display: flex; flex-direction: column; min-width: 0; }
+.rl-perm-label { font-weight: 500; }
+.rl-perm.on .rl-perm-label { color: var(--text); }
+.rl-perm:not(.on) .rl-perm-label { color: var(--muted); }
+/* Interruptor: casilla con forma de llave, del color del acento al encenderse. */
+.rl-switch {
+  appearance: none; -webkit-appearance: none; flex: none; width: 30px; height: 17px; margin: 2px 0 0;
+  border-radius: 999px; background: var(--border); position: relative; cursor: inherit; transition: background .15s;
+}
+.rl-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%;
+  background: var(--text); transition: transform .15s;
+}
+.rl-switch:checked { background: var(--accent); }
+.rl-switch:checked::after { transform: translateX(13px); }
+.rl-switch:disabled { opacity: .7; }
+.rl-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rl-users { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rl-actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.rl-spacer { flex: 1; }
+.rl-templates { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow: auto; margin-bottom: 8px; }
+.rl-template { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.rl-template:hover { background: var(--panel-2); }
+.rl-template input { width: auto; margin-top: 4px; }
+/* Roles en el formulario de usuario. */
+.role-pick { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto;
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: var(--panel-2); }
+.role-pick-item { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; cursor: pointer; font-weight: normal; }
+.role-pick-item input { width: auto; margin-top: 4px; }
+.role-pick-item.locked { opacity: .5; cursor: not-allowed; }
+@media (max-width: 1000px) {
+  .rl-layout { grid-template-columns: 1fr; }
+  .rl-list { position: static; }
+  .rl-head { grid-template-columns: 1fr; }
+  .rl-groups { grid-template-columns: 1fr; }
+}

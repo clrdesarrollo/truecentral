@@ -5,6 +5,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Services;
 using TrueCentralVms.Server.Services.Reports;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -41,7 +42,7 @@ public static class AccessRecordsApi
         app.MapGet("/api/access/events", async (HttpContext ctx, VmsDbContext db, AuditService audit,
             int? page, int? pageSize, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessMonitor, out var session) is { } failure) return failure;
             int pageNumber = Math.Max(page ?? 1, 1);
             int size = Math.Clamp(pageSize is null or 0 ? 50 : pageSize.Value, 1, 500);
 
@@ -71,7 +72,7 @@ public static class AccessRecordsApi
         app.MapGet("/api/access/events/export", async (HttpContext ctx, VmsDbContext db, AuditService audit,
             IWebHostEnvironment env, string? format, string? report, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AccessRecordsExport, out var session) is { } failure) return failure;
             bool pdf = string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase);
             string kind = (report ?? "detail").Trim().ToLowerInvariant();
             if (kind is not ("detail" or "attendance" or "doors"))

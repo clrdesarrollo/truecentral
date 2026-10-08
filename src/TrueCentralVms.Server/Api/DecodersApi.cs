@@ -8,6 +8,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -86,7 +87,7 @@ public static class DecodersApi
             DecoderDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (string.IsNullOrEmpty(request.Password))
                 return Error("La contraseña del decodificador es obligatoria.");
@@ -126,7 +127,7 @@ public static class DecodersApi
             DecoderDriverRegistry drivers, CredentialProtector protector, DecoderSessionManager sessions,
             IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
 
             var decoder = await db.Decoders.FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -182,7 +183,7 @@ public static class DecodersApi
         app.MapDelete("/api/decoders/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             DecoderSessionManager sessions, IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var decoder = await db.Decoders.FindAsync([id], ct);
             if (decoder is null) return Results.NotFound();
             if (await db.Walls.AnyAsync(w => w.DecoderId == id, ct))
@@ -203,7 +204,7 @@ public static class DecodersApi
         app.MapPost("/api/decoders/{id:int}/test", async (HttpContext ctx, int id, VmsDbContext db,
             DecoderSessionManager sessions, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.WallOperate) is { } failure) return failure;
             var decoder = await db.Decoders.FirstOrDefaultAsync(d => d.Id == id, ct);
             if (decoder is null) return Results.NotFound();
 
@@ -235,7 +236,7 @@ public static class DecodersApi
         app.MapGet("/api/decoders/{id:int}/diagnostics", async (HttpContext ctx, int id, VmsDbContext db,
             DecoderSessionManager sessions, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.WallOperate) is { } failure) return failure;
             var decoder = await db.Decoders.FirstOrDefaultAsync(d => d.Id == id, ct);
             if (decoder is null) return Results.NotFound();
             try

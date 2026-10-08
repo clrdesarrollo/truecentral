@@ -1250,6 +1250,117 @@ umbrales y tiempos del rostro, antisuplantación): ¿dónde queda todo eso en el
   **Base64** y son de 1 a 8 dígitos; `leaderCardOpenDuration` es en segundos. **Falta**
   verlo contra el DS-K1T321MFWX y el DS-K1T323MBWX reales.
 
+## Seguridad: roles y permisos — 2026-10-08
+
+Pedido: un sistema de gestión de roles "como Genetec y HikCentral". La investigación (guías
+oficiales de Genetec 5.13, HikCentral Professional, Milestone y DSS Pro) dejó esto:
+- Genetec: privilegios en grupos de usuarios (Permitido / Denegado / Sin definir, gana lo más
+  restrictivo), plantillas aditivas, particiones para el alcance y nivel de usuario 1–254 para
+  el PTZ.
+- HikCentral: rol con vigencia y horario de permisos; Administrador y Operador fijos;
+  prioridad PTZ 1–100 en el usuario.
+- Milestone: roles con Allow/Deny (gana Deny) y prioridad PTZ por rol.
+
+No se entró a la consola HikCentral del cliente (192.168.1.38). El navegador integrado
+rechazó la dirección, y el asistente no escribe contraseñas.
+
+**Modelo (identidad propia, ver identidad-producto):**
+- Rol = conjunto de **permisos**. Un usuario puede tener varios y obtiene la **unión**: solo
+  se otorga, sin denegaciones.
+- El permiso dice QUÉ puede hacer. El alcance por ubicación (ya existente, en el usuario)
+  dice DÓNDE.
+- Catálogo como código: `Core/Domain/Permissions.cs`. Tiene 40 claves estables en 5 grupos
+  (Video · Monitoreo y operación · Personas · Configuración · Sistema y seguridad).
+  - Cada permiso trae `Requires` ("Abrir puertas" incluye "Ver control de acceso").
+  - Los permisos sobre la seguridad del sistema van marcados como sensibles.
+  - El catálogo trae 6 plantillas para partir: Guardia, Operador de central, Investigador,
+    Administrador de acceso, Técnico y Auditor.
+- Roles de sistema (`Roles.SystemKey`):
+  - **Administrador**: todos los permisos, también los futuros. No se edita ni se borra.
+  - **Operador**: parte con lo que el operador podía hacer antes. Se edita, no se borra.
+- `User.Role` sigue existiendo como **nivel derivado**: "Admin" si tiene el rol
+  Administrador, si no "Operator". Viaja en la sesión, en la bitácora y en el alcance.
+  Cambiar el nivel revoca las sesiones. Los demás permisos se leen en cada solicitud y valen
+  al instante, sin volver a ingresar.
+
+**Contra el escalamiento (servidor):** nadie otorga lo que no tiene.
+- Quien no es administrador solo puede crear, editar, borrar o asignar roles cuyos permisos
+  tenga todos.
+- No toca a usuarios con más permisos o más alcance que él, ni a sí mismo.
+- Solo asigna ubicaciones dentro de su alcance, y "ver el resto" solo si él lo tiene.
+- Siempre queda al menos un administrador habilitado.
+- Un rol asignado no se borra (409, con la lista de usuarios).
+
+**Implementación:**
+- Base: tablas `Roles`, `RolePermissions` y `UserRoles` (migración `20261008210106_UserRoles`).
+  - Siembra los dos roles de sistema y da a cada usuario el de su nivel actual.
+  - La lista del Operador va congelada en la migración.
+  - Verificada sobre una copia de la base de prueba con 1 admin y 4 operadores.
+- Permisos en memoria: `UserScope.Permissions/Has()` lo arma `UserScopeService`, con la misma
+  caché e invalidación que el alcance. El middleware de token deja el alcance en
+  `Items["scope"]`.
+- Guardas: `ApiSecurity.Require(ctx, permiso, out session)` y `RequireAny(...)` reemplazaron
+  los ~150 `RequireAdmin`. Las órdenes que antes pedían solo sesión (abrir puerta, armar,
+  PTZ, citofonía, muro, reproducción, exportar…) ahora piden su permiso.
+  - Las listas que usan los árboles (equipos, canales, paneles) siguen abiertas a toda
+    sesión, filtradas por alcance.
+  - El 403 queda en la bitácora: `auth/permission-denied`, una vez cada 5 min por usuario y
+    permiso.
+- Hub: `ScopedHub` filtra además por permiso los eventos que llenan historiales (alarma,
+  acceso, patente, cerco, llamada de citofonía, sincronización de personas).
+  - `SessionsChanged` va a quien tiene "Sesiones".
+  - Las alertas para todos van a quien tiene "Atender alertas".
+- API: `GET/POST/PUT/DELETE /api/roles` y `GET /api/roles/catalog`. Este último trae lo que
+  la sesión puede otorgar.
+  - `/api/users` acepta `roleIds`. Un cliente anterior que manda `role` se traduce al rol de
+    sistema.
+  - `/api/auth/me` trae `permissions` (isAdmin, claves y nombres de roles).
+- Bitácora: categoría nueva `roles` (role-created/updated/deleted, con lo agregado y quitado),
+  más `users/user-roles-updated` y `auth/permission-denied`.
+- Web:
+  - `Perms` en app.js, con `Perms.can("a|b")`.
+  - `data-perm` en el menú: se ocultan enlaces, grupos y títulos vacíos.
+  - Guarda de rutas ("Sus roles no incluyen el acceso a esta página").
+  - Recarga en caliente con `ConfigChanged "permissions"`.
+  - Los ~50 `Api.role === "Admin"` de las páginas pasaron a su permiso.
+  - Página nueva **Seguridad → Roles** (`roles.js`).
+    - Lista con barra de cobertura a la izquierda.
+    - A la derecha, interruptores por grupo, con buscador, "Todos/Ninguno", dependencias
+      automáticas, bloqueados los que la sesión no tiene, Duplicar y aviso de "sin guardar".
+    - Rol nuevo desde plantilla.
+  - Usuarios: varios roles por casillas y columna "Roles"; las filas que la sesión no puede
+    tocar dicen "Sin acceso".
+- Cliente WPF:
+  - `Services/PermissionScope` y `MainViewModel.Permissions`: el riel y el inicio muestran
+    solo los módulos permitidos.
+  - Con "permissions" del hub se cierran los que dejaron de estarlo.
+  - El menú del usuario muestra sus roles.
+- Migrador: acepta a quien tenga "Administrar personas", no solo al admin.
+
+**Probado (servidor aislado 5290, base nueva):**
+- 43/43 pruebas de API: dependencias, 403 por permiso, cambio de rol en caliente, reglas
+  contra el escalamiento, borrado, último admin, compatibilidad con `role` y bitácora.
+- Web en el navegador integrado:
+  - Página Roles y formulario de usuarios.
+  - Menú del guardia filtrado; al agregarle "Ver patentes" desde la API, "ANPR" apareció sin
+    recargar.
+  - Las 30 páginas recorridas como administrador sin errores de consola.
+- Cliente: arnés de consola con el `ApiClient` real: el guardia ve Vivo, Citofonía y
+  Patentes.
+
+**Licencia:** los roles y permisos van en TODAS las ediciones (decisión del usuario, 2026-10-08): no tienen módulo ni cupo en LicenseCatalog.
+
+**Incluye también (otra sesión):** PTZ en canales analógicos de DVR Turbo HD. El cuadro abierto del cliente toma el nodo vigente del árbol al recargarse (un PTZ marcado a mano se aplica sin reabrirlo) y la casilla del canal pasa a "PTZ / lente", porque los varifocales motorizados por coaxial tampoco los informa el grabador.
+
+**Pendiente, fase 2 (propuesto):**
+- Vigencia y horario en la asignación usuario–rol: con el horario vencido no entra, y si
+  está conectado se le corta.
+- Prioridad PTZ por rol, con toma de control y liberación.
+- Ingreso supervisado o doble autorización (ISO 27001).
+- Alcance por ubicación también en el rol.
+- El cliente WPF real no se abrió por UI Automation: los bindings compilan, y la lógica se
+  probó con el arnés.
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

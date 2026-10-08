@@ -97,7 +97,7 @@ async function renderDeviceMaintenance() {
   try { maintData = await Api.get("/api/maintenance/clocks"); maintFetchedAt = performance.now(); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("maintenance.manage");
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Hora y mantenimiento <span class="muted" style="font-weight:normal;font-size:12px">(se actualiza solo)</span></h3>
@@ -175,7 +175,7 @@ function maintDraw() {
     return;
   }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("maintenance.manage");
   const selectable = devices.filter((d) => d.supportsClock);
   const allChecked = selectable.length > 0 && selectable.every((d) => maintSelected.has(maintKey(d)));
   $("#mt-table").innerHTML = `
@@ -596,7 +596,7 @@ async function maintFillDeviceSection(kind, id) {
     box.textContent = "Este equipo no admite ajustes de hora ni mantenimiento desde el VMS.";
     return;
   }
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("maintenance.manage");
   box.innerHTML = `
     <div>${d.clock
       ? `<b class="mt-clock" data-clock="${maintBaseMs(d.clock.localTime)}">${maintWallClock(maintBaseMs(d.clock.localTime))}</b>

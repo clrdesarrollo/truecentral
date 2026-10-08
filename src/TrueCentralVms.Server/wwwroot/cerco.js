@@ -59,7 +59,7 @@ async function renderCercoPanels() {
   try { panels = await Api.get("/api/cerco/panels"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("cerco.configure");
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Paneles de cerco <span class="muted" style="font-weight:normal;font-size:12px">(tiempo real)</span></h3>
@@ -166,7 +166,7 @@ async function cercoPanelModal(panel) {
       if (editing) {
         const dto = await Api.put(`/api/cerco/panels/${panel.id}`, body); closeModal(); toast("Panel actualizado.");
         const tr = document.getElementById(`cerco-row-${panel.id}`);
-        if (tr) tr.outerHTML = cercoRow(dto, Api.role === "Admin");
+        if (tr) tr.outerHTML = cercoRow(dto, Perms.can("cerco.configure"));
       } else {
         const res = await Api.post("/api/cerco/panels", body); closeModal();
         cercoCredentialsModal(res.credentials, body.name);
@@ -695,7 +695,7 @@ const CERCO_KIND_LABELS = [
 const CERCO_HIST_PAGE = 50;
 
 function cercoHistoryModal(panels) {
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("cerco.monitor");
   openModal(`
     <h3>Historial de eventos de cerco</h3>
     <div class="toolbar" style="gap:6px;flex-wrap:wrap;align-items:flex-end">

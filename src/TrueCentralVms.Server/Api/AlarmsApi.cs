@@ -10,6 +10,7 @@ using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
 using TrueCentralVms.Drivers.Hikvision;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -232,7 +233,7 @@ public static class AlarmsApi
             AlarmDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
             AlarmPanelService service, AuditService audit, LocalIpReceiverService local, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             // Con la receptora que instala la suite no se pide contraseña: la
             // generó el servidor al activarla y nadie tiene que conocerla.
@@ -342,7 +343,7 @@ public static class AlarmsApi
             AlarmDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
             AlarmPanelService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
 
             var panel = await db.AlarmPanels.Include(p => p.Areas).Include(p => p.Zones).AsSplitQuery()
@@ -462,7 +463,7 @@ public static class AlarmsApi
             CredentialProtector protector, IHubContext<VmsHub> hub, AlarmPanelService service, AuditService audit,
             AlarmDriverRegistry drivers, LocalIpReceiverService local, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             var panel = await db.AlarmPanels.FindAsync([id], ct);
             if (panel is null) return Results.NotFound();
 
@@ -508,7 +509,7 @@ public static class AlarmsApi
             AlarmDriverRegistry drivers, CredentialProtector protector, AuditService audit, LocalIpReceiverService local,
             int? panelId, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
 
             string? password = request.Password;
@@ -559,7 +560,7 @@ public static class AlarmsApi
         // ------------------------------------------------------------------
         app.MapGet("/api/alarms/receiver/local", async (HttpContext ctx, LocalIpReceiverService local, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             var state = await local.EnsureActivatedAsync(ct);
             // La contraseña NO se expone nunca: solo si el servidor la tiene.
             return Results.Ok(new AlarmLocalReceiverDto(state.Present, state.Ready && local.HasCredentials,
@@ -573,7 +574,7 @@ public static class AlarmsApi
         app.MapGet("/api/alarms/receiver/local/orphans", async (HttpContext ctx, VmsDbContext db, AlarmDriverRegistry drivers,
             LocalIpReceiverService local, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             if (!local.Enabled || local.GetPassword() is not { Length: > 0 } password)
                 return Results.Ok(new AlarmReceiverOrphansDto([], null));
             if (drivers.All.Select(f => f.Create()).OfType<IAlarmGatewayDriver>().FirstOrDefault() is not { } gateway)
@@ -607,7 +608,7 @@ public static class AlarmsApi
         app.MapGet("/api/alarms/receiver/local/credential", async (HttpContext ctx, LocalIpReceiverService local,
             AuditService audit) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             if (local.GetPassword() is not { Length: > 0 } password)
                 return Error("El sistema todavía no activó la receptora de este servidor: no hay credencial que mostrar.");
 
@@ -622,7 +623,7 @@ public static class AlarmsApi
             VmsDbContext db, CredentialProtector protector, AuditService audit, LocalIpReceiverService local,
             string? search, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             var (conn, error) = await ReceiverConnectionAsync(request, db, protector, local, ct);
             if (conn is null) return Error(error!);
 
@@ -649,7 +650,7 @@ public static class AlarmsApi
             VmsDbContext db, CredentialProtector protector, AuditService audit, LocalIpReceiverService local,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.DeviceId))
                 return Error("El ID del equipo es obligatorio.");
             var (conn, error) = await ReceiverConnectionAsync(request.Receiver, db, protector, local, ct);
@@ -719,7 +720,7 @@ public static class AlarmsApi
             VmsDbContext db, CredentialProtector protector, AuditService audit, LocalIpReceiverService local,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsConfigure, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.DevIndex))
                 return Error("Indique el equipo a quitar de la receptora.");
             var (conn, error) = await ReceiverConnectionAsync(request.Receiver, db, protector, local, ct);
@@ -760,7 +761,7 @@ public static class AlarmsApi
         app.MapPost("/api/alarms/panels/{id:int}/refresh", async (HttpContext ctx, int id, VmsDbContext db,
             AlarmPanelService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.AlarmsMonitor, Permissions.AlarmsConfigure) is { } failure) return failure;
             var panel = await db.AlarmPanels.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
             var scope = await ctx.ScopeAsync(session);
@@ -840,7 +841,7 @@ public static class AlarmsApi
         app.MapPost("/api/alarms/panels/{id:int}/areas/{area:int}/arm", async (HttpContext ctx, int id, int area,
             AlarmArmRequestDto request, VmsDbContext db, AlarmPanelService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsOperate, out var session) is { } failure) return failure;
             var panel = await LoadForCommandAsync(db, id, ct);
             if (panel is null) return Results.NotFound();
             if (area > 0 && panel.Areas.All(a => a.Number != area)) return Error("El área no existe en el panel.");
@@ -871,7 +872,7 @@ public static class AlarmsApi
         app.MapPost("/api/alarms/panels/{id:int}/areas/{area:int}/disarm", async (HttpContext ctx, int id, int area,
             VmsDbContext db, AlarmPanelService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsOperate, out var session) is { } failure) return failure;
             var panel = await LoadForCommandAsync(db, id, ct);
             if (panel is null) return Results.NotFound();
             if (area > 0 && panel.Areas.All(a => a.Number != area)) return Error("El área no existe en el panel.");
@@ -899,7 +900,7 @@ public static class AlarmsApi
         app.MapPost("/api/alarms/panels/{id:int}/areas/{area:int}/clear-alarm", async (HttpContext ctx, int id, int area,
             VmsDbContext db, AlarmPanelService service, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsOperate, out var session) is { } failure) return failure;
             var panel = await LoadForCommandAsync(db, id, ct);
             if (panel is null) return Results.NotFound();
             if (area > 0 && panel.Areas.All(a => a.Number != area)) return Error("El área no existe en el panel.");
@@ -931,7 +932,7 @@ public static class AlarmsApi
             AlarmZoneBypassRequestDto request, VmsDbContext db, AlarmPanelService service, AuditService audit,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsOperate, out var session) is { } failure) return failure;
             var panel = await LoadForCommandAsync(db, id, ct);
             if (panel is null) return Results.NotFound();
             var target = panel.Zones.FirstOrDefault(z => z.Number == zone);
@@ -968,7 +969,7 @@ public static class AlarmsApi
         app.MapGet("/api/alarms/events", async (HttpContext ctx, VmsDbContext db, AuditService audit,
             int? panelId, string? kind, string? severity, DateTime? from, DateTime? to, string? text, int? take) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.AlarmsMonitor, out var session) is { } failure) return failure;
 
             bool filtered = panelId is > 0 || !string.IsNullOrWhiteSpace(kind) || !string.IsNullOrWhiteSpace(severity)
                             || from is not null || to is not null || !string.IsNullOrWhiteSpace(text);

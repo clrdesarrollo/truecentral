@@ -182,7 +182,14 @@ public sealed class ApiClient
         catch (ApiException) { return null; }
     }
 
-    private sealed record MeDto(string Username, string Role, UserScopeDto? Scope);
+    private sealed record MeDto(string Username, string Role, UserScopeDto? Scope, MyPermissionsDto? Permissions);
+
+    /// <summary>Permisos de esta sesión según sus roles (null si el servidor es anterior a los roles o no responde).</summary>
+    public async Task<MyPermissionsDto?> GetMyPermissionsAsync(CancellationToken ct = default)
+    {
+        try { return (await SendAsync<MeDto>(HttpMethod.Get, "/api/auth/me", null, ct))?.Permissions; }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException) { return null; }
+    }
 
     /// <summary>Qué puede operar esta sesión (null si no se pudo leer: entonces no se bloquea nada).</summary>
     public async Task<OperableDto?> GetOperableAsync(CancellationToken ct = default)

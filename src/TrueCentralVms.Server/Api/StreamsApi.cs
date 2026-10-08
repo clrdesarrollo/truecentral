@@ -4,6 +4,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -18,7 +19,7 @@ public static class StreamsApi
         app.MapPost("/api/streams/request", async (HttpContext ctx, StreamRequestDto request, VmsDbContext db,
             StreamTokenService streamTokens, MediaMtxManager mtx, IConfiguration config) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend) is { } failure) return failure;
 
             if (!mtx.IsRunning)
                 return Results.Json(new { error = "El servicio de streaming no está disponible en el servidor." },
@@ -56,7 +57,7 @@ public static class StreamsApi
         app.MapPost("/api/streams/{id:int}/kick", async (HttpContext ctx, int id, VmsDbContext db,
             MediaMtxManager mtx, Hubs.ScopedHub hub, AuditService audit, ILogger<Program> logger) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var admin) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SessionsManage, out var admin) is { } failure) return failure;
 
             var session = await db.StreamSessions.FirstOrDefaultAsync(s => s.Id == id && s.EndedAt == null);
             if (session is null) return Results.NotFound();
@@ -82,7 +83,7 @@ public static class StreamsApi
         // ------------------------------------------------------------------
         app.MapGet("/api/streams/active", async (HttpContext ctx, VmsDbContext db) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SessionsManage, out _) is { } failure) return failure;
             var active = await db.StreamSessions
                 .Where(s => s.EndedAt == null)
                 .OrderBy(s => s.StartedAt)

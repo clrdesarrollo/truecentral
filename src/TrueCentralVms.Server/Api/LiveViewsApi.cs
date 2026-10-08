@@ -88,7 +88,7 @@ public static class LiveViewsApi
         // Las propias del usuario + las compartidas por cualquiera.
         app.MapGet("/api/live-views", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var views = await db.LiveViews
                 .Include(v => v.Items)
@@ -103,7 +103,7 @@ public static class LiveViewsApi
         app.MapPost("/api/live-views", async (HttpContext ctx, LiveViewSaveRequest request,
             VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.LiveViewsManage, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             if (Validate(request, out int cellCount) is { } invalid) return invalid;
 
@@ -137,7 +137,7 @@ public static class LiveViewsApi
         app.MapPut("/api/live-views/{id:int}", async (HttpContext ctx, int id, LiveViewSaveRequest request,
             VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.LiveViewsManage, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             if (Validate(request, out int cellCount) is { } invalid) return invalid;
 
@@ -169,7 +169,7 @@ public static class LiveViewsApi
         app.MapDelete("/api/live-views/{id:int}", async (HttpContext ctx, int id,
             VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.LiveViewsManage, out var session) is { } failure) return failure;
             var view = await db.LiveViews.FirstOrDefaultAsync(v => v.Id == id, ct);
             if (view is null) return Results.NotFound();
             if (!CanEdit(view, session))
@@ -189,7 +189,7 @@ public static class LiveViewsApi
         app.MapPost("/api/live-views/{id:int}/apply", async (HttpContext ctx, int id,
             VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var view = await db.LiveViews.Include(v => v.Items)
                 .AsSplitQuery().AsNoTracking()

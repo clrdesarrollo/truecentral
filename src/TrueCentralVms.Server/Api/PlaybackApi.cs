@@ -8,6 +8,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -30,7 +31,7 @@ public static class PlaybackApi
             async (HttpContext ctx, int deviceId, int channelNumber, DateTime? date, VmsDbContext db,
                 DriverRegistry drivers, CredentialProtector protector, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PlaybackView, out var session) is { } failure) return failure;
 
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.ChannelNumber == channelNumber, ct);
@@ -79,7 +80,7 @@ public static class PlaybackApi
                 int? seconds, DateTime? start, VmsDbContext db, DriverRegistry drivers,
                 CredentialProtector protector, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
 
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.RtspChannel == rtspChannel, ct);
@@ -109,7 +110,7 @@ public static class PlaybackApi
             async (HttpContext ctx, int deviceId, int channelNumber, int? year, int? month, VmsDbContext db,
                 DriverRegistry drivers, CredentialProtector protector, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PlaybackView, out var session) is { } failure) return failure;
 
             var now = DateTime.Now;
             int y = year ?? now.Year, m = month ?? now.Month;
@@ -150,7 +151,7 @@ public static class PlaybackApi
             MediaMtxManager mtx, Services.Rtsp.PlaybackRelayManager relays, IConfiguration config,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PlaybackView, out var session) is { } failure) return failure;
 
             if (!mtx.IsRunning)
                 return Results.Json(new { error = "El servicio de streaming no está disponible en el servidor." },
@@ -241,7 +242,7 @@ public static class PlaybackApi
         // ------------------------------------------------------------------
         app.MapGet("/api/playback/failure/{path}", (HttpContext ctx, string path, MediaMtxManager mtx) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PlaybackView, out var session) is { } failure) return failure;
             // La ruta es "pb-{equipo}-{canal}-{usuario}-{azar}": el motivo es de quien la pidió.
             if (session.Role != Core.Domain.Roles.Admin &&
                 path.Split('-') is { Length: >= 4 } parts && int.TryParse(parts[3], out int owner) && owner != session.UserId)
@@ -270,7 +271,7 @@ public static class PlaybackApi
                 string? format, VmsDbContext db, DriverRegistry drivers, CredentialProtector protector,
                 AuditService audit, ILoggerFactory loggers, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PlaybackExport, out var session) is { } failure) return failure;
             var logger = loggers.CreateLogger("Playback");
 
             if (end <= start || end - start > TimeSpan.FromHours(2))

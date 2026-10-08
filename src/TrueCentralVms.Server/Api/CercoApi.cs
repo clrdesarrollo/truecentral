@@ -8,6 +8,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
 
@@ -141,7 +142,7 @@ public static class CercoApi
             CredentialProtector protector, IConfiguration config, ScopedHub hub, CercoConnectionManager conns,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre es obligatorio (máximo 128 caracteres).");
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
@@ -182,7 +183,7 @@ public static class CercoApi
         app.MapPut("/api/cerco/panels/{id:int}", async (HttpContext ctx, int id, CercoPanelUpsertDto request, VmsDbContext db,
             ScopedHub hub, CercoConnectionManager conns, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             var panel = await db.CercoPanels.Include(p => p.Zones).FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
@@ -212,7 +213,7 @@ public static class CercoApi
         // -------- eliminar --------
         app.MapDelete("/api/cerco/panels/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             var panel = await db.CercoPanels.FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
             db.CercoPanels.Remove(panel);
@@ -228,7 +229,7 @@ public static class CercoApi
             CredentialProtector protector, IConfiguration config, AuditService audit, ScopedHub hub,
             CercoConnectionManager conns, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             var panel = await db.CercoPanels.Include(p => p.Zones).FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
             var creds = GenerateCredentials(panel, protector, config, ctx);
@@ -257,7 +258,7 @@ public static class CercoApi
         app.MapPost("/api/cerco/panels/{id:int}/firmware", async (HttpContext ctx, int id, IFormFile file, VmsDbContext db,
             CercoConnectionManager conns, CercoFirmwareService firmware, IConfiguration config, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out var session) is { } failure) return failure;
             var panel = await db.CercoPanels.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
             if (!firmware.Running)
@@ -311,7 +312,7 @@ public static class CercoApi
         // -------- configuración (administrador) --------
         app.MapGet("/api/cerco/panels/{id:int}/config", async (HttpContext ctx, int id, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             var panel = await db.CercoPanels.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
             return panel is null ? Results.NotFound() : Results.Ok(CercoMapper.ConfigOf(panel));
         });
@@ -319,7 +320,7 @@ public static class CercoApi
         app.MapPut("/api/cerco/panels/{id:int}/config", async (HttpContext ctx, int id, CercoConfigDto request, VmsDbContext db,
             CercoConnectionManager conns, ScopedHub hub, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out var session) is { } failure) return failure;
             if (CercoMapper.Validate(request) is { } err) return Error(err);
             var panel = await db.CercoPanels.Include(p => p.Zones).FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
@@ -346,7 +347,7 @@ public static class CercoApi
         // -------- controles RF (administrador) --------
         app.MapGet("/api/cerco/panels/{id:int}/remotes", async (HttpContext ctx, int id, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             var list = await db.CercoRemotes.AsNoTracking().Where(r => r.CercoPanelId == id).OrderBy(r => r.Slot).ToListAsync(ct);
             return Results.Ok(list.Select(CercoMapper.ToDto).ToList());
         });
@@ -355,7 +356,7 @@ public static class CercoApi
             CercoConnectionManager conns) =>
         {
             // Antes de tocar nada: el nombre pendiente es estado compartido del panel.
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             string name = (request.Name ?? "").Trim();
             if (name.Length is 0 or > 64) return Error("El nombre del botón es obligatorio (máximo 64 caracteres).");
             if (request.Action == CercoRfAction.None || !Enum.IsDefined(request.Action)) return Error("Elija la acción del botón.");
@@ -367,7 +368,7 @@ public static class CercoApi
         app.MapPut("/api/cerco/panels/{id:int}/remotes/{slot:int}", async (HttpContext ctx, int id, int slot, CercoRemoteRenameDto request,
             VmsDbContext db, ScopedHub hub, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             string name = (request.Name ?? "").Trim();
             if (name.Length is 0 or > 64) return Error("El nombre es obligatorio (máximo 64 caracteres).");
             var r = await db.CercoRemotes.FirstOrDefaultAsync(x => x.CercoPanelId == id && x.Slot == slot, ct);
@@ -390,7 +391,8 @@ public static class CercoApi
         // Handler común de comandos (firma + envío por el receptor + auditoría).
         async Task<IResult> Command(HttpContext ctx, int id, string cmd, JsonObject? args, string verb, bool admin = false)
         {
-            var failure = admin ? ApiSecurity.RequireAdmin(ctx, out var session) : ApiSecurity.RequireUser(ctx, out session);
+            // Mantenimiento y controles remotos = configurar; el resto = operar.
+            var failure = ApiSecurity.Require(ctx, admin ? Permissions.CercoConfigure : Permissions.CercoOperate, out var session);
             if (failure is not null) return failure;
             var db = ctx.RequestServices.GetRequiredService<VmsDbContext>();
             var conns = ctx.RequestServices.GetRequiredService<CercoConnectionManager>();
@@ -419,7 +421,7 @@ public static class CercoApi
         // -------- eventos recientes (monitor) --------
         app.MapGet("/api/cerco/events", async (HttpContext ctx, int? panelId, int? take, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoMonitor, out var session) is { } failure) return failure;
             int limit = Math.Clamp(take ?? 100, 1, MaxTake);
             var q = InScope(db, db.CercoEvents.AsNoTracking(), await ctx.ScopeAsync(session))
                 .OrderByDescending(e => e.ReceivedAt).AsQueryable();
@@ -432,7 +434,7 @@ public static class CercoApi
         app.MapGet("/api/cerco/events/history", async (HttpContext ctx, VmsDbContext db, int? panelId,
             CercoEventKind? kind, DateTime? from, DateTime? to, int? page, int? pageSize, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoMonitor, out var session) is { } failure) return failure;
             var query = InScope(db, FilterEvents(db, panelId, kind, from, to), await ctx.ScopeAsync(session));
             long total = await query.LongCountAsync(ct);
             int size = Math.Clamp(pageSize ?? 50, 1, 200);
@@ -448,7 +450,7 @@ public static class CercoApi
         app.MapGet("/api/cerco/events/export", async (HttpContext ctx, VmsDbContext db, AuditService audit, int? panelId,
             CercoEventKind? kind, DateTime? from, DateTime? to, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAdmin(ctx, out _) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.CercoMonitor, out _) is { } failure) return failure;
             var rows = await FilterEvents(db, panelId, kind, from, to)
                 .OrderByDescending(e => e.ReceivedAt).ThenByDescending(e => e.Id)
                 .Take(MaxCsvRows)

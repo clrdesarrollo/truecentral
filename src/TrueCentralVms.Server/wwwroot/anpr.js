@@ -324,7 +324,7 @@ function renderAnprDetail(ev) {
   if (box.dataset.id === String(ev.id)) return; // ya está a la vista
   box.dataset.id = ev.id;
 
-  const isAdmin = Api.role === "Admin";
+  const isAdmin = Perms.can("anpr.delete");
   const fileBase = `${ev.plateNumber}_${anprDate(ev.capturedAt).split("-").reverse().join("")}_${anprTime(ev.capturedAt).slice(0, 8).replace(/:/g, "")}`;
   box.innerHTML = `
     <div class="anpr-detail-head">

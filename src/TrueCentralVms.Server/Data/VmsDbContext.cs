@@ -13,6 +13,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<PasswordHistory> PasswordHistories => Set<PasswordHistory>();
     /// <summary>Ubicaciones del alcance de cada usuario restringido (ver User.RestrictToLocations).</summary>
     public DbSet<UserLocation> UserLocations => Set<UserLocation>();
+    /// <summary>Roles (conjuntos de permisos) y su asignación a usuarios.</summary>
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<UserRole> UserRoles => Set<UserRole>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<StreamSession> StreamSessions => Set<StreamSession>();
@@ -113,6 +117,33 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             // API exige sacarla antes de los alcances (y la base lo respalda).
             e.HasOne<Location>().WithMany().HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.LocationId);
+        });
+
+        modelBuilder.Entity<Role>(e =>
+        {
+            e.Property(r => r.Name).HasMaxLength(64);
+            e.HasIndex(r => r.Name).IsUnique();
+            e.Property(r => r.Description).HasMaxLength(256);
+            e.Property(r => r.SystemKey).HasMaxLength(16);
+            e.HasIndex(r => r.SystemKey).IsUnique().HasFilter("\"SystemKey\" IS NOT NULL");
+            e.Ignore(r => r.IsAdmin);
+        });
+
+        modelBuilder.Entity<RolePermission>(e =>
+        {
+            e.HasKey(x => new { x.RoleId, x.Permission });
+            e.Property(x => x.Permission).HasMaxLength(48);
+            e.HasOne<Role>().WithMany(r => r.Permissions).HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserRole>(e =>
+        {
+            e.HasKey(x => new { x.UserId, x.RoleId });
+            e.HasOne<User>().WithMany(u => u.Roles).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            // Un rol asignado no se borra en silencio: la API exige quitárselo
+            // antes a sus usuarios (y la base lo respalda).
+            e.HasOne<Role>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.RoleId);
         });
 
         modelBuilder.Entity<Device>(e =>

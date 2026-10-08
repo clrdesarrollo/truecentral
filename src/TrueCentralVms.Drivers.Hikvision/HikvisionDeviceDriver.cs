@@ -386,6 +386,9 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
     /// <summary>
     /// El canal tiene PTZ si el equipo responde a la consulta de posición PTZ
     /// (NET_DVR_GET_PTZPOS): las cámaras fijas devuelven "no soportado".
+    /// En los canales analógicos de un DVR Turbo HD (iDS-7232HQHI-M2/XT) NO sirve:
+    /// todos tienen PTZ por coaxial (UTC) configurado y ninguno informa posición,
+    /// sea domo o cámara fija; ahí el administrador marca el PTZ a mano.
     /// </summary>
     private static bool DetectPtz(int userId, int channel)
     {

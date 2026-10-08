@@ -72,8 +72,8 @@ public sealed partial class LprViewModel : ObservableObject
     /// <summary>Cantidad de fuentes con el canal de eventos realmente abierto.</summary>
     [ObservableProperty] private int _liveSourceCount;
 
-    /// <summary>Encender o apagar fuentes exige rol administrador.</summary>
-    public bool IsAdmin => _api.Role == "Admin";
+    /// <summary>Encender o apagar fuentes exige el permiso de configurar fuentes de video.</summary>
+    public bool IsAdmin => Services.PermissionScope.Current.Has(Core.Domain.Permissions.DevicesManage);
 
     public bool HasEvents => Events.Count > 0;
 
