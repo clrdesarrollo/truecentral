@@ -266,23 +266,48 @@ begin
   Result := RunHidden(SysTool('cmd.exe'), '/c sc query {#ServiceName} | find "RUNNING"') = 0;
 end;
 
+// Para ESPERAR la detención no sirve "not ServiceRunning()": durante el apagado
+// el estado es STOP_PENDING, que no contiene RUNNING, y la espera terminaba al
+// instante con el servidor todavía vivo (la copia fallaba con "DeleteFile
+// falló; código 5" sobre clrjit.dll, y además se le mataban postgres y
+// mediamtx por debajo como si fueran huérfanos).
+function ServiceStopped(): Boolean;
+begin
+  Result := RunHidden(SysTool('cmd.exe'), '/c sc query {#ServiceName} | find "STOPPED"') = 0;
+end;
+
+// Que el SCM diga STOPPED no garantiza que el proceso ya salió (puede seguir
+// descargándose, o haber quedado colgado en el apagado), y mientras viva tiene
+// mapeados sus .dll. También cubre un servidor lanzado a mano desde {app}.
+// Solo se toca el de ESTA instalación; se fuerza si no sale en 30 s.
+procedure WaitServerProcessExit();
+begin
+  RunHidden(PowerShellExe(),
+    '-NoProfile -NonInteractive -Command "$p = @(Get-Process TrueCentralVms.Server -ErrorAction SilentlyContinue | ' +
+    'Where-Object { $_.Path -like ''' + ExpandConstant('{app}') + '\*'' }); ' +
+    'if ($p.Count) { $p | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue; ' +
+    '$p | Where-Object { -not $_.HasExited } | Stop-Process -Force; Start-Sleep -Seconds 1 }"');
+end;
+
 procedure StopServiceAndWait(const Caption: string);
 var
   I: Integer;
 begin
-  if not ServiceExists() then
-    exit;
-  if Caption <> '' then
-    WizardForm.StatusLabel.Caption := Caption;
-  RunHidden(SysTool('sc.exe'), 'stop {#ServiceName}');
-  // Esperar el apagado ordenado (incluye pg_ctl stop): hasta 90 s.
-  for I := 1 to 180 do
+  if ServiceExists() then
   begin
-    if not ServiceRunning() then
-      break;
-    Sleep(500);
+    if Caption <> '' then
+      WizardForm.StatusLabel.Caption := Caption;
+    RunHidden(SysTool('sc.exe'), 'stop {#ServiceName}');
+    // Apagado ordenado: el servidor se da hasta 60 s (HostOptions.ShutdownTimeout,
+    // incluye pg_ctl stop); aquí se espera hasta 2 min antes de forzar.
+    for I := 1 to 240 do
+    begin
+      if ServiceStopped() then
+        break;
+      Sleep(500);
+    end;
   end;
-  Sleep(1000);
+  WaitServerProcessExit();
 end;
 
 // Un Watchdog abierto bloquearía su propio .exe durante la copia (y durante
@@ -1472,24 +1497,15 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  I, ResultCode: Integer;
+  ResultCode: Integer;
   Uninstaller: string;
 begin
   if CurUninstallStep = usUninstall then
   begin
     KillWatchdog();
+    StopServiceAndWait('');
     if ServiceExists() then
-    begin
-      RunHidden(SysTool('sc.exe'), 'stop {#ServiceName}');
-      for I := 1 to 180 do
-      begin
-        if not ServiceRunning() then
-          break;
-        Sleep(500);
-      end;
-      Sleep(1000);
       RunHidden(SysTool('sc.exe'), 'delete {#ServiceName}');
-    end;
     // Un postgres o mediamtx huérfano bloquearía sus propios binarios durante el borrado.
     StopOrphanPostgres();
     StopOrphanMediaMtx();
