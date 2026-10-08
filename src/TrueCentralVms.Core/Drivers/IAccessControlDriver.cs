@@ -34,7 +34,9 @@ public sealed record AccessDeviceInfo(
     string? MacAddress,
     AccessDeviceKind Kind,
     AccessCapabilities Capabilities,
-    IReadOnlyList<AccessDoorInfo> Doors);
+    IReadOnlyList<AccessDoorInfo> Doors,
+    /// <summary>Ficha de capacidades declaradas por el equipo; null si el driver no la sabe leer.</summary>
+    AccessCapabilityProfile? Profile = null);
 
 /// <summary>Lo que el equipo informa de una puerta en el monitoreo en vivo.</summary>
 public sealed record AccessDoorStatus(
@@ -60,7 +62,20 @@ public sealed record AccessEventRecord(
     /// <summary>Códigos del fabricante (Hikvision: major/minor), para diagnóstico.</summary>
     int? MajorType,
     int? MinorType,
-    string? RawJson);
+    string? RawJson,
+    /// <summary>
+    /// Número correlativo del evento en el equipo (Hikvision: <c>serialNo</c>),
+    /// el que permite pedir "lo que vino después" sin depender de la hora;
+    /// null si el equipo no lo informa.
+    /// </summary>
+    long? SerialNo = null);
+
+/// <summary>
+/// Una lectura del historial por número de serie: los eventos (ya sin el ruido
+/// que el driver descarta) y el último número que el equipo entregó, CONTANDO
+/// lo descartado, para que la próxima lectura empiece después de él.
+/// </summary>
+public sealed record AccessEventPage(IReadOnlyList<AccessEventRecord> Events, long? LastSerial);
 
 /// <summary>Un tramo horario de un día de la semana, en minutos desde medianoche.</summary>
 public sealed record AccessTimeSegment(int Day, int StartMinutes, int EndMinutes)
@@ -90,6 +105,18 @@ public sealed record AccessDoorRight(int DoorNumber, AccessWeekPlan Plan);
 /// numeran los equipos.
 /// </summary>
 public sealed record AccessFingerprintData(int Number, string Template);
+
+/// <summary>
+/// El equipo dijo, al recibir una huella, que no tiene dónde guardarla: ningún
+/// lector suyo tiene módulo de huella (un terminal facial sin sensor, o la
+/// entrada de lector externo sin nada conectado).
+///
+/// Va aparte de un <see cref="DriverException"/> común porque NO es una falla
+/// de la escritura: el driver lo lanza recién después de escribir todo lo
+/// demás, y solo si todo lo demás quedó. El servidor lo toma como "este equipo
+/// no lleva huellas": lo anota en el equipo y da a la persona por escrita.
+/// </summary>
+public sealed class NoFingerprintReaderException(string message) : DriverException(message);
 
 /// <summary>
 /// El rostro de una persona listo para bajar a un equipo: la FOTO tal cual, no
@@ -217,12 +244,25 @@ public interface IAccessControlDriver
         throw new DriverException("Este equipo no entrega el historial de accesos.");
 
     /// <summary>
+    /// Eventos con número de serie mayor que <paramref name="afterSerial"/>, a
+    /// lo sumo <paramref name="max"/>. Es la forma preferida de ponerse al día:
+    /// no pierde dos eventos del mismo segundo ni se confunde si el reloj del
+    /// equipo retrocede. null = este equipo no sabe buscar por número de serie
+    /// (el servidor sigue con <see cref="FetchEventsAsync"/>).
+    /// </summary>
+    Task<AccessEventPage?> FetchEventsAfterSerialAsync(AccessConnectionInfo info, long afterSerial, int max,
+        CancellationToken ct = default) =>
+        Task.FromResult<AccessEventPage?>(null);
+
+    /// <summary>
     /// Escucha los eventos que empuja el equipo, hasta que se cancele o se
     /// corte la conexión (solo si <see cref="SupportsEventStream"/>). El
     /// llamador se encarga de reconectar: acá una desconexión termina la
-    /// secuencia, no se disimula.
+    /// secuencia, no se disimula. <paramref name="signal"/> recibe, si el driver
+    /// los sabe dar, los avisos de salud de la conexión (ver <see cref="AccessStreamSignal"/>).
     /// </summary>
-    IAsyncEnumerable<AccessEventRecord> StreamEventsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+    IAsyncEnumerable<AccessEventRecord> StreamEventsAsync(AccessConnectionInfo info,
+        Action<AccessStreamSignal>? signal = null, CancellationToken ct = default) =>
         throw new DriverException("Este equipo no empuja eventos.");
 
     /// <summary>Deja la persona escrita en el equipo (la crea o la actualiza) con sus credenciales y permisos.</summary>

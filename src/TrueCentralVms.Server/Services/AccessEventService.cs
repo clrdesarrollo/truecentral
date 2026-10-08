@@ -16,10 +16,15 @@ namespace TrueCentralVms.Server.Services;
 /// <item><b>En vivo</b>: a los equipos que saben empujar sus eventos se les
 /// mantiene abierta una escucha, y lo que pasa en la puerta aparece en el
 /// monitoreo en el momento. Es la vía normal.</item>
-/// <item><b>Sondeo de respaldo</b>: cada 15 s se le pregunta a cada equipo qué
-/// pasó desde su MARCA DE AGUA. Cubre a los equipos que no empujan, y tapa los
-/// huecos de los que sí: mientras la escucha estaba caída (o el servidor
-/// apagado) igual se recupera lo que se perdió.</item>
+/// <item><b>Sondeo de respaldo</b>: se le pregunta a cada equipo qué pasó desde
+/// su MARCA DE AGUA. Cada 15 s a los que no tienen una escucha sana; a los que
+/// sí, cada <c>Access:LivePollMinutes</c> (5) y además enseguida al reconectar
+/// la escucha o al faltar un número de evento entre dos que llegaron. Cubre a
+/// los equipos que no empujan, y tapa los huecos de los que sí: mientras la
+/// escucha estaba caída (o el servidor apagado) igual se recupera lo que se
+/// perdió, sin cargar con consultas a los equipos que ya avisan solos. La marca es el número de
+/// evento del equipo (<c>serialNo</c>) cuando el equipo sabe buscar por él, y
+/// la hora del último evento si no.</item>
 /// </list>
 ///
 /// Que las dos vías traigan el mismo evento no molesta: se descarta por equipo,
@@ -53,6 +58,89 @@ public sealed class AccessEventService(
     /// <summary>Equipos que se consultan a la vez.</summary>
     private const int Parallelism = 4;
 
+    /// <summary>
+    /// Cada cuánto, a un equipo que se lee por número de evento, se le pregunta
+    /// además por hora (<c>Access:EventTimeCheckMinutes</c>, 10 por omisión). Es
+    /// lo que delata un contador que volvió a empezar (equipo restablecido)
+    /// cuando no hay escucha en vivo que lo muestre.
+    /// </summary>
+    private TimeSpan TimeCheckInterval =>
+        TimeSpan.FromMinutes(Math.Clamp(config.GetValue("Access:EventTimeCheckMinutes", 10), 1, 1440));
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _lastTimeCheck = new();
+
+    // ------------------------------------------------------------------
+    // Ritmo del sondeo según la salud de la escucha en vivo
+    // ------------------------------------------------------------------
+
+    /// <summary>Cuándo llegó algo por última vez de la escucha de cada equipo (evento o latido).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _liveAlive = new();
+
+    /// <summary>Cuándo se leyó por última vez el historial de cada equipo.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _lastPoll = new();
+
+    /// <summary>Equipos cuyo historial se pidió leer cuanto antes (reconexión o hueco de numeración).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> _pollRequested = new();
+
+    /// <summary>Despierta la vuelta del sondeo antes de tiempo.</summary>
+    private readonly SemaphoreSlim _wake = new(0, 1);
+
+    /// <summary>
+    /// Una escucha está sana si llegó algo en este lapso: el driver corta la que
+    /// calla 120 s, así que pasado esto ya no se le puede creer.
+    /// </summary>
+    private static readonly TimeSpan LiveFreshness = TimeSpan.FromSeconds(150);
+
+    /// <summary>Mínimo entre dos lecturas del mismo equipo pedidas por la escucha (un equipo con muchos huecos no lo satura).</summary>
+    private static readonly TimeSpan MinRequestSpacing = TimeSpan.FromSeconds(10);
+
+    /// <summary>Mínimo entre dos vueltas del sondeo, aunque lo despierten seguido.</summary>
+    private static readonly TimeSpan MinLoopGap = TimeSpan.FromSeconds(2);
+
+    /// <summary>Respaldo de los equipos con escucha sana (<c>Access:LivePollMinutes</c>, 5 por omisión).</summary>
+    private TimeSpan LivePollInterval =>
+        TimeSpan.FromMinutes(Math.Clamp(config.GetValue("Access:LivePollMinutes", 5), 1, 60));
+
+    private bool IsLive(int deviceId, DateTime now) =>
+        _liveAlive.TryGetValue(deviceId, out var alive) && now - alive < LiveFreshness;
+
+    /// <summary>¿Le toca leer el historial a este equipo en esta vuelta?</summary>
+    private bool IsDue(int deviceId, DateTime now)
+    {
+        var since = _lastPoll.TryGetValue(deviceId, out var last) ? now - last : TimeSpan.MaxValue;
+        if (_pollRequested.ContainsKey(deviceId)) return since >= MinRequestSpacing;
+        // Las vueltas pueden adelantarse (las despierta otro equipo): sin escucha
+        // sana se sigue leyendo cada 15 s, no más seguido.
+        return since >= (IsLive(deviceId, now) ? LivePollInterval : PollInterval - MinLoopGap);
+    }
+
+    /// <summary>Pide leer el historial del equipo en la próxima vuelta, que se adelanta.</summary>
+    private void RequestPoll(int deviceId)
+    {
+        _pollRequested[deviceId] = DateTime.UtcNow;
+        try { if (_wake.CurrentCount == 0) _wake.Release(); }
+        catch (SemaphoreFullException) { /* ya estaba despierto */ }
+    }
+
+    private void OnStreamSignal(int deviceId, string deviceName, AccessStreamSignal signal)
+    {
+        switch (signal)
+        {
+            case AccessStreamSignal.Connected:
+                _liveAlive[deviceId] = DateTime.UtcNow;
+                // Lo que pasó mientras la escucha estaba caída se trae ya.
+                RequestPoll(deviceId);
+                break;
+            case AccessStreamSignal.Alive:
+                _liveAlive[deviceId] = DateTime.UtcNow;
+                break;
+            case AccessStreamSignal.Gap:
+                logger.LogDebug("Faltó un número de evento en la escucha de {Device}: se lee el historial.", deviceName);
+                RequestPoll(deviceId);
+                break;
+        }
+    }
+
     private DateTime _lastPurge = DateTime.MinValue;
 
     /// <summary>Escuchas abiertas, por equipo: para no abrir dos al mismo.</summary>
@@ -78,7 +166,12 @@ public sealed class AccessEventService(
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception ex) { logger.LogWarning(ex, "La lectura del historial de accesos falló."); }
 
-            try { await Task.Delay(PollInterval, stoppingToken); }
+            // La vuelta siguiente, o antes si la escucha pidió leer un equipo.
+            try
+            {
+                await Task.Delay(MinLoopGap, stoppingToken);
+                await _wake.WaitAsync(PollInterval - MinLoopGap, stoppingToken);
+            }
             catch (OperationCanceledException) { return; }
         }
     }
@@ -118,6 +211,7 @@ public sealed class AccessEventService(
     private async Task ListenAsync(int deviceId, CancellationToken ct)
     {
         int fallos = 0;
+        bool primera = true;
         while (!ct.IsCancellationRequested)
         {
             AccessDevice? device;
@@ -131,8 +225,14 @@ public sealed class AccessEventService(
 
             try
             {
-                logger.LogInformation("Escuchando los eventos de '{Device}' en vivo.", device.Name);
-                await foreach (var record in access.DriverOf(device).StreamEventsAsync(access.ConnectionOf(device), ct))
+                // El driver corta la escucha que queda en silencio (sin latido)
+                // para reconectar: esas vueltas sanas no ensucian el registro.
+                logger.Log(primera || fallos > 0 ? LogLevel.Information : LogLevel.Debug,
+                    "Escuchando los eventos de '{Device}' en vivo.", device.Name);
+                primera = false;
+                string name = device.Name;
+                await foreach (var record in access.DriverOf(device).StreamEventsAsync(access.ConnectionOf(device),
+                                   s => OnStreamSignal(deviceId, name, s), ct))
                 {
                     fallos = 0;   // llegó algo: la conexión está sana
                     await StoreAsync(device.Id, [record], ct);
@@ -144,6 +244,11 @@ public sealed class AccessEventService(
             {
                 fallos++;
                 logger.LogDebug(ex, "Se cortó la escucha de eventos de {Device}.", device.Name);
+            }
+            finally
+            {
+                // Sin escucha, el equipo vuelve al sondeo de cada 15 s.
+                _liveAlive.TryRemove(deviceId, out _);
             }
 
             try { await Task.Delay(TimeSpan.FromSeconds(Math.Min(5 * Math.Max(fallos, 1), 60)), ct); }
@@ -161,7 +266,14 @@ public sealed class AccessEventService(
                 .Where(d => d.Enabled && d.SupportsEvents && d.Status == AccessDeviceStatus.Online)
                 .ToListAsync(ct);
         }
+        var now = DateTime.UtcNow;
+        devices = devices.Where(d => IsDue(d.Id, now)).ToList();
         if (devices.Count == 0) return;
+        foreach (var device in devices)
+        {
+            _lastPoll[device.Id] = now;
+            _pollRequested.TryRemove(device.Id, out _);
+        }
 
         using var limiter = new SemaphoreSlim(Parallelism);
         await Task.WhenAll(devices.Select(async device =>
@@ -178,17 +290,43 @@ public sealed class AccessEventService(
 
     private async Task PollOneAsync(AccessDevice device, CancellationToken ct)
     {
+        var driver = access.DriverOf(device);
+        var connection = access.ConnectionOf(device);
+
+        // Por número de evento, si ya se conoce uno y el equipo sabe buscar así
+        // (el driver devuelve null si no). Lo que trae, aunque sea solo ruido
+        // descartado, adelanta la marca.
+        if (device.LastEventSerial is long after)
+        {
+            AccessEventPage? page;
+            try { page = await driver.FetchEventsAfterSerialAsync(connection, after, MaxPerPoll, ct); }
+            catch (DriverException ex)
+            {
+                logger.LogDebug(ex, "El equipo {Device} no entregó su historial.", device.Name);
+                return;
+            }
+            if (page is not null)
+            {
+                await StoreAsync(device.Id, page.Events, ct, page.LastSerial, fromHistory: true);
+                if (_lastTimeCheck.TryGetValue(device.Id, out var checkedAt) && DateTime.UtcNow - checkedAt < TimeCheckInterval)
+                    return;
+            }
+        }
+
+        // Por hora: los equipos que no buscan por número, la primera lectura
+        // (de ahí sale el primer número) y el control periódico de arriba.
         var since = device.LastEventAt ?? DateTime.UtcNow - FirstReadWindow;
         IReadOnlyList<AccessEventRecord> records;
-        try { records = await access.DriverOf(device).FetchEventsAsync(access.ConnectionOf(device), since, MaxPerPoll, ct); }
+        try { records = await driver.FetchEventsAsync(connection, since, MaxPerPoll, ct); }
         catch (DriverException ex)
         {
             logger.LogDebug(ex, "El equipo {Device} no entregó su historial.", device.Name);
             return;
         }
+        _lastTimeCheck[device.Id] = DateTime.UtcNow;
         if (records.Count == 0) return;
 
-        await StoreAsync(device.Id, records, ct);
+        await StoreAsync(device.Id, records, ct, fromHistory: true);
     }
 
     /// <summary>
@@ -196,25 +334,40 @@ public sealed class AccessEventService(
     /// Descarta lo repetido: el sondeo y la escucha se pisan a propósito, y
     /// varios firmware reenvían el último evento al reconectar.
     /// </summary>
-    private async Task StoreAsync(int deviceId, IReadOnlyList<AccessEventRecord> records, CancellationToken ct)
+    /// <param name="lastSerial">Último número que entregó la lectura, contando el ruido descartado.</param>
+    /// <param name="fromHistory">Viene del historial (sondeo): solo eso adelanta la marca por número.</param>
+    private async Task StoreAsync(int deviceId, IReadOnlyList<AccessEventRecord> records, CancellationToken ct,
+        long? lastSerial = null, bool fromHistory = false)
     {
-        if (records.Count == 0) return;
+        if (records.Count == 0 && lastSerial is null) return;
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
         var tracked = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == deviceId, ct);
         if (tracked is null) return;
 
+        bool serialMoved = AdvanceSerial(tracked, records, lastSerial, fromHistory);
+        if (records.Count == 0)
+        {
+            if (serialMoved) await db.SaveChangesAsync(ct);
+            return;
+        }
+
         var since = records.Min(r => r.Timestamp).AddSeconds(-1);
         var known = await db.AccessEvents
             .Where(e => e.AccessDeviceId == deviceId && e.Timestamp >= since)
-            .Select(e => new { e.Timestamp, e.EmployeeNo, e.MinorType, e.DoorNumber })
+            .Select(e => new { e.Timestamp, e.EmployeeNo, e.MinorType, e.DoorNumber, e.SerialNo })
             .ToListAsync(ct);
 
         var stored = new List<AccessEvent>();
         foreach (var record in records)
         {
-            if (known.Any(k => k.Timestamp == record.Timestamp && k.EmployeeNo == record.EmployeeNo &&
-                               k.MinorType == record.MinorType && k.DoorNumber == record.DoorNumber))
+            // Con número de evento, número y hora lo identifican; sin él (equipos
+            // que no lo informan, eventos de antes), la hora y lo que pasó.
+            if (known.Any(k => k.Timestamp == record.Timestamp &&
+                               (record.SerialNo is long serial && k.SerialNo is long knownSerial
+                                   ? serial == knownSerial
+                                   : k.EmployeeNo == record.EmployeeNo && k.MinorType == record.MinorType &&
+                                     k.DoorNumber == record.DoorNumber)))
                 continue;
 
             // Los terminales de UNA puerta (los faciales) a menudo no informan
@@ -243,12 +396,17 @@ public sealed class AccessEventService(
                 MajorType = record.MajorType,
                 MinorType = record.MinorType,
                 RawJson = record.RawJson,
+                SerialNo = record.SerialNo,
             };
             stored.Add(entity);
             db.AccessEvents.Add(entity);
         }
 
-        if (stored.Count == 0) return;
+        if (stored.Count == 0)
+        {
+            if (serialMoved) await db.SaveChangesAsync(ct);
+            return;
+        }
         await LinkPersonsAsync(db, stored, ct);
 
         // La marca de agua solo avanza: la escucha en vivo y el sondeo llegan
@@ -274,6 +432,45 @@ public sealed class AccessEventService(
         // estado de la hoja y de la cerradura: se relee ya en vez de esperar
         // el sondeo de un minuto.
         if (stored.Any(e => IsDoorEvent(e.Kind))) access.RequestDoorRefresh(deviceId);
+    }
+
+    /// <summary>
+    /// Mueve la marca por número de evento. Devuelve true si cambió.
+    ///
+    /// <list type="bullet">
+    /// <item>Avanza solo con lo que trajo el historial: un evento en vivo con un
+    /// número alto, después de un corte de la escucha, saltaría lo perdido. Lo
+    /// en vivo se guarda igual y el sondeo lo relee (se descarta repetido).</item>
+    /// <item>Retrocede si el contador del equipo volvió a empezar (se restableció o
+    /// es otro equipo en la misma dirección): llega un evento MÁS NUEVO que la
+    /// marca de hora con un número que ya se había pasado. Retroceder siempre
+    /// es seguro: a lo sumo se relee algo y se descarta.</item>
+    /// </list>
+    /// </summary>
+    private bool AdvanceSerial(AccessDevice device, IReadOnlyList<AccessEventRecord> records, long? lastSerial,
+        bool fromHistory)
+    {
+        if (device.LastEventSerial is long current && device.LastEventAt is DateTime lastAt)
+        {
+            var restarted = records
+                .Where(r => r.SerialNo is long serial && serial < current && r.Timestamp > lastAt)
+                .Select(r => r.SerialNo!.Value)
+                .ToList();
+            if (restarted.Count > 0)
+            {
+                device.LastEventSerial = restarted.Min() - 1;
+                logger.LogInformation(
+                    "El equipo {Device} volvió a numerar sus eventos desde {Serial} (antes iba en {Previous}): " +
+                    "se sigue desde ahí.", device.Name, restarted.Min(), current);
+                return true;
+            }
+        }
+
+        if (!fromHistory) return false;
+        long? newest = new[] { lastSerial, records.Max(r => r.SerialNo) }.Max();
+        if (newest is not long top || device.LastEventSerial is long known && top <= known) return false;
+        device.LastEventSerial = top;
+        return true;
     }
 
     private static bool IsDoorEvent(AccessEventKind kind) =>

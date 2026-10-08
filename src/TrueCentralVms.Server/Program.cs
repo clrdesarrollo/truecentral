@@ -123,6 +123,8 @@ builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionAccessDriver
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaAccessDriverFactory>();
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.ZkTeco.ZkTecoAccessDriverFactory>();
 builder.Services.AddSingleton<AccessDriverRegistry>();
+// Configuración propia de los equipos (puertas y lectores), por marca.
+builder.Services.AddSingleton<IAccessDeviceSettingsProvider, HikvisionAccessSettingsProvider>();
 builder.Services.AddSingleton<AccessControlService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessControlService>());
 // El padrón (personas, credenciales, horarios y niveles) lo escribe el
@@ -370,6 +372,7 @@ app.MapCercoApi();
 app.MapSpeakersApi();
 app.MapIntercomsApi();
 app.MapAccessApi();
+app.MapAccessSettingsApi();
 app.MapAccessCatalogApi();
 app.MapAccessRecordsApi();
 app.MapDeviceMaintenanceApi();

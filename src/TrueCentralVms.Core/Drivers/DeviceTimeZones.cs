@@ -118,6 +118,49 @@ public static partial class DeviceTimeZones
     // ------------------------------------------------------------------
 
     /// <summary>"UTC−4", "UTC+5:30", "UTC".</summary>
+    /// <summary>
+    /// Desfase UTC que corresponde a una hora LOCAL del equipo según su zona
+    /// POSIX, horario de verano incluido; null si las reglas no se entienden.
+    ///
+    /// Sirve para no creerle la etiqueta: el DS-K1T804AMF V1.4.0 aplica el
+    /// horario de verano a su reloj pero sigue etiquetando la hora con el desfase
+    /// de invierno (17:28 de Chile en verano como "-04:00"), y sus eventos
+    /// quedaban una hora corridos.
+    /// </summary>
+    public static TimeSpan? OffsetAtLocal(PosixZone zone, DateTime local)
+    {
+        if (zone.DstDelta is not { } delta || zone.DstStart is null || zone.DstEnd is null) return zone.UtcOffset;
+        if (TransitionLocal(zone.DstStart, local.Year) is not { } start ||
+            TransitionLocal(zone.DstEnd, local.Year) is not { } end)
+            return null;
+        // Hemisferio sur: el verano empieza en un año y termina en el siguiente.
+        bool dst = start < end ? local >= start && local < end : local >= start || local < end;
+        return dst ? zone.UtcOffset + delta : zone.UtcOffset;
+    }
+
+    /// <summary>Fecha y hora local de una transición "Mm.w.d/hh:mm:ss" en un año (semana 5 = la última).</summary>
+    private static DateTime? TransitionLocal(string rule, int year)
+    {
+        var m = TransitionPattern().Match(rule.Trim());
+        if (!m.Success) return null;
+        int month = int.Parse(m.Groups["mo"].Value, CultureInfo.InvariantCulture);
+        int week = int.Parse(m.Groups["w"].Value, CultureInfo.InvariantCulture);
+        int day = int.Parse(m.Groups["d"].Value, CultureInfo.InvariantCulture);
+        if (month is < 1 or > 12 || week is < 1 or > 5 || day is < 0 or > 6) return null;
+        var first = new DateTime(year, month, 1);
+        var date = first.AddDays(((day - (int)first.DayOfWeek) + 7) % 7 + (week - 1) * 7);
+        while (date.Month != month) date = date.AddDays(-7);   // semana 5: la última de ese mes
+        var time = TimeSpan.FromHours(2);                       // POSIX: a las 2:00 si no lo dice
+        if (m.Groups["h"].Success)
+            time = new TimeSpan(int.Parse(m.Groups["h"].Value, CultureInfo.InvariantCulture),
+                m.Groups["mi"].Success ? int.Parse(m.Groups["mi"].Value, CultureInfo.InvariantCulture) : 0,
+                m.Groups["s"].Success ? int.Parse(m.Groups["s"].Value, CultureInfo.InvariantCulture) : 0);
+        return date + time;
+    }
+
+    [GeneratedRegex(@"^M(?<mo>\d{1,2})\.(?<w>\d)\.(?<d>\d)(?:/(?<h>\d{1,2})(?::(?<mi>\d{2})(?::(?<s>\d{2}))?)?)?$")]
+    private static partial Regex TransitionPattern();
+
     public static string OffsetLabel(TimeSpan offset)
     {
         if (offset == TimeSpan.Zero) return "UTC";
@@ -219,10 +262,15 @@ public static partial class DeviceTimeZones
         return null;
     }
 
-    /// <summary>Misma regla, sin distinguir medianoche escrita como 24:00:00 o 23:59:59.</summary>
+    /// <summary>
+    /// Misma regla, sin distinguir medianoche escrita como 24:00:00, 23:59:59 o
+    /// 23:59:00 (los DS-K1T rechazan 24:00:00 y guardan 23:59:00 lo que se les
+    /// manda como 23:59:59; sin esto la supervisión los veía siempre "con otras
+    /// fechas de verano" y los reescribía).
+    /// </summary>
     private static bool SameRule(string a, string b)
     {
-        static string Normal(string r) => r.Trim().Replace("/23:59:59", "/24:00:00");
+        static string Normal(string r) => r.Trim().Replace("/23:59:59", "/24:00:00").Replace("/23:59:00", "/24:00:00");
         return string.Equals(Normal(a), Normal(b), StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -188,45 +188,8 @@ function accessPollGuard(hash, timer) {
 // ===========================================================================
 
 // El monitoreo en vivo (tarjetas, órdenes por lote, lo que va pasando) vive
-// en access-monitor.js; acá queda solo el diálogo para editar una puerta.
-
-function accessDoorModal(door) {
-  openModal(`
-    <h3>Puerta "${esc(door.name)}"</h3>
-    <div id="ad-error"></div>
-    <form id="access-door-form">
-      <div class="field">
-        <label>Nombre</label>
-        <input id="ad-name" required maxlength="128" value="${esc(door.name)}">
-        <div class="muted" style="font-size:12px;margin-top:4px">
-          Es el nombre del VMS: revalidar el equipo ya no lo pisa.
-        </div>
-      </div>
-      <div class="info-box">
-        Puerta ${door.number} del equipo <b>${esc(door.deviceName)}</b>.
-        Las puertas las declara el equipo: acá solo se les cambia el nombre o se las pausa.
-      </div>
-      <label class="checkbox-row"><input type="checkbox" id="ad-enabled" ${door.enabled ? "checked" : ""}>
-        Activa (ocupa cupo de la licencia; al pausarla se quita de los niveles de acceso en los equipos)</label>
-      <div class="modal-actions">
-        <button class="btn ghost" type="button" id="ad-cancel">Cancelar</button>
-        <button class="btn" type="submit">Guardar cambios</button>
-      </div>
-    </form>`);
-  $("#ad-cancel").addEventListener("click", closeModal);
-  $("#access-door-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    try {
-      await Api.put(`/api/access/doors/${door.id}`, {
-        name: $("#ad-name").value.trim(),
-        enabled: $("#ad-enabled").checked,
-      });
-      closeModal();
-      toast("Puerta actualizada.");
-      renderAccessMonitor();
-    } catch (err) { $("#ad-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; }
-  });
-}
+// en access-monitor.js. Renombrar una puerta es de su ficha en Recursos, y
+// pausarla, de la página de su equipo (Conexión → Puertas del equipo).
 
 // ===========================================================================
 // Horarios
@@ -690,12 +653,25 @@ function accessPersonSyncModal(person, levels) {
   // Primero lo que falla, después lo que espera y al final lo que está al día.
   const ORDER = { Failed: 0, Pending: 1, NotApplicable: 2, Synced: 3 };
 
-  const deviceBlock = (d) => {
+  // Lo que la persona lleva y ESTE equipo no usa, así que no se le mandó: un
+  // terminal facial sin lector de huella está al día sin sus huellas, y decir
+  // "todas sus credenciales" ahí haría creer que con el dedo también entra.
+  const notCarried = (d, p) => [
+    p.fingerprints.length && d.supportsFingerprint === false
+      ? `No lleva ${p.fingerprints.length === 1 ? "su huella" : "sus huellas"} porque el equipo no tiene lector de huellas.`
+      : null,
+    p.face && d.supportsFace === false ? "No lleva su rostro porque el equipo no reconoce rostros." : null,
+  ].filter(Boolean);
+
+  const deviceBlock = (d, p) => {
     const state = ACCESS_SYNC_STATES[d.state] ?? ACCESS_SYNC_STATES.NotApplicable;
     const { text, raw } = accessSplitSyncError(d.error);
-    const body = d.state === "Synced"
-      ? `<div class="muted">Quedó escrita con todas sus credenciales.</div>`
-      : `<div>${esc(text || "Sin detalle del equipo.")}</div>`;
+    const missing = notCarried(d, p);
+    const body = d.state !== "Synced"
+      ? `<div>${esc(text || "Sin detalle del equipo.")}</div>`
+      : missing.length
+        ? `<div class="muted">Quedó escrita con lo que este equipo usa. ${esc(missing.join(" "))}</div>`
+        : `<div class="muted">Quedó escrita con todas sus credenciales.</div>`;
     return `
       <div class="sync-device ${d.state === "Failed" ? "failed" : d.state === "Pending" ? "pending" : ""}">
         <div class="sync-device-head">
@@ -736,7 +712,7 @@ function accessPersonSyncModal(person, levels) {
         ${failed === 1 ? "Un equipo no aceptó" : `${failed} equipos no aceptaron`} todo lo que se le mandó.
         Corrija lo que indique el equipo y vuelva a escribirla.</div>` : ""}
       <div id="psd-error"></div>
-      <div class="sync-device-list">${devices.map(deviceBlock).join("")}</div>
+      <div class="sync-device-list">${devices.map((d) => deviceBlock(d, p)).join("")}</div>
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="psd-close">Cerrar</button>
         <div style="flex:1"></div>

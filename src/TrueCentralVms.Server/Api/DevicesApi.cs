@@ -21,6 +21,9 @@ public static class DevicesApi
 {
     /// <summary>Máximo de capturas simultáneas hacia los equipos (no saturar DVR/NVR).</summary>
     private static readonly SemaphoreSlim SnapshotThrottle = new(4, 4);
+    /// <summary>Cuánto vale una captura antes de volver a pedírsela al equipo (si nadie pide una más fresca).</summary>
+    private const int SnapshotCacheSeconds = 25;
+    private sealed record SnapshotEntry(byte[] Jpeg, DateTime At);
 
     private static DeviceDto ToDto(Device d, int channelCount, int enabledChannelCount, int disabledWithSignal,
         string? warning = null) => new(
@@ -750,11 +753,13 @@ public static class DevicesApi
         });
 
         // ------------------------------------------------------------------
-        // Snapshot JPEG de un canal (cache 25 s, máximo 4 capturas simultáneas)
-        // ------------------------------------------------------------------
+        // Snapshot JPEG de un canal (máximo 4 capturas simultáneas). Se cachea
+        // hasta 25 s; un cliente que quiere una imagen más fresca (la ficha de un
+        // recurso refrescándose sola) lo pide con ?maxAge=segundos (mínimo 2, para
+        // no acribillar al equipo).
         app.MapGet("/api/devices/{id:int}/snapshot/{channelNumber:int}", async (HttpContext ctx, int id, int channelNumber,
             VmsDbContext db, DriverRegistry drivers, CredentialProtector protector, IMemoryCache cache,
-            AuditService audit, CancellationToken ct) =>
+            AuditService audit, int? maxAge, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             // Alcance por ubicación, ANTES de la caché (que comparten todos los usuarios).
@@ -769,8 +774,9 @@ public static class DevicesApi
                     detail: $"Solicitó miniaturas del dispositivo {id} (canal {channelNumber} y siguientes).");
 
             string cacheKey = $"snapshot:{id}:{channelNumber}";
-            if (cache.TryGetValue(cacheKey, out byte[]? cached) && cached is not null)
-                return Results.File(cached, "image/jpeg");
+            var freshness = TimeSpan.FromSeconds(Math.Clamp(maxAge ?? SnapshotCacheSeconds, 2, SnapshotCacheSeconds));
+            if (cache.TryGetValue(cacheKey, out SnapshotEntry? cached) && cached is not null && DateTime.UtcNow - cached.At < freshness)
+                return Results.File(cached.Jpeg, "image/jpeg");
 
             var device = await db.Devices.FindAsync([id], ct);
             if (device is null) return Results.NotFound();
@@ -794,7 +800,7 @@ public static class DevicesApi
             if (jpeg is null or { Length: 0 })
                 return Error("El dispositivo no entregó imagen para ese canal.", StatusCodes.Status502BadGateway);
 
-            cache.Set(cacheKey, jpeg, TimeSpan.FromSeconds(25));
+            cache.Set(cacheKey, new SnapshotEntry(jpeg, DateTime.UtcNow), TimeSpan.FromSeconds(SnapshotCacheSeconds));
             return Results.File(jpeg, "image/jpeg");
         });
     }

@@ -340,13 +340,20 @@ public static class AccessFingers
     public static string NameOf(int number) => IsValid(number) ? Names[number - 1] : $"Dedo {number}";
 }
 
-/// <summary>Resultado de escribir una persona en UN equipo.</summary>
+/// <summary>
+/// Resultado de escribir una persona en UN equipo. Las capacidades del equipo
+/// van para poder decir qué credenciales NO se le mandaron porque no las usa
+/// (un terminal facial sin lector de huella), en vez de un "todas sus
+/// credenciales" que no es cierto.
+/// </summary>
 public sealed record AccessPersonDeviceDto(
     int DeviceId,
     string DeviceName,
     AccessSyncState State,
     string? Error,
-    DateTime? SyncedAt);
+    DateTime? SyncedAt,
+    bool SupportsFingerprint,
+    bool SupportsFace);
 
 public sealed record AccessPersonDto(
     int Id,

@@ -148,17 +148,43 @@ public static class HikvisionMaintenance
     {
         if (string.IsNullOrWhiteSpace(setting.NtpServer))
             throw new DriverException("Falta el servidor NTP.");
-        var server = await ReadNtpAsync(client, ct)
-                     ?? throw new DriverException("El equipo no expone su configuración de NTP por ISAPI.");
-        string id = Value(server, "id") ?? "1";
-        string host = setting.NtpServer.Trim();
-        bool isIp = System.Net.IPAddress.TryParse(host, out _);
+        var current = await ReadNtpAsync(client, ct)
+                      ?? throw new DriverException("El equipo no expone su configuración de NTP por ISAPI.");
+        var server = BuildNtpServer(current, setting.NtpServer, setting.NtpIntervalMinutes);
+        await PutAsync(client, $"/ISAPI/System/time/ntpServers/{Value(server, "id")}",
+            server.ToString(SaveOptions.DisableFormatting), "el servidor NTP", ct);
+    }
 
-        Set(server, "addressingFormatType", isIp ? "ipaddress" : "hostname");
-        if (isIp) Set(server, "ipAddress", host); else Set(server, "hostName", host);
-        Set(server, "synchronizeInterval", Math.Clamp(setting.NtpIntervalMinutes, 1, 10080).ToString(CultureInfo.InvariantCulture));
-        await PutAsync(client, $"/ISAPI/System/time/ntpServers/{id}", server.ToString(SaveOptions.DisableFormatting),
-            "el servidor NTP", ct);
+    /// <summary>
+    /// Arma el <c>NTPServer</c> a enviar a partir del que el equipo informa.
+    /// Se construye de nuevo, EN EL ORDEN DEL ESQUEMA (id, addressingFormatType,
+    /// hostName, ipAddress, ipv6Address, portNo, synchronizeInterval): los
+    /// terminales validan la secuencia, y editar la respuesta del GET agregando
+    /// al final el campo que no traía —un equipo en «ipaddress» no informa
+    /// <c>hostName</c>— termina en «Invalid Content · badParameters». Lo que
+    /// el equipo ya tenía (la otra dirección, IPv6, el puerto) se conserva; el
+    /// puerto es obligatorio, así que si no vino se manda el 123 de NTP.
+    /// </summary>
+    public static XElement BuildNtpServer(XElement current, string ntpServer, int intervalMinutes)
+    {
+        string host = ntpServer.Trim();
+        bool isIp = System.Net.IPAddress.TryParse(host, out _);
+        var ns = current.Name.Namespace;
+        var server = new XElement(current.Name, current.Attributes());
+
+        void Add(string name, string? value)
+        {
+            if (value is not null) server.Add(new XElement(ns + name, value));
+        }
+
+        Add("id", Value(current, "id") ?? "1");
+        Add("addressingFormatType", isIp ? "ipaddress" : "hostname");
+        Add("hostName", isIp ? Value(current, "hostName") : host);
+        Add("ipAddress", isIp ? host : Value(current, "ipAddress"));
+        Add("ipv6Address", Value(current, "ipv6Address"));
+        Add("portNo", Value(current, "portNo") ?? "123");
+        Add("synchronizeInterval", Math.Clamp(intervalMinutes, 1, 10080).ToString(CultureInfo.InvariantCulture));
+        return server;
     }
 
     /// <summary>

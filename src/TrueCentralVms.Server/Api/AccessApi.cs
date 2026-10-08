@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
@@ -68,6 +69,9 @@ public static class AccessApi
         device.SupportsFace = info.Capabilities.SupportsFace;
         device.UserCapacity = info.Capabilities.UserCapacity;
         device.CardCapacity = info.Capabilities.CardCapacity;
+        // Una lectura fallida de la ficha no borra la anterior: es informativa.
+        if (info.Profile is not null)
+            device.CapabilityProfileJson = JsonSerializer.Serialize(info.Profile);
         device.Status = AccessDeviceStatus.Online;
         device.LastError = null;
         device.LastSeenAt = DateTime.UtcNow;
@@ -153,6 +157,25 @@ public static class AccessApi
             return device is not null && (await ctx.ScopeAsync(session)).Visible(service.ToDto(device)) is { } dto
                 ? Results.Ok(dto)
                 : Results.NotFound();
+        });
+
+        // Ficha de capacidades que declaró el equipo al validarlo (pestaña
+        // Capacidades). Se lee de la base, no del equipo: para releerla está
+        // "Revalidar". null = todavía no se leyó (equipo validado antes).
+        app.MapGet("/api/access/devices/{id:int}/capabilities", async (HttpContext ctx, int id, VmsDbContext db,
+            AccessControlService service, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            var device = await db.AccessDevices.AsNoTracking().Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
+            if (device is null || (await ctx.ScopeAsync(session)).Visible(service.ToDto(device)) is null)
+                return Results.NotFound();
+            AccessCapabilityProfile? profile = null;
+            if (device.CapabilityProfileJson is { Length: > 0 } json)
+            {
+                try { profile = JsonSerializer.Deserialize<AccessCapabilityProfile>(json); }
+                catch (JsonException) { /* ficha de una versión que ya no se entiende: se relee al revalidar */ }
+            }
+            return Results.Ok(new { profile });
         });
 
         app.MapPost("/api/access/devices", async (HttpContext ctx, AccessDeviceWriteDto request, VmsDbContext db,

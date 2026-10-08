@@ -82,8 +82,106 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     {
         HikvisionIsapiClient.Forget(Transport(info));
         // Lo aprendido de sus lectores también: puede ser otro equipo en la misma dirección.
-        AcceptedReaders.TryRemove($"{(info.UseHttps ? "https" : "http")}://{info.Host}:{info.Port}", out _);
+        AcceptedReaders.TryRemove(DeviceKey(info), out _);
+        // Y lo que declaró: un firmware nuevo puede declarar otra cosa.
+        Profiles.TryRemove(DeviceKey(info), out _);
+        ProfileMisses.TryRemove(DeviceKey(info), out _);
+        SerialSearchRefused.TryRemove(DeviceKey(info), out _);
+        SetUpDeleteRefused.TryRemove(DeviceKey(info), out _);
+        // Lo que se cambie desde Hora y mantenimiento tiene que verse ya.
+        DeviceZones.TryRemove(DeviceKey(info), out _);
     }
+
+    /// <summary>Clave de un equipo en las cachés del driver (esquema, dirección y puerto).</summary>
+    private static string DeviceKey(AccessConnectionInfo info) =>
+        $"{(info.UseHttps ? "https" : "http")}://{info.Host}:{info.Port}";
+
+    // ------------------------------------------------------------------
+    // Capacidades declaradas (ver HikvisionAccessProfile)
+    // ------------------------------------------------------------------
+
+    /// <summary>Lo que declaró cada equipo, leído al validarlo o la primera vez que hizo falta.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, HikvisionAccessProfile> Profiles = new();
+
+    /// <summary>Equipos que no entregaron capacidades: no se les vuelve a preguntar en cada vuelta.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> ProfileMisses = new();
+
+    private static readonly TimeSpan ProfileRetry = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Las capacidades del equipo, o null si no las declara (o todavía no se
+    /// pudieron leer): con null el driver sigue por el camino ya probado.
+    /// Tras un reinicio del servidor se releen una vez, en la primera operación.
+    /// </summary>
+    private static async Task<HikvisionAccessProfile?> ProfileOfAsync(AccessConnectionInfo info,
+        HikvisionIsapiClient client, CancellationToken ct)
+    {
+        string key = DeviceKey(info);
+        if (Profiles.TryGetValue(key, out var known)) return known;
+        if (ProfileMisses.TryGetValue(key, out var missedAt) && DateTime.UtcNow - missedAt < ProfileRetry) return null;
+
+        var profile = await ReadProfileCoreAsync(client, ct);
+        if (!profile.Usable)
+        {
+            ProfileMisses[key] = DateTime.UtcNow;
+            return null;
+        }
+        Profiles[key] = profile;
+        ProfileMisses.TryRemove(key, out _);
+        return profile;
+    }
+
+    /// <summary>Las capacidades ya leídas de este equipo, sin ir a buscarlas (null si no están).</summary>
+    private static HikvisionAccessProfile? CachedProfile(HikvisionIsapiClient client) =>
+        Profiles.TryGetValue(client.BaseUrl, out var profile) ? profile : null;
+
+    /// <summary>
+    /// Ficha de capacidades para el servidor, releída del equipo (es lo que
+    /// pide "Revalidar"). También deja al día la que usa el driver.
+    /// </summary>
+    private static async Task<AccessCapabilityProfile?> ReadProfileAsync(AccessConnectionInfo info,
+        HikvisionIsapiClient client, CancellationToken ct)
+    {
+        try
+        {
+            var profile = await ReadProfileCoreAsync(client, ct);
+            if (profile.Usable)
+            {
+                Profiles[DeviceKey(info)] = profile;
+                ProfileMisses.TryRemove(DeviceKey(info), out _);
+                // Un firmware nuevo puede respetar ahora la búsqueda por número.
+                SerialSearchRefused.TryRemove(DeviceKey(info), out _);
+            }
+            return profile.ToDisplay();
+        }
+        catch (DriverException) { return null; }   // la ficha es informativa: no tumba la validación
+    }
+
+    /// <summary>
+    /// Las capacidades declaradas más lo que el driver averigua aparte: si de
+    /// verdad hay un lector de huella (ver <see cref="HasFingerprintReaderAsync"/>).
+    /// Con eso, a un equipo sin sensor tampoco se le piden borrados de huellas.
+    /// </summary>
+    private static async Task<HikvisionAccessProfile> ReadProfileCoreAsync(HikvisionIsapiClient client,
+        CancellationToken ct)
+    {
+        var profile = await HikvisionAccessProfile.ReadAsync(client, ct);
+        profile.FingerprintReader = profile.DeclaresFingerprints == false
+            ? false
+            : await HasFingerprintReaderAsync(client, ct);
+        return profile;
+    }
+
+    /// <summary>
+    /// Ninguna operación de borrado sale sin persona. La guía ISAPI es
+    /// explícita: un <c>UserInfoDelCond</c>/<c>CardInfoDelCond</c> SIN lista de
+    /// personas borra a TODAS las personas o tarjetas del equipo.
+    /// </summary>
+    private static string RequireEmployeeNo(string? employeeNo) =>
+        string.IsNullOrWhiteSpace(employeeNo)
+            ? throw new DriverException("Falta el identificador de la persona: no se envía nada al equipo " +
+                                        "(sin identificador, el equipo borraría a todas las personas).")
+            : employeeNo.Trim();
 
     public void ForgetCachedSession(AccessConnectionInfo info) => Forget(info);
 
@@ -183,19 +281,23 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         int doorCount = DoorCountOf(doorCaps) ?? DoorCountOf(acsCaps) ?? 1;
         var doors = await ReadDoorsAsync(client, doorCount, ct);
 
+        // La ficha primero: ya averigua si hay lector de huella, y eso mismo es
+        // SupportsFingerprint (no se le pregunta dos veces al equipo).
+        var profile = await ReadProfileAsync(info, client, ct);
+
         var capabilities = new AccessCapabilities(
             DoorCount: doors.Count,
             SupportsRemoteControl: remoteControl,
             SupportsEvents: await AnswersAsync(client, "/ISAPI/AccessControl/AcsEvent/capabilities?format=json", ct),
             SupportsCards: await AnswersAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities?format=json", ct),
-            SupportsFingerprint: await AnswersAsync(client, "/ISAPI/AccessControl/FingerPrintCfg/capabilities?format=json", ct),
+            SupportsFingerprint: CachedProfile(client)?.FingerprintReader ?? await HasFingerprintReaderAsync(client, ct),
             SupportsFace: await AnswersAsync(client, "/ISAPI/Intelligent/FDLib/capabilities?format=json", ct),
             UserCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/UserInfo/capabilities?format=json", ct),
             CardCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities?format=json", ct));
 
         var kind = ClassifyModel(model) ?? KindOfDoorCount(doors.Count);
         return new AccessDeviceInfo(model, Value("serialNumber"), Value("firmwareVersion"), Value("deviceType"),
-            Value("macAddress"), kind, capabilities, doors);
+            Value("macAddress"), kind, capabilities, doors, profile);
     }
 
     public async Task PingAsync(AccessConnectionInfo info, CancellationToken ct = default)
@@ -214,6 +316,57 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     {
         try { return await client.RequestAsync(HttpMethod.Get, path, ct: ct) is not null; }
         catch (DriverException) { return false; }   // 403 del usuario sin permiso, o función deshabilitada
+    }
+
+    /// <summary>
+    /// ¿Tiene el equipo dónde leer una huella? Que conteste la ruta de huellas
+    /// no alcanza: el DS-K1T323MBWX-QRE1 (facial, sin sensor) la contesta igual,
+    /// ubica las huellas en el lector 2 —la entrada para un lector externo— y
+    /// las acepta con OK para después tirarlas.
+    ///
+    /// Se mira cada lector donde el equipo dice grabar huellas
+    /// (<c>enableCardReader</c> de sus capacidades). Si TODOS son entradas
+    /// vacías —<c>cardReaderFunction</c> sin nada y sin descripción, que es como
+    /// se ve un lector externo sin conectar; el propio del terminal dice
+    /// <c>["face", "card"]</c> y su modelo— no hay dónde leer una huella. Ante
+    /// cualquier duda (ruta que no existe, campo que no viene, respuesta que no
+    /// se entiende) se contesta que sí: un "no" apaga las huellas en ese
+    /// equipo, y eso solo se hace si el equipo lo afirma.
+    /// </summary>
+    private static async Task<bool> HasFingerprintReaderAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        int[] readers;
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get,
+                    "/ISAPI/AccessControl/FingerPrintCfg/capabilities?format=json", ct: ct) is not { } json)
+                return false;   // no sabe de huellas
+            using var doc = JsonDocument.Parse(json);
+            if (RangeOf(doc.RootElement, "enableCardReader", depth: 4) is not { } range) return true;
+            readers = ReaderRange(range.Min, range.Max);
+        }
+        catch (DriverException) { return false; }   // 403 del usuario sin permiso, o función deshabilitada
+        catch (JsonException) { return true; }
+
+        foreach (int reader in readers)
+        {
+            try
+            {
+                if (await client.RequestAsync(HttpMethod.Get,
+                        $"/ISAPI/AccessControl/CardReaderCfg/{reader}?format=json", ct: ct) is not { } json)
+                    return true;
+                using var doc = JsonDocument.Parse(json);
+                if (HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "CardReaderCfg") is not { } cfg ||
+                    !cfg.TryGetProperty("cardReaderFunction", out var functions) ||
+                    functions.ValueKind != JsonValueKind.Array ||
+                    functions.GetArrayLength() > 0 ||
+                    !string.IsNullOrWhiteSpace(HikvisionAlarmPanelDriver.GetString(cfg, "cardReaderDescription")))
+                    return true;
+            }
+            catch (DriverException) { return true; }
+            catch (JsonException) { return true; }
+        }
+        return false;
     }
 
     /// <summary>Cupo declarado en una ruta de capacidades (<c>maxRecordNum</c> / <c>maxNum</c>).</summary>
@@ -378,6 +531,13 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             _ => throw new DriverException($"Orden de puerta desconocida: {command}."),
         };
         var client = Client(info);
+        // Si el equipo declara qué órdenes acepta, se le pregunta antes de
+        // mandarle una que rechazaría (un torniquete sin "bloqueada permanente",
+        // por ejemplo): así el operador recibe el motivo y no un "badParameters".
+        if (await ProfileOfAsync(info, client, ct) is { DoorCommands: { Count: > 0 } accepted } && !accepted.Contains(cmd))
+            throw new DriverException(
+                $"Este equipo no acepta la orden «{HikvisionAccessProfile.DoorCommandName(cmd)}» según sus " +
+                $"propias capacidades (acepta: {string.Join(", ", accepted.Select(HikvisionAccessProfile.DoorCommandName))}).");
         string body = $"<RemoteControlDoor><cmd>{cmd}</cmd></RemoteControlDoor>";
         _ = await client.RequestAsync(HttpMethod.Put, $"/ISAPI/AccessControl/RemoteControl/door/{doorNumber}",
                 body, "application/xml", ct, allowNotFound: false)
@@ -454,15 +614,18 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     // Historial de accesos
     // ==================================================================
 
-    /// <summary>Cuántos renglones se piden por página al equipo (los firmware antiguos se atragantan con más).</summary>
     /// <summary>
-    /// Cuántos eventos se piden por página. Diez, no treinta: el DS-K1T804AMF
-    /// V1.4.0 declara <c>maxResults @max=10</c> en las capacidades de
-    /// <c>AcsEvent</c> y rechaza con <c>badParameters</c> cualquier número
-    /// mayor. Los firmware nuevos aceptan 30, pero pedir de a 10 en todos sale
-    /// más barato que preguntarle a cada equipo cuánto aguanta.
+    /// Cuántos eventos se piden por página cuando el equipo no declara su tope.
+    /// Diez, no treinta: el DS-K1T804AMF V1.4.0 declara <c>maxResults @max=10</c>
+    /// en las capacidades de <c>AcsEvent</c> y rechaza con <c>badParameters</c>
+    /// cualquier número mayor (la guía dice que el equipo debería recortarlo
+    /// solo, pero ese firmware no lo hace). Si el equipo declara su tope, se usa
+    /// ese: menos consultas para ponerse al día.
     /// </summary>
     private const int EventPageSize = 10;
+
+    /// <summary>Tope de página aunque el equipo declare más (la guía muestra 30 como máximo habitual).</summary>
+    private const int MaxEventPageSize = 30;
 
     /// <summary>
     /// Historial posterior a <paramref name="sinceUtc"/> con
@@ -475,26 +638,183 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         int max, CancellationToken ct = default)
     {
         var client = Client(info);
+        var profile = await ProfileOfAsync(info, client, ct);
+        var (all, _) = await SearchEventsAsync(client, profile, new Dictionary<string, object>
+        {
+            ["startTime"] = IsapiTime(sinceUtc),
+            ["endTime"] = IsapiTime(DateTime.UtcNow.AddMinutes(1)),
+        }, max, ct);
+
+        // El equipo entrega del más nuevo al más viejo en algunos firmware: el
+        // servidor los quiere en orden cronológico para guardarlos de corrido.
+        return await WithDeviceNamesAsync(client,
+            all.Where(e => !IsOwnSessionNoise(e) && e.Timestamp > sinceUtc).OrderBy(e => e.Timestamp), ct);
+    }
+
+    /// <summary>
+    /// Historial por número de serie (<c>beginSerialNo</c> de
+    /// <c>AcsEventCond</c>): todo lo que el equipo numeró después de
+    /// <paramref name="afterSerial"/>. La guía define <c>serialNo</c> justamente
+    /// para detectar pérdida de eventos, y no depende de la hora: no se pierden
+    /// dos pasadas del mismo segundo ni lo que pasó mientras el reloj del
+    /// equipo estuvo corrido.
+    ///
+    /// Solo si el equipo declara <c>beginSerialNo</c> en sus capacidades. Y se
+    /// comprueba que lo respete: si devuelve un número que no es mayor al pedido
+    /// (o eventos sin número), el firmware ignora el filtro y para ese equipo se
+    /// vuelve a la búsqueda por hora (null), en vez de volcar su historial viejo.
+    /// </summary>
+    public async Task<AccessEventPage?> FetchEventsAfterSerialAsync(AccessConnectionInfo info, long afterSerial, int max,
+        CancellationToken ct = default)
+    {
+        var client = Client(info);
+        var profile = await ProfileOfAsync(info, client, ct);
+        string key = DeviceKey(info);
+        if (profile?.EventCondFields?.Contains("beginSerialNo") != true || SerialSearchRefused.ContainsKey(key))
+            return null;
+
+        // endSerialNo es OBLIGATORIO en los equipos reales aunque la guía lo
+        // marque opcional: sin él el DS-K1T323MBWX contesta badJsonContent y el
+        // DS-K1T804AMF badParameters (medido el 2026-10-08). Una ventana amplia
+        // alcanza para ponerse al día; el máximo de 32 bits lo rechazan.
+        var condition = new Dictionary<string, object>
+        {
+            ["beginSerialNo"] = afterSerial + 1,
+            ["endSerialNo"] = afterSerial + SerialWindow,
+        };
+        // Pedir orden cronológico si el equipo declara el campo: la guía dice
+        // que es lo de fábrica, pero hay firmware que entrega del más nuevo al
+        // más viejo.
+        if (profile?.EventCondFields?.Contains("timeReverseOrder") == true) condition["timeReverseOrder"] = false;
+
+        List<AccessEventRecord> all;
+        bool truncated;
+        try
+        {
+            (all, truncated) = await SearchEventsAsync(client, profile, condition, max, ct);
+            if (!Honors(all, afterSerial)) return Refuse(key);
+            if (all.Count == 0) return new AccessEventPage([], null);
+
+            // Se cortó por el tope: si llegó el número que sigue al pedido, el
+            // equipo entrega en orden y se lee hasta el último CONSECUTIVO. Si
+            // no llegó, está entregando del más nuevo al más viejo: se completa
+            // la lectura (con un tope mayor) y se toman los más antiguos, para no
+            // saltar los del medio.
+            if (truncated)
+            {
+                if (ConsecutiveEnd(all, afterSerial) is long end)
+                    return await Page(all, end);
+                (all, truncated) = await SearchEventsAsync(client, profile, condition, DescendingCatchUp, ct);
+                if (!Honors(all, afterSerial)) return Refuse(key);
+                if (truncated)
+                    return ConsecutiveEnd(all, afterSerial) is long reachable ? await Page(all, reachable) : Refuse(key);
+            }
+        }
+        catch (DriverException ex) when (IsRejectedCondition(ex.Message))
+        {
+            return Refuse(key);
+        }
+
+        // Lectura completa: no falta nada hasta el último número que llegó, así
+        // que se entregan los primeros max útiles en orden de número y la marca
+        // queda en el último entregado.
+        var ordered = all.OrderBy(e => e.SerialNo).ToList();
+        long cutoff = ordered[^1].SerialNo!.Value;
+        int useful = 0;
+        foreach (var e in ordered)
+        {
+            if (IsOwnSessionNoise(e) || ++useful < max) continue;
+            cutoff = e.SerialNo!.Value;
+            break;
+        }
+        return await Page(ordered, cutoff);
+
+        async Task<AccessEventPage> Page(List<AccessEventRecord> events, long cutoff) => new(
+            await WithDeviceNamesAsync(client,
+                events.Where(e => e.SerialNo <= cutoff && !IsOwnSessionNoise(e)).OrderBy(e => e.SerialNo), ct),
+            cutoff);
+
+        AccessEventPage? Refuse(string device)
+        {
+            SerialSearchRefused[device] = DateTime.UtcNow;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// El equipo respetó <c>beginSerialNo</c>: todo lo que entregó tiene número
+    /// y es mayor al pedido. Si no, el firmware ignora el filtro.
+    /// </summary>
+    private static bool Honors(List<AccessEventRecord> events, long afterSerial) =>
+        events.All(e => e.SerialNo is long serial && serial > afterSerial);
+
+    /// <summary>Último número consecutivo desde <paramref name="afterSerial"/> + 1; null si ese ni llegó.</summary>
+    private static long? ConsecutiveEnd(List<AccessEventRecord> events, long afterSerial)
+    {
+        var serials = events.Select(e => e.SerialNo!.Value).ToHashSet();
+        long next = afterSerial;
+        while (serials.Contains(next + 1)) next++;
+        return next > afterSerial ? next : null;
+    }
+
+    /// <summary>
+    /// Tope de eventos útiles al ponerse al día con un equipo que entrega del más
+    /// nuevo al más viejo. Más allá, ese equipo se lee por hora.
+    /// </summary>
+    private const int DescendingCatchUp = 5000;
+
+    /// <summary>Ancho de la ventana de números que se pide de una vez (ver FetchEventsAfterSerialAsync).</summary>
+    private const long SerialWindow = 100_000;
+
+    /// <summary>Equipos que declararon <c>beginSerialNo</c> pero no lo respetan: se leen por hora.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> SerialSearchRefused = new();
+
+    /// <summary>El equipo rechazó la condición de búsqueda (no un problema de red ni de ocupado).</summary>
+    private static bool IsRejectedCondition(string message) =>
+        message.Contains("badParameters", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("Invalid Content", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("Invalid Message", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("rechazó la solicitud", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Búsqueda de <c>POST /ISAPI/AccessControl/AcsEvent</c> con la condición
+    /// dada, paginando mientras el equipo conteste <c>MORE</c>. Devuelve TODO lo
+    /// que entregó, incluido el ruido de las propias consultas (lo filtra quien
+    /// llama: su número de serie también cuenta para avanzar), y si se cortó
+    /// por haber juntado <paramref name="max"/> eventos útiles con más por leer.
+    /// </summary>
+    private static async Task<(List<AccessEventRecord> All, bool Truncated)> SearchEventsAsync(
+        HikvisionIsapiClient client, HikvisionAccessProfile? profile, Dictionary<string, object> condition, int max,
+        CancellationToken ct)
+    {
+        int pageSize = profile?.EventMaxResults is { } declared and > 0
+            ? Math.Min(declared, MaxEventPageSize)
+            : EventPageSize;
+        // Sin fotos: la guía avisa que, si la respuesta lleva imágenes, llega
+        // en partes MIME y no como JSON. Solo se manda si el equipo declara el
+        // campo: los firmware viejos rechazan con badParameters lo que no conocen.
+        bool sendPicEnable = profile?.EventCondFields?.Contains("picEnable") == true;
+
         // El mismo id en todas las páginas (así se sigue UNA búsqueda), pero de
-        // 32 caracteres: ver SearchId.
+        // 16 caracteres: ver SearchId.
         string searchId = SearchId();
         var events = new List<AccessEventRecord>();
+        int useful = 0;
+        bool more = false;
 
-        for (int position = 0; events.Count < max; position += EventPageSize)
+        for (int position = 0; useful < max;)
         {
-            string body = JsonSerializer.Serialize(new
+            var cond = new Dictionary<string, object>
             {
-                AcsEventCond = new
-                {
-                    searchID = searchId,
-                    searchResultPosition = position,
-                    maxResults = Math.Min(EventPageSize, max - events.Count),
-                    major = 0,
-                    minor = 0,
-                    startTime = IsapiTime(sinceUtc),
-                    endTime = IsapiTime(DateTime.UtcNow.AddMinutes(1)),
-                },
-            });
+                ["searchID"] = searchId,
+                ["searchResultPosition"] = position,
+                ["maxResults"] = Math.Min(pageSize, max - useful),
+                ["major"] = 0,
+                ["minor"] = 0,
+            };
+            foreach (var (name, value) in condition) cond[name] = value;
+            if (sendPicEnable) cond["picEnable"] = false;
+            string body = JsonSerializer.Serialize(new Dictionary<string, object> { ["AcsEventCond"] = cond });
             string? json = await client.RequestAsync(HttpMethod.Post, "/ISAPI/AccessControl/AcsEvent?format=json",
                 body, ct: ct, allowNotFound: false);
             if (string.IsNullOrWhiteSpace(json)) break;
@@ -510,7 +830,11 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 using var doc = JsonDocument.Parse(json);
                 var search = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "AcsEvent") ?? doc.RootElement;
                 foreach (var item in InfoList(search))
-                    if (ParseEvent(item) is var record && !IsOwnSessionNoise(record)) events.Add(record);
+                {
+                    var record = ParseEvent(item);
+                    events.Add(record);
+                    if (!IsOwnSessionNoise(record)) useful++;
+                }
                 status = HikvisionAlarmPanelDriver.GetString(search, "responseStatusStrg") ?? "OK";
                 matches = HikvisionAlarmPanelDriver.GetInt(search, "numOfMatches") ?? 0;
             }
@@ -519,12 +843,125 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 throw new DriverException("El equipo respondió el historial de accesos en un formato que no se entiende.");
             }
 
-            if (!status.Equals("MORE", StringComparison.OrdinalIgnoreCase) || matches == 0) break;
+            more = status.Equals("MORE", StringComparison.OrdinalIgnoreCase) && matches > 0;
+            if (!more) break;
+            // Se avanza lo que el equipo ENTREGÓ, no lo que se pidió: puede
+            // devolver menos (su tope) y avanzar de a página saltaría eventos.
+            position += matches;
         }
 
-        // El equipo entrega del más nuevo al más viejo en algunos firmware: el
-        // servidor los quiere en orden cronológico para guardarlos de corrido.
-        return events.Where(e => e.Timestamp > sinceUtc).OrderBy(e => e.Timestamp).ToList();
+        return (events, more);
+    }
+
+    /// <summary>
+    /// Nombre de una persona según el equipo, para los eventos que traen el
+    /// legajo pero no el nombre (el DS-K1T804AMF V1.4.0 nunca lo manda). Sin
+    /// esto, alguien dado de alta directo en el equipo —que el VMS no conoce—
+    /// aparecía como "—". Se guarda por equipo y legajo (también el "no está").
+    /// </summary>
+    private static async Task<string?> DeviceNameAsync(HikvisionIsapiClient client, string employeeNo,
+        CancellationToken ct)
+    {
+        string key = client.BaseUrl + "|" + employeeNo;
+        if (DeviceNames.TryGetValue(key, out var known) && DateTime.UtcNow - known.At < DeviceNameTtl) return known.Name;
+
+        string? name = null;
+        string body = JsonSerializer.Serialize(new
+        {
+            UserInfoSearchCond = new
+            {
+                searchID = SearchId(),
+                searchResultPosition = 0,
+                maxResults = 1,
+                EmployeeNoList = new[] { new { employeeNo } },
+            },
+        });
+        try
+        {
+            string? json = await client.RequestAsync(HttpMethod.Post, "/ISAPI/AccessControl/UserInfo/Search?format=json", body, ct: ct);
+            if (json is not null)
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "UserInfoSearch") is { } search &&
+                    search.TryGetProperty("UserInfo", out var list) && list.ValueKind == JsonValueKind.Array &&
+                    list.GetArrayLength() > 0)
+                    name = HikvisionAlarmPanelDriver.GetString(list[0], "name")?.Trim() is { Length: > 0 } n ? n : null;
+            }
+        }
+        catch (DriverException) { return null; }   // sin respuesta: no se guarda, se reintenta en el próximo evento
+        catch (JsonException) { }
+        DeviceNames[key] = (name, DateTime.UtcNow);
+        return name;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string? Name, DateTime At)> DeviceNames = new();
+    private static readonly TimeSpan DeviceNameTtl = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Completa lo que el evento no trae bien: el nombre (si viene solo el
+    /// legajo) y la hora en UTC calculada con la regla de zona del equipo en vez
+    /// de la etiqueta de desfase que pone (ver <see cref="DeviceTimeZones.OffsetAtLocal"/>).
+    /// </summary>
+    private static async Task<AccessEventRecord> WithDeviceNameAsync(HikvisionIsapiClient client, AccessEventRecord record,
+        CancellationToken ct)
+    {
+        if (record.PersonName is null && record.EmployeeNo is { } employeeNo &&
+            await DeviceNameAsync(client, employeeNo, ct) is { } name)
+            record = record with { PersonName = name };
+        if (await DeviceZoneAsync(client, ct) is { } zone && CorrectedUtc(record, zone) is { } utc)
+            record = record with { Timestamp = utc };
+        return record;
+    }
+
+    /// <summary>
+    /// La hora del evento en UTC según la regla de zona del equipo, o null si no
+    /// hace falta corregirla (o no se puede). La hora local del evento es la del
+    /// reloj del equipo; lo que puede estar mal es solo la etiqueta.
+    /// </summary>
+    private static DateTime? CorrectedUtc(AccessEventRecord record, DeviceTimeZones.PosixZone zone)
+    {
+        if (record.RawJson is null) return null;
+        string? text;
+        try
+        {
+            using var doc = JsonDocument.Parse(record.RawJson);
+            text = HikvisionAlarmPanelDriver.GetString(doc.RootElement, "dateTime")
+                   ?? HikvisionAlarmPanelDriver.GetString(doc.RootElement, "time");
+        }
+        catch (JsonException) { return null; }
+        if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var labeled)) return null;
+        if (DeviceTimeZones.OffsetAtLocal(zone, labeled.DateTime) is not { } offset || offset == labeled.Offset) return null;
+        return DateTime.SpecifyKind(labeled.DateTime - offset, DateTimeKind.Utc);
+    }
+
+    /// <summary>Zona POSIX que tiene configurada el equipo (<c>/ISAPI/System/time</c>), en caché una hora.</summary>
+    private static async Task<DeviceTimeZones.PosixZone?> DeviceZoneAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        if (DeviceZones.TryGetValue(client.BaseUrl, out var known) && DateTime.UtcNow - known.At < DeviceZoneTtl)
+            return known.Zone;
+        DeviceTimeZones.PosixZone? zone = null;
+        try
+        {
+            string? xml = await client.RequestAsync(HttpMethod.Get, "/ISAPI/System/time", null, "application/xml", ct);
+            if (xml is not null)
+                zone = DeviceTimeZones.ParsePosix(XDocument.Parse(xml).Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "timeZone")?.Value);
+        }
+        catch (DriverException) { return known.Zone; }
+        catch (System.Xml.XmlException) { }
+        DeviceZones[client.BaseUrl] = (zone, DateTime.UtcNow);
+        return zone;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DeviceTimeZones.PosixZone? Zone, DateTime At)> DeviceZones = new();
+    private static readonly TimeSpan DeviceZoneTtl = TimeSpan.FromHours(1);
+
+    private static async Task<List<AccessEventRecord>> WithDeviceNamesAsync(HikvisionIsapiClient client,
+        IEnumerable<AccessEventRecord> records, CancellationToken ct)
+    {
+        var result = new List<AccessEventRecord>();
+        foreach (var record in records) result.Add(await WithDeviceNameAsync(client, record, ct));
+        return result;
     }
 
     /// <summary>La lista de eventos de la respuesta, sin importar cómo la nombre el firmware.</summary>
@@ -564,9 +1001,11 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         string? cardNo = HikvisionAlarmPanelDriver.GetString(item, "cardNo");
         var (kind, credential, text) = Classify(major, minor);
 
-        // El modo de verificación que informa el equipo es más fiable que
-        // deducir la credencial del código del evento, y existe en todos los
-        // firmware con lector biométrico.
+        // currentVerifyMode es el MODO configurado del lector, no lo que la
+        // persona usó: con "cardOrFace" el DS-K1T323MBWX informa así un acceso
+        // con ROSTRO (minor 0x4b), y tomarlo por su primer factor lo mostraba
+        // como tarjeta. Solo se le cree cuando nombra un único factor; si es
+        // combinado, manda el código del evento.
         var verified = CredentialOf(HikvisionAlarmPanelDriver.GetString(item, "currentVerifyMode"));
         if (verified != AccessCredentialKind.Unknown) credential = verified;
         else if (credential == AccessCredentialKind.Unknown && !string.IsNullOrWhiteSpace(cardNo))
@@ -583,7 +1022,9 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             CardNumber: string.IsNullOrWhiteSpace(cardNo) || cardNo.Trim('0').Length == 0 ? null : cardNo.Trim(),
             MajorType: major,
             MinorType: minor,
-            RawJson: item.GetRawText());
+            RawJson: item.GetRawText(),
+            SerialNo: long.TryParse(HikvisionAlarmPanelDriver.GetString(item, "serialNo"), out long serial) && serial > 0
+                ? serial : null);
     }
 
     /// <summary>Hora del equipo ("2026-09-09T10:15:00-03:00") a UTC; sin desfase se asume la hora del servidor.</summary>
@@ -601,8 +1042,9 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     {
         string mode = (verifyMode ?? "").ToLowerInvariant();
         if (mode.Length == 0) return AccessCredentialKind.Unknown;
-        // Los modos combinados ("cardOrFace", "cardAndPw") se resuelven por el
-        // primer factor que nombran, que es el que la persona usó.
+        // Un modo combinado ("cardOrFace", "cardAndPw", "faceOrFpOrCardOrPw")
+        // no dice qué factor se usó: no se adivina (ver ParseEvent).
+        if (System.Text.RegularExpressions.Regex.IsMatch(verifyMode!, "(Or|And)[A-Z]")) return AccessCredentialKind.Unknown;
         if (mode.StartsWith("face")) return AccessCredentialKind.Face;
         if (mode.StartsWith("fp") || mode.StartsWith("finger")) return AccessCredentialKind.Fingerprint;
         if (mode.StartsWith("card")) return AccessCredentialKind.Card;
@@ -959,57 +1401,106 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// Verificado contra un DS-K1T321MFWX: <c>multipart/mixed;
     /// boundary=MIME_boundary</c>, y cada parte trae <c>eventType</c> y, para lo
     /// que interesa acá, un objeto <c>AccessControllerEvent</c>.
+    ///
+    /// La guía pide vigilar el latido: el equipo manda uno cada tanto
+    /// (<c>eventType</c> "videoloss" con <c>eventState</c> "inactive") aunque
+    /// no pase nadie. Si en <see cref="StreamIdleTimeout"/> no llega NADA, la
+    /// conexión se da por muerta y se corta para que el llamador reconecte:
+    /// sin esto, un equipo que se reinicia o un cable que se corta sin cerrar
+    /// la conexión dejaba la escucha colgada para siempre.
+    ///
+    /// Avisos a <paramref name="signal"/>: <c>Connected</c> al abrir, <c>Alive</c>
+    /// con cada dato que llega (latido incluido) y <c>Gap</c> si entre dos eventos
+    /// falta un número (<c>serialNo</c>/<c>frontSerialNo</c>, que la guía define
+    /// para detectar pérdidas). El ruido de las propias consultas no se entrega,
+    /// pero sí cuenta para la numeración: también consume números.
     /// </summary>
     public async IAsyncEnumerable<AccessEventRecord> StreamEventsAsync(AccessConnectionInfo info,
+        Action<AccessStreamSignal>? signal = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         var client = Client(info);
         using var response = await client.OpenStreamAsync("/ISAPI/Event/notification/alertStream", ct);
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        signal?.Invoke(AccessStreamSignal.Connected);
+        long? lastSerial = null;
 
         string boundary = BoundaryOf(response.Content.Headers.ContentType?.Parameters) ?? "MIME_boundary";
-        string separator = "--" + boundary;
+        // Partes por Content-Length (sin esperar a la siguiente) y en bytes:
+        // ver HikvisionMultipartReader.
+        var reader = new HikvisionMultipartReader(boundary);
 
         var buffer = new byte[8192];
-        var pending = new StringBuilder();
         while (!ct.IsCancellationRequested)
         {
-            int read = await stream.ReadAsync(buffer, ct);
-            if (read <= 0) yield break;      // el equipo cerró: que reconecte el llamador
-            pending.Append(Encoding.UTF8.GetString(buffer, 0, read));
+            int read = await ReadWithIdleTimeoutAsync(stream, buffer, ct);
+            if (read <= 0) yield break;      // el equipo cerró o calló: que reconecte el llamador
+            signal?.Invoke(AccessStreamSignal.Alive);
+            reader.Append(buffer.AsSpan(0, read));
 
-            while (true)
+            foreach (var (contentType, body) in reader.TakeParts())
             {
-                string texto = pending.ToString();
-                int at = texto.IndexOf(separator, StringComparison.Ordinal);
-                if (at < 0) break;
-                string parte = texto[..at];
-                pending.Remove(0, at + separator.Length);
-                if (ParseStreamPart(parte) is { } evento) yield return evento;
+                // Las fotos del evento viajan en su propia parte: no son el evento.
+                if (contentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true) continue;
+                if (ParseStreamPart(HikvisionIsapiClient.DecodeBody(body)) is not { } part) continue;
+                if (IsSerialGap(lastSerial, part.Record.SerialNo, part.Front)) signal?.Invoke(AccessStreamSignal.Gap);
+                if (part.Record.SerialNo is long serial) lastSerial = serial;
+                if (!IsOwnSessionNoise(part.Record)) yield return await WithDeviceNameAsync(client, part.Record, ct);
             }
 
             // Un flujo sin separadores que crece sin límite es un equipo que
             // no habla lo que dijo: se corta en vez de comerse la memoria.
-            if (pending.Length > MaxStreamBuffer) yield break;
+            if (reader.Buffered > MaxStreamBuffer) yield break;
         }
     }
 
-    /// <summary>Tope del buffer del flujo (un evento con foto no llega a tanto).</summary>
-    private const int MaxStreamBuffer = 512 * 1024;
+    /// <summary>Tope de lo retenido esperando completar una parte (una foto de evento cabe holgada).</summary>
+    private const int MaxStreamBuffer = 2 * 1024 * 1024;
+
+    /// <summary>
+    /// Silencio máximo del flujo de eventos antes de darlo por muerto. Holgado
+    /// a propósito: el latido llega mucho más seguido, y si un firmware no lo
+    /// manda, reconectar cada par de minutos no pierde nada (el sondeo del
+    /// historial cubre el hueco y los repetidos se descartan al guardar).
+    /// </summary>
+    private static readonly TimeSpan StreamIdleTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>Una lectura del flujo con tope de silencio; 0 si el equipo cerró o no mandó nada a tiempo.</summary>
+    private static async Task<int> ReadWithIdleTimeoutAsync(Stream stream, byte[] buffer, CancellationToken ct)
+    {
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        idle.CancelAfter(StreamIdleTimeout);
+        try { return await stream.ReadAsync(buffer, idle.Token); }
+        // El corte de una lectura de red llega como cancelación o como IOException
+        // según el punto en que la agarre: lo que importa es que lo pidió el tope.
+        catch (Exception) when (idle.IsCancellationRequested && !ct.IsCancellationRequested) { return 0; }
+    }
 
     private static string? BoundaryOf(ICollection<System.Net.Http.Headers.NameValueHeaderValue>? parameters) =>
         parameters?.FirstOrDefault(p => p.Name.Equals("boundary", StringComparison.OrdinalIgnoreCase))
             ?.Value?.Trim('"');
 
     /// <summary>
-    /// Una parte del multipart a evento, o null si no es un evento de control
-    /// de acceso (el equipo también empuja latidos y eventos de otros
-    /// subsistemas por el mismo flujo).
+    /// ¿Se perdió algo entre el evento anterior y este? Con <c>frontSerialNo</c>
+    /// (el número del evento anterior según el equipo) se compara con el último
+    /// que llegó; sin él, que el número sea el siguiente. El primero de cada
+    /// conexión no se juzga: lo de antes lo cubre la lectura al reconectar.
+    /// Un número que no avanza (reenvío al reconectar) no es un hueco.
     /// </summary>
-    private static AccessEventRecord? ParseStreamPart(string parte)
+    private static bool IsSerialGap(long? lastSerial, long? serial, long? front)
     {
-        int cuerpo = parte.IndexOf("\r\n\r\n", StringComparison.Ordinal);
-        string json = (cuerpo >= 0 ? parte[(cuerpo + 4)..] : parte).Trim();
+        if (lastSerial is not long previous || serial is not long current || current <= previous) return false;
+        return front is long declared ? declared != previous : current > previous + 1;
+    }
+
+    /// <summary>
+    /// El cuerpo de una parte del multipart a evento, o null si no es un evento
+    /// de control de acceso (el equipo también empuja latidos en XML y eventos de
+    /// otros subsistemas por el mismo flujo).
+    /// </summary>
+    private static (AccessEventRecord Record, long? Front)? ParseStreamPart(string body)
+    {
+        string json = body.Trim();
         if (json.Length < 2 || json[0] != '{') return null;
 
         try
@@ -1019,10 +1510,12 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             if (HikvisionAlarmPanelDriver.FindObject(root, "AccessControllerEvent") is not { } acs) return null;
 
             var record = ParseEvent(acs);
-            if (IsOwnSessionNoise(record)) return null;
             // La hora del evento va en la envoltura, no en el objeto interno.
             var cuando = ParseTime(HikvisionAlarmPanelDriver.GetString(root, "dateTime"));
-            return record with { Timestamp = cuando, RawJson = json };
+            string? front = HikvisionAlarmPanelDriver.GetString(acs, "frontSerialNo")
+                            ?? HikvisionAlarmPanelDriver.GetString(root, "frontSerialNo");
+            return (record with { Timestamp = cuando, RawJson = json },
+                long.TryParse(front, out long previous) && previous > 0 ? previous : null);
         }
         catch (JsonException)
         {
@@ -1155,14 +1648,17 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     public async Task ApplyPersonAsync(AccessConnectionInfo info, AccessPersonPlan plan, CancellationToken ct = default)
     {
+        RequireEmployeeNo(plan.EmployeeNo);
         var client = Client(info);
+        var profile = await ProfileOfAsync(info, client, ct);
 
         var user = new Dictionary<string, object?>
         {
             ["employeeNo"] = plan.EmployeeNo,
             // El nombre de la persona SÍ se muestra en el terminal: se conservan
-            // los acentos y solo se acota al tope de bytes del equipo.
-            ["name"] = Truncate(plan.Name, MaxPersonNameBytes),
+            // los acentos y solo se acota al tope de bytes que declara el equipo
+            // (32 si no lo dice).
+            ["name"] = Truncate(plan.Name, profile?.NameMaxBytes is { } nameMax and > 0 ? nameMax : MaxPersonNameBytes),
             ["userType"] = "normal",
             ["Valid"] = new
             {
@@ -1181,15 +1677,20 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             ["localUIRight"] = false,
             ["maxOpenDoorTime"] = 0,
         };
-        if (!string.IsNullOrWhiteSpace(plan.PinCode)) user["password"] = plan.PinCode;
+        string? pinProblem = ApplyPin(user, plan, profile);
 
         string body = JsonSerializer.Serialize(new Dictionary<string, object?> { ["UserInfo"] = user });
 
-        // Crear una persona que ya está da error; modificar una que no está,
-        // también. Se pregunta primero, y si el equipo no sabe buscar se
+        // Si el equipo declara "setUp" (UserInfo/capabilities), una sola llamada
+        // crea o edita según corresponda: es la ruta que da la guía ISAPI.
+        // Si no, crear una persona que ya está da error; modificar una que no
+        // está, también. Se pregunta primero, y si el equipo no sabe buscar se
         // intenta crear y, si no, modificar.
-        bool? exists = await PersonExistsAsync(client, plan.EmployeeNo, ct);
-        if (exists == true)
+        bool setUp = profile?.CanSetUpUser == true;
+        bool? exists = setUp ? null : await PersonExistsAsync(client, plan.EmployeeNo, ct);
+        if (setUp)
+            await WriteUserAsync(client, HttpMethod.Put, "/ISAPI/AccessControl/UserInfo/SetUp?format=json", body, ct);
+        else if (exists == true)
             await WriteUserAsync(client, HttpMethod.Put, "/ISAPI/AccessControl/UserInfo/Modify?format=json", body, ct);
         else if (exists == false)
             await WriteUserAsync(client, HttpMethod.Post, "/ISAPI/AccessControl/UserInfo/Record?format=json", body, ct);
@@ -1207,22 +1708,73 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         // final se cuenta lo que falló, que igual deja el equipo en rojo pero
         // diciendo QUÉ falta.
         var problemas = new List<string>();
+        if (pinProblem is not null) problemas.Add($"de la clave: {pinProblem}");
+        NoFingerprintReaderException? sinLectorDeHuella = null;
         foreach (var (nombre, escribir) in new (string, Func<Task>)[]
                  {
-                     ("las tarjetas", () => ApplyCardsAsync(client, plan, ct)),
-                     ("las huellas", () => ApplyFingerprintsAsync(client, plan, ct)),
-                     ("el rostro", () => ApplyFaceAsync(client, plan, ct)),
+                     ("de las tarjetas", () => ApplyCardsAsync(client, plan, ct)),
+                     ("de las huellas", () => ApplyFingerprintsAsync(client, plan, ct)),
+                     ("del rostro", () => ApplyFaceAsync(client, plan, ct)),
                  })
         {
             try { await escribir(); }
+            catch (NoFingerprintReaderException ex) { sinLectorDeHuella = ex; }
             catch (DriverException ex) { problemas.Add($"{nombre}: {ex.Message}"); }
         }
 
-        if (problemas.Count == 0) return;
+        // Un equipo sin lector de huella no es una escritura fallida: quedó
+        // todo lo que ese equipo puede llevar. Se avisa aparte —y solo si no
+        // hubo otra cosa— para que el servidor lo anote en el equipo y no le
+        // vuelva a mandar huellas.
+        if (problemas.Count == 0)
+        {
+            if (sinLectorDeHuella is not null) throw sinLectorDeHuella;
+            return;
+        }
+        if (sinLectorDeHuella is not null) problemas.Add($"de las huellas: {sinLectorDeHuella.Message}");
         throw new DriverException(
-            "La persona quedó escrita en el equipo, pero falló la escritura de " +
+            "La persona quedó escrita en el equipo, pero falló la escritura " +
             $"{string.Join(" · ", problemas)} " +
             "El resto de sus credenciales sí quedó, así que puede entrar con las que sí entraron.");
+    }
+
+    /// <summary>
+    /// Pone la clave numérica en el registro de la persona según lo que el
+    /// equipo declara, y devuelve un problema para informar (o null).
+    ///
+    /// <list type="bullet">
+    /// <item>Sin clave en el VMS se manda <c>password</c> VACÍO: medido contra el
+    /// DS-K1T321MFWX y el DS-K1T804AMF, si el campo se omite el equipo conserva
+    /// la clave anterior, así que quitársela a alguien en el VMS no se la
+    /// quitaba en la puerta. Vacía, el equipo la borra.</item>
+    /// <item>Un equipo que no tiene teclado (no declara <c>password</c>, como el
+    /// DS-K1T323MBWX facial) no recibe nada.</item>
+    /// <item>Una clave fuera del largo que declara el equipo no se manda (el
+    /// equipo rechazaría a la persona entera): se borra la que tuviera y se avisa.</item>
+    /// </list>
+    /// Si no se conocen las capacidades del equipo se hace lo de antes: se manda
+    /// solo la clave que haya.
+    /// </summary>
+    private static string? ApplyPin(Dictionary<string, object?> user, AccessPersonPlan plan,
+        HikvisionAccessProfile? profile)
+    {
+        string pin = plan.PinCode?.Trim() ?? "";
+        switch (profile?.Pin)
+        {
+            case false:
+                return null;
+            case null:
+                if (pin.Length > 0) user["password"] = pin;
+                return null;
+        }
+        if (pin.Length > 0 && profile!.PinLength is { } range && (pin.Length < Math.Max(range.Min, 1) || pin.Length > range.Max))
+        {
+            user["password"] = "";
+            return $"el equipo acepta claves de {Math.Max(range.Min, 1)} a {range.Max} dígitos y la de " +
+                   $"{plan.Name} tiene {pin.Length}: no se le puso clave en este equipo.";
+        }
+        user["password"] = pin;
+        return null;
     }
 
     // ==================================================================
@@ -1323,6 +1875,9 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     private static async Task ApplyFaceAsync(HikvisionIsapiClient client, AccessPersonPlan plan,
         CancellationToken ct)
     {
+        // Si el equipo lo declara, una sola llamada crea, reemplaza o borra.
+        if (CachedProfile(client)?.CanSetUpFace == true && await SetUpFaceAsync(client, plan, ct)) return;
+
         // Siempre se borra primero: si la persona ya no tiene rostro en el VMS,
         // el que quedó en el equipo le seguiría abriendo la puerta.
         await DeleteFaceAsync(client, plan.EmployeeNo, ct);
@@ -1355,32 +1910,103 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 "FaceDataRecord", meta,
                 "img", $"{plan.EmployeeNo}.{extension}", face.Image, face.ContentType, ct);
         }
-        catch (DriverException ex) when (IsFaceQuality(ex.Message))
+        catch (DriverException ex) when (FaceRejection(plan.Name, ex.Message) is { } explained)
         {
-            throw new DriverException(FaceQualityMessage(plan.Name));
+            throw new DriverException(explained);
         }
 
         if (response is null)
             throw new DriverException("Este equipo no acepta rostros desde el VMS: no tiene la biblioteca de caras.");
         if (FailureOf(response) is { } error)
             throw new DriverException(
-                IsFaceQuality(error) ? FaceQualityMessage(plan.Name)
+                FaceRejection(plan.Name, error) is { } explained ? explained
                 : error.Contains("AlreadyExistFace", StringComparison.OrdinalIgnoreCase)
                     ? $"El equipo todavía tiene el rostro anterior de {plan.Name} y no acepta el nuevo. " +
                       "Vuelva a enviarla en un momento."
                     : $"El equipo rechazó la foto de {plan.Name}: {error}");
 
-        // Y se comprueba, por lo mismo que las huellas: un "OK" no prueba que
-        // haya quedado guardado. El equipo aplica en diferido, así que se
-        // reintenta antes de dar el rostro por perdido.
+        await VerifyFaceStoredAsync(client, plan, immediate: false, ct);
+    }
+
+    /// <summary>
+    /// Comprueba que el rostro haya quedado, por lo mismo que las huellas: un
+    /// "OK" no prueba que esté guardado. Con <c>FaceDataRecord</c> el equipo
+    /// aplica en diferido; con <c>FDSetUp</c> queda al instante (medido contra el
+    /// DS-K1T321MFWX: a los 0,4 s ya aparece), así que ahí se mira primero sin esperar.
+    /// </summary>
+    private static async Task VerifyFaceStoredAsync(HikvisionIsapiClient client, AccessPersonPlan plan,
+        bool immediate, CancellationToken ct)
+    {
         for (int attempt = 0; attempt < VerifyAttempts; attempt++)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(VerifyDelayMs), ct);
+            if (!immediate || attempt > 0) await Task.Delay(TimeSpan.FromMilliseconds(VerifyDelayMs), ct);
             if (await HasFaceAsync(client, plan.EmployeeNo, ct) is not { } stored) return;   // no sabe contestar
             if (stored) return;
         }
         throw new DriverException(
             $"El equipo aceptó la foto de {plan.Name} pero no la guardó: dijo que sí y quedó sin rostro.");
+    }
+
+    private const string FaceSetUpPath = "/ISAPI/Intelligent/FDLib/FDSetUp?format=json";
+
+    /// <summary>
+    /// Rostro con <c>PUT FDLib/FDSetUp</c>: con foto lo crea o lo REEMPLAZA (no
+    /// hace falta borrar antes, ni esperar el borrado, ni pelear con
+    /// <c>deviceUserAlreadyExistFace</c>); sin foto, <c>deleteFP</c> lo borra y el
+    /// equipo contesta OK exista o no. Medido contra el DS-K1T321MFWX V3.9.20.
+    ///
+    /// Devuelve false si el equipo, aunque lo declaró, no atiende la ruta: ahí se
+    /// sigue por el camino de siempre.
+    /// </summary>
+    private static async Task<bool> SetUpFaceAsync(HikvisionIsapiClient client, AccessPersonPlan plan,
+        CancellationToken ct)
+    {
+        string employeeNo = RequireEmployeeNo(plan.EmployeeNo);
+        string? response;
+        if (plan.Face is not { } face)
+        {
+            string body = JsonSerializer.Serialize(new
+            {
+                faceLibType = FaceLibType,
+                FDID = FaceLibId,
+                FPID = employeeNo,
+                deleteFP = true,
+            });
+            try { response = await client.RequestAsync(HttpMethod.Put, FaceSetUpPath, body, ct: ct); }
+            catch (DriverException ex) when (UnknownRoute(ex.Message)) { return false; }
+            if (response is null) return false;
+            if (FailureOf(response) is not { } error || IsMissingFace(error)) return true;
+            if (UnknownRoute(error)) return false;
+            throw new DriverException($"No se pudo borrar el rostro anterior en el equipo: {error}");
+        }
+
+        string meta = JsonSerializer.Serialize(new
+        {
+            faceLibType = FaceLibType,
+            FDID = FaceLibId,
+            FPID = employeeNo,
+            name = PlanLabel(plan.Name, CachedProfile(client)?.FaceNameMaxBytes is { } max and > 0 ? Math.Min(max, 96) : 48),
+        });
+        string extension = face.ContentType.Contains("png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpg";
+        try
+        {
+            response = await client.RequestMultipartAsync(FaceSetUpPath, "FaceDataRecord", meta,
+                "img", $"{employeeNo}.{extension}", face.Image, face.ContentType, ct, HttpMethod.Put);
+        }
+        catch (DriverException ex) when (UnknownRoute(ex.Message)) { return false; }
+        catch (DriverException ex) when (FaceRejection(plan.Name, ex.Message) is { } explained)
+        {
+            throw new DriverException(explained);
+        }
+        if (response is null) return false;
+        if (FailureOf(response) is { } failure)
+        {
+            if (UnknownRoute(failure)) return false;
+            throw new DriverException(FaceRejection(plan.Name, failure) ?? $"El equipo rechazó la foto de {plan.Name}: {failure}");
+        }
+
+        await VerifyFaceStoredAsync(client, plan, immediate: true, ct);
+        return true;
     }
 
     /// <summary>
@@ -1395,14 +2021,37 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         message.Contains("saveFacePic", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Lo primero que hay que mirar es el TAMAÑO: probado contra el
-    /// DS-K1T321MFWX, una foto de 135×189 px se rechaza y esa misma imagen al
-    /// doble se acepta. Después vienen la pose y la luz.
+    /// El rechazo de la foto en palabras que el operador pueda accionar, con
+    /// la respuesta del equipo entre paréntesis para quien tenga que mirarla;
+    /// null si no es un rechazo de la foto.
+    /// </summary>
+    private static string? FaceRejection(string name, string message)
+    {
+        if (IsFaceQuality(message)) return FaceQualityMessage(name) + DeviceDetail(message);
+        // Medido contra el DS-K1T321MFWX V3.9.20: pasado su tope de ~200 KB
+        // contesta "badJsonContent · faceURL", como si la foto tuviera que
+        // venir por URL. El servidor ya la manda por debajo del tope.
+        if (message.Contains("faceURL", StringComparison.OrdinalIgnoreCase))
+            return $"La foto de {name} pesa más de lo que acepta el equipo (unos 200 KB). " +
+                   "Cárguela de nuevo con una foto más liviana." + DeviceDetail(message);
+        return null;
+    }
+
+    /// <summary>La respuesta del equipo que trae el mensaje, entre paréntesis, o "" si no trae.</summary>
+    private static string DeviceDetail(string message) =>
+        System.Text.RegularExpressions.Regex.Match(message, @"\(([^()]*)\)\s*$") is { Success: true } m
+            ? $" ({m.Groups[1].Value})" : "";
+
+    /// <summary>
+    /// Con la foto ya arreglada por el servidor (JPEG normal, derecha, de
+    /// tamaño y peso razonables) lo que queda es la foto en sí. Antes de eso,
+    /// el "no reconoce una cara" del DS-K1T321MFWX era casi siempre el FORMATO:
+    /// un JPEG progresivo, como los que entrega WhatsApp, lo rechaza así
+    /// aunque la cara sea perfecta (<c>SubpicAnalysisModelingError · saveFacePic</c>).
     /// </summary>
     private static string FaceQualityMessage(string name) =>
         $"El equipo no pudo reconocer una cara en la foto de {name}. " +
-        "Suele ser porque la foto es chica: use una de al menos 300 px de lado. " +
-        "Además tiene que ser de frente, con la cara despejada y bien iluminada, " +
+        "Tiene que ser de frente, con la cara despejada y bien iluminada, " +
         "sin lentes oscuros ni gorro, y ocupando buena parte de la imagen.";
 
     /// <summary>
@@ -1411,6 +2060,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     private static async Task DeleteFaceAsync(HikvisionIsapiClient client, string employeeNo, CancellationToken ct)
     {
+        employeeNo = RequireEmployeeNo(employeeNo);
         string body = JsonSerializer.Serialize(new
         {
             FPID = new[] { new { value = employeeNo } },
@@ -1488,6 +2138,13 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     private static async Task ApplyFingerprintsAsync(HikvisionIsapiClient client, AccessPersonPlan plan,
         CancellationToken ct)
     {
+        // Un equipo que declara que no maneja huellas (isSupportFingerPrintCfg
+        // en false) no puede tener ninguna que borrar: no se le pide nada.
+        if (plan.Fingerprints.Count == 0 && CachedProfile(client)?.Fingerprints == false) return;
+
+        // Si el equipo lo declara, FingerPrint/SetUp: borra y escribe en el acto.
+        if (CachedProfile(client)?.FingerprintSetUp == true && await SetUpFingerprintsAsync(client, plan, ct)) return;
+
         // Los lectores se averiguan primero porque el borrado también los
         // necesita: hay firmware que no borra si no se le dice de dónde.
         int[] readers = await CardReadersAsync(client, plan.Doors.Count, ct);
@@ -1516,9 +2173,313 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             // Si el equipo tuvo que bajar a menos lectores, las huellas que
             // siguen ya van con los que aceptó.
             readers = await DownloadFingerprintAsync(client, plan.EmployeeNo, readers, plan.Fingerprints[i], ct);
+            // Y se pregunta cómo le fue: el OK de arriba solo dice que el
+            // equipo recibió el pedido.
+            await CheckFingerprintProgressAsync(client, plan.Fingerprints[i], ct);
         }
 
         await VerifyFingerprintsAsync(client, plan, ct);
+    }
+
+    /// <summary>
+    /// Cómo le fue a la huella recién bajada, lector por lector.
+    ///
+    /// El OK de <c>FingerPrintDownload</c> solo dice que el equipo recibió el
+    /// pedido. El resultado de verdad lo deja en <c>FingerPrintProgress</c>:
+    /// <c>totalStatus</c> 1 cuando terminó, y un <c>cardReaderRecvStatus</c> por
+    /// lector (1 = guardada). Medido contra el DS-K1T323MBWX-QRE1 V4.23.41: a
+    /// cada huella contestaba OK y ahí decía <c>{"id": 2, "cardReaderRecvStatus": 8}</c>
+    /// —ese lector no tiene módulo de huella—, mientras el VMS la daba por
+    /// escrita y recién la comprobación posterior la echaba de menos, sin poder
+    /// decir por qué.
+    ///
+    /// Con que UN lector la haya guardado alcanza. Si todos dicen que no tienen
+    /// módulo, el equipo no puede llevar huellas y se lanza
+    /// <see cref="NoFingerprintReaderException"/>. Cualquier otro rechazo se
+    /// traduce a palabras. Si el equipo no conoce la ruta o no termina a tiempo
+    /// no se inventa un veredicto: queda la comprobación de después.
+    /// </summary>
+    private static async Task CheckFingerprintProgressAsync(HikvisionIsapiClient client, AccessFingerprintData finger,
+        CancellationToken ct)
+    {
+        if (await ReadFingerprintProgressAsync(client, ct) is { } statuses)
+            EvaluateFingerprintStatuses(statuses, finger, "FingerPrintProgress");
+    }
+
+    /// <summary>
+    /// Lo que dejó <c>FingerPrintProgress</c> tras la última bajada, lector por
+    /// lector; null si el equipo no lo dice (o no termina a tiempo).
+    /// </summary>
+    private static async Task<List<(int Reader, int Status, string? Message)>?> ReadFingerprintProgressAsync(
+        HikvisionIsapiClient client, CancellationToken ct)
+    {
+        List<(int Reader, int Status, string? Message)>? statuses = null;
+        for (int attempt = 0; attempt < ProgressAttempts && statuses is null; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(TimeSpan.FromMilliseconds(ProgressDelayMs), ct);
+
+            string? response;
+            try
+            {
+                response = await client.RequestAsync(HttpMethod.Get,
+                    "/ISAPI/AccessControl/FingerPrintProgress?format=json", ct: ct);
+            }
+            catch (DriverException ex) when (IsBusy(ex.Message)) { continue; }
+            catch (DriverException) { return null; }   // firmware que no la tiene
+            if (response is null) return null;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(response);
+                if (HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "FingerPrintStatus") is not { } status) return null;
+                if (HikvisionAlarmPanelDriver.GetInt(status, "totalStatus") is 0) continue;   // todavía aplicando
+                statuses = ReaderStatuses(status);
+                if (statuses is null) return null;
+            }
+            catch (JsonException) { return null; }
+        }
+        return statuses;
+    }
+
+    /// <summary><c>StatusList</c> de un <c>FingerPrintStatus</c>; null si no viene o viene vacía.</summary>
+    private static List<(int Reader, int Status, string? Message)>? ReaderStatuses(JsonElement status)
+    {
+        if (!status.TryGetProperty("StatusList", out var list) || list.ValueKind != JsonValueKind.Array) return null;
+        var found = new List<(int, int, string?)>();
+        foreach (var item in list.EnumerateArray())
+            if (HikvisionAlarmPanelDriver.GetInt(item, "cardReaderRecvStatus") is { } recv)
+                found.Add((HikvisionAlarmPanelDriver.GetInt(item, "id") ?? 0, recv,
+                    HikvisionAlarmPanelDriver.GetString(item, "errorMsg")));
+        return found.Count == 0 ? null : found;
+    }
+
+    /// <summary>
+    /// Veredicto sobre una huella a partir de lo que dijo cada lector. Con que
+    /// UN lector la haya guardado alcanza; si todos dicen que no tienen módulo,
+    /// el equipo no puede llevar huellas; cualquier otro rechazo, en palabras.
+    /// </summary>
+    private static void EvaluateFingerprintStatuses(List<(int Reader, int Status, string? Message)> statuses,
+        AccessFingerprintData finger, string source)
+    {
+        if (statuses.Any(s => s.Status == ReaderStored)) return;
+
+        string raw = string.Join(" · ", statuses.Select(s =>
+            $"lector {s.Reader}: cardReaderRecvStatus {s.Status}" +
+            (string.IsNullOrWhiteSpace(s.Message) ? "" : $" {s.Message}")));
+
+        if (statuses.All(s => s.Status == ReaderWithoutModule))
+            throw new NoFingerprintReaderException(
+                "Este equipo no tiene lector de huellas: no trae sensor de huella y no hay un lector externo " +
+                $"de huella conectado. ({source} · {raw})");
+
+        string reasons = string.Join("; ", statuses
+            .Where(s => s.Status != ReaderWithoutModule)
+            .Select(s => ReaderStatusText(s.Reader, s.Status, s.Message))
+            .Distinct());
+        throw new DriverException(
+            $"El equipo no guardó la huella de {FingerName(finger.Number)}: {reasons}. ({source} · {raw})");
+    }
+
+    /// <summary>Consultas a <c>FingerPrintProgress</c> antes de dejarle el veredicto a la comprobación.</summary>
+    private const int ProgressAttempts = 6;
+
+    /// <summary>Espera entre dos consultas mientras el equipo sigue aplicando (<c>totalStatus</c> 0).</summary>
+    private const int ProgressDelayMs = 500;
+
+    /// <summary><c>cardReaderRecvStatus</c>: el lector guardó la huella.</summary>
+    private const int ReaderStored = 1;
+
+    /// <summary><c>cardReaderRecvStatus</c>: ese lector no tiene módulo de huella ("no necesita configurarse").</summary>
+    private const int ReaderWithoutModule = 8;
+
+    /// <summary>
+    /// <c>cardReaderRecvStatus</c> en palabras (los mismos códigos que
+    /// <c>NET_DVR_FINGER_PRINT_STATUS</c> del SDK; el equipo declara 0..8).
+    /// </summary>
+    private static string ReaderStatusText(int reader, int status, string? message = null) => status switch
+    {
+        0 => $"el lector {reader} no pudo guardarla",
+        2 => $"el módulo de huella del lector {reader} está desconectado",
+        3 => "la plantilla es de mala calidad: vuelva a capturar ese dedo",
+        4 => "la memoria de huellas del equipo está llena",
+        // El equipo detecta el MISMO dedo ya registrado y en errorMsg dice a
+        // quién (medido: dos capturas del mismo dedo como dedos distintos).
+        5 => string.IsNullOrWhiteSpace(message)
+            ? "esa huella ya está registrada en el equipo, probablemente a otra persona"
+            : $"esa huella ya está registrada en el equipo a la persona {message.Trim()} " +
+              "(si es la misma persona, se capturó el mismo dedo dos veces)",
+        6 => "ese número de dedo ya está ocupado en el equipo",
+        7 => "el equipo no acepta ese número de dedo",
+        10 => $"el módulo de huella del lector {reader} es demasiado antiguo para esta escritura",
+        _ => $"el lector {reader} la rechazó (código {status})",
+    };
+
+    private const string FingerprintSetUpPath = "/ISAPI/AccessControl/FingerPrint/SetUp?format=json";
+
+    /// <summary>
+    /// Huellas con <c>POST FingerPrint/SetUp</c> (el equipo declara
+    /// <c>isSupportSetUp</c> en sus capacidades de huella). Medido contra el
+    /// DS-K1T321MFWX V3.9.20, todo es INMEDIATO, a diferencia de
+    /// <c>FingerPrintDownload</c>:
+    /// <list type="bullet">
+    /// <item>El borrado de todas las huellas de la persona contesta
+    /// <c>status: success</c> y una escritura pegada a él no se pierde (con el
+    /// borrado diferido de antes, el primer dedo se lo llevaba puesto).</item>
+    /// <item>Cada escritura contesta el resultado de cada lector en el acto
+    /// (<c>cardReaderRecvStatus</c>): no hace falta sondear
+    /// <c>FingerPrintProgress</c> ni esperar 4 s entre dedos.</item>
+    /// </list>
+    /// Antes de borrar se pregunta cuántas tiene (<c>numOfFP</c> de la búsqueda
+    /// de personas): la mayoría no tiene ninguna. Devuelve false si el equipo no
+    /// atiende la ruta, y se sigue por el camino de siempre.
+    ///
+    /// El DS-K1T804AMF V1.4.0 declara <c>isSupportSetUp</c> y ESCRIBE bien por
+    /// acá, pero rechaza cualquier forma de borrado con <c>MessageParametersLack</c>
+    /// (probadas las cuatro de la guía). A ese equipo se lo borra por el camino de
+    /// siempre —con su espera— y se lo anota para no volver a probar.
+    /// </summary>
+    private static async Task<bool> SetUpFingerprintsAsync(HikvisionIsapiClient client, AccessPersonPlan plan,
+        CancellationToken ct)
+    {
+        string employeeNo = RequireEmployeeNo(plan.EmployeeNo);
+        int[] readers = await CardReadersAsync(client, plan.Doors.Count, ct);
+
+        if (await StoredFingerprintCountAsync(client, employeeNo, ct) is not 0)
+        {
+            bool deleted = false;
+            if (!SetUpDeleteRefused.ContainsKey(client.BaseUrl))
+            {
+                string deleteBody = JsonSerializer.Serialize(new
+                {
+                    FingerPrintCfg = new { employeeNo, deleteFingerPrint = true },
+                });
+                try
+                {
+                    string response = await WriteAsync(client, HttpMethod.Post, FingerprintSetUpPath, deleteBody,
+                        "el borrado de las huellas anteriores", ct);
+                    if (SetUpStatus(response) is "failed")
+                        throw new DriverException(
+                            "No se pudieron borrar las huellas anteriores de la persona en el equipo, así que no se " +
+                            "escribieron las nuevas: una huella vieja podría seguir abriendo la puerta.");
+                    deleted = true;
+                }
+                catch (DriverException ex) when (UnknownRoute(ex.Message)) { return false; }
+                catch (DriverException ex) when (IsRejectedCondition(ex.Message))
+                {
+                    SetUpDeleteRefused[client.BaseUrl] = DateTime.UtcNow;
+                }
+            }
+            if (!deleted)
+            {
+                await DeleteFingerprintsAsync(client, employeeNo, readers, ct);
+                if (plan.Fingerprints.Count > 0) await WaitForDeleteAsync(client, employeeNo, ct);
+            }
+        }
+        if (plan.Fingerprints.Count == 0) return true;
+
+        foreach (var finger in plan.Fingerprints)
+        {
+            while (true)
+            {
+                string body = JsonSerializer.Serialize(new
+                {
+                    FingerPrintCfg = new
+                    {
+                        employeeNo,
+                        enableCardReader = readers,
+                        fingerPrintID = finger.Number,
+                        fingerType = "normalFP",
+                        fingerData = finger.Template,
+                    },
+                });
+                string response;
+                try
+                {
+                    response = await WriteAsync(client, HttpMethod.Post, FingerprintSetUpPath, body,
+                        $"grabar la huella de {FingerName(finger.Number)}", ct);
+                }
+                catch (DriverException ex) when (RejectsReaders(ex.Message) && FewerReaders(readers) is { } fewer)
+                {
+                    readers = fewer;
+                    AcceptedReaders[client.BaseUrl] = readers;
+                    continue;
+                }
+                catch (DriverException ex) when (UnknownRoute(ex.Message)) { return false; }
+
+                if (SetUpStatuses(response) is { } statuses) EvaluateFingerprintStatuses(statuses, finger, "FingerPrint/SetUp");
+                else await CheckFingerprintProgressAsync(client, finger, ct);   // el equipo no lo dijo en la respuesta
+                break;
+            }
+        }
+
+        // Comprobación: si la búsqueda informa cuántas tiene y cuadran, listo;
+        // si no, la de siempre, dedo por dedo.
+        if (await StoredFingerprintCountAsync(client, employeeNo, ct) is int stored && stored >= plan.Fingerprints.Count)
+            return true;
+        await VerifyFingerprintsAsync(client, plan, ct);
+        return true;
+    }
+
+    /// <summary>Equipos que escriben huellas por SetUp pero no aceptan borrarlas por ahí.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> SetUpDeleteRefused = new();
+
+    /// <summary><c>FingerPrintStatus.status</c> de la respuesta de SetUp ("success"/"failed"), o null.</summary>
+    private static string? SetUpStatus(string response)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(response);
+            return HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "FingerPrintStatus") is { } status
+                ? HikvisionAlarmPanelDriver.GetString(status, "status")
+                : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>Lo que dijo cada lector en la respuesta de SetUp; null si no lo dijo.</summary>
+    private static List<(int Reader, int Status, string? Message)>? SetUpStatuses(string response)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(response);
+            return HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "FingerPrintStatus") is { } status
+                ? ReaderStatuses(status)
+                : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// Cuántas huellas tiene la persona según la búsqueda de personas
+    /// (<c>numOfFP</c>); null si el equipo no lo informa (el DS-K1T804AMF V1.4.0
+    /// no lo trae, y <c>FingerPrint/Count</c> no existe en el DS-K1T321MFWX).
+    /// </summary>
+    private static async Task<int?> StoredFingerprintCountAsync(HikvisionIsapiClient client, string employeeNo,
+        CancellationToken ct)
+    {
+        string body = JsonSerializer.Serialize(new
+        {
+            UserInfoSearchCond = new
+            {
+                searchID = SearchId(),
+                searchResultPosition = 0,
+                maxResults = 1,
+                EmployeeNoList = new[] { new { employeeNo } },
+            },
+        });
+        try
+        {
+            string? json = await client.RequestAsync(HttpMethod.Post, "/ISAPI/AccessControl/UserInfo/Search?format=json", body, ct: ct);
+            if (json is null) return null;
+            using var doc = JsonDocument.Parse(json);
+            if (HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "UserInfoSearch") is not { } search ||
+                !search.TryGetProperty("UserInfo", out var list) || list.ValueKind != JsonValueKind.Array ||
+                list.GetArrayLength() == 0)
+                return null;
+            return HikvisionAlarmPanelDriver.GetInt(list[0], "numOfFP");
+        }
+        catch (DriverException) { return null; }
+        catch (JsonException) { return null; }
     }
 
     /// <summary>
@@ -1781,6 +2742,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     private static async Task DeleteFingerprintsAsync(HikvisionIsapiClient client, string employeeNo,
         int[] readers, CancellationToken ct)
     {
+        employeeNo = RequireEmployeeNo(employeeNo);
         // Dos formas del mismo pedido. La DETALLADA nombra los lectores y los
         // diez dedos: es la que exige el DS-K1T804AMF V1.4.0 —su esquema los
         // declara y sin ellos contesta un `badParameters` que no dice cuál
@@ -1984,7 +2946,8 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         // El esquema de huellas del propio equipo trae enableCardReader con su
         // RANGO, y el rango entero es la respuesta: no siempre empieza en 1.
         // En el DS-K1T323MBWX-QRE1 (V4.23.41) el lector 1 es el de rostro y
-        // tarjeta y el de huella es el 2: declara {"@min": 2, "@max": 2} y
+        // tarjeta y las huellas van al 2 —la entrada de lector externo, porque
+        // el terminal no trae sensor—: declara {"@min": 2, "@max": 2} y
         // rechaza cualquier lista que incluya el 1 ("Exceeding the parameter
         // range limit … enableCardReader"). Tomar solo el @max como cantidad
         // —1..@max— fue lo que dejó a sus personas sin huellas.
@@ -2071,11 +3034,19 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         {
             using var doc = JsonDocument.Parse(response);
             var root = doc.RootElement;
-            if (HikvisionAlarmPanelDriver.GetInt(root, "statusCode") is { } code && code != 1)
-                return HikvisionAlarmPanelDriver.GetString(root, "statusString")
-                       ?? HikvisionAlarmPanelDriver.GetString(root, "subStatusCode")
-                       ?? $"código {code}";
-            return null;
+            if (HikvisionAlarmPanelDriver.GetInt(root, "statusCode") is not { } code || code == 1) return null;
+            // Las tres piezas de ResponseStatus, como las arma el transporte para
+            // un error HTTP: statusString dice la familia ("Device Busy" es todo
+            // statusCode 2, lo transitorio), subStatusCode el motivo
+            // ("notExist", "badJsonContent") y errorMsg el campo. Quedarse solo
+            // con la primera tapaba el motivo y los chequeos que lo buscan.
+            string detail = string.Join(" · ", new[]
+            {
+                HikvisionAlarmPanelDriver.GetString(root, "statusString"),
+                HikvisionAlarmPanelDriver.GetString(root, "subStatusCode"),
+                HikvisionAlarmPanelDriver.GetString(root, "errorMsg"),
+            }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            return detail.Length > 0 ? detail : $"código {code}";
         }
         catch (JsonException) { return null; }   // XML o texto: el transporte ya validó el HTTP
     }
@@ -2115,12 +3086,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     private static async Task ApplyCardsAsync(HikvisionIsapiClient client, AccessPersonPlan plan, CancellationToken ct)
     {
-        string deleteBody = JsonSerializer.Serialize(new
-        {
-            CardInfoDelCond = new { EmployeeNoList = new[] { new { employeeNo = plan.EmployeeNo } } },
-        });
-        try { _ = await client.RequestAsync(HttpMethod.Put, "/ISAPI/AccessControl/CardInfo/Delete?format=json", deleteBody, ct: ct); }
-        catch (DriverException) { /* no tenía tarjetas, o el firmware no expone la ruta */ }
+        await DeleteCardsAsync(client, plan.EmployeeNo, ct);
 
         foreach (string card in plan.Cards)
         {
@@ -2131,6 +3097,68 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             _ = await WriteAsync(client, HttpMethod.Post, "/ISAPI/AccessControl/CardInfo/Record?format=json",
                 body, $"grabar la tarjeta {card}", ct);
         }
+    }
+
+    /// <summary>
+    /// Borra TODAS las tarjetas de una persona en el equipo y se asegura de que
+    /// no quede ninguna.
+    ///
+    /// Antes un fallo acá se pasaba por alto ("no tenía tarjetas"), y si el
+    /// equipo estaba ocupado la tarjeta que se le había quitado a la persona
+    /// SEGUÍA abriendo la puerta mientras el VMS la daba por sincronizada. Ahora,
+    /// si el borrado no sale limpio, se le pregunta al equipo cuántas tarjetas
+    /// le quedan a la persona (<c>CardInfo/Count?employeeNo=</c>): solo un cero
+    /// afirmado por el equipo permite seguir.
+    /// </summary>
+    private static async Task DeleteCardsAsync(HikvisionIsapiClient client, string employeeNo, CancellationToken ct)
+    {
+        employeeNo = RequireEmployeeNo(employeeNo);
+        string deleteBody = JsonSerializer.Serialize(new
+        {
+            CardInfoDelCond = new { EmployeeNoList = new[] { new { employeeNo } } },
+        });
+
+        string? problem = null;
+        for (int attempt = 0; attempt < BusyRetries; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(TimeSpan.FromMilliseconds(BusyDelayMs * attempt), ct);
+            try
+            {
+                string? response = await client.RequestAsync(HttpMethod.Put, "/ISAPI/AccessControl/CardInfo/Delete?format=json",
+                    deleteBody, ct: ct, timeout: HikvisionIsapiClient.DeleteTimeout);
+                // 404: el equipo no maneja tarjetas, así que tampoco puede tener una.
+                if (response is null) return;
+                problem = FailureOf(response);
+                if (problem is null || IsHarmlessDeleteError(problem)) return;
+            }
+            catch (DriverException ex)
+            {
+                problem = ex.Message;
+                if (IsHarmlessDeleteError(problem)) return;
+            }
+            if (!IsBusy(problem)) break;
+        }
+
+        if (await CardCountAsync(client, employeeNo, ct) == 0) return;
+        throw new DriverException(
+            "No se pudieron borrar las tarjetas anteriores de la persona en el equipo, así que no se escribieron " +
+            $"las nuevas: una tarjeta quitada podría seguir abriendo la puerta. Detalle del equipo: {problem}");
+    }
+
+    /// <summary>Tarjetas que el equipo dice tener de una persona; null si no sabe contestar.</summary>
+    private static async Task<int?> CardCountAsync(HikvisionIsapiClient client, string employeeNo, CancellationToken ct)
+    {
+        try
+        {
+            string? json = await client.RequestAsync(HttpMethod.Get,
+                $"/ISAPI/AccessControl/CardInfo/Count?format=json&employeeNo={Uri.EscapeDataString(employeeNo)}", ct: ct);
+            if (json is null) return null;
+            using var doc = JsonDocument.Parse(json);
+            var count = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "CardInfoCount") ?? doc.RootElement;
+            return HikvisionAlarmPanelDriver.GetInt(count, "cardNumber");
+        }
+        catch (DriverException) { return null; }
+        catch (JsonException) { return null; }
     }
 
     /// <summary>
@@ -2157,33 +3185,116 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     public async Task RemovePersonAsync(AccessConnectionInfo info, string employeeNo, CancellationToken ct = default)
     {
+        employeeNo = RequireEmployeeNo(employeeNo);
         var client = Client(info);
+        var profile = await ProfileOfAsync(info, client, ct);
         var list = new { EmployeeNoList = new[] { new { employeeNo } } };
 
-        try
+        // Si el equipo lo declara, la baja completa va en UNA operación: la
+        // persona con sus tarjetas, huellas, rostro y permisos.
+        if (profile?.CanDeleteUserDetail == true && await DeleteUserDetailAsync(client, employeeNo, ct))
         {
-            _ = await client.RequestAsync(HttpMethod.Put, "/ISAPI/AccessControl/CardInfo/Delete?format=json",
-                JsonSerializer.Serialize(new { CardInfoDelCond = list }), ct: ct);
+            // La guía incluye el rostro en ese borrado; se repite el del rostro
+            // igual (no cuesta nada y no tener ninguno no es un fallo).
+            try { await DeleteFaceAsync(client, employeeNo, ct); }
+            catch (DriverException) { /* ya no estaba */ }
+            return;
         }
-        catch (DriverException) { /* si no tenía tarjetas, tampoco hay que borrarlas */ }
 
-        // Las huellas se borran aparte: hay firmware que las deja vivas al
-        // borrar la persona, y una huella huérfana sigue abriendo la puerta.
-        // Acá sí se tolera el fallo: enseguida se borra la persona entera, que
-        // es lo que de verdad le quita el acceso.
-        try { await DeleteFingerprintsAsync(client, employeeNo, await CardReadersAsync(client, 1, ct), ct); }
-        catch (DriverException) { /* no tenía huellas, o el firmware no sabe borrarlas */ }
+        // Si no, por partes. La guía es clara: borrar la persona
+        // (UserInfo/Delete) NO borra sus tarjetas, huellas ni rostro, y una
+        // credencial huérfana sigue abriendo la puerta. Por eso las tarjetas
+        // se borran con comprobación y un fallo corta la baja.
+        await DeleteCardsAsync(client, employeeNo, ct);
+
+        // Las huellas, igual de estricto cuando el equipo declara que las
+        // maneja. Si no lo declara se tolera el fallo, como antes: un equipo sin
+        // huellas no puede tener una, y no se le puede trabar la baja por eso.
+        if (profile?.Fingerprints == true)
+            await DeleteFingerprintsAsync(client, employeeNo, await CardReadersAsync(client, 1, ct), ct);
+        else if (profile?.Fingerprints is null)
+        {
+            try { await DeleteFingerprintsAsync(client, employeeNo, await CardReadersAsync(client, 1, ct), ct); }
+            catch (DriverException) { /* no tenía huellas, o el firmware no sabe borrarlas */ }
+        }
 
         // El rostro va por su propia biblioteca: borrar la persona no lo saca.
         try { await DeleteFaceAsync(client, employeeNo, ct); }
         catch (DriverException) { /* no tenía rostro, o el equipo no tiene cámara */ }
 
         string? response = await client.RequestAsync(HttpMethod.Put, "/ISAPI/AccessControl/UserInfo/Delete?format=json",
-            JsonSerializer.Serialize(new { UserInfoDelCond = list }), ct: ct, allowNotFound: false);
+            JsonSerializer.Serialize(new { UserInfoDelCond = list }), ct: ct, allowNotFound: false,
+            timeout: HikvisionIsapiClient.DeleteTimeout);
         // Que la persona no estuviera no es un error: el objetivo era que no esté.
         if (response is not null && FailureOf(response) is { } error &&
             !error.Contains("notExist", StringComparison.OrdinalIgnoreCase) &&
             !error.Contains("No Match", StringComparison.OrdinalIgnoreCase))
             throw new DriverException($"El equipo rechazó el borrado de la persona: {error}");
     }
+
+    /// <summary>
+    /// Baja completa con <c>PUT UserInfoDetail/Delete</c> (modo
+    /// <c>byEmployeeNo</c>). La ruta solo ARRANCA el borrado: el resultado se
+    /// lee de <c>UserInfoDetail/DeleteProcess</c> hasta que diga
+    /// <c>success</c> o <c>failed</c>, como pide la guía.
+    ///
+    /// Devuelve false si el equipo no tomó el pedido (para seguir por partes),
+    /// y lanza si lo tomó y falló o no terminó a tiempo: ahí no se sabe qué
+    /// quedó, y lo honesto es no dar la baja por hecha.
+    /// </summary>
+    private static async Task<bool> DeleteUserDetailAsync(HikvisionIsapiClient client, string employeeNo,
+        CancellationToken ct)
+    {
+        string body = JsonSerializer.Serialize(new
+        {
+            UserInfoDetail = new
+            {
+                mode = "byEmployeeNo",
+                EmployeeNoList = new[] { new { employeeNo = RequireEmployeeNo(employeeNo) } },
+            },
+        });
+        try
+        {
+            _ = await WriteAsync(client, HttpMethod.Put,
+                "/ISAPI/AccessControl/UserInfoDetail/Delete?format=json", body, "el borrado de la persona", ct);
+        }
+        catch (DriverException)
+        {
+            // Lo declaró pero no lo tomó (ocupado, rechazo, ruta que no
+            // atiende): se borra por partes, que comprueba cada credencial.
+            return false;
+        }
+
+        var until = DateTime.UtcNow + UserDetailDeleteWait;
+        string? status = null;
+        while (DateTime.UtcNow < until)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(UserDetailPollMs), ct);
+            try
+            {
+                string? json = await client.RequestAsync(HttpMethod.Get,
+                    "/ISAPI/AccessControl/UserInfoDetail/DeleteProcess?format=json", ct: ct);
+                if (json is null) break;
+                using var doc = JsonDocument.Parse(json);
+                var process = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "UserInfoDetailDeleteProcess")
+                              ?? doc.RootElement;
+                status = HikvisionAlarmPanelDriver.GetString(process, "status");
+            }
+            catch (DriverException ex) when (IsBusy(ex.Message)) { continue; }
+            catch (JsonException) { break; }
+
+            if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+                throw new DriverException("El equipo informó que no pudo completar el borrado de la persona " +
+                                          "(con sus tarjetas, huellas y rostro). Vuelva a intentarlo.");
+        }
+        throw new DriverException(
+            "El equipo empezó a borrar a la persona pero no confirmó que terminara " +
+            $"(último estado: {status ?? "sin respuesta"}). Vuelva a intentarlo en un momento.");
+    }
+
+    /// <summary>Cuánto se espera a que el equipo confirme una baja completa (la guía sugiere 60 s para borrados).</summary>
+    private static readonly TimeSpan UserDetailDeleteWait = TimeSpan.FromSeconds(60);
+
+    private const int UserDetailPollMs = 1000;
 }

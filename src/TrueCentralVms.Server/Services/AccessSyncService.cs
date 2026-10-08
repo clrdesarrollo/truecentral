@@ -507,6 +507,29 @@ public sealed class AccessSyncService(
                 row.AppliedHash = hash;
                 row.SyncedAt = DateTime.UtcNow;
             }
+            catch (NoFingerprintReaderException ex)
+            {
+                // El equipo no tiene dónde guardar huellas y lo dijo al
+                // recibirlas. El driver solo lo lanza si todo lo demás quedó
+                // escrito, así que la persona está al día con lo que ese equipo
+                // usa. Se anota en el equipo para no volver a mandárselas: la
+                // próxima pasada calcula el plan sin huellas, que es justamente
+                // el que queda guardado como aplicado.
+                if (device.SupportsFingerprint)
+                {
+                    device.SupportsFingerprint = false;
+                    device.UpdatedAt = DateTime.UtcNow;
+                    await audit.LogSystemAsync("access", "device-fingerprint-unavailable",
+                        targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
+                        detail: $"El equipo '{device.Name}' ({device.Model ?? "modelo desconocido"}) informó que no tiene " +
+                                $"lector de huellas: {ex.Message} Desde ahora no se le mandan huellas; las personas " +
+                                "entran ahí con sus demás credenciales.");
+                }
+                row.State = AccessSyncState.Synced;
+                row.Error = null;
+                row.AppliedHash = HashOf(JsonSerializer.Serialize(plan.Plan with { Fingerprints = [] }));
+                row.SyncedAt = DateTime.UtcNow;
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 row.State = AccessSyncState.Failed;
@@ -518,6 +541,10 @@ public sealed class AccessSyncService(
 
         Summarize(person);
     }
+
+    /// <summary>La foto como la aceptan los terminales; fuera de Windows (sin GDI+) va tal cual.</summary>
+    private static AccessFaceData ForDevices(AccessFaceData face) =>
+        OperatingSystem.IsWindows() ? AccessFacePhotoNormalizer.Normalize(face) : face;
 
     /// <summary>El estado de la persona es el peor de sus equipos: lo que falta en uno le falta a ella.</summary>
     private static void Summarize(AccessPerson person)
@@ -598,8 +625,11 @@ public sealed class AccessSyncService(
             .ToList();
         // La foto también se descifra una sola vez: pesa bastante más que una
         // plantilla y va a los equipos con cámara tal cual está.
+        // Y se arregla para los equipos: el DS-K1T321MFWX no lee un JPEG
+        // progresivo (el de WhatsApp) ni acepta más de ~200 KB, y lo rechazaba
+        // como "no hay una cara" (ver AccessFacePhotoNormalizer).
         var face = person.Face is { } stored
-            ? new AccessFaceData(credentials.UnprotectBytes(stored.ImageCiphertext), stored.ContentType)
+            ? ForDevices(new AccessFaceData(credentials.UnprotectBytes(stored.ImageCiphertext), stored.ContentType))
             : null;
 
         foreach (var (deviceId, doorRights) in rights)
@@ -607,8 +637,11 @@ public sealed class AccessSyncService(
             // A un equipo que no sabe de biometría no se le mandan huellas: se
             // le escribiría algo que va a rechazar y quedaría la persona entera
             // como fallida por una credencial que ese equipo ni usa.
+            // Y tampoco a uno que sabe de huellas pero no tiene lector: el
+            // DS-K1T323MBWX-QRE1 acepta la escritura, contesta OK y las tira.
             var device = await db.AccessDevices.FindAsync([deviceId], ct);
-            bool biometric = device is not null && access.SupportsFingerprintSync(device.DriverKey);
+            bool biometric = device is not null && device.SupportsFingerprint &&
+                             access.SupportsFingerprintSync(device.DriverKey);
             // Lo mismo con el rostro, que además es cosa de otro terminal: hay
             // equipos con lector de huella y sin cámara, y al revés.
             bool camera = device is not null && device.SupportsFace && access.SupportsFaceSync(device.DriverKey);
@@ -647,6 +680,7 @@ public sealed class AccessSyncService(
         person.Levels.Select(x => x.AccessLevel?.Name ?? "").Where(n => n.Length > 0).OrderBy(n => n).ToList(),
         person.SyncState, person.SyncError, person.LastSyncedAt,
         person.Devices.Select(d => new AccessPersonDeviceDto(
-            d.AccessDeviceId, d.AccessDevice?.Name ?? $"Equipo {d.AccessDeviceId}", d.State, d.Error, d.SyncedAt)).ToList(),
+            d.AccessDeviceId, d.AccessDevice?.Name ?? $"Equipo {d.AccessDeviceId}", d.State, d.Error, d.SyncedAt,
+            d.AccessDevice?.SupportsFingerprint ?? true, d.AccessDevice?.SupportsFace ?? true)).ToList(),
         person.CreatedAt, person.UpdatedAt);
 }

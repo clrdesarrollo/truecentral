@@ -220,6 +220,12 @@
                 <TextBlock Style="{StaticResource SettingHint}"
                            Text="Apagado, el cliente pide siempre usuario y contraseña. Es lo recomendado en puestos compartidos: con el auto-login encendido, cualquiera que encienda el equipo entra con la cuenta recordada."/>
                 <TextBlock x:Name="AutoLoginAccountText" Style="{StaticResource SettingHint}"/>
+
+                <TextBlock Text="Ventana de alarma" Style="{StaticResource FieldLabel}" Margin="0,18,0,4"/>
+                <CheckBox x:Name="AlertPlacementCheck" Style="{StaticResource DarkCheckBox}" Margin="0,4,0,0"
+                          Content="Abrir la ventana de alarma donde quedó la última vez"/>
+                <TextBlock Style="{StaticResource SettingHint}"
+                           Text="Apagado, la alarma aparece centrada sobre la ventana principal. Encendido, se abre en el monitor, la posición y el tamaño en que se cerró la anterior: en puestos con dos pantallas basta con arrastrarla una vez a la de trabajo. Si ese monitor ya no está conectado, vuelve a aparecer centrada."/>
             </StackPanel>
 
             <!-- ============ LICENCIA (solo lectura; se administra en el panel web) ============ -->

@@ -10,7 +10,7 @@
 //                     asistencia y resumen por puerta).
 //
 // Se carga ANTES que app.js, junto a access-catalog.js (que declara los
-// temporizadores, ACCESS_EVENT_KINDS, ACCESS_CREDENTIALS y accessDoorModal).
+// temporizadores, ACCESS_EVENT_KINDS y ACCESS_CREDENTIALS).
 "use strict";
 
 // El hub (SignalR) manda los enums como número; la API REST, como texto.
@@ -225,7 +225,6 @@ function accessDoorCard(door, isAdmin) {
           title="Vuelve al modo normal">${accessIcon("shield")}Normal</button>
         ${isAdmin ? `<button class="btn danger btn-door" ${op} data-cmd="RemainLocked" ${canCommand ? "" : "disabled"}
           title="Bloquea la puerta: no entra nadie">${accessIcon("lock")}Bloquear</button>` : ""}
-        ${isAdmin ? `<button class="btn ghost btn-door-edit btn-icon" title="Renombrar o pausar esta puerta" aria-label="Editar puerta">${accessIcon("pencil")}</button>` : ""}
       </div>
     </div>`;
 }
@@ -327,8 +326,9 @@ async function renderAccessMonitor() {
     if (!button) return;
     const door = accessMonitor.doors.find((d) => d.id === Number(button.closest(".access-door").dataset.id));
     if (!door) return;
-    if (button.classList.contains("btn-door-edit")) accessDoorModal(door);
-    else if (button.classList.contains("btn-door")) accessSingleCommand(door, button, isAdmin);
+    // Renombrar y pausar una puerta no es del monitoreo: el nombre se cambia
+    // en su ficha de Recursos y la pausa en la página de su equipo.
+    if (button.classList.contains("btn-door")) accessSingleCommand(door, button, isAdmin);
   });
 
   await refreshAccessLive(true);

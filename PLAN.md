@@ -1010,6 +1010,66 @@ ubicaciones) la interfaz ofrecía órdenes que el servidor rechazaba con 403.
   la columna "Credenciales" cuenta también huellas y rostro (antes mostraba "—" a una
   persona con 4 huellas). Solo lectura: no hay acción nueva que auditar.
 
+### El Facial Tablero no tiene lector de huellas — 2026-10-08
+
+Con la 0.5.11 instalada el terminal ya aceptaba las huellas (OK a cada `FingerPrintDownload`)
+pero la comprobación no encontraba ninguna. Preguntándole al equipo (solo lectura): **el
+DS-K1T323MBWX-QRE1 no trae sensor de huella** (sin la "F" del modelo). `CardReaderCfg/1` es
+el propio (`cardReaderFunction: ["face", "card"]`, descripción = el modelo) y el lector 2 es
+la **entrada de lector externo, vacía** (`cardReaderFunction: []`, sin descripción;
+`AcsWorkStatus.cardReaderOnlineStatus: [1]`). Lo que se leyó el 2026-10-07 como "el de
+huella es el 2" era solo que el firmware ubica ahí las huellas que vendrían de un lector
+externo. `GET /ISAPI/AccessControl/FingerPrintProgress` lo decía claro tras cada huella:
+`{"id": 2, "cardReaderRecvStatus": 8}` (8 = ese lector no tiene módulo de huella).
+
+- **Driver**: tras cada huella, `CheckFingerprintProgressAsync` lee `FingerPrintProgress`
+  (espera `totalStatus` 1) y traduce `cardReaderRecvStatus` (0 falló, 2 módulo
+  desconectado, 3 mala calidad, 4 memoria llena, 5 huella ya registrada, 6 dedo ocupado,
+  7 dedo inválido, 8 sin módulo, 10 módulo antiguo). Con un lector que la guardó alcanza;
+  si TODOS dicen 8 lanza `NoFingerprintReaderException` (Core), que `ApplyPersonAsync`
+  deja salir solo si tarjetas y rostro quedaron. Sin la ruta (firmware viejo) queda la
+  comprobación de siempre. En el sondeo, `HasFingerprintReaderAsync`: `SupportsFingerprint`
+  es falso solo si TODOS los lectores de `enableCardReader` son entradas vacías (ante
+  cualquier duda, sí).
+- **Servidor**: no se mandan huellas a un equipo con `SupportsFingerprint` falso (igual que
+  el rostro). Al recibir `NoFingerprintReaderException` lo anota en el equipo, da la fila
+  por `Synced` con el hash del plan sin huellas (el que calcula la pasada siguiente) y lo
+  audita como `access/device-fingerprint-unavailable` (sistema).
+- **Panel**: `AccessPersonDeviceDto` lleva las capacidades del equipo; el detalle dice
+  "Quedó escrita con lo que este equipo usa. No lleva sus huellas porque el equipo no tiene
+  lector de huellas" en vez de "todas sus credenciales".
+- **Probado**: driver real contra cuatro terminales simulados (perfil del DS-K1T323MBWX,
+  con huella, memoria llena y sin `FingerPrintProgress`) y el detalle en el navegador.
+  **Validado con la 0.5.12 instalada**: el Facial Tablero quedó "Al día" sin huellas y el
+  DS-K1T804AMF con todo. Para huellas en ese terminal hace falta un lector de huella externo
+  RS-485 en el lector 2.
+
+### La foto del rostro se arregla antes de mandarla — 2026-10-08
+
+Con las huellas resueltas, el DS-K1T321MFWX (192.168.10.77, V3.9.20) rechazaba el rostro con
+"no pudo reconocer una cara" usando una foto perfecta (de frente, 1200×1600). Probado en el
+equipo con la misma foto en variantes (persona 1000, borrar y grabar):
+
+| Foto | Respuesta |
+|---|---|
+| JPEG **progresivo** (el de WhatsApp), 184 KB | `SubpicAnalysisModelingError · saveFacePic` |
+| JPEG baseline, 214 KB | `badJsonContent · faceURL` (tope ~200 KB) |
+| JPEG baseline, 160 KB, mismo 1200×1600 | OK |
+| JPEG baseline 600×800, 76 KB | OK |
+
+El DS-K1T323MBWX V4.23 sí aceptaba la progresiva: es el firmware viejo. Arreglo:
+`Services\AccessFacePhotoNormalizer` (System.Drawing, solo Windows) lo aplica
+`AccessSyncService` al descifrar la foto, una vez por persona: aplica la orientación EXIF,
+lleva el lado mayor a 1024 px (o agranda a 400 px de lado corto si es menor que 300),
+redibuja sobre blanco y la codifica en JPEG baseline bajando la calidad (90→60) y después el
+tamaño hasta quedar ≤ 180 KB. Si GDI+ no la lee, va tal cual. La foto guardada no cambia.
+Es **determinista** (verificado: mismos bytes en dos pasadas), porque el plan se compara por
+hash; consecuencia esperada: tras instalar, las personas con rostro se reescriben UNA vez.
+El driver ahora deja la respuesta del equipo entre paréntesis en los rechazos de la foto y
+traduce `faceURL` a "pesa más de lo que acepta el equipo"; de paso "de el rostro" → "del
+rostro". Verificado: la foto normalizada (768×1024, 139 KB) entró en el DS-K1T321MFWX real y
+la persona quedó con `numOfFace: 1`; casos de prueba EXIF 6, PNG chico transparente y basura.
+
 ## Hora y mantenimiento de equipos — 2026-10-07
 
 Pedido del usuario a partir del Facial Tablero en zona China: ver y supervisar la hora de los
@@ -1126,6 +1186,69 @@ DSS/Genetec).
   caminos y el cierre de sesión normal.
 - El aviso equivalente del cliente de escritorio (el servidor rechaza el reingreso automático)
   es parte del trabajo de revocación de sesiones, pendiente de juntar (ver Pendientes).
+
+## Control de acceso: página del equipo y configuración de puertas y lectores — 2026-10-08
+
+Pedido del usuario con capturas del modal «Editar equipo» (angosto) y de HikCentral (ficha de
+la puerta con contacto, botón de salida, tiempos, alarma de puerta abierta, códigos; ficha de
+cada lector con intervalo entre tarjetas, intentos fallidos, sabotaje, LED, nivel de huella,
+umbrales y tiempos del rostro, antisuplantación): ¿dónde queda todo eso en el VMS?
+
+- **Una puerta, dos lectores**: el DS-K1T321MFWX administra UNA puerta; lo que HikCentral
+  muestra como dos son los **lectores** (`Cardreader 01` = el propio terminal, rostro +
+  huella + tarjeta; `Cardreader 02` = la entrada Wiegand para un lector externo). El VMS
+  contaba bien; ahora además muestra los lectores en su pestaña.
+- **Página del equipo** (`#/access/device?id=N`, `access.js`): reemplaza al modal de edición.
+  En la tabla, el nombre enlaza a ella y «Editar» pasó a ser «Configurar». Pestañas (mismas
+  clases que la ficha de Recursos): **Conexión** (lo del modal, con prueba de conexión),
+  **Puertas**, **Lectores** y **Hora y mantenimiento** (el apartado de las fichas). El alta
+  sigue siendo un modal, ahora `wide`. Desde la ficha de una puerta en Recursos, «Ir al
+  equipo» lleva a su página.
+- **Configuración propia del equipo**: `IAccessDeviceSettingsProvider` (Core, por clave de
+  driver; registrado en DI aparte de `IAccessControlDriver` para no tocar el driver en curso)
+  con `AccessDeviceSettingsDto` → bloques `door:n` / `reader:n`, cada uno con sus parámetros
+  (clave del fabricante, nombre en español, tipo, valor, rango, opciones, ayuda) y «Otros»:
+  todo lo que el equipo informó y el catálogo no conoce, solo lectura, para no esconder
+  nada. `HikvisionAccessSettingsProvider` (`HikvisionAccessSettings.cs`) lee
+  `Door/param/{n}` (`DoorParam`) y `CardReaderCfg/{n}`: JSON primero y, si el firmware lo
+  da casi vacío (el DS-K1T321MFWX V3.9.20 con la puerta), XML; escribe en la **misma forma**
+  y el documento **entero y en el mismo orden**, cambiando solo lo pedido; los rangos y
+  opciones salen de `…/capabilities` (`@min`/`@max`/`@opt`). Cantidad de lectores:
+  `cardReaderNo @max` de las capacidades o, si no, hasta que el equipo deje de contestar.
+  Catálogo: puerta = doorName, magneticType, openButtonType, openDuration,
+  disabledOpenDuration (el «Delay Duration» de HikCentral), magneticAlarmTimeout,
+  enableDoorLock, enableLeaderCard, leaderCardOpenDuration, lockInputCheck/Type, códigos de
+  coacción/maestro/desbloqueo (solo escritura, vacío = no cambiar); lector = enable,
+  defaultVerifyMode, offlineCheckTime, swipeInterval, pressTimeout, enableFailAlarm,
+  maxReadCardFailNum, enableTamperCheck, polaridad de LED OK/error/zumbador, buzzerTime,
+  enableReverseCardNo, fingerPrintCheckLevel y demás de huella, faceMatchThresholdN/1,
+  umbrales con mascarilla, faceQuality, faceRecogizeTimeOut/Interval, livingBodyDetect
+  (antisuplantación), faceImageSensitometry. Lo de HikCentral que NO es del equipo
+  (cámaras vinculadas, almacenamiento de fotos) sigue en Recursos → Cámaras asociadas.
+- **API** (`AccessSettingsApi.cs`, admin): `GET /api/access/devices/{id}/settings` y
+  `PUT …/settings/{door:n|reader:n}` con `{values:{clave:valor}}` (solo lo cambiado);
+  devuelve el bloque releído. Auditoría `access/device-settings-updated` (claves y valores,
+  sin las contraseñas); si cambió `doorName` y la puerta aún lleva el nombre del equipo, el
+  VMS la renombra (mismo criterio que la revalidación). Marca sin proveedor → 501 con aviso.
+- **Recursos: imagen que se refresca sola**. En la ficha, pestañas General y Equipo: la
+  imagen de la cámara (o la de la **cámara principal** de una puerta o zona) con «Actualizar
+  cada 5 s / 10 s / 30 s / 1 min / manual» (guardado por navegador, 10 s por omisión), hora de
+  la última actualización y pausa con la pestaña del navegador oculta. El snapshot del
+  servidor (`/api/devices/{id}/snapshot/{canal}`) acepta `?maxAge=segundos` (mínimo 2):
+  vuelve a capturar si la que tiene es más vieja; sin el parámetro sigue sirviendo la caché de
+  25 s.
+- **Probado** con un simulador ISAPI (Digest, deviceInfo, capacidades, DoorParam en XML con
+  JSON pobre, dos `CardReaderCfg` en JSON, PUT con validación de rangos): alta, página
+  completa, guardar en puerta (PUT XML entero) y lector (PUT JSON), rechazo del equipo
+  (502 con su `subStatusCode`), bloque o clave desconocidos, auditoría, enlace desde la
+  ficha de la puerta y el refresco de la imagen. Catálogo contrastado con la guía oficial
+  (`markitdown/isapi1.md`, B.1): `fingerPrintCheckLevel` (1..18), `fingerPrintImageQuality`,
+  `faceRecogizeEnable` (1/2/3) y los niveles de seguridad facial son ENTEROS con nombre
+  (se escriben con el tipo que traía el campo); `defaultVerifyMode` es solo lectura; el
+  «Face Anti-Spoofing Security Level» de HikCentral es `liveDetLevelSet` y el «Application
+  Mode» es `envirMode`; las claves de la puerta (coacción, maestra, desbloqueo) van en
+  **Base64** y son de 1 a 8 dígitos; `leaderCardOpenDuration` es en segundos. **Falta**
+  verlo contra el DS-K1T321MFWX y el DS-K1T323MBWX reales.
 
 ## Pendientes (al 2026-10-07)
 
