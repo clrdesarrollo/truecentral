@@ -80,6 +80,9 @@ async function renderVideowall() {
       ? "Créelos en Configuración → Dispositivos → Videowalls → Muro de video." : "Un administrador debe configurarlos."}</div>`;
     return;
   }
+  // #/videowall?wall=N (botón "Operar" de Configuración → Muro de video) elige ese muro.
+  const wanted = Number(new URLSearchParams(location.hash.split("?")[1] || "").get("wall"));
+  if (vwWalls.some((w) => w.id === wanted)) { vwPrefs.wallId = wanted; vwSavePrefs(); }
   vwWall = vwWalls.find((w) => w.id === vwPrefs.wallId) ?? vwWalls[0];
 
   $("#view").innerHTML = `

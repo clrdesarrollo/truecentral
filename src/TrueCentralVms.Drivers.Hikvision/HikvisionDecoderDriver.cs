@@ -63,6 +63,10 @@ public sealed class HikvisionDecoderDriver : IDecoderDriver, IDecoderDiagnostics
     // Modos de división de ventana que declara el muro (WALL_ABILITY windowMode).
     private List<int> _wallWindowModes = new();
 
+    // El muro puede mostrar el n.º de salida en los monitores (WALL_ABILITY
+    // ShowDispChanNo). Si la capacidad no se puede leer se intenta igual.
+    private bool _canShowOutputNumbers = true;
+
     public bool IsConnected => _userId >= 0;
 
     public Task ConnectAsync(DecoderConnectionInfo info, CancellationToken ct = default) => Task.Run(() =>
@@ -758,6 +762,210 @@ public sealed class HikvisionDecoderDriver : IDecoderDriver, IDecoderDiagnostics
         SetWindowPositions(new[] { win }, throwOnItemError: true, modifyExisting: true);
     }
 
+    // -----------------------------------------------------------------------
+    // Estado de las salidas, entradas locales e identificación de monitores
+    // -----------------------------------------------------------------------
+
+    public bool CanIdentifyOutputs => _useWallApi == true && _canShowOutputNumbers;
+
+    /// <summary>
+    /// Resolución y monitor conectado de cada salida (NET_DVR_WALLOUTPUT_GET,
+    /// familia video wall). Los decoders clásicos no lo informan por esta vía.
+    /// </summary>
+    public Task<IReadOnlyList<DisplayOutputStatus>> GetOutputStatusAsync(CancellationToken ct = default) => Task.Run(() =>
+    {
+        EnsureConnected();
+        var caps = GetCapabilitiesCore();
+        if (!UseWallApi()) return (IReadOnlyList<DisplayOutputStatus>)[];
+
+        var targets = new List<(int Channel, uint DisplayNo)>();
+        foreach (var display in caps.Displays)
+        {
+            try { targets.Add((display.ChannelNo, ResolveWallDisplayNo(display.ChannelNo))); }
+            catch (InvalidOperationException) { /* salida fuera del muro del equipo */ }
+        }
+        if (targets.Count == 0) return [];
+
+        // De una vez; si el equipo rechaza el lote (una salida con problemas),
+        // de a una para no perder las demás.
+        var result = ReadOutputParams(targets);
+        if (result is null)
+        {
+            result = [];
+            foreach (var target in targets)
+                if (ReadOutputParams([target]) is { Count: 1 } single) result.AddRange(single);
+        }
+        return (IReadOnlyList<DisplayOutputStatus>)result;
+    }, ct);
+
+    private List<DisplayOutputStatus>? ReadOutputParams(List<(int Channel, uint DisplayNo)> targets)
+    {
+        int n = targets.Count, size = WallSdk.WallOutputParamSize;
+        IntPtr inBuffer = Marshal.AllocHGlobal(4 * n);
+        IntPtr statusBuffer = Marshal.AllocHGlobal(4 * n);
+        IntPtr outBuffer = Marshal.AllocHGlobal(size * n);
+        try
+        {
+            for (int i = 0; i < size * n; i++) Marshal.WriteByte(outBuffer, i, 0);
+            for (int i = 0; i < n; i++)
+            {
+                Marshal.WriteInt32(inBuffer, 4 * i, (int)targets[i].DisplayNo);
+                Marshal.WriteInt32(statusBuffer, 4 * i, 0);
+                Marshal.WriteInt32(outBuffer, size * i, size);
+            }
+            if (!WallSdk.NET_DVR_GetDeviceConfig(_userId, WallSdk.NET_DVR_WALLOUTPUT_GET, (uint)n,
+                    inBuffer, (uint)(4 * n), statusBuffer, outBuffer, (uint)(size * n)))
+                return null;
+
+            var list = new List<DisplayOutputStatus>(n);
+            for (int i = 0; i < n; i++)
+            {
+                if (Marshal.ReadInt32(statusBuffer, 4 * i) != 0) continue; // la salida i falló
+                int offset = size * i;
+                uint resolution = (uint)Marshal.ReadInt32(outBuffer, offset + 4);
+                byte videoFormat = Marshal.ReadByte(outBuffer, offset + 16);
+                byte displayMode = Marshal.ReadByte(outBuffer, offset + 17);
+                byte link = Marshal.ReadByte(outBuffer, offset + 28);   // el DS-6908UDI siempre informa 0 (no lo sabe)
+                list.Add(new DisplayOutputStatus(targets[i].Channel,
+                    FormatResolution(resolution, videoFormat, analog: displayMode == 1),
+                    link switch { 1 => true, 2 => false, _ => null }));
+            }
+            return list;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(inBuffer);
+            Marshal.FreeHGlobal(statusBuffer);
+            Marshal.FreeHGlobal(outBuffer);
+        }
+    }
+
+    /// <summary>
+    /// Traduce un código MAKE_RESOLUTION del SDK: (entrelazado&lt;&lt;28) |
+    /// ((ancho&gt;&gt;3)&lt;&lt;19) | ((alto&gt;&gt;1)&lt;&lt;8) | fps. En una señal analógica
+    /// (BNC) vale el estándar de byVideoFormat: el DS-6908UDI informa ahí el
+    /// mismo código de 1080p que en las HDMI, que no significa nada.
+    /// </summary>
+    internal static string? FormatResolution(uint code, byte videoFormat, bool analog = false)
+    {
+        string? standard = videoFormat switch { 1 => "NTSC", 2 => "PAL", _ => null };
+        if (analog) return standard;
+        uint width = ((code >> 19) & 0x1FF) << 3;
+        uint height = ((code >> 8) & 0x7FF) << 1;
+        uint fps = code & 0xFF;
+        bool interlaced = ((code >> 28) & 0xF) == 1;
+        if (width >= 160 && height >= 120)
+            return $"{width}×{height}{(interlaced ? "i" : "")}" + (fps > 0 ? $" a {fps} Hz" : "");
+        return standard;
+    }
+
+    /// <summary>
+    /// Muestra u oculta en TODOS los monitores el número de la salida que los
+    /// alimenta (NET_DVR_DISPLAY_CHANNO_CONTROL).
+    /// </summary>
+    public Task ShowOutputNumbersAsync(bool show, CancellationToken ct = default) => Task.Run(() =>
+    {
+        EnsureConnected();
+        if (!UseWallApi())
+            throw new NotSupportedException("Este decodificador no puede mostrar el número de salida en los monitores.");
+
+        int size = WallSdk.ShowControlInfoSize;
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            for (int i = 0; i < size; i++) Marshal.WriteByte(buffer, i, 0);
+            Marshal.WriteInt32(buffer, 0, size);
+            Marshal.WriteInt32(buffer, 4, unchecked((int)0xFFFFFFFF)); // todas las salidas
+            Marshal.WriteByte(buffer, 8, (byte)(show ? 1 : 0));
+            Marshal.WriteByte(buffer, 9, 1);                            // n.º de salida
+            Marshal.WriteInt32(buffer, 12, (int)_wallNoHigh);
+            if (!WallSdk.NET_DVR_RemoteControl(_userId, WallSdk.NET_DVR_DISPLAY_CHANNO_CONTROL, buffer, (uint)size))
+                throw HikvisionException.FromLastError("NET_DVR_DISPLAY_CHANNO_CONTROL");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }, ct);
+
+    /// <summary>
+    /// Entradas de señal locales (HDMI/VGA/DVI... del propio equipo) con
+    /// NET_DVR_GetInputSignalList_V40. Las fuentes de red que algunos
+    /// controladores listan en el mismo lugar (IP, decodificador, matriz) se
+    /// omiten: no son entradas cableadas. null = el equipo no lo soporta.
+    /// </summary>
+    public Task<IReadOnlyList<LocalInputInfo>?> GetLocalInputsAsync(CancellationToken ct = default) => Task.Run(() =>
+    {
+        EnsureConnected();
+        int listSize = WallSdk.InputSignalListSize, itemSize = WallSdk.InputStreamCfgV40Size;
+        IntPtr list = Marshal.AllocHGlobal(listSize);
+        IntPtr items = IntPtr.Zero;
+        try
+        {
+            for (int i = 0; i < listSize; i++) Marshal.WriteByte(list, i, 0);
+            Marshal.WriteInt32(list, 0, listSize);
+            // Primera llamada sin buffer: el equipo informa cuántas entradas tiene.
+            bool ok = WallSdk.NET_DVR_GetInputSignalList_V40(_userId, 0, list);
+            int count = Marshal.ReadInt32(list, 4);
+            if (count <= 0) return ok ? [] : (IReadOnlyList<LocalInputInfo>?)null;
+            count = Math.Min(count, 512);
+
+            items = Marshal.AllocHGlobal(count * itemSize);
+            for (int i = 0; i < count * itemSize; i++) Marshal.WriteByte(items, i, 0);
+            for (int i = 0; i < count; i++) Marshal.WriteInt32(items, i * itemSize, itemSize);
+            Marshal.WriteInt32(list, 4, count);
+            Marshal.WriteIntPtr(list, 8, items);
+            Marshal.WriteInt32(list, 20, count * itemSize);
+            if (!WallSdk.NET_DVR_GetInputSignalList_V40(_userId, 0, list)) return null;
+            count = Math.Min(count, Marshal.ReadInt32(list, 4));
+
+            var inputs = new List<LocalInputInfo>();
+            for (int i = 0; i < count; i++)
+            {
+                int offset = i * itemSize;
+                if (Marshal.ReadByte(items, offset + 4) == 0) continue;           // byValid
+                string? type = InputType(Marshal.ReadByte(items, offset + 5));     // byCamMode
+                if (type is null) continue;
+                int number = Marshal.ReadInt32(items, offset + 588);              // dwInputSignalNo
+                if (number <= 0) number = (ushort)Marshal.ReadInt16(items, offset + 6); // wInputNo
+                var nameBytes = new byte[32];
+                Marshal.Copy(items + offset + 8, nameBytes, 0, nameBytes.Length);
+                string name = Encoding.UTF8.GetString(nameBytes).TrimEnd('\0').Trim();
+                uint resolution = (uint)Marshal.ReadInt32(items, offset + 544);
+                byte videoFormat = Marshal.ReadByte(items, offset + 548);
+                byte status = Marshal.ReadByte(items, offset + 549);
+                inputs.Add(new LocalInputInfo(number, name.Length > 0 ? name : $"Entrada {number}", type,
+                    status switch { 1 => true, 2 or 3 => false, _ => null },
+                    status == 1 ? FormatResolution(resolution, videoFormat, analog: type == "Bnc") : null));
+            }
+            return inputs.OrderBy(x => x.Number).ToList();
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(list);
+            if (items != IntPtr.Zero) Marshal.FreeHGlobal(items);
+        }
+    }, ct);
+
+    /// <summary>Conector de una entrada local según NET_DVR_CAM_MODE; null = fuente de red, no cableada.</summary>
+    private static string? InputType(byte camMode) => camMode switch
+    {
+        1 => "Bnc",
+        2 => "Vga",
+        3 => "Dvi",
+        4 => "Hdmi",
+        6 => "Rgb",
+        9 => "Ypbpr",
+        10 => "Usb",
+        11 or 12 or 21 => "Sdi",
+        13 => "Dp",
+        14 or 24 => "Tvi",
+        16 => "HdBaseT",
+        17 => "Dvi",
+        20 => "Fibra",
+        _ => null, // 5 IP, 7 decodificador, 8 matriz, 15 unión, 18 fusión, 19 pantalla virtual, 22 IP distribuida...
+    };
+
     public async ValueTask DisposeAsync()
     {
         try
@@ -1024,6 +1232,7 @@ public sealed class HikvisionDecoderDriver : IDecoderDriver, IDecoderDiagnostics
                 return;
 
             string xml = Marshal.PtrToStringAnsi(buffer) ?? "";
+            if (xml.Length > 0) _canShowOutputNumbers = xml.Contains("ShowDispChanNo", StringComparison.Ordinal);
             static uint? Extract(string source, string tag)
             {
                 var match = System.Text.RegularExpressions.Regex.Match(
@@ -1235,7 +1444,12 @@ public sealed class HikvisionDecoderDriver : IDecoderDriver, IDecoderDiagnostics
     }
 
 
-    /// <summary>Desvincula una salida del muro (SET enable=0 y, como refuerzo, RESET 1750). Best-effort.</summary>
+    /// <summary>
+    /// Desvincula una salida del muro (SET enable=0). Best-effort. Sin
+    /// refuerzo con RESET_VIDEOWALLDISPLAYPOSITION (1750): ese comando recibe
+    /// el n.º de MURO (muro&lt;&lt;24) y desvincula TODAS sus salidas; con el n.º
+    /// de salida compuesto (0x01000001) el equipo lo lee como "muro 1".
+    /// </summary>
     private void UnbindDisplay(uint wallDisplayNo, StringBuilder diag)
     {
         var position = new WallSdk.NET_DVR_VIDEOWALLDISPLAYPOSITION();
@@ -1246,18 +1460,6 @@ public sealed class HikvisionDecoderDriver : IDecoderDriver, IDecoderDiagnostics
         position.dwDisplayNo = wallDisplayNo;
 
         bool ok = TrySetDisplayPosition(wallDisplayNo, position, out uint status);
-        if (!ok || status != 0)
-        {
-            // Refuerzo: comando dedicado para cancelar la vinculación.
-            IntPtr inBuffer = Marshal.AllocHGlobal(4);
-            try
-            {
-                Marshal.WriteInt32(inBuffer, (int)wallDisplayNo);
-                ok = WallSdk.NET_DVR_RemoteControl(_userId, 1750 /*RESET_VIDEOWALLDISPLAYPOSITION*/, inBuffer, 4);
-                status = ok ? 0 : CHCNetSDK.NET_DVR_GetLastError();
-            }
-            finally { Marshal.FreeHGlobal(inBuffer); }
-        }
         diag.Append($"; 0x{wallDisplayNo:X} desvinculada → " + (ok && status == 0 ? "OK" : $"err {status}"));
     }
 

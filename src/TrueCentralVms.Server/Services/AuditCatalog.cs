@@ -106,6 +106,7 @@ public static class AuditCatalog
             new("decoder-updated", "Decodificador modificado"),
             new("decoder-deleted", "Decodificador eliminado"),
             new("decoder-tested", "Decodificador probado"),
+            new("decoder-identified", "Números de salida mostrados en los monitores"),
             new("wall-created", "Muro creado"),
             new("wall-updated", "Muro modificado"),
             new("wall-deleted", "Muro eliminado"),

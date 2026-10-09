@@ -36,6 +36,33 @@ public sealed record DecoderCapabilitiesDto(
 /// <summary>Resultado de probar un decodificador (no persiste nada salvo modelo/serie).</summary>
 public sealed record DecoderProbeResultDto(bool Success, string? Error, DecoderCapabilitiesDto? Capabilities);
 
+/// <summary>Monitor de un muro que alimenta una salida del decodificador.</summary>
+public sealed record OutputWallUseDto(int Id, string Name, int Row, int Col);
+
+/// <summary>
+/// Salida física con su estado en vivo (resolución, monitor conectado) y el
+/// monitor del muro que alimenta. Resolution/Connected null = el equipo no lo informa.
+/// </summary>
+public sealed record DecoderOutputDto(
+    string Type, int Index, int ChannelNo, string Label, IReadOnlyList<int> WindowModes,
+    string? Resolution, bool? Connected, OutputWallUseDto? Wall);
+
+/// <summary>Entrada de señal local del decodificador.</summary>
+public sealed record LocalInputDto(int Number, string Name, string Type, bool? Signal, string? Resolution);
+
+/// <summary>Muro que usa el decodificador y cuántos canales de decodificación ocupa.</summary>
+public sealed record DecoderWallUsageDto(int Id, string Name, int Rows, int Columns, int Windows, int Floating);
+
+/// <summary>
+/// Estado en vivo de un decodificador para su página y el editor de muros.
+/// Sin conexión (Online=false) las salidas son solo las que usan los muros.
+/// </summary>
+public sealed record DecoderOverviewDto(
+    DecoderDto Decoder, bool Online, string? Error, string? Model, string? SerialNumber,
+    int? DecodeChannelStart, int? DecodeChannelCount, int ChannelsInUse,
+    IReadOnlyList<DecoderOutputDto> Outputs, IReadOnlyList<LocalInputDto>? Inputs,
+    bool CanIdentify, IReadOnlyList<DecoderWallUsageDto> Walls);
+
 // ---------------------------------------------------------------------------
 // Muros
 // ---------------------------------------------------------------------------

@@ -20,6 +20,9 @@ namespace TrueCentralVms.Server.Api;
 /// </summary>
 public static class DecodersApi
 {
+    /// <summary>Última identificación de monitores por decodificador (la nueva posterga el apagado de la anterior).</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> IdentifyGenerations = new();
+
     private static DecoderDto ToDto(Decoder d) => new(
         d.Id, d.Name, d.DriverKey, d.Host, d.Port, d.Username, d.Enabled, d.Model, d.Notes, d.CreatedAt);
 
@@ -81,6 +84,150 @@ public static class DecodersApi
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             var decoders = await db.Decoders.OrderBy(d => d.Name).ToListAsync();
             return Results.Ok(decoders.Select(ToDto));
+        });
+
+        app.MapGet("/api/decoders/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            var decoder = await db.Decoders.AsNoTracking().FirstOrDefaultAsync(d => d.Id == id, ct);
+            return decoder is null ? Results.NotFound() : Results.Ok(ToDto(decoder));
+        });
+
+        // Estado en vivo para la página del decodificador y el editor de muros:
+        // salidas con resolución y monitor conectado, entradas locales, canales
+        // de decodificación y qué monitor de qué muro alimenta cada salida. Lo
+        // de los muros sale de la base, así que se informa aunque el equipo no
+        // responda.
+        app.MapGet("/api/decoders/{id:int}/overview", async (HttpContext ctx, int id, VmsDbContext db,
+            DecoderSessionManager sessions, ILogger<Program> logger, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.WallOperate) is { } failure) return failure;
+            var decoder = await db.Decoders.FirstOrDefaultAsync(d => d.Id == id, ct);
+            if (decoder is null) return Results.NotFound();
+
+            var walls = await db.Walls.AsNoTracking()
+                .Include(w => w.Screens).ThenInclude(s => s.Windows)
+                .Include(w => w.Floating)
+                .Where(w => w.DecoderId == id)
+                .OrderBy(w => w.Name)
+                .AsSplitQuery()
+                .ToListAsync(ct);
+            var uses = walls
+                .SelectMany(w => w.Screens.Select(s => (s.DisplayChannel, s.Label, Use: new OutputWallUseDto(w.Id, w.Name, s.Row, s.Col))))
+                .GroupBy(x => x.DisplayChannel)
+                .ToDictionary(g => g.Key, g => g.First());
+            var usage = walls
+                .Select(w => new DecoderWallUsageDto(w.Id, w.Name, w.Rows, w.Columns,
+                    w.Screens.Sum(s => s.Windows.Count), w.Floating.Count))
+                .ToList();
+
+            DecoderCapabilities? caps = null;
+            IReadOnlyList<DisplayOutputStatus> status = [];
+            IReadOnlyList<LocalInputInfo>? inputs = null;
+            bool canIdentify = false;
+            string? error = null;
+            try
+            {
+                (caps, status, inputs, canIdentify) = await sessions.WithDriverAsync(decoder, async d =>
+                {
+                    var c = await d.GetCapabilitiesAsync(ct);
+                    // El estado de salidas y entradas es un extra: si el equipo
+                    // no lo soporta, la página igual muestra sus salidas.
+                    IReadOnlyList<DisplayOutputStatus> s = [];
+                    try { s = await d.GetOutputStatusAsync(ct); }
+                    catch (Exception ex) { logger.LogDebug(ex, "Estado de salidas del decodificador {Id} no disponible", id); }
+                    IReadOnlyList<LocalInputInfo>? i = null;
+                    try { i = await d.GetLocalInputsAsync(ct); }
+                    catch (Exception ex) { logger.LogDebug(ex, "Entradas locales del decodificador {Id} no disponibles", id); }
+                    return (c, s, i, d.CanIdentifyOutputs);
+                }, ct);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+            }
+
+            List<DecoderOutputDto> outputs;
+            if (caps is not null)
+            {
+                outputs = caps.Displays.Select(o =>
+                {
+                    var live = status.FirstOrDefault(x => x.ChannelNo == o.ChannelNo);
+                    uses.TryGetValue(o.ChannelNo, out var use);
+                    return new DecoderOutputDto(o.Type.ToString(), o.Index, o.ChannelNo, o.Label, o.WindowModes,
+                        live?.Resolution, live?.Connected, use.Use);
+                }).ToList();
+                string? model = caps.Model ?? caps.SerialNumber;
+                if (!string.IsNullOrWhiteSpace(model) && decoder.Model != model)
+                {
+                    decoder.Model = model;
+                    await db.SaveChangesAsync(ct);
+                }
+            }
+            else
+            {
+                // Sin conexión: las salidas que la base sabe que se usan ("HDMI 3").
+                outputs = uses.Values.OrderBy(x => x.DisplayChannel).Select(x =>
+                {
+                    string[] parts = x.Label.Split(' ', 2);
+                    string type = parts[0].Length > 0 ? char.ToUpperInvariant(parts[0][0]) + parts[0][1..].ToLowerInvariant() : "Other";
+                    int index = parts.Length > 1 && int.TryParse(parts[1], out int n) ? n : 0;
+                    return new DecoderOutputDto(type, index, x.DisplayChannel, x.Label, [], null, null, x.Use);
+                }).ToList();
+            }
+
+            return Results.Ok(new DecoderOverviewDto(
+                ToDto(decoder), caps is not null, error,
+                caps?.Model ?? decoder.Model, caps?.SerialNumber,
+                caps?.DecodeChannelStart, caps?.DecodeChannelCount,
+                usage.Sum(w => w.Windows + w.Floating),
+                outputs,
+                inputs?.Select(i => new LocalInputDto(i.Number, i.Name, i.Type, i.Signal, i.Resolution)).ToList(),
+                caps is not null && canIdentify,
+                usage));
+        });
+
+        // Identificar monitores: cada monitor muestra el número de la salida
+        // que lo alimenta durante unos segundos (al armar el muro, para saber
+        // qué monitor físico es cuál). Se apagan solos.
+        app.MapPost("/api/decoders/{id:int}/identify", async (HttpContext ctx, int id, VmsDbContext db,
+            DecoderSessionManager sessions, AuditService audit, ILogger<Program> logger, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
+            var decoder = await db.Decoders.AsNoTracking().FirstOrDefaultAsync(d => d.Id == id, ct);
+            if (decoder is null) return Results.NotFound();
+
+            const int seconds = 15;
+            try
+            {
+                await sessions.WithDriverAsync(decoder, async d =>
+                {
+                    await d.GetCapabilitiesAsync(ct);
+                    await d.ShowOutputNumbersAsync(true, ct);
+                }, ct);
+            }
+            catch (Exception ex)
+            {
+                await audit.LogAsync(ctx, "wall", "decoder-identified",
+                    targetType: "decoder", targetId: id.ToString(), targetName: decoder.Name,
+                    detail: $"Intentó mostrar los números de salida en los monitores de '{decoder.Name}': {ex.Message}", success: false);
+                return Error(ex is NotSupportedException ? ex.Message : $"El decodificador rechazó la orden: {ex.Message}");
+            }
+
+            // Una identificación nueva posterga el apagado de la anterior.
+            int generation = IdentifyGenerations.AddOrUpdate(id, 1, (_, g) => g + 1);
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(seconds));
+                if (IdentifyGenerations.TryGetValue(id, out int current) && current != generation) return;
+                try { await sessions.WithDriverAsync(decoder, d => d.ShowOutputNumbersAsync(false)); }
+                catch (Exception ex) { logger.LogWarning(ex, "No se pudieron ocultar los números de salida del decodificador {Id}", id); }
+            });
+
+            await audit.LogAsync(ctx, "wall", "decoder-identified",
+                targetType: "decoder", targetId: id.ToString(), targetName: decoder.Name,
+                detail: $"Mostró durante {seconds} s el número de salida en los monitores de '{decoder.Name}'.");
+            return Results.Ok(new { seconds });
         });
 
         app.MapPost("/api/decoders", async (HttpContext ctx, DecoderWriteDto request, VmsDbContext db, LicenseService license,
