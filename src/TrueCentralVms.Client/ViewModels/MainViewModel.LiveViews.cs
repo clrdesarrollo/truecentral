@@ -57,9 +57,9 @@ public partial class MainViewModel
             SavedViews.Clear();
             foreach (var view in views)
                 SavedViews.Add(ToItem(view));
-            SavedViewsStatus = SavedViews.Count == 0
-                ? "Todavía no hay vistas guardadas: arme la grilla y guárdela aquí abajo."
-                : "";
+            SavedViewsStatus = SavedViews.Count > 0 ? ""
+                : CanSaveViews ? "Todavía no hay vistas guardadas: arme la grilla y guárdela aquí abajo."
+                : "Todavía no hay vistas guardadas.";
         }
         catch (Exception ex)
         {
@@ -74,7 +74,7 @@ public partial class MainViewModel
             : view.Shared ? " · compartida" : "";
         return new SavedViewItem(view.Id, view.Name,
             $"{view.Items.Count} cámara(s) · división {VideoLayout.Find(view.LayoutName)?.Key ?? view.LayoutName}{owner}",
-            view.Shared, view.CanEdit);
+            view.Shared, view.CanEdit && CanSaveViews);
     }
 
     /// <summary>Foto de la grilla actual en el formato que guarda el servidor.</summary>
@@ -93,6 +93,7 @@ public partial class MainViewModel
     [RelayCommand]
     private async Task SaveCurrentViewAsync()
     {
+        if (!CanSaveViews) return;
         string name = NewViewName.Trim();
         if (name.Length == 0)
         {

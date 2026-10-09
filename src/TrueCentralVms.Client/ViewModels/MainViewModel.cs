@@ -633,10 +633,12 @@ public partial class MainViewModel : ObservableObject
     {
         var assigned = CurrentTreeNode(SelectedCell?.AssignedChannel);
         _ptzChannel = assigned is { Channel.SupportsPtz: true } ? assigned : null;
-        // Alcance por ubicación: la cámara de otro lugar se ve, pero su PTZ no se mueve.
+        // Sin el permiso "Mover cámaras PTZ" no se mueve ninguna; con él, solo las
+        // de su alcance (la cámara de otro lugar se ve, pero su PTZ no se mueve).
         bool operable = _ptzChannel is not null && OperableScope.Current.CanOperateChannel(_ptzChannel.Channel.Id);
-        IsPtzAvailable = operable;
+        IsPtzAvailable = operable && CanPtz;
         PtzTargetName = _ptzChannel is null ? "sin cámara PTZ"
+            : !CanPtz ? $"{_ptzChannel.Channel.Name} (sus roles no lo permiten)"
             : operable ? _ptzChannel.Channel.Name
             : $"{_ptzChannel.Channel.Name} (fuera de su alcance)";
         SyncTreeSelection();

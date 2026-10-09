@@ -263,6 +263,10 @@
                         </DockPanel>
                         <StackPanel Margin="0,8,0,0" IsEnabled="{Binding IsPtzAvailable}"
                                     Visibility="{Binding IsPtzExpanded, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <!-- Sin el permiso "Mover cámaras PTZ" el panel queda deshabilitado, con el porqué -->
+                        <TextBlock Margin="2,0,2,6" Text="Sus roles no incluyen mover cámaras PTZ." FontSize="11"
+                                   Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                                   Visibility="{Binding CanPtz, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
                         <UniformGrid Columns="3" Rows="3" Width="132" HorizontalAlignment="Left">
                             <UniformGrid.Resources>
                                 <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
@@ -352,11 +356,12 @@
                 <!-- Panel Parlantes IP: hablar (mantener presionado), sonidos
                      del servidor, biblioteca del equipo y texto a voz. Con
                      varios parlantes marcados los sonidos del servidor suenan
-                     sincronizados. Solo aparece si hay parlantes configurados. -->
+                     sincronizados. Solo aparece si hay parlantes configurados y
+                     sus roles incluyen "Usar parlantes". -->
                 <Border DockPanel.Dock="Bottom" Background="{StaticResource Panel2Brush}"
                         BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,10"
                         DataContext="{Binding Speakers}"
-                        Visibility="{Binding HasSpeakers, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        Visibility="{Binding IsPanelVisible, Converter={x:Static vm:BoolToVisibility.Instance}}">
                     <StackPanel>
                         <DockPanel>
                             <ToggleButton DockPanel.Dock="Right" Style="{StaticResource PtzCollapseToggle}"
@@ -800,8 +805,9 @@
                                        FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"
                                        Margin="2,0,0,8"/>
 
-                            <!-- Guardar la grilla que hay ahora -->
+                            <!-- Guardar la grilla que hay ahora (solo con el permiso "Guardar vistas") -->
                             <StackPanel DockPanel.Dock="Bottom">
+                                <StackPanel Visibility="{Binding CanSaveViews, Converter={x:Static vm:BoolToVisibility.Instance}}">
                                 <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,10,0,10"/>
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" Content="Guardar" Padding="12,5" Margin="8,0,0,0"
@@ -831,6 +837,7 @@
                                 <CheckBox Content="Compartir con todos los puestos" Margin="2,8,0,0" FontSize="12"
                                           Style="{StaticResource DarkCheckBox}"
                                           IsChecked="{Binding NewViewShared, Mode=TwoWay}"/>
+                                </StackPanel>
                                 <TextBlock Text="{Binding SavedViewsStatus}" Margin="2,8,0,0" FontSize="11.5"
                                            TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
                                            Visibility="{Binding SavedViewsStatus,

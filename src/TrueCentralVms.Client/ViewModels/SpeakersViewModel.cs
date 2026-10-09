@@ -53,6 +53,8 @@ public sealed partial class SpeakersViewModel : ObservableObject
         };
         // Cambió lo que esta sesión puede operar: los parlantes ajenos no se eligen.
         OperableScope.Current.Changed += OnOperableChanged;
+        // Sin el permiso "Usar parlantes" el panel no se muestra (y lo que esté sonando desde aquí se corta).
+        PermissionScope.Current.Changed += () => Application.Current.Dispatcher.InvokeAsync(OnPermissionsChanged);
         hub.SpeakerStatusChanged += dto => Application.Current.Dispatcher.InvokeAsync(() =>
         {
             var item = Speakers.FirstOrDefault(s => s.Dto.Id == dto.Id);
@@ -70,7 +72,9 @@ public sealed partial class SpeakersViewModel : ObservableObject
     [ObservableProperty] private string _statusMessage = "";
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _isTalking;
-    [ObservableProperty] private bool _hasSpeakers;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsPanelVisible))]
+    private bool _hasSpeakers;
     [ObservableProperty] private bool _hasSelection;
     [ObservableProperty] private bool _hasSounds;
     [ObservableProperty] private bool _hasLibrary;
@@ -91,6 +95,12 @@ public sealed partial class SpeakersViewModel : ObservableObject
     [ObservableProperty] private bool _isMicTest;
     /// <summary>Hay una escucha local en curso (sonido del servidor o de la biblioteca).</summary>
     [ObservableProperty] private bool _isPreviewing;
+
+    /// <summary>Sus roles incluyen "Usar parlantes".</summary>
+    public static bool CanUse => PermissionScope.Current.Has(Core.Domain.Permissions.SpeakersPlay);
+
+    /// <summary>El panel se muestra si hay parlantes y sus roles permiten usarlos (como en la web).</summary>
+    public bool IsPanelVisible => HasSpeakers && CanUse;
 
     /// <summary>Los marcados que esta sesión puede operar (los de fuera de su alcance no se marcan).</summary>
     public IReadOnlyList<int> SelectedIds => Speakers.Where(s => s.IsSelected && s.CanOperate).Select(s => s.Dto.Id).ToList();
@@ -345,6 +355,18 @@ public sealed partial class SpeakersViewModel : ObservableObject
         OnSelectionChanged();
     }
 
+    /// <summary>Cambiaron sus permisos: el panel aparece o desaparece; sin permiso se corta la voz y la prueba del micrófono.</summary>
+    private void OnPermissionsChanged()
+    {
+        OnPropertyChanged(nameof(IsPanelVisible));
+        if (!CanUse)
+        {
+            IsMicTest = false;
+            _ = StopTalkAsync();
+        }
+        OnOperableChanged();
+    }
+
     [ObservableProperty] private bool _allSelected;
 
     // ------------------------------------------------------------------
@@ -498,8 +520,8 @@ public sealed partial class SpeakerItem : ObservableObject
 
     partial void OnIsSelectedChanged(bool value) => SelectionChanged?.Invoke();
 
-    /// <summary>El parlante está en el alcance de este usuario (si no, se ve pero no se elige).</summary>
-    public bool CanOperate => OperableScope.Current.CanOperateSpeaker(Dto.Id);
+    /// <summary>Sus roles permiten usar parlantes y este está en su alcance (si no, se ve pero no se elige).</summary>
+    public bool CanOperate => SpeakersViewModel.CanUse && OperableScope.Current.CanOperateSpeaker(Dto.Id);
 
     /// <summary>Cambió lo que esta sesión puede operar.</summary>
     public void RefreshOperable()

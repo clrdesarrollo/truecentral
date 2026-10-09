@@ -273,7 +273,7 @@ public partial class MainViewModel
     /// </summary>
     public async Task RunLocationCommandAsync(LocationNode node, string command)
     {
-        if (node.Location is not { } location) return;
+        if (node.Location is not { } location || !node.CanCommand) return;
         var owner = Application.Current.MainWindow;
         string verb = command switch { "arm-away" => "Armar total", "arm-stay" => "Armar parcial", _ => "Desarmar" };
         LocationCommandResultDto preview;

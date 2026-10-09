@@ -24,10 +24,15 @@ public partial class MainViewModel
     public bool CanLpr => Perms.Has(Permissions.AnprView);
     public bool CanDownloads => Perms.Has(Permissions.PlaybackExport);
 
+    // Acciones dentro de los módulos (además, el recurso tiene que estar en su alcance).
+    public bool CanPtz => Perms.Has(Permissions.LivePtz);
+    public bool CanSaveViews => Perms.Has(Permissions.LiveViewsManage);
+
     private static readonly string[] ModuleFlags =
     [
         nameof(CanLiveView), nameof(CanPlayback), nameof(CanWall), nameof(CanAlarms), nameof(CanCerco),
         nameof(CanIntercom), nameof(CanEvents), nameof(CanLpr), nameof(CanDownloads), nameof(RoleLabel),
+        nameof(CanPtz), nameof(CanSaveViews),
     ];
 
     /// <summary>Relee los permisos de la sesión (al entrar y cuando el servidor avisa que cambiaron).</summary>
@@ -40,6 +45,9 @@ public partial class MainViewModel
     private void OnPermissionsChanged() => Application.Current.Dispatcher.InvokeAsync(() =>
     {
         foreach (var name in ModuleFlags) OnPropertyChanged(name);
+        // Lo que se ofrece dentro de la Vista en vivo (PTZ, órdenes por ubicación, vistas).
+        OnOperableChanged();
+        if (IsViewsPopupOpen) _ = LoadSavedViewsAsync();
         if (IsLiveViewOpen && !CanLiveView) CloseLiveViewCommand.Execute(null);
         if (IsPlaybackOpen && !CanPlayback) ClosePlaybackCommand.Execute(null);
         if (IsWallOpen && !CanWall) CloseWallCommand.Execute(null);

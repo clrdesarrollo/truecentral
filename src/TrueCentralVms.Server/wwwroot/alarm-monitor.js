@@ -254,6 +254,8 @@ function renderAlarmMonDetail() {
   ].filter(Boolean);
   const anyArming = p.areas.some((a) => a.armState === "Arming");
   const allArmed = p.areas.length > 0 && p.areas.every(alarmMonIsArmed);
+  // Armar, desarmar, silenciar y anular exigen "Operar alarmas"; sin él se ve el estado.
+  const canOperate = Perms.can("alarms.operate");
 
   const areaCard = (a) => {
     const [label, lvl] = ALARM_MON_AREA_LABELS[a.armState] ?? ALARM_MON_AREA_LABELS.Unknown;
@@ -266,12 +268,12 @@ function renderAlarmMonDetail() {
           <span class="almon-pill ${a.inAlarm ? "alarm" : lvl}">${esc(label)}</span>
         </div>
         ${a.inAlarm ? `<div class="almon-alarm-text">¡ALARMA ACTIVA!</div>` : ""}
-        <div class="almon-actions">
+        ${canOperate ? `<div class="almon-actions">
           <button class="btn almon-arm" ${op} data-area="${a.number}" data-mode="Away" ${alarmMonIsArmed(a) ? "disabled" : ""}>Armar total</button>
           <button class="btn ghost almon-arm" ${op} data-area="${a.number}" data-mode="Stay" ${alarmMonIsArmed(a) ? "disabled" : ""}>Parcial</button>
           <button class="btn ghost almon-disarm" ${op} data-area="${a.number}" ${a.armState === "Disarmed" ? "disabled" : ""}>${a.armState === "Arming" ? "Cancelar" : "Desarmar"}</button>
           ${a.inAlarm ? `<button class="btn danger almon-clear" ${op} data-area="${a.number}">Silenciar</button>` : ""}
-        </div>
+        </div>` : ""}
       </div>`;
   };
 
@@ -286,7 +288,7 @@ function renderAlarmMonDetail() {
         <div class="muted almon-small">${area ? esc(area.name) : "Sin área"} · zona ${z.number}</div>
         ${flags ? `<div class="almon-small almon-flags">${esc(flags)}</div>` : ""}
         ${info ? `<div class="muted almon-small" title="${esc(info)}">${esc(info)}</div>` : ""}
-        <button class="btn ghost almon-bypass" data-op="zone:${p.id}/${z.number}" data-zone="${z.number}" data-on="${z.bypassed ? 1 : 0}">${z.bypassed ? "Restituir" : "Anular"}</button>
+        ${canOperate ? `<button class="btn ghost almon-bypass" data-op="zone:${p.id}/${z.number}" data-zone="${z.number}" data-on="${z.bypassed ? 1 : 0}">${z.bypassed ? "Restituir" : "Anular"}</button>` : ""}
       </div>`;
   };
 
@@ -299,15 +301,16 @@ function renderAlarmMonDetail() {
       <div class="muted almon-small">${esc(alarmMonStatusText(p))} · ${p.lastStateAt ? `Estado leído a las ${new Date(p.lastStateAt).toLocaleTimeString("es-CL")}` : "Estado aún no leído"}</div>
       ${p.lastError ? `<div class="almon-small" style="color:var(--danger)">${esc(p.lastError)}</div>` : ""}
       ${warnings.length ? `<div class="error-box" style="margin:8px 0 0">⚠ ${warnings.map(esc).join("<br>")}</div>` : ""}
-      <div class="op-hint" data-op-hint="panel:${p.id}" hidden>${p.areas.some((a) => Operable.can("area", `${p.id}/${a.number}`))
+      ${canOperate ? `<div class="op-hint" data-op-hint="panel:${p.id}" hidden>${p.areas.some((a) => Operable.can("area", `${p.id}/${a.number}`))
         ? "Parte de este panel está fuera de su alcance: solo puede operar lo que no aparece deshabilitado."
-        : "Este panel está fuera de su alcance: puede verlo, pero no operarlo."}</div>
+        : "Este panel está fuera de su alcance: puede verlo, pero no operarlo."}</div>`
+        : `<div class="op-hint">Sus roles no incluyen operar alarmas: puede ver el estado, pero no armar, desarmar ni anular.</div>`}
       <div class="almon-actions" style="margin-top:10px">
-        ${p.areas.length > 1 ? `
+        ${canOperate && p.areas.length > 1 ? `
           <button class="btn almon-arm" data-op="panel:${p.id}" data-area="0" data-mode="Away" ${allArmed ? "disabled" : ""}>Armar todo</button>
           <button class="btn ghost almon-arm" data-op="panel:${p.id}" data-area="0" data-mode="Stay" ${allArmed ? "disabled" : ""}>Armar parcial (todo)</button>
           <button class="btn ghost almon-disarm" data-op="panel:${p.id}" data-area="0">${anyArming ? "Cancelar armado" : "Desarmar todo"}</button>` : ""}
-        ${p.inAlarm ? `<button class="btn danger almon-clear" data-op="panel:${p.id}" data-area="0">Silenciar alarmas</button>` : ""}
+        ${canOperate && p.inAlarm ? `<button class="btn danger almon-clear" data-op="panel:${p.id}" data-area="0">Silenciar alarmas</button>` : ""}
         <button class="btn ghost almon-refresh">Actualizar</button>
       </div>
     </div>

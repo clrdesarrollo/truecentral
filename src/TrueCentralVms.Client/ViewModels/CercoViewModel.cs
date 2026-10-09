@@ -50,11 +50,15 @@ public sealed partial class CercoViewModel : ObservableObject
         {
             if (entity is "scope" or "locations" && _loaded) Application.Current.Dispatcher.InvokeAsync(() => _ = ReloadAsync());
         };
-        // Cambió lo que esta sesión puede operar: se re-evalúan los botones.
+        // Cambió lo que esta sesión puede operar (o sus permisos): se re-evalúan los botones.
         OperableScope.Current.Changed += () =>
         {
             foreach (var panel in Panels) panel.RefreshOperable();
         };
+        PermissionScope.Current.Changed += () => Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            foreach (var panel in Panels) panel.RefreshOperable();
+        });
     }
 
     public ObservableCollection<CercoPanelItem> Panels { get; } = [];
@@ -185,9 +189,16 @@ public sealed partial class CercoPanelItem : ObservableObject
     private static string SignalBars(int r) => r >= -67 ? "▂▄▆█" : r >= -75 ? "▂▄▆" : r >= -82 ? "▂▄" : "▂";
     public string ZoneText => string.Join(" · ", _dto.Zones.Where(z => z.InAlarm).Select(z => $"Zona {z.Number} en alarma"));
 
-    /// <summary>El panel está en el alcance de este usuario (si no, se ve pero no se opera).</summary>
-    public bool CanOperate => OperableScope.Current.CanOperateFence(_dto.Id);
+    /// <summary>Sus roles incluyen "Operar cercos eléctricos" (armar, desarmar y silenciar).</summary>
+    private static bool MayOperate => PermissionScope.Current.Has(Core.Domain.Permissions.CercoOperate);
+
+    /// <summary>Sus roles lo permiten y el panel está en su alcance (si no, se ve pero no se opera).</summary>
+    public bool CanOperate => MayOperate && OperableScope.Current.CanOperateFence(_dto.Id);
     public bool IsReadOnly => !CanOperate;
+
+    /// <summary>Por qué no se puede operar el panel.</summary>
+    public string ReadOnlyHint => MayOperate ? OperableScope.DeniedHint
+        : "Sus roles no incluyen \"Operar cercos eléctricos\": puede ver el estado, pero no armar, desarmar ni silenciar.";
 
     public bool CanArm => CanOperate && _dto.Connected && !_dto.Armed && !_dto.Arming && !IsBusy;
     public bool CanDisarm => CanOperate && _dto.Connected && (_dto.Armed || _dto.Arming) && !IsBusy;

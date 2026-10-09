@@ -490,13 +490,15 @@ async function layoutsModal(wall, onApplied = renderWalls) {
   try { layouts = await Api.get(`/api/walls/${wall.id}/layouts`); }
   catch (err) { toast(err.error, true); return; }
 
+  // Guardar y eliminar exigen "Guardar diseños del muro"; aplicar basta con operar el muro.
+  const canSave = Perms.can("wall.layouts");
   openModal(`
     <h3>Layouts de "${esc(wall.name)}"</h3>
-    <div class="field">
+    ${canSave ? `<div class="field">
       <label>Guardar el estado actual como</label>
       <input id="lm-name" placeholder="Ej: Turno noche">
     </div>
-    <button class="btn" id="lm-save">Guardar layout</button>
+    <button class="btn" id="lm-save">Guardar layout</button>` : ""}
     <h3 style="margin-top:22px">Guardados</h3>
     ${layouts.length === 0 ? `<p class="muted">No hay layouts guardados.</p>` : `
       <table class="grid"><tbody>
@@ -505,14 +507,14 @@ async function layoutsModal(wall, onApplied = renderWalls) {
             <td>${esc(l.name)} <span class="muted">· ${l.items.length} cámara(s)</span></td>
             <td class="row-actions">
               <button class="btn ghost btn-apply">Aplicar</button>
-              <button class="btn danger btn-del">Eliminar</button>
+              ${canSave ? `<button class="btn danger btn-del">Eliminar</button>` : ""}
             </td>
           </tr>`).join("")}
       </tbody></table>`}
     <div class="modal-actions"><button class="btn ghost" id="lm-close">Cerrar</button></div>`);
 
   $("#lm-close").addEventListener("click", closeModal);
-  $("#lm-save").addEventListener("click", async () => {
+  $("#lm-save")?.addEventListener("click", async () => {
     const name = $("#lm-name").value.trim();
     if (!name) { toast("Escriba un nombre para el layout.", true); return; }
     try {

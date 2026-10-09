@@ -220,11 +220,11 @@ public partial class IntercomCallWindow : Window
                 }
                 break;
         }
-        // Alcance por ubicación: de un frente ajeno se ve el video, pero no se
+        // Sin "Atender citofonía", o con un frente ajeno, se ve el video, pero no se
         // contesta, ni se le habla, ni se abre su puerta (el servidor lo rechazaría).
-        bool canOperate = OperableScope.Current.CanOperateIntercom(_intercom.Id);
+        bool canOperate = IntercomsViewModel.CanAnswer(_intercom.Id);
         AnswerButton.IsEnabled = RejectButton.IsEnabled = TalkButton.IsEnabled = DoorButtons.IsEnabled = canOperate;
-        ReadOnlyText.Text = canOperate ? "" : OperableScope.DeniedHint;
+        ReadOnlyText.Text = IntercomsViewModel.DeniedHint(_intercom.Id) ?? "";
         ReadOnlyText.Visibility = canOperate ? Visibility.Collapsed : Visibility.Visible;
 
         StateText.Text = state;
