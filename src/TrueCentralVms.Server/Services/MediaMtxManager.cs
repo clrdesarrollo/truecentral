@@ -94,7 +94,7 @@ public sealed partial class MediaMtxManager(
         }
 
         KillOrphans(exe);
-        await WriteConfigAsync(ct);
+        await WriteConfigAsync(ct, startup: true);
         StartProcess(exe);
     }
 
@@ -144,14 +144,330 @@ public sealed partial class MediaMtxManager(
     }
 
     /// <summary>
-    /// Regenera las rutas tras un cambio de dispositivos/canales. MediaMTX
-    /// vigila su archivo de configuración y aplica los cambios en caliente,
-    /// sin cortar las sesiones de rutas que no cambiaron.
+    /// Regenera las rutas tras un cambio de dispositivos/canales y espera a que
+    /// MediaMTX las tenga (con tope: si tarda, el pedido sigue en curso). Los
+    /// pedidos se encolan y los que llegan mientras se aplica otro se agrupan
+    /// en una sola pasada siguiente, que relee la base: la última escritura
+    /// siempre refleja el último cambio. Ver <see cref="CommitConfigAsync"/>.
     /// </summary>
     public async Task RefreshPathsAsync(CancellationToken ct = default)
     {
-        await WriteConfigAsync(ct);
-        logger.LogInformation("Rutas de MediaMTX regeneradas.");
+        try
+        {
+            await RequestRefresh().WaitAsync(RefreshWaitLimit, ct);
+        }
+        catch (TimeoutException)
+        {
+            logger.LogWarning("MediaMTX: las rutas aún no quedan aplicadas tras {Seconds} s; se siguen aplicando en segundo plano.",
+                RefreshWaitLimit.TotalSeconds);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Aplicación de las rutas en caliente. MediaMTX vigila su archivo, pero
+    // su vigilante IGNORA todo cambio dentro de 1 s desde su última recarga
+    // (minInterval de internal/confwatcher, v1.20): con altas seguidas
+    // —importar o migrar equipos, la siembra de la demo— solo la primera
+    // escritura se aplicaba y el resto de las rutas quedaba "not configured".
+    // Además, si leyera el archivo a medio escribir, MediaMTX se detiene
+    // entero. Por eso: escritura atómica, una pasada a la vez, y después de
+    // cada escritura se compara lo que MediaMTX tiene (API de control) con lo
+    // escrito; lo que no tomó se aplica ruta por ruta por la API, que es
+    // inmediata. Solo se tocan las rutas que difieren, así que las sesiones
+    // de las demás no se cortan (una recarga posterior del mismo archivo
+    // tampoco: la ruta queda idéntica a la cargada desde el archivo).
+    // ------------------------------------------------------------------
+    private static readonly TimeSpan RefreshWaitLimit = TimeSpan.FromSeconds(15);
+
+    /// <summary>Ventana en que el vigilante de MediaMTX ignora otra escritura (1 s + margen).</summary>
+    private const int WatcherBlindMs = 1200;
+
+    /// <summary>Cuánto se le da al vigilante para recargar antes de aplicar por la API.</summary>
+    private static readonly TimeSpan WatcherGrace = TimeSpan.FromMilliseconds(800);
+
+    private const int MaxRefreshRetries = 6;
+
+    private readonly Lock _refreshGate = new();
+    private TaskCompletionSource? _refreshPending;
+    private bool _refreshRunning;
+    private int _refreshRetries;
+
+    // Protegidos por _configLock.
+    private string? _writtenConfig;
+    private Dictionary<string, Dictionary<string, string>> _appliedPaths = new(StringComparer.Ordinal);
+    private long _lastWatchedWriteTicks = -WatcherBlindMs;
+
+    /// <summary>true = no se sabe si MediaMTX tiene lo último escrito (recién
+    /// lanzado, o falló la pasada anterior): la próxima pasada lo comprueba
+    /// aunque ninguna ruta haya cambiado.</summary>
+    private volatile bool _resyncPaths;
+
+    /// <summary>Encola una pasada; la tarea termina cuando una pasada que
+    /// empezó DESPUÉS de este pedido terminó (con éxito o no).</summary>
+    private Task RequestRefresh()
+    {
+        lock (_refreshGate)
+        {
+            _refreshPending ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_refreshRunning)
+            {
+                _refreshRunning = true;
+                _ = Task.Run(RefreshLoopAsync);
+            }
+            return _refreshPending.Task;
+        }
+    }
+
+    private async Task RefreshLoopAsync()
+    {
+        while (true)
+        {
+            TaskCompletionSource batch;
+            lock (_refreshGate)
+            {
+                if (_refreshPending is null)
+                {
+                    _refreshRunning = false;
+                    return;
+                }
+                batch = _refreshPending;
+                _refreshPending = null;
+            }
+            try
+            {
+                await WriteConfigAsync(CancellationToken.None, startup: false);
+                _refreshRetries = 0;
+            }
+            catch (Exception ex)
+            {
+                _resyncPaths = true;
+                bool retry = ++_refreshRetries <= MaxRefreshRetries;
+                logger.LogError(ex, "MediaMTX: no se pudieron aplicar las rutas{Retry}.",
+                    retry ? "; se reintenta en 5 s" : "; quedan pendientes hasta el próximo cambio");
+                if (retry)
+                    _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ => RequestRefresh(), TaskScheduler.Default);
+            }
+            batch.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// Escribe la configuración generada y, si MediaMTX está corriendo, se
+    /// asegura de que la tomó. Al arrancar solo escribe: el proceso la lee al
+    /// iniciar. Sin cambios respecto de lo último escrito no reescribe (así
+    /// tampoco se descartan las rutas de reproducción pb-…, que viven solo en
+    /// la API y una recarga del archivo borra).
+    /// </summary>
+    private async Task CommitConfigAsync(string content, bool startup)
+    {
+        var expected = ParseConfigPaths(content);
+        bool written = false;
+        if (startup || content != _writtenConfig)
+        {
+            await WriteConfigFileAsync(content);
+            _writtenConfig = content;
+            written = true;
+        }
+        if (startup || !IsRunning)
+        {
+            // Arranque o relanzamiento pendiente: el proceso lee el archivo.
+            _appliedPaths = expected;
+            _resyncPaths = false;
+            return;
+        }
+
+        // Cuántas rutas cambiaron respecto de lo que MediaMTX ya tiene; null =
+        // no se sabe (arranque o error anterior) y se compara igual.
+        int? changed = _resyncPaths ? null : ChangedPaths(_appliedPaths, expected);
+        if (changed == 0)
+            return; // el cambio no tocó ninguna ruta
+
+        // El vigilante solo recarga si su última recarga fue hace más de 1 s.
+        bool watcherReloads = written && Environment.TickCount64 - _lastWatchedWriteTicks >= WatcherBlindMs;
+        if (watcherReloads) _lastWatchedWriteTicks = Environment.TickCount64;
+
+        var waited = Stopwatch.StartNew();
+        List<PathDifference> pending;
+        for (int poll = 1; ; poll++)
+        {
+            if (watcherReloads) await Task.Delay(poll * 100); // 100, 200, 300… ms
+            pending = await FindPathDifferencesAsync(expected);
+            if (pending.Count == 0 || !watcherReloads || waited.Elapsed >= WatcherGrace) break;
+        }
+
+        if (pending.Count > 0)
+        {
+            logger.LogDebug(
+                "MediaMTX no tomó el archivo de configuración ({Reason}): se aplican {Count} rutas por su API de control.",
+                watcherReloads ? "no recargó a tiempo"
+                : written ? "su última recarga fue hace menos de 1 s" : "difería de lo escrito",
+                pending.Count);
+            await ApplyPathDifferencesAsync(pending);
+            var still = await FindPathDifferencesAsync(expected);
+            if (still.Count > 0)
+                throw new InvalidOperationException(
+                    $"MediaMTX sigue sin {still.Count} rutas tras aplicarlas por la API (p. ej. '{still[0].Name}').");
+        }
+
+        _appliedPaths = expected;
+        _resyncPaths = false;
+        if (changed is not null || pending.Count > 0)
+            logger.LogInformation("Rutas de MediaMTX aplicadas: {Count} con cambios{How}.",
+                changed ?? pending.Count, pending.Count > 0 ? " (por la API de control)" : "");
+    }
+
+    /// <summary>
+    /// Escritura atómica: archivo temporal y reemplazo. Un MediaMTX que leyera
+    /// el yml a medio escribir lo rechazaría y se detendría. Si justo lo está
+    /// leyendo (lo abre sin compartir el borrado), el reemplazo se reintenta.
+    /// </summary>
+    private async Task WriteConfigFileAsync(string content)
+    {
+        string temp = ConfigPath + ".tmp";
+        await File.WriteAllTextAsync(temp, content);
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temp, ConfigPath, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < 20)
+            {
+                await Task.Delay(50);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Rutas del yml generado: nombre → campos tal como se escribieron. Lee el
+    /// formato fijo que produce <see cref="WriteConfigAsync"/> ("  nombre:" y
+    /// "    clave: valor" bajo "paths:"), así lo que se verifica es justo lo
+    /// que se escribió, venga del bloque que venga.
+    /// </summary>
+    internal static Dictionary<string, Dictionary<string, string>> ParseConfigPaths(string yml)
+    {
+        var paths = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        Dictionary<string, string>? current = null;
+        bool inPaths = false;
+        foreach (string raw in yml.Split('\n'))
+        {
+            string line = raw.TrimEnd('\r');
+            if (!inPaths)
+            {
+                inPaths = line == "paths:";
+                continue;
+            }
+            if (line.StartsWith("    ", StringComparison.Ordinal))
+            {
+                int colon = line.IndexOf(": ", StringComparison.Ordinal);
+                if (current is not null && colon > 0)
+                    current[line[..colon].Trim()] = UnquoteYaml(line[(colon + 2)..].Trim());
+            }
+            else if (line.StartsWith("  ", StringComparison.Ordinal) && line.EndsWith(':'))
+            {
+                current = new Dictionary<string, string>(StringComparer.Ordinal);
+                paths[line.Trim().TrimEnd(':')] = current;
+            }
+            else if (line.Length > 0 && line[0] != ' ' && line[0] != '#')
+            {
+                break; // otra clave de primer nivel: se acabaron las rutas
+            }
+        }
+        return paths;
+    }
+
+    private static string UnquoteYaml(string value) =>
+        value.Length >= 2 && value[0] == '\'' && value[^1] == '\''
+            ? value[1..^1].Replace("''", "'")
+            : value;
+
+    /// <summary>Rutas agregadas, cambiadas o quitadas entre dos configuraciones.</summary>
+    private static int ChangedPaths(
+        Dictionary<string, Dictionary<string, string>> before, Dictionary<string, Dictionary<string, string>> after) =>
+        after.Count(pair => !before.TryGetValue(pair.Key, out var old) || !SameFields(old, pair.Value))
+        + before.Keys.Count(name => !after.ContainsKey(name));
+
+    private static bool SameFields(Dictionary<string, string> a, Dictionary<string, string> b) =>
+        a.Count == b.Count && a.All(pair => b.TryGetValue(pair.Key, out var value) && value == pair.Value);
+
+    /// <summary>Las rutas de reproducción (pb-…) las crea el servidor por la
+    /// API y no están en el archivo: la comparación no las toca.</summary>
+    private static bool IsConfigPath(string name) => !name.StartsWith("pb-", StringComparison.Ordinal);
+
+    /// <summary>Ruta a corregir: Fields null = sobra y se quita.</summary>
+    private sealed record PathDifference(string Name, Dictionary<string, string>? Fields);
+
+    /// <summary>Lo que distingue a una ruta: su fuente (o "publisher" si la
+    /// alimenta un relé) y el comando del relé.</summary>
+    private static (string Source, string RunOnDemand) Identity(Dictionary<string, string> fields) =>
+        (fields.GetValueOrDefault("source") ?? "publisher", fields.GetValueOrDefault("runOnDemand") ?? "");
+
+    /// <summary>
+    /// Compara las rutas esperadas con las que MediaMTX tiene configuradas
+    /// (todas menos las de reproducción). Va por el listado y no ruta por
+    /// ruta: cada consulta de una ruta inexistente MediaMTX la anota como
+    /// error en su salida, que termina en el registro del servidor.
+    /// </summary>
+    private async Task<List<PathDifference>> FindPathDifferencesAsync(
+        Dictionary<string, Dictionary<string, string>> expected)
+    {
+        var actual = await ListConfiguredPathsAsync();
+        var differences = new List<PathDifference>();
+        foreach (string name in expected.Keys.Union(actual.Keys.Where(IsConfigPath)))
+        {
+            bool have = actual.TryGetValue(name, out var current);
+            if (expected.TryGetValue(name, out var fields))
+            {
+                if (!have || current != Identity(fields)) differences.Add(new PathDifference(name, fields));
+            }
+            else if (have && IsConfigPath(name))
+            {
+                differences.Add(new PathDifference(name, null));
+            }
+        }
+        return differences;
+    }
+
+    private async Task<Dictionary<string, (string Source, string RunOnDemand)>> ListConfiguredPathsAsync()
+    {
+        var paths = new Dictionary<string, (string, string)>(StringComparer.Ordinal);
+        for (int page = 0, pageCount = 1; page < pageCount; page++)
+        {
+            string body = await ApiHttp.GetStringAsync($"{ApiBaseUrl}/v3/config/paths/list?itemsPerPage=500&page={page}");
+            using var json = System.Text.Json.JsonDocument.Parse(body);
+            pageCount = json.RootElement.GetProperty("pageCount").GetInt32();
+            foreach (var item in json.RootElement.GetProperty("items").EnumerateArray())
+                paths[item.GetProperty("name").GetString()!] = ReadIdentity(item);
+        }
+        return paths;
+    }
+
+    private static (string Source, string RunOnDemand) ReadIdentity(System.Text.Json.JsonElement path) =>
+        (path.TryGetProperty("source", out var source) ? source.GetString() ?? "" : "",
+         path.TryGetProperty("runOnDemand", out var run) ? run.GetString() ?? "" : "");
+
+    /// <summary>Aplica las rutas por la API: replace crea o reemplaza (con los
+    /// pathDefaults del archivo para lo que no se indica), delete quita.</summary>
+    private async Task ApplyPathDifferencesAsync(List<PathDifference> differences)
+    {
+        foreach (var difference in differences)
+        {
+            using var response = difference.Fields is null
+                ? await ApiHttp.DeleteAsync($"{ApiBaseUrl}/v3/config/paths/delete/{difference.Name}")
+                : await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(ApiHttp,
+                    $"{ApiBaseUrl}/v3/config/paths/replace/{difference.Name}",
+                    difference.Fields.ToDictionary(f => f.Key, f => f.Value switch
+                    {
+                        "yes" => (object)true,
+                        "no" => false,
+                        _ => f.Value,
+                    }));
+            if (!response.IsSuccessStatusCode && response.StatusCode != System.Net.HttpStatusCode.NotFound)
+                throw new InvalidOperationException(
+                    $"MediaMTX rechazó la ruta '{difference.Name}' ({(int)response.StatusCode}): " +
+                    await response.Content.ReadAsStringAsync());
+        }
     }
 
     /// <summary>tools\mediamtx\mediamtx.exe: junto al ejecutable, subiendo por el árbol (repo).</summary>
@@ -186,7 +502,9 @@ public sealed partial class MediaMtxManager(
         return null;
     }
 
-    private async Task WriteConfigAsync(CancellationToken ct)
+    /// <summary>Genera mediamtx.runtime.yml desde la base y lo aplica (ver
+    /// <see cref="CommitConfigAsync"/>). Una pasada a la vez.</summary>
+    private async Task WriteConfigAsync(CancellationToken ct, bool startup)
     {
         await _configLock.WaitAsync(ct);
         try
@@ -298,7 +616,7 @@ public sealed partial class MediaMtxManager(
                 logger.LogInformation("Configuración de MediaMTX generada con {Count} rutas.", pathCount);
             }
 
-            await File.WriteAllTextAsync(ConfigPath, yml.ToString(), ct);
+            await CommitConfigAsync(yml.ToString(), startup);
         }
         finally
         {
@@ -652,6 +970,9 @@ public sealed partial class MediaMtxManager(
         _process = process;
         _startedAtUtc = DateTime.UtcNow;
         _restartPending = false;
+        // Lee el archivo al iniciar, pero hasta que su API conteste no se puede
+        // comprobar: la próxima pasada compara todas las rutas.
+        _resyncPaths = true;
         process.EnableRaisingEvents = true;
         // El hijo muere con el servidor aunque el apagado sea abrupto.
         ChildProcessJob.Attach(process);

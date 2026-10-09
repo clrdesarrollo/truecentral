@@ -173,7 +173,7 @@ Type: files; Name: "{app}\webcontrol\CLRTrueCentralVMS-Complemento-Setup-*.exe"
 ; Servidor publicado (self-contained). Se excluyen los restos de desarrollo
 ; que el SDK Web arrastra como contenido (ajustes locales, configuración
 ; generada de MediaMTX, logs).
-Source: "{#ServerPublish}\*"; DestDir: "{app}"; Excludes: "*.pdb,appsettings.Development.json,appsettings.Local.json,mediamtx.runtime.yml,*.log,pgdata\*,anpr\*,workflows\*"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ServerPublish}\*"; DestDir: "{app}"; Excludes: "*.pdb,appsettings.Development.json,appsettings.Local.json,mediamtx.runtime.yml*,*.log,pgdata\*,anpr\*,workflows\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ProductionConfig}"; DestDir: "{app}"; DestName: "appsettings.Production.json"; Flags: ignoreversion
 ; Ajustes del equipo: solo la primera vez; las actualizaciones no lo tocan.
 Source: "config\appsettings.Local.json"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall
@@ -1557,6 +1557,7 @@ begin
     // terminar (él mismo se borra al final, y con él la carpeta si queda vacía).
     DeleteFile(ExpandConstant('{app}\appsettings.Local.json'));
     DeleteFile(ExpandConstant('{app}\mediamtx.runtime.yml'));
+    DeleteFile(ExpandConstant('{app}\mediamtx.runtime.yml.tmp'));
     DelTree(ExpandConstant('{app}\tools'), True, True, True);
     DelTree(ExpandConstant('{app}\wwwroot'), True, True, True);
     DelTree(ExpandConstant('{app}\watchdog'), True, True, True);

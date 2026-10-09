@@ -30,8 +30,8 @@ src/TrueCentralVms.Server/license/
 *.key
 admin-initial.txt
 # Configuración generada de MediaMTX: contiene las credenciales de los equipos
-# embebidas en las URL RTSP de origen
-mediamtx.runtime.yml
+# embebidas en las URL RTSP de origen (y su temporal de escritura, .tmp)
+mediamtx.runtime.yml*
 # Ajustes por instalación (puertos, rutas)
 appsettings.Local.json
 # ...menos la plantilla que el instalador copia en cada equipo.

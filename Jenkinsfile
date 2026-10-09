@@ -131,7 +131,7 @@ pipeline {
         stage('Higiene de secretos') {
             steps {
                 powershell '''
-                    $filtrado = git ls-files -- "*.key" "*.secret" "*.apikey" "pgdata/*" "mediamtx.runtime.yml" "admin-initial.txt" "appsettings.Local.json"
+                    $filtrado = git ls-files -- "*.key" "*.secret" "*.apikey" "pgdata/*" "mediamtx.runtime.yml*" "admin-initial.txt" "appsettings.Local.json"
                     if ($filtrado) {
                         Write-Host "Archivos con secretos o datos de runtime versionados:" -ForegroundColor Red
                         $filtrado | ForEach-Object { Write-Host "  $_" }
