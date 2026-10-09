@@ -961,8 +961,9 @@ public sealed class WorkflowEngine : BackgroundService
 
     /// <summary>
     /// Recorre el diagrama desde un nodo. Las ramas que salen de un mismo
-    /// puerto se ejecutan una tras otra, en el orden en que se dibujaron (así
-    /// el correo de la segunda rama ya tiene la foto que tomó la primera).
+    /// puerto se ejecutan una tras otra, de izquierda a derecha (así el
+    /// correo de la rama de la derecha ya tiene la foto que tomó la de la
+    /// izquierda).
     /// </summary>
     private async Task WalkAsync(RunState state, WorkflowGraph.Node node)
     {

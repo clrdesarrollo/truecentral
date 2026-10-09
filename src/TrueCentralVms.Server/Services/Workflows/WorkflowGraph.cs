@@ -44,10 +44,16 @@ public sealed class WorkflowGraph
 
     public Node? Find(string id) => _byId.TryGetValue(id, out var node) ? node : null;
 
-    /// <summary>Nodos destino que salen del puerto dado, en el orden en que se dibujaron las conexiones.</summary>
+    /// <summary>
+    /// Nodos destino que salen del puerto dado, de izquierda a derecha según
+    /// su posición en el diagrama: lo que se ve es el orden en que se
+    /// ejecutan, y se cambia moviendo los pasos. A igual posición, en el
+    /// orden en que se dibujaron las conexiones (OrderBy es estable).
+    /// </summary>
     public IEnumerable<Node> Next(string nodeId, string port) =>
         _outgoing[nodeId].Where(e => string.Equals(e.Port, port, StringComparison.OrdinalIgnoreCase))
-            .Select(e => Find(e.To)).Where(n => n is not null)!;
+            .Select(e => Find(e.To)).OfType<Node>()
+            .OrderBy(n => n.X);
 
     // ------------------------------------------------------------------
     // Construcción
@@ -293,17 +299,19 @@ public sealed class WorkflowGraph
         CredentialProtector protector)
     {
         // Orden de aparición desde el disparador: es el orden de la lista
-        // lineal si alguien la lee sin el diagrama, y el del historial.
+        // lineal si alguien la lee sin el diagrama, y el del historial. Las
+        // ramas hermanas, de izquierda a derecha como las ejecuta el motor.
         var order = new Dictionary<string, int>(StringComparer.Ordinal);
         var trigger = graph.Nodes.First(n => n.Kind == WorkflowNodeKinds.Trigger);
         var outgoing = (graph.Edges ?? []).ToLookup(e => e.From, StringComparer.Ordinal);
+        var xOf = graph.Nodes.ToDictionary(n => n.Id, n => n.X, StringComparer.Ordinal);
         var queue = new Queue<string>([trigger.Id]);
         var seen = new HashSet<string>(StringComparer.Ordinal) { trigger.Id };
         int position = 0;
         while (queue.TryDequeue(out var current))
         {
             order[current] = position++;
-            foreach (var edge in outgoing[current])
+            foreach (var edge in outgoing[current].OrderBy(e => xOf.GetValueOrDefault(e.To)))
                 if (seen.Add(edge.To)) queue.Enqueue(edge.To);
         }
 

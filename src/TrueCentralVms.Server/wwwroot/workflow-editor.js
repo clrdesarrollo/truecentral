@@ -94,12 +94,18 @@ const WFE_CREDENTIALS = [["Card", "Tarjeta"], ["Fingerprint", "Huella"], ["Face"
 async function renderWorkflowEditor() {
   const params = new URLSearchParams((location.hash.split("?")[1]) || "");
   const id = Number(params.get("id")) || 0;
-  $("#page-title").textContent = id ? "Editar automatización" : "Nueva automatización";
+  // Sin «Editar automatizaciones» el editor abre en solo lectura: se ve el
+  // diagrama y la configuración de cada paso, pero nada se cambia ni se guarda.
+  const readOnly = !Perms.can("workflows.manage");
+  $("#page-title").textContent = readOnly ? "Ver automatización" : id ? "Editar automatización" : "Nueva automatización";
   $("#view").classList.add("view-editor");
   $("#view").innerHTML = `<div class="info-box" style="margin:24px">Cargando el editor…</div>`;
 
-  if (!Perms.can("workflows.manage")) {
-    $("#view").innerHTML = `<div class="error-box" style="margin:24px">Sus roles no incluyen editar automatizaciones (permiso Editar automatizaciones).</div>`;
+  const denied = !Perms.can("workflows.view")
+    ? "Sus roles no incluyen ver automatizaciones (permiso Ver automatizaciones)."
+    : readOnly && !id ? "Sus roles permiten ver las automatizaciones, no crearlas (permiso Editar automatizaciones)." : null;
+  if (denied) {
+    $("#view").innerHTML = `<div class="error-box" style="margin:24px">${esc(denied)}</div>`;
     return;
   }
 
@@ -117,7 +123,7 @@ async function renderWorkflowEditor() {
 
   const lists = { catalog, cameras, devices, doors, panels, speakers, audio, accessDevices };
   wfEd = {
-    id, lists,
+    id, lists, readOnly,
     name: workflow?.name ?? "",
     description: workflow?.description ?? "",
     enabled: workflow ? workflow.enabled : true,
@@ -163,25 +169,31 @@ function wfeRenderShell() {
     groups.get(g).push(a);
   });
 
+  const ro = wfEd.readOnly ? "disabled" : "";
   $("#view").innerHTML = `
     <div class="wfe">
       <div class="wfe-top">
         <button class="btn ghost" id="wfe-back" title="Volver al listado">← Volver</button>
-        <input id="wfe-name" class="wfe-name" maxlength="128" placeholder="Nombre de la automatización" value="${esc(wfEd.name)}">
-        <input id="wfe-description" class="wfe-description" maxlength="512" placeholder="Descripción (opcional)" value="${esc(wfEd.description)}">
+        <input id="wfe-name" class="wfe-name" maxlength="128" placeholder="Nombre de la automatización" value="${esc(wfEd.name)}" ${ro}>
+        <input id="wfe-description" class="wfe-description" maxlength="512" placeholder="Descripción (opcional)" value="${esc(wfEd.description)}" ${ro}>
         <label class="wfe-inline" title="Tiempo mínimo entre dos ejecuciones: un sensor que rebota no ejecuta veinte veces">
-          Mínimo entre ejecuciones <input id="wfe-cooldown" type="number" min="0" max="86400" value="${wfEd.cooldownSeconds}"> s
+          Mínimo entre ejecuciones <input id="wfe-cooldown" type="number" min="0" max="86400" value="${wfEd.cooldownSeconds}" ${ro}> s
         </label>
-        <label class="wfe-inline"><input type="checkbox" id="wfe-enabled" ${wfEd.enabled ? "checked" : ""}> Activa</label>
+        <label class="wfe-inline"><input type="checkbox" id="wfe-enabled" ${wfEd.enabled ? "checked" : ""} ${ro}> Activa</label>
         <span class="wfe-spacer"></span>
-        <button class="btn ghost" id="wfe-layout" title="Ordenar los pasos automáticamente">Ordenar</button>
+        <button class="btn ghost" id="wfe-layout" title="Ordenar los pasos automáticamente${wfEd.readOnly ? " (solo en pantalla: no se guarda)" : ""}">Ordenar</button>
         <button class="btn ghost" id="wfe-fit" title="Ajustar el diagrama a la ventana">Ajustar</button>
-        <button class="btn ghost" id="wfe-test" title="Guarda y ejecuta las acciones DE VERDAD con un evento de ejemplo">Probar</button>
-        <button class="btn" id="wfe-save">Guardar</button>
+        ${wfEd.readOnly
+          ? `<span class="tag operator" title="Sus roles permiten ver esta automatización, no modificarla (permiso Editar automatizaciones)">Solo lectura</span>`
+          : `<button class="btn ghost" id="wfe-test" title="Guarda y ejecuta las acciones DE VERDAD con un evento de ejemplo">Probar</button>
+        <button class="btn" id="wfe-save">Guardar</button>`}
       </div>
       <div id="wfe-error"></div>
       <div class="wfe-body">
-        <aside class="wfe-palette">
+        <aside class="wfe-palette">${wfEd.readOnly ? `
+          <div class="wfe-palette-title">Solo lectura</div>
+          <div class="wfe-palette-hint">Sus roles permiten ver esta automatización, no modificarla (permiso <b>Editar automatizaciones</b>).</div>
+          <div class="wfe-palette-hint">Haga clic en un paso o en una flecha para ver su configuración a la derecha.</div>` : `
           <div class="wfe-palette-title">Pasos</div>
           <div class="wfe-palette-hint">Haga clic para agregar después del paso seleccionado, o arrástrelo al lienzo.</div>
           <div class="wfe-palette-group">Flujo</div>
@@ -190,7 +202,7 @@ function wfeRenderShell() {
           <button class="wfe-item kind-end" draggable="true" data-kind="end" title="Termina la rama (opcional)">${WFE_ICONS.end} Fin</button>
           ${[...groups.entries()].map(([group, actions]) => `
             <div class="wfe-palette-group">${esc(group)}</div>
-            ${actions.map((a) => `<button class="wfe-item kind-action" draggable="true" data-kind="action" data-type="${esc(a.key)}" title="${esc(a.description)}">${WFE_ICONS[a.key] || "▶"} ${esc(a.label)}</button>`).join("")}`).join("")}
+            ${actions.map((a) => `<button class="wfe-item kind-action" draggable="true" data-kind="action" data-type="${esc(a.key)}" title="${esc(a.description)}">${WFE_ICONS[a.key] || "▶"} ${esc(a.label)}</button>`).join("")}`).join("")}`}
         </aside>
         <div class="wfe-canvas" id="wfe-canvas" tabindex="0">
           <svg class="wfe-svg" id="wfe-svg">
@@ -219,8 +231,8 @@ function wfeRenderShell() {
   $("#wfe-enabled").addEventListener("change", (e) => { wfEd.enabled = e.target.checked; });
   $("#wfe-layout").addEventListener("click", () => { wfeAutoLayout(true); wfeFit(); });
   $("#wfe-fit").addEventListener("click", wfeFit);
-  $("#wfe-save").addEventListener("click", () => wfeSave(false));
-  $("#wfe-test").addEventListener("click", () => wfeSave(true));
+  $("#wfe-save")?.addEventListener("click", () => wfeSave(false));
+  $("#wfe-test")?.addEventListener("click", () => wfeSave(true));
   $("#wfe-zoom-in").addEventListener("click", () => wfeZoomBy(1.2));
   $("#wfe-zoom-out").addEventListener("click", () => wfeZoomBy(1 / 1.2));
 
@@ -233,9 +245,10 @@ function wfeRenderShell() {
     });
   });
   const canvas = $("#wfe-canvas");
-  canvas.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
+  canvas.addEventListener("dragover", (e) => { if (wfEd.readOnly) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
   canvas.addEventListener("drop", (e) => {
     e.preventDefault();
+    if (wfEd.readOnly) return;
     let data;
     try { data = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
     const p = wfeCanvasPoint(e.clientX, e.clientY);
@@ -276,6 +289,7 @@ function wfeDefaultConfig(type) {
 /// Agrega un paso. Sin posición, va debajo del seleccionado (o del último) y
 /// se conecta solo desde su primer puerto libre.
 function wfeAddFromPalette(kind, type, position) {
+  if (wfEd.readOnly) return;
   const node = {
     id: wfeNewId(kind === "action" ? "a" : kind[0]),
     kind, x: 0, y: 0, label: "",
@@ -308,6 +322,7 @@ function wfeAddFromPalette(kind, type, position) {
 
 /// Agrega un paso conectado a un puerto concreto (menú del puerto).
 function wfeAddAfterPort(fromId, port, kind, type) {
+  if (wfEd.readOnly) return;
   const from = wfeNode(fromId);
   const siblings = wfEd.edges.filter((e) => e.from === fromId).length;
   const node = {
@@ -327,7 +342,7 @@ function wfeAddAfterPort(fromId, port, kind, type) {
 
 function wfeRemoveSelected() {
   const s = wfEd.selected;
-  if (!s) return;
+  if (!s || wfEd.readOnly) return;
   if (s.kind === "edge") {
     wfEd.edges.splice(s.index, 1);
   } else {
@@ -342,7 +357,7 @@ function wfeRemoveSelected() {
 }
 
 function wfeConnect(fromId, port, toId) {
-  if (fromId === toId) return;
+  if (fromId === toId || wfEd.readOnly) return;
   const to = wfeNode(toId);
   if (!to || to.kind === "trigger") { toast("Nada puede conectarse hacia el punto de partida.", true); return; }
   if (wfEd.edges.some((e) => e.from === fromId && e.port === port && e.to === toId)) return;
@@ -440,7 +455,7 @@ function wfeDraw() {
         <div class="wfe-node-sub">${esc(wfeSubtitle(node))}</div>
         ${result ? `<div class="wfe-node-result">${result.success ? "✔" : "✖"} ${esc(result.detail || "")}</div>` : ""}
         ${outs.length ? `<div class="wfe-outs">${outs.map(([p, label]) =>
-          `<div class="wfe-out"><div class="wfe-port out port-${p}" data-port="${p}" title="${esc(label)}: arrastre hasta otro paso, o haga clic para agregar uno"></div><span class="wfe-port-label">${esc(label)}</span></div>`).join("")}</div>` : ""}
+          `<div class="wfe-out"><div class="wfe-port out port-${p}" data-port="${p}" title="${esc(wfEd.readOnly ? label : `${label}: arrastre hasta otro paso, o haga clic para agregar uno`)}"></div><span class="wfe-port-label">${esc(label)}</span></div>`).join("")}</div>` : ""}
       </div>`;
   }).join("");
 
@@ -530,7 +545,7 @@ function wfeBindCanvas(canvas) {
     if (e.button !== 0) return;
     const port = e.target.closest(".wfe-port.out");
     const nodeEl = e.target.closest(".wfe-node");
-    if (port && nodeEl) {
+    if (port && nodeEl && !wfEd.readOnly) {
       drag = { kind: "connect", from: nodeEl.dataset.id, port: port.dataset.port, moved: false, startX: e.clientX, startY: e.clientY };
       const a = wfePortPoint(drag.from, drag.port);
       const temp = $("#wfe-temp-edge");
@@ -560,7 +575,8 @@ function wfeBindCanvas(canvas) {
   window.addEventListener("mousemove", (e) => {
     if (!drag) return;
     if (drag.kind === "node") {
-      if (!drag.moved && !far(e.clientX, e.clientY, drag.startX, drag.startY)) return;
+      // En solo lectura un paso se selecciona, no se mueve.
+      if (wfEd.readOnly || (!drag.moved && !far(e.clientX, e.clientY, drag.startX, drag.startY))) return;
       drag.moved = true;
       const p = wfeCanvasPoint(e.clientX, e.clientY);
       const nx = Math.round(p.x - drag.offsetX), ny = Math.round(p.y - drag.offsetY);
@@ -687,7 +703,9 @@ function wfeAutoLayout(redraw) {
     if (!layers.has(d)) layers.set(d, []);
     layers.get(d).push(n);
   });
-  // Dentro de la capa, según el orden de los padres (y del puerto: Sí antes que No).
+  // Dentro de la capa, según el orden de los padres (y del puerto: Sí antes
+  // que No). Las ramas hermanas conservan su orden de izquierda a derecha:
+  // es el orden en que el motor las ejecuta, y ordenar no debe cambiarlo.
   const order = new Map();
   [...layers.keys()].sort((a, b) => a - b).forEach((d) => {
     const layer = layers.get(d);
@@ -695,7 +713,7 @@ function wfeAutoLayout(redraw) {
       const pa = wfEd.edges.find((e) => e.to === a.id), pb = wfEd.edges.find((e) => e.to === b.id);
       const ka = pa ? (order.get(pa.from) ?? 0) * 10 + (pa.port === "no" || pa.port === "error" ? 1 : 0) : 99;
       const kb = pb ? (order.get(pb.from) ?? 0) * 10 + (pb.port === "no" || pb.port === "error" ? 1 : 0) : 99;
-      return ka - kb;
+      return ka - kb || a.x - b.x;
     });
     const width = layer.length * (WFE_NODE_WIDTH + 60) - 60;
     layer.forEach((n, i) => {
@@ -723,6 +741,18 @@ function wfeProps() {
   const s = wfEd.selected;
   const L = wfEd.lists;
 
+  if (!s && wfEd.readOnly) {
+    box.innerHTML = `
+      <div class="wfe-props-title">Cómo leer el diagrama</div>
+      <ol class="wfe-steps">
+        <li>El <b>punto de partida</b> dice qué dispara la automatización y con qué filtro.</li>
+        <li>Una <b>condición</b> sigue por <b>Sí</b> o por <b>No</b>; una acción sigue por <b>Siguiente</b> o, si falla, por <b>Si falla</b>.</li>
+        <li>Haga clic en un paso o en una flecha para ver su configuración. Rueda del mouse = zoom; arrastre el fondo para moverse.</li>
+      </ol>
+      <div class="muted" style="font-size:12px">Las ramas que salen de un mismo punto se ejecutan una tras otra, de izquierda a derecha.</div>`;
+    return;
+  }
+
   if (!s) {
     box.innerHTML = `
       <div class="wfe-props-title">Cómo armar el diagrama</div>
@@ -732,7 +762,7 @@ function wfeProps() {
         <li>Una <b>condición</b> tiene dos salidas: <b>Sí</b> y <b>No</b>. Una acción tiene <b>Siguiente</b> y <b>Si falla</b>.</li>
         <li>Seleccione un paso o una flecha y pulse <b>Supr</b> para eliminarlo. Rueda del mouse = zoom; arrastre el fondo para moverse.</li>
       </ol>
-      <div class="muted" style="font-size:12px">Las ramas que salen de un mismo punto se ejecutan una tras otra, de izquierda a derecha.</div>`;
+      <div class="muted" style="font-size:12px">Las ramas que salen de un mismo punto se ejecutan una tras otra, de izquierda a derecha: para cambiar el orden, mueva los pasos.</div>`;
     return;
   }
 
@@ -746,8 +776,8 @@ function wfeProps() {
         <b>${esc(wfeTitle(from))}</b> <span class="chip">${esc({ yes: "Sí", no: "No", error: "si falla", next: "siguiente" }[e.port])}</span>
         → <b>${esc(wfeTitle(to))}</b>
       </div>
-      <button class="btn danger" id="wfe-edge-delete">Eliminar conexión</button>`;
-    $("#wfe-edge-delete").addEventListener("click", wfeRemoveSelected);
+      ${wfEd.readOnly ? "" : `<button class="btn danger" id="wfe-edge-delete">Eliminar conexión</button>`}`;
+    $("#wfe-edge-delete")?.addEventListener("click", wfeRemoveSelected);
     return;
   }
 
@@ -866,10 +896,22 @@ function wfeProps() {
       break;
     }
   }
+  wfeLockReadOnly(box);
 }
 
 /// Redibuja el lienzo (títulos, subtítulos) sin tocar el panel de propiedades.
 function wfeDrawKeepProps() { wfeDraw(); }
+
+/// Solo lectura: la configuración se ve pero no se cambia. Siguen activos el
+/// filtro de las listas de cámaras, escuchar el sonido y copiar la URL del
+/// webhook; los botones que solo sirven para editar se esconden.
+function wfeLockReadOnly(root) {
+  if (!wfEd?.readOnly || !root) return;
+  $$("input, select, textarea", root).forEach((el) => { if (!el.classList.contains("wf-filter")) el.disabled = true; });
+  $$("button", root).forEach((b) => {
+    if (!b.classList.contains("btn-field-play") && b.id !== "wfe-hookcopy") b.hidden = true;
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Formulario de condiciones (filtro del disparador y nodos de condición)
@@ -1085,6 +1127,8 @@ function wfeConditionsForm(container, node, isTrigger) {
         toast("Clave nueva generada: regirá al guardar.");
       } catch (err) { toast(err.error, true); }
     });
+    // Se vuelve a pintar sola (al llegar las líneas de la cámara): se bloquea cada vez.
+    wfeLockReadOnly(container);
   };
 
   const read = () => {
@@ -1492,6 +1536,7 @@ function wfeLocalCheck() {
 }
 
 async function wfeSave(thenTest) {
+  if (wfEd.readOnly) return;
   const errorBox = $("#wfe-error");
   errorBox.innerHTML = "";
   const local = wfeLocalCheck();
