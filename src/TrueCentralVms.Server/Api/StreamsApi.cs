@@ -27,13 +27,7 @@ public static class StreamsApi
 
             var grant = await IssueGrantAsync(ctx, session, db, streamTokens, request.DeviceId, request.RtspChannel, request.Profile);
             if (grant.Failure is not null) return grant.Failure;
-
-            // Host visible para los clientes: configurable (NAT/DNS) o el del request.
-            string host = config["Streaming:PublicHost"] is { Length: > 0 } configured
-                ? configured
-                : ctx.Request.Host.Host;
-            string url = $"rtsp://{host}:{mtx.RtspPort}/{grant.Path}?token={grant.Token}";
-            return Results.Ok(new StreamGrantDto(url, grant.Token, grant.ExpiresAt));
+            return Results.Ok(new StreamGrantDto(PublicRtspUrl(ctx, config, mtx, grant.Path, grant.Token), grant.Token, grant.ExpiresAt));
         });
 
         // ------------------------------------------------------------------
@@ -137,6 +131,15 @@ public static class StreamsApi
                 .ToListAsync();
             return Results.Ok(active);
         });
+    }
+
+    /// <summary>URL RTSP de una ruta de MediaMTX con su token. Host visible para los clientes: configurable (NAT/DNS) o el del request.</summary>
+    internal static string PublicRtspUrl(HttpContext ctx, IConfiguration config, MediaMtxManager mtx, string path, string token)
+    {
+        string host = config["Streaming:PublicHost"] is { Length: > 0 } configured
+            ? configured
+            : ctx.Request.Host.Host;
+        return $"rtsp://{host}:{mtx.RtspPort}/{path}?token={token}";
     }
 
     private sealed record GrantResult(IResult? Failure, string Path = "", string Token = "", DateTime ExpiresAt = default);

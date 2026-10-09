@@ -6,7 +6,9 @@ namespace TrueCentralVms.Core.Drivers;
 /// señalización de llamadas y la voz, e ISAPI (HTTP) para identificación,
 /// estado de llamada y apertura de puerta.
 /// </summary>
-public sealed record IntercomConnectionInfo(string Host, int Port, int HttpPort, string Username, string Password);
+public sealed record IntercomConnectionInfo(string Host, int Port, int HttpPort, string Username, string Password,
+    /// <summary>Puerto RTSP de la cámara propia del frente.</summary>
+    int RtspPort = 554);
 
 /// <summary>Identificación y capacidades del frente, leídas al validar las credenciales.</summary>
 public sealed record IntercomInfo(
@@ -123,6 +125,16 @@ public interface IIntercomDriver
 
     /// <summary>Deja el stream principal con un cuadro completo por segundo (el video de la llamada aparece al instante).</summary>
     Task OptimizeVideoAsync(IntercomConnectionInfo info, CancellationToken ct = default);
+
+    /// <summary>
+    /// URL RTSP (con credenciales) de la cámara propia del frente. El video del
+    /// frente es parte del frente: MediaMTX la sirve en una ruta propia, sin
+    /// registrarlo en Fuentes de video ni ocupar un canal de video de la licencia.
+    /// </summary>
+    string BuildRtspUrl(IntercomConnectionInfo info, StreamProfile profile);
+
+    /// <summary>Foto JPEG actual de la cámara propia del frente (consola web); null si el equipo no la entrega.</summary>
+    Task<byte[]?> CaptureSnapshotAsync(IntercomConnectionInfo info, CancellationToken ct = default);
 
     /// <summary>Abre (pulso) la puerta indicada, numerada desde 1.</summary>
     Task OpenDoorAsync(IntercomConnectionInfo info, int door, CancellationToken ct = default);

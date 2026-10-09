@@ -631,6 +631,11 @@ public sealed class ApiClient
         SendAsync<StreamGrantDto>(HttpMethod.Post, "/api/streams/request",
             new StreamRequestDto(deviceId, rtspChannel, profile), ct);
 
+    /// <summary>Concesión del video de la cámara propia de un frente de citofonía (no es un canal de video).</summary>
+    public Task<StreamGrantDto> RequestIntercomStreamAsync(int intercomId, StreamProfile profile, CancellationToken ct = default) =>
+        SendAsync<StreamGrantDto>(HttpMethod.Post, $"/api/intercoms/{intercomId}/stream",
+            new IntercomStreamRequestDto(profile), ct);
+
     /// <summary>Segmentos grabados de un canal para un día (hora local del equipo).</summary>
     public Task<List<RecordingSegmentDto>> GetRecordingSegmentsAsync(int deviceId, int channelNumber, DateTime date,
         CancellationToken ct = default) =>

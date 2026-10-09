@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Core.Domain;
 using TrueCentralVms.Core.Drivers;
@@ -33,7 +34,7 @@ public static class IntercomsApi
             return "El nombre es obligatorio (máximo 128 caracteres).";
         if (string.IsNullOrWhiteSpace(request.Host))
             return "La dirección (IP o hostname) es obligatoria.";
-        if (request.Port is < 1 or > 65535 || request.HttpPort is < 1 or > 65535)
+        if (request.Port is < 1 or > 65535 || request.HttpPort is < 1 or > 65535 || request.RtspPort is < 1 or > 65535)
             return "Los puertos deben estar entre 1 y 65535.";
         if (string.IsNullOrWhiteSpace(request.Username))
             return "El usuario del frente es obligatorio.";
@@ -173,7 +174,7 @@ public static class IntercomsApi
 
         app.MapPost("/api/intercoms", async (HttpContext ctx, IntercomWriteDto request, VmsDbContext db, IntercomDriverRegistry drivers,
             LicenseService license, CredentialProtector protector, IHubContext<VmsHub> hub, IntercomService service, AuditService audit,
-            CancellationToken ct) =>
+            MediaMtxManager mtx, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -188,7 +189,7 @@ public static class IntercomsApi
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
 
-            var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, request.Password);
+            var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, request.Password, request.RtspPort);
             var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             if (info is null)
             {
@@ -204,6 +205,7 @@ public static class IntercomsApi
                 Host = host,
                 Port = request.Port,
                 HttpPort = request.HttpPort,
+                RtspPort = request.RtspPort,
                 Username = request.Username,
                 PasswordCiphertext = protector.Protect(request.Password),
                 GroupName = GroupOf(request),
@@ -224,7 +226,7 @@ public static class IntercomsApi
                         $"{intercom.Model ?? "modelo desconocido"}, {intercom.DoorCount} puerta(s)" +
                         (intercom.GroupName is null ? "" : $", grupo '{intercom.GroupName}'") +
                         (intercom.LocationId is null ? "" : $", en {EquipmentLocation.Describe(intercom.LocationId)}") + ").",
-                data: new { intercom.Host, intercom.Port, intercom.HttpPort, intercom.DriverKey, intercom.Model, intercom.SerialNumber, intercom.ChannelId, intercom.LocationId });
+                data: new { intercom.Host, intercom.Port, intercom.HttpPort, intercom.RtspPort, intercom.DriverKey, intercom.Model, intercom.SerialNumber, intercom.ChannelId, intercom.LocationId });
             EquipmentLocation.Changed(ctx);
             if (request.ConfigureCallCenter && !info.CallCenterEnabled)
                 await audit.LogAsync(ctx, "intercom", "call-center-configured", targetType: "intercom", targetId: intercom.Id.ToString(),
@@ -233,6 +235,7 @@ public static class IntercomsApi
                         ? $"Configuró el botón de '{intercom.Name}' para llamar a la central."
                         : $"No se pudo configurar el botón de '{intercom.Name}' para llamar a la central: {callCenterError}");
             if (optimize) await AuditVideoAsync(ctx, audit, intercom, info, videoError);
+            await mtx.RefreshPathsAsync(ct); // ruta de su cámara propia
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "intercoms", cancellationToken: ct);
             var saved = await LoadAsync(db, intercom.Id, ct);
@@ -241,7 +244,7 @@ public static class IntercomsApi
 
         app.MapPut("/api/intercoms/{id:int}", async (HttpContext ctx, int id, IntercomWriteDto request, VmsDbContext db, LicenseService license,
             IntercomDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub, IntercomService service,
-            AuditService audit, CancellationToken ct) =>
+            AuditService audit, MediaMtxManager mtx, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -259,7 +262,7 @@ public static class IntercomsApi
             bool connectionChanged = intercom.Host != host || intercom.Port != request.Port || intercom.HttpPort != request.HttpPort ||
                                      intercom.Username != request.Username || intercom.DriverKey != request.DriverKey ||
                                      !string.IsNullOrEmpty(request.Password);
-            var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, password);
+            var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, password, request.RtspPort);
             IntercomInfo? probed = null;
             if (connectionChanged)
             {
@@ -279,6 +282,7 @@ public static class IntercomsApi
             if (intercom.Name != request.Name.Trim()) changes.Add($"nombre '{intercom.Name}' → '{request.Name.Trim()}'");
             if (intercom.Host != host || intercom.Port != request.Port) changes.Add($"dirección {intercom.Host}:{intercom.Port} → {host}:{request.Port}");
             if (intercom.HttpPort != request.HttpPort) changes.Add($"puerto HTTP {intercom.HttpPort} → {request.HttpPort}");
+            if (intercom.RtspPort != request.RtspPort) changes.Add($"puerto RTSP {intercom.RtspPort} → {request.RtspPort}");
             if (intercom.Username != request.Username) changes.Add($"usuario '{intercom.Username}' → '{request.Username}'");
             if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
             if (intercom.GroupName != GroupOf(request)) changes.Add($"grupo '{intercom.GroupName}' → '{GroupOf(request)}'");
@@ -292,6 +296,7 @@ public static class IntercomsApi
             intercom.Host = host;
             intercom.Port = request.Port;
             intercom.HttpPort = request.HttpPort;
+            intercom.RtspPort = request.RtspPort;
             intercom.Username = request.Username;
             intercom.PasswordCiphertext = protector.Protect(password);
             intercom.GroupName = GroupOf(request);
@@ -320,6 +325,7 @@ public static class IntercomsApi
                         ? $"Configuró el botón de '{intercom.Name}' para llamar a la central."
                         : $"No se pudo configurar el botón de '{intercom.Name}' para llamar a la central: {callCenterError}");
             if (optimize) await AuditVideoAsync(ctx, audit, intercom, probed!, videoError);
+            await mtx.RefreshPathsAsync(ct); // dirección, credenciales o cámara pudieron cambiar
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "intercoms", cancellationToken: ct);
             var saved = await LoadAsync(db, intercom.Id, ct);
@@ -327,7 +333,7 @@ public static class IntercomsApi
         });
 
         app.MapDelete("/api/intercoms/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, IHubContext<VmsHub> hub,
-            IntercomService service, AuditService audit, CancellationToken ct) =>
+            IntercomService service, AuditService audit, MediaMtxManager mtx, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             var intercom = await db.Intercoms.FindAsync([id], ct);
@@ -341,6 +347,7 @@ public static class IntercomsApi
                 targetType: "intercom", targetId: id.ToString(), targetName: intercom.Name,
                 detail: $"Eliminó el frente de citofonía '{intercom.Name}' ({intercom.Host}:{intercom.Port}). Su historial de llamadas se conserva.");
             EquipmentLocation.Changed(ctx);
+            await mtx.RefreshPathsAsync(ct);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "intercoms", cancellationToken: ct);
             return Results.Ok();
@@ -359,7 +366,7 @@ public static class IntercomsApi
             if (string.IsNullOrEmpty(password)) return Error("La contraseña del frente es obligatoria.");
 
             string host = request.Host.Trim();
-            var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, password);
+            var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, password, request.RtspPort);
             var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             await audit.LogAsync(ctx, "intercom", "intercom-probed", targetType: "intercom", targetName: request.Name?.Trim(),
                 detail: info is null
@@ -369,11 +376,75 @@ public static class IntercomsApi
             if (info is null)
                 return Results.Ok(new IntercomProbeResultDto(false, probeError, null, null, null, null, 0, false, null, null));
 
-            // Sugerir la cámara del propio frente si ya está dada de alta como dispositivo.
+            // ¿El frente también está en Fuentes de video? Ese registro ocupa un canal de la licencia que la citofonía ya no necesita (el panel lo avisa).
             int? suggested = await db.Channels.AsNoTracking().Where(c => c.Device.Host == host)
                 .OrderBy(c => c.ChannelNumber).Select(c => (int?)c.Id).FirstOrDefaultAsync(ct);
             return Results.Ok(new IntercomProbeResultDto(true, null, info.Model, info.SerialNumber, info.FirmwareVersion, info.DeviceName,
                 info.DoorCount, info.CallCenterEnabled, info.AudioCodec, suggested, info.KeyFrameSeconds));
+        });
+
+        // ------------------------------------------------------------------
+        // Cámara propia del frente: es parte del frente, no un canal de Fuentes
+        // de video, así que no ocupa canales de la licencia de video. MediaMTX
+        // la sirve en ic/{id}/main|sub; la concesión es la misma de un canal
+        // (token de 60 s canjeado en /api/streaming/auth) con el alcance del frente.
+        // ------------------------------------------------------------------
+        app.MapPost("/api/intercoms/{id:int}/stream", async (HttpContext ctx, int id, IntercomStreamRequestDto request,
+            VmsDbContext db, StreamTokenService streamTokens, MediaMtxManager mtx, IConfiguration config, AuditService audit,
+            CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.IntercomAnswer, out var session) is { } failure) return failure;
+            var intercom = await db.Intercoms.AsNoTracking().FirstOrDefaultAsync(i => i.Id == id, ct);
+            if (intercom is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanViewIntercom(id))
+                return await ctx.OutOfScopeAsync(session, "intercom", id.ToString(), intercom.Name, "ver la cámara del frente");
+
+            string? refusal = intercom.ChannelId is not null ? "Este frente muestra otra cámara (un canal de video), no la propia."
+                : !intercom.Enabled ? "El frente está desactivado."
+                : !mtx.IsRunning ? "El servicio de streaming no está disponible en el servidor."
+                : null;
+            if (refusal is not null)
+            {
+                // El cuadro reintenta solo cada pocos segundos: una fila cada 5 min basta.
+                if (audit.ShouldLog($"intercom-video-rejected:{session.UserId}:{id}", TimeSpan.FromMinutes(5)))
+                    await audit.LogAsync(ctx, "intercom", "video-rejected", targetType: "intercom", targetId: id.ToString(),
+                        targetName: intercom.Name, success: false,
+                        detail: $"No se pudo abrir la cámara del frente '{intercom.Name}': {refusal}");
+                return Error(refusal, mtx.IsRunning ? StatusCodes.Status422UnprocessableEntity : StatusCodes.Status503ServiceUnavailable);
+            }
+
+            string path = MediaMtxManager.IntercomPathName(id, request.Profile);
+            var (token, grant) = streamTokens.Issue(session.UserId, session.Username, path,
+                deviceId: 0, deviceName: intercom.Name, rtspChannel: 1,
+                profile: request.Profile == StreamProfile.Main ? "main" : "sub", intercomId: id);
+            return Results.Ok(new StreamGrantDto(StreamsApi.PublicRtspUrl(ctx, config, mtx, path, token), token, grant.ExpiresAt));
+        });
+
+        // Foto de la cámara propia (consola web, que no reproduce RTSP). Se
+        // renueva cada pocos segundos: caché corta compartida y una fila de
+        // bitácora por usuario y frente cada 5 min.
+        app.MapGet("/api/intercoms/{id:int}/snapshot", async (HttpContext ctx, int id, VmsDbContext db, IntercomService service,
+            IMemoryCache cache, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.IntercomAnswer, out var session) is { } failure) return failure;
+            var intercom = await db.Intercoms.AsNoTracking().FirstOrDefaultAsync(i => i.Id == id, ct);
+            if (intercom is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanViewIntercom(id))
+                return await ctx.OutOfScopeAsync(session, "intercom", id.ToString(), intercom.Name, "ver la imagen del frente");
+            if (intercom.ChannelId is not null || !intercom.Enabled) return Results.NotFound();
+
+            if (audit.ShouldLog($"intercom-snap:{session.UserId}:{id}", TimeSpan.FromMinutes(5)))
+                await audit.LogAsync(ctx, "intercom", "video-viewed", targetType: "intercom", targetId: id.ToString(),
+                    targetName: intercom.Name, detail: $"Vio la imagen de la cámara del frente de citofonía '{intercom.Name}' desde el panel web.");
+
+            string cacheKey = $"intercom-snapshot:{id}";
+            if (!cache.TryGetValue(cacheKey, out byte[]? jpeg))
+            {
+                try { jpeg = await service.DriverOf(intercom).CaptureSnapshotAsync(service.ConnectionOf(intercom), ct); }
+                catch (DriverException) { jpeg = null; }
+                if (jpeg is not null) cache.Set(cacheKey, jpeg, TimeSpan.FromSeconds(2));
+            }
+            return jpeg is null ? Results.NotFound() : Results.File(jpeg, "image/jpeg");
         });
 
         // ------------------------------------------------------------------

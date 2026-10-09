@@ -13,14 +13,13 @@ public sealed partial class IntercomItemViewModel(IntercomDto intercom) : Observ
 {
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Name), nameof(Detail), nameof(IsOnline), nameof(StatusText), nameof(CallText),
-        nameof(IsRinging), nameof(HasVideo))]
+        nameof(IsRinging))]
     private IntercomDto _intercom = intercom;
 
     public int Id => Intercom.Id;
     public string Name => Intercom.Name;
     public string Detail => $"{Intercom.Model ?? "—"} · {Intercom.Host}" + (Intercom.GroupName is { } g ? $" · {g}" : "");
     public bool IsOnline => Intercom.Status == IntercomStatus.Online;
-    public bool HasVideo => Intercom.ChannelId is not null;
     public bool IsRinging => Intercom.ActiveCall?.State == IntercomCallState.Ringing;
 
     /// <summary>Sus roles permiten atender citofonía y el frente está en su alcance: puede contestar, hablar y abrir.</summary>

@@ -25,6 +25,7 @@ namespace TrueCentralVms.Server.Services;
 public sealed partial class MediaMtxManager(
     IServiceScopeFactory scopeFactory,
     DriverRegistry drivers,
+    IntercomDriverRegistry intercomDrivers,
     CredentialProtector protector,
     IConfiguration config,
     IHostEnvironment env,
@@ -293,6 +294,23 @@ public sealed partial class MediaMtxManager(
                         }
                     }
                 }
+                // Cámara propia de los frentes de citofonía: es parte del frente
+                // (no un canal de Fuentes de video ni de la licencia de video).
+                // Los que eligieron otra cámara usan la ruta de ese canal.
+                var intercoms = await db.Intercoms.AsNoTracking()
+                    .Where(i => i.Enabled && i.ChannelId == null).ToListAsync(ct);
+                foreach (var intercom in intercoms)
+                {
+                    if (intercomDrivers.Find(intercom.DriverKey) is not { } factory) continue;
+                    var conn = new IntercomConnectionInfo(intercom.Host, intercom.Port, intercom.HttpPort,
+                        intercom.Username, protector.Unprotect(intercom.PasswordCiphertext), intercom.RtspPort);
+                    foreach (var profile in new[] { StreamProfile.Main, StreamProfile.Sub })
+                    {
+                        yml.AppendLine($"  {IntercomPathName(intercom.Id, profile)}:");
+                        yml.AppendLine($"    source: {factory.Create().BuildRtspUrl(conn, profile)}");
+                        pathCount++;
+                    }
+                }
                 if (pathCount == 0)
                     yml.AppendLine("  {}");
                 logger.LogInformation("Configuración de MediaMTX generada con {Count} rutas.", pathCount);
@@ -345,6 +363,18 @@ public sealed partial class MediaMtxManager(
 
     public static string PathName(int deviceId, int rtspChannel, StreamProfile profile) =>
         $"ch/{deviceId}/{rtspChannel}/{(profile == StreamProfile.Main ? "main" : "sub")}";
+
+    /// <summary>Ruta de la cámara propia de un frente de citofonía.</summary>
+    public static string IntercomPathName(int intercomId, StreamProfile profile) =>
+        $"ic/{intercomId}/{(profile == StreamProfile.Main ? "main" : "sub")}";
+
+    /// <summary>¿Es la ruta de la cámara propia de un frente? (alcance y bitácora van por el frente, no por un canal).</summary>
+    public static bool TryParseIntercomPath(string? path, out int intercomId)
+    {
+        intercomId = 0;
+        var parts = (path ?? "").Split('/');
+        return parts.Length == 3 && parts[0] == "ic" && int.TryParse(parts[1], out intercomId);
+    }
 
     /// <summary>Ubica ffmpeg.exe una sola vez; sin él, los canales marcados
     /// con proxy caen al pull directo (y se avisa una vez en el log).</summary>

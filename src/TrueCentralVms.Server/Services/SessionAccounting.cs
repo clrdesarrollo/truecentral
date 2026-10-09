@@ -81,7 +81,17 @@ public sealed class SessionAccounting(
             bool fromWeb = streamTokens.TakeWebSession(session.MtxSessionId);
             logger.LogInformation("Streaming: {User} dejó de ver {Device} canal {Channel} ({Profile}).",
                 session.Username, session.DeviceName, session.RtspChannel, session.Profile);
-            if (session.Profile is "main" or "sub")
+            if (MediaMtxManager.TryParseIntercomPath(session.Path, out int intercomId))
+            {
+                var duration = session.EndedAt.Value - session.StartedAt;
+                await audit.LogSystemAsync("intercom", "video-closed",
+                    targetType: "intercom", targetId: intercomId.ToString(), targetName: session.DeviceName,
+                    detail: $"Dejó de ver la cámara del frente de citofonía '{session.DeviceName}' " +
+                            $"(duración {(int)duration.TotalMinutes} min {duration.Seconds} s).",
+                    userId: session.UserId, username: session.Username, clientIp: session.ClientIp,
+                    origin: fromWeb ? "web" : "client", data: new { session.StartedAt, session.EndedAt, session.Profile });
+            }
+            else if (session.Profile is "main" or "sub")
             {
                 var duration = session.EndedAt.Value - session.StartedAt;
                 await audit.LogSystemAsync("live", "view-stopped",
@@ -154,7 +164,9 @@ public sealed class SessionAccounting(
         if (!scope.FiltersView) return 0;
         var open = await db.StreamSessions.Where(s => s.UserId == scope.UserId && s.EndedAt == null).ToListAsync(ct);
         int kicked = 0;
-        foreach (var session in open.Where(s => !scope.CanViewRtsp(s.DeviceId, s.RtspChannel)))
+        foreach (var session in open.Where(s => MediaMtxManager.TryParseIntercomPath(s.Path, out int intercomId)
+                     ? !scope.CanViewIntercom(intercomId)
+                     : !scope.CanViewRtsp(s.DeviceId, s.RtspChannel)))
         {
             await mtx.KickSessionAsync(session.MtxSessionId);
             session.EndedAt = DateTime.UtcNow;
