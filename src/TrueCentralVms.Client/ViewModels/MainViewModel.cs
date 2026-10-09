@@ -203,6 +203,7 @@ public partial class MainViewModel : ObservableObject
         if (Application.Current.MainWindow is { IsLoaded: true } owner)
             Views.ToastWindow.ShowAlertWithAck(owner, toastId, $"Alarma de cerco · {dto.PanelName}",
                 $"{dto.Description}\n{dto.ReceivedAt.ToLocalTime():HH:mm:ss}", "\uE945", null,
+                "Calla la sirena de este puesto; la del panel se apaga con \u00ABSilenciar\u00BB.",
                 () =>
                 {
                     // "Enterado" apaga el sonido en este puesto (la sirena del panel se

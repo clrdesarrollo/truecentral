@@ -347,7 +347,7 @@ async function cercoConfigModal(panel) {
 
   $("#rf-learn").addEventListener("click", async () => {
     const name = $("#rf-name").value.trim();
-    if (!name) { toast("Ponle un nombre al botón.", true); return; }
+    if (!name) { toast("Póngale un nombre al botón.", true); return; }
     try {
       await Api.post(`/api/cerco/panels/${panel.id}/remotes/learn`, { name, action: $("#rf-action").value });
       cercoCfgStartLearn(name);
@@ -585,7 +585,7 @@ function cercoCfgStartLearn(name) {
   cercoCfgStopLearn();
   const box = document.getElementById("rf-learning");
   cercoCfg.learnLeft = 30;
-  const paint = () => { if (box) box.innerHTML = `Presiona ahora el botón del control para <b>${esc(name)}</b>… <b>${cercoCfg.learnLeft}</b> s`; };
+  const paint = () => { if (box) box.innerHTML = `Presione ahora el botón del control para <b>${esc(name)}</b>… <b>${cercoCfg.learnLeft}</b> s`; };
   box?.classList.remove("hidden"); paint();
   $("#rf-learn").disabled = true;
   cercoCfg.learnTimer = setInterval(() => {

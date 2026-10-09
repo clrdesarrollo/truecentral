@@ -1566,16 +1566,18 @@ function accessPersonModal(person, levels) {
    * se corta apenas se cierra.
    */
   const cardCaptureDialog = async () => {
+    // Solo los equipos cuyo driver sabe leer una tarjeta A PEDIDO (hoy,
+    // Hikvision): ofrecer un Dahua o un ZKTeco solo terminaría en un error.
     let devices = [];
     try {
       devices = (await Api.get("/api/access/devices"))
-        .filter((d) => d.enabled && d.supportsCards && d.status === "Online");
+        .filter((d) => d.enabled && d.supportsCards && d.supportsCardCapture && d.status === "Online");
     } catch {
       toast("No se pudo pedir la lista de equipos.", true);
       return;
     }
     if (!devices.length) {
-      toast("No hay equipos de control de acceso en línea para leer la tarjeta.", true);
+      toast("No hay equipos en línea que puedan leer una tarjeta (solo los Hikvision lo hacen). Escriba el número con «+ tarjeta».", true);
       return;
     }
 
@@ -1591,7 +1593,7 @@ function accessPersonModal(person, levels) {
           </select>
         </div>
         <div id="cc-state" class="muted" style="margin:10px 0">
-          Elegí el equipo y apretá «Esperar tarjeta».
+          Elija el equipo y haga clic en «Esperar tarjeta».
         </div>
         <div class="row-actions" style="justify-content:flex-end">
           <button type="button" class="btn ghost" id="cc-cancel">Cancelar</button>
@@ -1608,7 +1610,7 @@ function accessPersonModal(person, levels) {
       const id = Number($("#cc-device", root).value);
       $("#cc-start", root).disabled = true;
       $("#cc-device", root).disabled = true;
-      $("#cc-state", root).textContent = "Pasá la tarjeta por el lector del equipo…";
+      $("#cc-state", root).textContent = "Pase la tarjeta por el lector del equipo…";
 
       while (alive) {
         let answer;
@@ -1635,7 +1637,7 @@ function accessPersonModal(person, levels) {
         {
           readStep();
           if (draft.cards.some((c) => c.replace(/\s+/g, "") === answer.cardNo)) {
-            $("#cc-state", root).textContent = `Esa tarjeta (${answer.cardNo}) ya está en la lista. Pasá otra…`;
+            $("#cc-state", root).textContent = `Esa tarjeta (${answer.cardNo}) ya está en la lista. Pase otra…`;
             await new Promise((r) => setTimeout(r, 1200));
             continue;
           }

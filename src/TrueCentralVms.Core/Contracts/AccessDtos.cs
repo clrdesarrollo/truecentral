@@ -69,7 +69,9 @@ public sealed record AccessDeviceDto(
     DateTime UpdatedAt,
     IReadOnlyList<AccessDoorDto> Doors,
     /// <summary>Ubicación del equipo (null = por ubicar): la heredan sus puertas.</summary>
-    int? LocationId = null);
+    int? LocationId = null,
+    /// <summary>Su driver sabe leer una tarjeta a pedido en el lector (hoy, solo Hikvision).</summary>
+    bool SupportsCardCapture = false);
 
 public sealed record AccessDeviceWriteDto(
     string Name,

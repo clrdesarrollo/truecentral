@@ -452,7 +452,7 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
         int total = Cells.Sum(c => c.Segments.Count);
         Status = total == 0
             ? $"Sin grabaciones el {Date:dd-MM-yyyy}. El equipo conserva según su propio disco y política."
-            : "Clic en la línea de tiempo para reproducir; arrastre para marcar un tramo.";
+            : "Clic en la línea de tiempo para reproducir desde esa hora; arrastre para recorrerla. Para marcar un tramo, active «Recorte».";
     }
 
     // ------------------------------------------------------------------

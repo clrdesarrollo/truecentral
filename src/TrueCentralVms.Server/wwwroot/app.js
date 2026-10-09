@@ -800,9 +800,14 @@ const ANPR_DRIVERS = ["hikvision-netsdk", "dahua-netsdk"];
 
 async function renderDevices() {
   $("#page-title").textContent = "Dispositivos";
-  let devices;
-  try { devices = await Api.get("/api/devices"); }
+  let devices, drivers;
+  try {
+    // Los drivers dan el nombre visible de la marca; si no llegan, la columna
+    // cae a la clave técnica en vez de dejar la página sin tabla.
+    [devices, drivers] = await Promise.all([Api.get("/api/devices"), getDrivers().catch(() => [])]);
+  }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
+  const brandOf = (key) => drivers.find((dr) => dr.key === key)?.displayName ?? key;
 
   const isAdmin = Perms.can("devices.manage");
   $("#view").innerHTML = `
@@ -826,7 +831,7 @@ async function renderDevices() {
             <tr data-id="${d.id}">
               <td>${esc(d.name)}${locationLineHtml(d.location)}</td>
               <td>${esc(typeLabel(d.deviceType))}</td>
-              <td class="muted">${esc(d.driverKey)}</td>
+              <td class="muted">${esc(brandOf(d.driverKey))}</td>
               <td class="muted">${esc(d.host)}:${d.sdkPort}</td>
               <td>${esc(d.model ?? "—")}</td>
               <td class="muted">${esc(d.serialNumber ?? "—")}</td>
