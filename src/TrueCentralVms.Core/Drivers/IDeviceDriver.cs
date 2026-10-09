@@ -126,6 +126,17 @@ public interface IDeviceDriver
         DateTime localStart, DateTime localEnd) => null;
 
     /// <summary>
+    /// La URL de <see cref="BuildPlaybackUrl"/>, consultando al equipo si hace
+    /// falta: es la que usa el servidor. Hikvision y Dahua la arman de una
+    /// plantilla; ONVIF la pide por SOAP (GetReplayUri), así que reproducir o
+    /// exportar no depende de que antes se haya consultado la línea de tiempo.
+    /// Lanza <see cref="DriverException"/> si el equipo no responde.
+    /// </summary>
+    Task<string?> ResolvePlaybackUrlAsync(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default) =>
+        Task.FromResult(BuildPlaybackUrl(info, rtspPort, rtspChannel, localStart, localEnd));
+
+    /// <summary>
     /// true si la URL de <see cref="BuildPlaybackUrl"/> arranca exactamente en
     /// el instante pedido (Hikvision y Dahua llevan el rango en la propia
     /// URL). ONVIF no lo cumple: su posicionamiento viaja en una cabecera

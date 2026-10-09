@@ -94,7 +94,16 @@ public static class PlaybackApi
             var from = start ?? DateTime.Now.Date.AddHours(14);
             var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
                 protector.Unprotect(device.PasswordCiphertext));
-            if (driver.BuildPlaybackUrl(conn, device.RtspPort, rtspChannel, from, from.AddHours(1)) is not { } source)
+            string? source;
+            try
+            {
+                source = await driver.ResolvePlaybackUrlAsync(conn, device.RtspPort, rtspChannel, from, from.AddHours(1), ct);
+            }
+            catch (DriverException ex)
+            {
+                return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
+            if (source is null)
                 return Results.Json(new { error = "Este equipo no soporta reproducción remota." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
 
@@ -179,8 +188,16 @@ public static class PlaybackApi
 
             var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
                 protector.Unprotect(device.PasswordCiphertext));
-            string? source = driver.BuildPlaybackUrl(conn, device.RtspPort, request.RtspChannel,
-                request.StartLocal, request.EndLocal);
+            string? source;
+            try
+            {
+                source = await driver.ResolvePlaybackUrlAsync(conn, device.RtspPort, request.RtspChannel,
+                    request.StartLocal, request.EndLocal, ct);
+            }
+            catch (DriverException ex)
+            {
+                return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
             if (source is null)
                 return Results.Json(new { error = "Este equipo aún no soporta reproducción remota desde el VMS." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
@@ -298,7 +315,19 @@ public static class PlaybackApi
 
             var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
                 protector.Unprotect(device.PasswordCiphertext));
-            if (driver.BuildPlaybackUrl(conn, device.RtspPort, rtspChannel, start, end) is not { } source)
+            // La exportación puede ser lo primero que se le pide al equipo desde
+            // que arrancó el servidor (sin línea de tiempo consultada): el
+            // driver obtiene la URL por su cuenta si la necesita.
+            string? source;
+            try
+            {
+                source = await driver.ResolvePlaybackUrlAsync(conn, device.RtspPort, rtspChannel, start, end, ct);
+            }
+            catch (DriverException ex)
+            {
+                return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
+            if (source is null)
                 return Results.Json(new { error = "Este equipo aún no soporta reproducción remota desde el VMS." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
 

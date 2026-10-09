@@ -177,8 +177,10 @@ public sealed class OnvifDeviceDriver : IDeviceDriver
 
     /// <summary>
     /// URI de reproducción por equipo, resueltas al consultar las grabaciones:
-    /// <see cref="BuildPlaybackUrl"/> es síncrono y no puede hablar SOAP, y el
-    /// cliente siempre pide primero la línea de tiempo del día.
+    /// <see cref="BuildPlaybackUrl"/> es síncrono y no puede hablar SOAP. Vive
+    /// solo en memoria: <see cref="ResolvePlaybackUrlAsync"/> la vuelve a
+    /// llenar cuando falta (servidor recién arrancado, exportación sin haber
+    /// abierto la línea de tiempo).
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, List<ReplayEntry>> ReplayCache = new();
 
@@ -245,6 +247,21 @@ public sealed class OnvifDeviceDriver : IDeviceDriver
 
         return $"rtsp://{Uri.EscapeDataString(info.Username)}:{Uri.EscapeDataString(info.Password)}" +
                $"@{uri.Host}:{(uri.IsDefaultPort ? 554 : uri.Port)}{uri.PathAndQuery}";
+    }
+
+    /// <summary>
+    /// Si la caché no tiene la grabación que cubre la hora pedida (se
+    /// reinició el servidor, nadie abrió la línea de tiempo, o la grabación
+    /// siguió creciendo desde la última consulta), se la pide al equipo antes
+    /// de armar la URL.
+    /// </summary>
+    public async Task<string?> ResolvePlaybackUrlAsync(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default)
+    {
+        if (!ReplayCache.TryGetValue(CacheKey(info), out var entries) ||
+            !entries.Any(e => localStart >= e.From && localStart < e.Until))
+            await QueryRecordingsAsync(info, rtspChannel, localStart, localEnd, ct);
+        return BuildPlaybackUrl(info, rtspPort, rtspChannel, localStart, localEnd);
     }
 
     public async Task<byte[]?> CaptureSnapshotAsync(DeviceConnectionInfo info, int channelNumber, CancellationToken ct = default)
