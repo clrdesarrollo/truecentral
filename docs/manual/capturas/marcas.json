@@ -1,0 +1,1110 @@
+{
+  "cliente-centro-de-descargas.png": [
+    {
+      "x": 0,
+      "y": 0.1417,
+      "etiqueta": "Resumen de las descargas"
+    },
+    {
+      "x": 0.842,
+      "y": 0.1417,
+      "etiqueta": "Limpiar terminadas"
+    },
+    {
+      "x": 0.1477,
+      "y": 0.325,
+      "etiqueta": "Archivo (el puntero muestra la ruta completa)"
+    },
+    {
+      "x": 0.8284,
+      "y": 0.4458,
+      "etiqueta": "Estado: Por comenzar, Descargando, Terminada, Fallida"
+    },
+    {
+      "x": 0.9153,
+      "y": 0.5792,
+      "etiqueta": "Botones de la fila: abrir la carpeta, reintentar, cancelar o quitar"
+    },
+    {
+      "x": 0.5989,
+      "y": 0.7615,
+      "etiqueta": "Motivo de una exportación fallida"
+    }
+  ],
+  "cliente-centro-de-eventos.png": [
+    {
+      "x": 0.0486,
+      "y": 0.0928,
+      "etiqueta": "Resumen: alertas y cuántas faltan por confirmar"
+    },
+    {
+      "x": 0.7465,
+      "y": 0.0811,
+      "etiqueta": "Solo sin confirmar"
+    },
+    {
+      "x": 0.9014,
+      "y": 0.0806,
+      "etiqueta": "Ventana aparte"
+    },
+    {
+      "x": 0.8299,
+      "y": 0.2644,
+      "etiqueta": "Estado de la alerta"
+    },
+    {
+      "x": 0.9101,
+      "y": 0.2778,
+      "etiqueta": "Ver: abre la ventana de alarma"
+    },
+    {
+      "x": 0.9559,
+      "y": 0.3156,
+      "etiqueta": "Enterado: confirma la alerta"
+    },
+    {
+      "x": 0.0764,
+      "y": 0.445,
+      "etiqueta": "Quién la confirmó, cuándo y desde dónde"
+    },
+    {
+      "x": 0.0042,
+      "y": 0.4367,
+      "etiqueta": "Botón del riel con las alertas sin confirmar"
+    }
+  ],
+  "cliente-configuracion-video.png": [
+    {
+      "x": 0.0118,
+      "y": 0.1521,
+      "etiqueta": "Apartados de la configuración"
+    },
+    {
+      "x": 0.2676,
+      "y": 0.2594,
+      "etiqueta": "Stream al abrir un canal"
+    },
+    {
+      "x": 0.2676,
+      "y": 0.4385,
+      "etiqueta": "Ajuste de imagen"
+    },
+    {
+      "x": 0.2676,
+      "y": 0.6156,
+      "etiqueta": "Al abrir un equipo completo"
+    },
+    {
+      "x": 0.2779,
+      "y": 0.8021,
+      "etiqueta": "Volver a abrir las cámaras de la última sesión"
+    },
+    {
+      "x": 0.8529,
+      "y": 0.9458,
+      "etiqueta": "Guardar (Cancelar descarta los cambios)"
+    }
+  ],
+  "cliente-exportar-grabaciones.png": [
+    {
+      "x": 0.0032,
+      "y": 0.1884,
+      "etiqueta": "Cámara"
+    },
+    {
+      "x": 0.0032,
+      "y": 0.2998,
+      "etiqueta": "Inicio y fin: fecha y hora"
+    },
+    {
+      "x": 0.0032,
+      "y": 0.4154,
+      "etiqueta": "Carpeta de destino (… para elegirla)"
+    },
+    {
+      "x": 0.0032,
+      "y": 0.5353,
+      "etiqueta": "Formato: MP4 o MKV"
+    },
+    {
+      "x": 0.029,
+      "y": 0.7634,
+      "etiqueta": "Una sola cápsula o dividir en archivos"
+    },
+    {
+      "x": 0.0258,
+      "y": 0.9443,
+      "etiqueta": "Resumen de lo que se va a exportar"
+    },
+    {
+      "x": 0.8548,
+      "y": 0.9443,
+      "etiqueta": "Exportar"
+    }
+  ],
+  "cliente-inicio-sesion.png": [
+    {
+      "x": 0.0643,
+      "y": 0.3169,
+      "etiqueta": "Servidor"
+    },
+    {
+      "x": 0.0643,
+      "y": 0.4607,
+      "etiqueta": "Usuario (▾ muestra los recientes)"
+    },
+    {
+      "x": 0.0643,
+      "y": 0.6045,
+      "etiqueta": "Contraseña (el ojo la muestra)"
+    },
+    {
+      "x": 0.0643,
+      "y": 0.6843,
+      "etiqueta": "Recordar contraseña e inicio automático"
+    },
+    {
+      "x": 0.1024,
+      "y": 0.773,
+      "etiqueta": "Ingresar"
+    }
+  ],
+  "cliente-inicio.png": [
+    {
+      "x": 0.1042,
+      "y": 0.0228,
+      "etiqueta": "Viñetas de los módulos abiertos"
+    },
+    {
+      "x": 0.1104,
+      "y": 0.2261,
+      "etiqueta": "Tarjeta de un módulo"
+    },
+    {
+      "x": 0.0042,
+      "y": 0.0789,
+      "etiqueta": "Riel con un botón por módulo"
+    }
+  ],
+  "cliente-ventana-de-alarma.png": [
+    {
+      "x": 0.0481,
+      "y": 0.0879,
+      "etiqueta": "Título, origen y hora de la alerta"
+    },
+    {
+      "x": 0.0179,
+      "y": 0.1786,
+      "etiqueta": "Origen: automatización, disparo, severidad y alarma sonora"
+    },
+    {
+      "x": 0.0179,
+      "y": 0.57,
+      "etiqueta": "Acuse de recibo"
+    },
+    {
+      "x": 0.3491,
+      "y": 0.1586,
+      "etiqueta": "Fotos, Video en vivo y Qué hizo el sistema"
+    },
+    {
+      "x": 0.058,
+      "y": 0.9329,
+      "etiqueta": "Enterado: confirma la alerta"
+    },
+    {
+      "x": 0.1406,
+      "y": 0.9329,
+      "etiqueta": "Silenciar la alarma sonora"
+    },
+    {
+      "x": 0.7104,
+      "y": 0.9571,
+      "etiqueta": "Alertas sin confirmar y paginador"
+    },
+    {
+      "x": 0.9528,
+      "y": 0.9329,
+      "etiqueta": "Cerrar (la alerta sigue pendiente)"
+    }
+  ],
+  "cliente-ventana-principal.png": [
+    {
+      "x": 0.1618,
+      "y": 0.0228,
+      "etiqueta": "Viñetas: una por módulo abierto"
+    },
+    {
+      "x": 0.7222,
+      "y": 0.0228,
+      "etiqueta": "Uso de procesador, memoria y disco del servidor"
+    },
+    {
+      "x": 0.8042,
+      "y": 0.0228,
+      "etiqueta": "Conexión con el servidor"
+    },
+    {
+      "x": 0.8535,
+      "y": 0.0228,
+      "etiqueta": "Menú del usuario"
+    },
+    {
+      "x": 0.0042,
+      "y": 0.13,
+      "etiqueta": "Riel con un botón por módulo"
+    },
+    {
+      "x": 0.5979,
+      "y": 0.9872,
+      "etiqueta": "Barra de estado, con el aviso de licencia a la derecha"
+    }
+  ],
+  "cliente-vista-en-vivo-cuadro.png": [
+    {
+      "x": 0.0472,
+      "y": 0.4932,
+      "etiqueta": "Equipo y cámara (a la izquierda, el número del cuadro)"
+    },
+    {
+      "x": 0.7541,
+      "y": 0.3514,
+      "etiqueta": "Audio"
+    },
+    {
+      "x": 0.7913,
+      "y": 0.3514,
+      "etiqueta": "Stream: P principal o S secundario"
+    },
+    {
+      "x": 0.8285,
+      "y": 0.3514,
+      "etiqueta": "Captura de imagen"
+    },
+    {
+      "x": 0.8657,
+      "y": 0.6486,
+      "etiqueta": "Grabación local, con su contador"
+    },
+    {
+      "x": 0.9592,
+      "y": 0.6486,
+      "etiqueta": "Cerrar el video del cuadro"
+    }
+  ],
+  "cliente-vista-en-vivo-vistas.png": [
+    {
+      "x": 0.0727,
+      "y": 0.3818,
+      "etiqueta": "Una vista: clic para cargarla"
+    },
+    {
+      "x": 0.9599,
+      "y": 0.5727,
+      "etiqueta": "Actualizar con la grilla actual y eliminar (a la derecha de cada vista)"
+    },
+    {
+      "x": 0.0727,
+      "y": 0.8,
+      "etiqueta": "Nombre de la vista nueva"
+    },
+    {
+      "x": 0.0777,
+      "y": 0.9127,
+      "etiqueta": "Compartir con todos los puestos"
+    },
+    {
+      "x": 0.8747,
+      "y": 0.8545,
+      "etiqueta": "Guardar la grilla como vista"
+    }
+  ],
+  "cliente-vista-en-vivo.png": [
+    {
+      "x": 0.1208,
+      "y": 0.0706,
+      "etiqueta": "Lista por Equipo o por Ubicación"
+    },
+    {
+      "x": 0.0507,
+      "y": 0.11,
+      "etiqueta": "Buscar canal…"
+    },
+    {
+      "x": 0.2264,
+      "y": 0.0694,
+      "etiqueta": "División de la grilla"
+    },
+    {
+      "x": 0.3188,
+      "y": 0.0694,
+      "etiqueta": "Zoom digital"
+    },
+    {
+      "x": 0.3722,
+      "y": 0.0694,
+      "etiqueta": "Limpiar todo"
+    },
+    {
+      "x": 0.5333,
+      "y": 0.0694,
+      "etiqueta": "Vistas guardadas"
+    },
+    {
+      "x": 0.8097,
+      "y": 0.0694,
+      "etiqueta": "Pantalla auxiliar"
+    },
+    {
+      "x": 0.8993,
+      "y": 0.0694,
+      "etiqueta": "Pantalla completa"
+    },
+    {
+      "x": 0.2479,
+      "y": 0.1156,
+      "etiqueta": "Barra del cuadro: cámara y botones"
+    },
+    {
+      "x": 0.0444,
+      "y": 0.6439,
+      "etiqueta": "Panel PTZ: muestra la cámara del cuadro seleccionado"
+    },
+    {
+      "x": 0.0083,
+      "y": 0.9872,
+      "etiqueta": "Barra de estado"
+    }
+  ],
+  "web-acceso-horario.png": [
+    {
+      "x": 0.028,
+      "y": 0.1499,
+      "etiqueta": "Nombre"
+    },
+    {
+      "x": 0.028,
+      "y": 0.2789,
+      "etiqueta": "Una fila por día, con sus tramos"
+    },
+    {
+      "x": 0.7646,
+      "y": 0.7177,
+      "etiqueta": "+ tramo: agrega otro tramo a ese día"
+    },
+    {
+      "x": 0.8505,
+      "y": 0.7177,
+      "etiqueta": "Copiar a todos: copia ese día a los otros seis"
+    },
+    {
+      "x": 0.4709,
+      "y": 0.6822,
+      "etiqueta": "Quitar este tramo"
+    },
+    {
+      "x": 0.1524,
+      "y": 0.8234,
+      "etiqueta": "Día sin tramos: no deja pasar a nadie"
+    }
+  ],
+  "web-acceso-persona-credenciales.png": [
+    {
+      "x": 0.3459,
+      "y": 0.1223,
+      "etiqueta": "Pasos del asistente"
+    },
+    {
+      "x": 0.6842,
+      "y": 0.3011,
+      "etiqueta": "+ tarjeta y Leer tarjeta en un lector"
+    },
+    {
+      "x": 0.028,
+      "y": 0.4309,
+      "etiqueta": "Clave de teclado"
+    },
+    {
+      "x": 0.028,
+      "y": 0.5084,
+      "etiqueta": "Las dos manos: elija el dedo en el dibujo"
+    },
+    {
+      "x": 0.4646,
+      "y": 0.5576,
+      "etiqueta": "Ficha del dedo elegido, con su calidad"
+    },
+    {
+      "x": 0.7546,
+      "y": 0.9356,
+      "etiqueta": "Rostro: Elegir foto"
+    }
+  ],
+  "web-acceso-personas.png": [
+    {
+      "x": 0.0116,
+      "y": 0.0613,
+      "etiqueta": "Filtros: Buscar, Departamento, Nivel de acceso y En los equipos"
+    },
+    {
+      "x": 0.638,
+      "y": 0.0296,
+      "etiqueta": "Escribir pendientes, Reenviar todo y Agregar persona"
+    },
+    {
+      "x": 0.4077,
+      "y": 0.6482,
+      "etiqueta": "Credenciales cargadas"
+    },
+    {
+      "x": 0.5669,
+      "y": 0.2578,
+      "etiqueta": "«ninguno»: sin niveles de acceso, no entra por ninguna puerta"
+    },
+    {
+      "x": 0.777,
+      "y": 0.2578,
+      "etiqueta": "Estado en los equipos"
+    },
+    {
+      "x": 0.0261,
+      "y": 0.8467,
+      "etiqueta": "Persona desactivada"
+    }
+  ],
+  "web-auditoria.png": [
+    {
+      "x": 0.2964,
+      "y": 0.2302,
+      "etiqueta": "Filtros (aquí, la categoría Usuarios)"
+    },
+    {
+      "x": 0.0187,
+      "y": 0.324,
+      "etiqueta": "Buscar y Limpiar"
+    },
+    {
+      "x": 0.8896,
+      "y": 0.0818,
+      "etiqueta": "Exportar CSV"
+    },
+    {
+      "x": 0.0191,
+      "y": 0.4998,
+      "etiqueta": "Un evento: clic para ver el detalle completo"
+    },
+    {
+      "x": 0.9131,
+      "y": 0.5007,
+      "etiqueta": "Resultado: Éxito o Fallo"
+    },
+    {
+      "x": 0.0187,
+      "y": 0.9182,
+      "etiqueta": "Total de eventos y paginador"
+    }
+  ],
+  "web-automatizaciones-editor.png": [
+    {
+      "x": 0.0771,
+      "y": 0.1028,
+      "etiqueta": "Nombre de la automatización"
+    },
+    {
+      "x": 0.6006,
+      "y": 0.1028,
+      "etiqueta": "Mínimo entre ejecuciones y Activa"
+    },
+    {
+      "x": 0.8749,
+      "y": 0.1028,
+      "etiqueta": "Probar y Guardar"
+    },
+    {
+      "x": 0,
+      "y": 0.1378,
+      "etiqueta": "Paleta Pasos"
+    },
+    {
+      "x": 0.46,
+      "y": 0.2442,
+      "etiqueta": "Salida de un paso: arrástrela a otro para conectarlos"
+    },
+    {
+      "x": 0.7467,
+      "y": 0.1378,
+      "etiqueta": "Propiedades del paso seleccionado"
+    },
+    {
+      "x": 0.7064,
+      "y": 0.9533,
+      "etiqueta": "Acercar y alejar"
+    }
+  ],
+  "web-automatizaciones-ejecucion.png": [
+    {
+      "x": 0.2134,
+      "y": 0.2576,
+      "etiqueta": "Resultado"
+    },
+    {
+      "x": 0.0287,
+      "y": 0.3973,
+      "etiqueta": "Paso con su resultado y detalle"
+    },
+    {
+      "x": 0.028,
+      "y": 0.7678,
+      "etiqueta": "Fotos capturadas"
+    }
+  ],
+  "web-automatizaciones-listado.png": [
+    {
+      "x": 0.0174,
+      "y": 0.1474,
+      "etiqueta": "Buscador"
+    },
+    {
+      "x": 0.722,
+      "y": 0.0748,
+      "etiqueta": "Servidor de correo, Sonidos y Nueva automatización"
+    },
+    {
+      "x": 0.7105,
+      "y": 0.2871,
+      "etiqueta": "Estado: Activa o Pausada"
+    },
+    {
+      "x": 0.7649,
+      "y": 0.2154,
+      "etiqueta": "Probar, Abrir, Duplicar y Eliminar"
+    },
+    {
+      "x": 0.9188,
+      "y": 0.5802,
+      "etiqueta": "Enterado"
+    },
+    {
+      "x": 0.0178,
+      "y": 0.8437,
+      "etiqueta": "Una ejecución: clic para ver el detalle"
+    }
+  ],
+  "web-biblioteca-sonidos.png": [
+    {
+      "x": 0.6608,
+      "y": 0.1267,
+      "etiqueta": "Archivo de audio y Subir"
+    },
+    {
+      "x": 0.3098,
+      "y": 0.3387,
+      "etiqueta": "Nivel (pico)"
+    },
+    {
+      "x": 0.7146,
+      "y": 0.3345,
+      "etiqueta": "Amplificar"
+    },
+    {
+      "x": 0.8471,
+      "y": 0.3345,
+      "etiqueta": "dB…"
+    },
+    {
+      "x": 0.0226,
+      "y": 0.565,
+      "etiqueta": "Audios en los parlantes"
+    }
+  ],
+  "web-centro-de-eventos.png": [
+    {
+      "x": 0.6057,
+      "y": 0.1331,
+      "etiqueta": "Solo sin confirmar"
+    },
+    {
+      "x": 0.7411,
+      "y": 0.1331,
+      "etiqueta": "Sonar alertas nuevas"
+    },
+    {
+      "x": 0.9317,
+      "y": 0.1588,
+      "etiqueta": "Actualizar"
+    },
+    {
+      "x": 0.4406,
+      "y": 0.3362,
+      "etiqueta": "Enterado en la lista"
+    },
+    {
+      "x": 0.7102,
+      "y": 0.5356,
+      "etiqueta": "Dirigida a"
+    },
+    {
+      "x": 0.8745,
+      "y": 0.2737,
+      "etiqueta": "Fotos, Cámaras y Qué hizo el sistema"
+    },
+    {
+      "x": 0.6579,
+      "y": 0.8306,
+      "etiqueta": "Silenciar"
+    }
+  ],
+  "web-fuentes-de-video-agregar.png": [
+    {
+      "x": 0.0548,
+      "y": 0.3425,
+      "etiqueta": "Marca / protocolo"
+    },
+    {
+      "x": 0.5143,
+      "y": 0.4309,
+      "etiqueta": "Puerto SDK y Puerto RTSP"
+    },
+    {
+      "x": 0.39,
+      "y": 0.9512,
+      "etiqueta": "Probar conexión"
+    },
+    {
+      "x": 0.0857,
+      "y": 0.8478,
+      "etiqueta": "Cupo de licencia"
+    }
+  ],
+  "web-fuentes-de-video-canales.png": [
+    {
+      "x": 0.0439,
+      "y": 0.4588,
+      "etiqueta": "Miniatura de la imagen"
+    },
+    {
+      "x": 0.1756,
+      "y": 0.4024,
+      "etiqueta": "Nombre del canal"
+    },
+    {
+      "x": 0.2843,
+      "y": 0.5459,
+      "etiqueta": "Canal, número RTSP y Con señal / Sin señal"
+    },
+    {
+      "x": 0.526,
+      "y": 0.4588,
+      "etiqueta": "Habilitado"
+    },
+    {
+      "x": 0.6526,
+      "y": 0.4588,
+      "etiqueta": "PTZ / lente"
+    },
+    {
+      "x": 0.7831,
+      "y": 0.4588,
+      "etiqueta": "Proxy"
+    },
+    {
+      "x": 0.8735,
+      "y": 0.4588,
+      "etiqueta": "Guardar (cada fila por separado)"
+    }
+  ],
+  "web-fuentes-de-video.png": [
+    {
+      "x": 0.8648,
+      "y": 0.0448,
+      "etiqueta": "Agregar dispositivo"
+    },
+    {
+      "x": 0.01,
+      "y": 0.2335,
+      "etiqueta": "Nombre y, debajo, su ubicación"
+    },
+    {
+      "x": 0.5504,
+      "y": 0.1198,
+      "etiqueta": "Canales habilitados del total"
+    },
+    {
+      "x": 0.6954,
+      "y": 0.2335,
+      "etiqueta": "Estado de la conexión"
+    },
+    {
+      "x": 0.7548,
+      "y": 0.1823,
+      "etiqueta": "Canales, Revalidar, Editar y Eliminar"
+    }
+  ],
+  "web-inicio-sesion.png": [
+    {
+      "x": 0.1437,
+      "y": 0.4135,
+      "etiqueta": "Usuario"
+    },
+    {
+      "x": 0.1437,
+      "y": 0.5927,
+      "etiqueta": "Contraseña"
+    },
+    {
+      "x": 0.8562,
+      "y": 0.5461,
+      "etiqueta": "Mostrar la contraseña"
+    },
+    {
+      "x": 0.1437,
+      "y": 0.7179,
+      "etiqueta": "Ingresar"
+    },
+    {
+      "x": 0.5685,
+      "y": 0.8225,
+      "etiqueta": "Versión del servidor"
+    }
+  ],
+  "web-licencia.png": [
+    {
+      "x": 0.0387,
+      "y": 0.1794,
+      "etiqueta": "Estado y modalidad"
+    },
+    {
+      "x": 0.0387,
+      "y": 0.332,
+      "etiqueta": "Identificador de este equipo"
+    },
+    {
+      "x": 0.0642,
+      "y": 0.7079,
+      "etiqueta": "Activar en línea y Generar solicitud (.req)"
+    },
+    {
+      "x": 0.5105,
+      "y": 0.7106,
+      "etiqueta": "Importar archivo .lic"
+    },
+    {
+      "x": 0.694,
+      "y": 0.6673,
+      "etiqueta": "Revalidar ahora y Desactivar en este equipo"
+    },
+    {
+      "x": 0.0226,
+      "y": 0.8037,
+      "etiqueta": "Módulos y cupos (sigue más abajo)"
+    }
+  ],
+  "web-panel.png": [
+    {
+      "x": 0.0895,
+      "y": 0.0825,
+      "etiqueta": "Menú lateral: solo las páginas que su usuario puede abrir"
+    },
+    {
+      "x": 0.1906,
+      "y": 0.1634,
+      "etiqueta": "Resumen del sistema"
+    },
+    {
+      "x": 0.8429,
+      "y": 0.0381,
+      "etiqueta": "Menú del usuario"
+    },
+    {
+      "x": 0.807,
+      "y": 0.1963,
+      "etiqueta": "Cerrar sesión"
+    },
+    {
+      "x": 0.0109,
+      "y": 0.9663,
+      "etiqueta": "Conexión con el servidor"
+    }
+  ],
+  "web-paneles-de-cerco-credenciales.png": [
+    {
+      "x": 0.0411,
+      "y": 0.4349,
+      "etiqueta": "ID de equipo"
+    },
+    {
+      "x": 0.0411,
+      "y": 0.606,
+      "etiqueta": "Código de enrolamiento"
+    },
+    {
+      "x": 0.0411,
+      "y": 0.7772,
+      "etiqueta": "URL WebSocket"
+    },
+    {
+      "x": 0.6312,
+      "y": 0.9054,
+      "etiqueta": "Copiar todo"
+    },
+    {
+      "x": 0.8449,
+      "y": 0.9054,
+      "etiqueta": "Listo"
+    }
+  ],
+  "web-recursos-ficha.png": [
+    {
+      "x": 0.3103,
+      "y": 0.0488,
+      "etiqueta": "← Volver a la lista"
+    },
+    {
+      "x": 0.3103,
+      "y": 0.2229,
+      "etiqueta": "Pestañas de la ficha"
+    },
+    {
+      "x": 0.4531,
+      "y": 0.3522,
+      "etiqueta": "Ubicación"
+    },
+    {
+      "x": 0.3103,
+      "y": 0.761,
+      "etiqueta": "Consignas para el operador"
+    },
+    {
+      "x": 0.6015,
+      "y": 0.2803,
+      "etiqueta": "Imagen actual, con Actualizar cada y Actualizar ahora"
+    },
+    {
+      "x": 0.3103,
+      "y": 0.9406,
+      "etiqueta": "Guardar"
+    }
+  ],
+  "web-recursos.png": [
+    {
+      "x": 0.0239,
+      "y": 0.0913,
+      "etiqueta": "Árbol de ubicaciones, con cuántos recursos tiene cada una"
+    },
+    {
+      "x": 0.2132,
+      "y": 0.0854,
+      "etiqueta": "+ Nueva: ubicación de primer nivel"
+    },
+    {
+      "x": 0.0239,
+      "y": 0.7933,
+      "etiqueta": "Por ubicar"
+    },
+    {
+      "x": 0.3103,
+      "y": 0.0623,
+      "etiqueta": "Ubicación elegida, con su tipo y su dirección"
+    },
+    {
+      "x": 0.7463,
+      "y": 0.0623,
+      "etiqueta": "+ Sububicación, Editar y Eliminar"
+    },
+    {
+      "x": 0.3103,
+      "y": 0.1903,
+      "etiqueta": "Etiquetas por tipo"
+    },
+    {
+      "x": 0.3103,
+      "y": 0.2739,
+      "etiqueta": "Buscador y lista Todos los equipos"
+    },
+    {
+      "x": 0.3784,
+      "y": 0.4531,
+      "etiqueta": "Nombre del recurso: abre su ficha"
+    }
+  ],
+  "web-roles.png": [
+    {
+      "x": 0.0259,
+      "y": 0.5765,
+      "etiqueta": "Lista de roles: permisos, usuarios y alcance de cada uno"
+    },
+    {
+      "x": 0.1855,
+      "y": 0.0589,
+      "etiqueta": "+ Nuevo rol"
+    },
+    {
+      "x": 0.3008,
+      "y": 0.0825,
+      "etiqueta": "Nombre y Descripción"
+    },
+    {
+      "x": 0.3132,
+      "y": 0.2483,
+      "etiqueta": "Alcance: solo en estas ubicaciones y recursos"
+    },
+    {
+      "x": 0.3238,
+      "y": 0.4695,
+      "etiqueta": "Ubicaciones del rol, con sus sububicaciones"
+    },
+    {
+      "x": 0.5956,
+      "y": 0.3628,
+      "etiqueta": "Recursos sueltos: tipo y buscador"
+    },
+    {
+      "x": 0.317,
+      "y": 0.775,
+      "etiqueta": "Puede ver el resto, sin operarlo"
+    },
+    {
+      "x": 0.3008,
+      "y": 0.9147,
+      "etiqueta": "Buscar permiso…"
+    }
+  ],
+  "web-servicios.png": [
+    {
+      "x": 0.0226,
+      "y": 0.0592,
+      "etiqueta": "Tarjetas del servidor"
+    },
+    {
+      "x": 0.7813,
+      "y": 0.2403,
+      "etiqueta": "Reiniciar servidor completo (deshabilitado si corre como consola)"
+    },
+    {
+      "x": 0.2842,
+      "y": 0.8336,
+      "etiqueta": "Servicio detenido a mano"
+    },
+    {
+      "x": 0.2842,
+      "y": 0.9311,
+      "etiqueta": "Servicio apagado en la configuración"
+    },
+    {
+      "x": 0.6827,
+      "y": 0.4232,
+      "etiqueta": "Auto: reinicio automático"
+    },
+    {
+      "x": 0.7651,
+      "y": 0.8216,
+      "etiqueta": "Iniciar, Detener y Reiniciar"
+    }
+  ],
+  "web-sesiones.png": [
+    {
+      "x": 0.1791,
+      "y": 0.0648,
+      "etiqueta": "Puestos de la licencia en uso"
+    },
+    {
+      "x": 0.7021,
+      "y": 0.3806,
+      "etiqueta": "Cliente abierto y conectado"
+    },
+    {
+      "x": 0.7021,
+      "y": 0.2654,
+      "etiqueta": "Sesión colgada: el cliente se cerró sin cerrar sesión"
+    },
+    {
+      "x": 0.8682,
+      "y": 0.265,
+      "etiqueta": "Desconectar o Liberar puesto"
+    },
+    {
+      "x": 0.0226,
+      "y": 0.4928,
+      "etiqueta": "Sesiones de video activas: una fila por cámara abierta"
+    },
+    {
+      "x": 0.8978,
+      "y": 0.6492,
+      "etiqueta": "Expulsar: corta esa transmisión"
+    }
+  ],
+  "web-usuarios.png": [
+    {
+      "x": 0.8491,
+      "y": 0.0824,
+      "etiqueta": "Agregar usuario"
+    },
+    {
+      "x": 0.0368,
+      "y": 0.3325,
+      "etiqueta": "Superadministrador"
+    },
+    {
+      "x": 0.3306,
+      "y": 0.5465,
+      "etiqueta": "Alcance limitado por su rol"
+    },
+    {
+      "x": 0.5281,
+      "y": 0.8973,
+      "etiqueta": "Usuario deshabilitado"
+    },
+    {
+      "x": 0.7277,
+      "y": 0.1999,
+      "etiqueta": "Última clave: cuándo cambió su contraseña"
+    },
+    {
+      "x": 0.9114,
+      "y": 0.3006,
+      "etiqueta": "Editar y Eliminar"
+    }
+  ],
+  "web-vista-en-vivo.png": [
+    {
+      "x": 0.0921,
+      "y": 0.1058,
+      "etiqueta": "Lista por Equipo o por Ubicación"
+    },
+    {
+      "x": 0.2255,
+      "y": 0.1528,
+      "etiqueta": "Buscar canal…"
+    },
+    {
+      "x": 0.2434,
+      "y": 0.1047,
+      "etiqueta": "División"
+    },
+    {
+      "x": 0.4242,
+      "y": 0.1244,
+      "etiqueta": "Zoom digital"
+    },
+    {
+      "x": 0.7389,
+      "y": 0.1047,
+      "etiqueta": "Vistas, con el nombre de la vista cargada"
+    },
+    {
+      "x": 0.8651,
+      "y": 0.1047,
+      "etiqueta": "Pantalla auxiliar"
+    },
+    {
+      "x": 0.9368,
+      "y": 0.1209,
+      "etiqueta": "Pantalla completa"
+    },
+    {
+      "x": 0.6547,
+      "y": 0.3284,
+      "etiqueta": "Engranaje: Ajustes de este navegador"
+    }
+  ]
+}
