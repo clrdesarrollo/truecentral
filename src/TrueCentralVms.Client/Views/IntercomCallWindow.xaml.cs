@@ -54,7 +54,7 @@ public partial class IntercomCallWindow : Window
         _voice = new IntercomVoiceClient(api);
         _cell = new VideoCellViewModel(api, settings);
         InitializeComponent();
-        VideoHost.DataContext = _cell;
+        VideoArea.DataContext = _cell;
 
         StateChanged += (_, _) => MaxGlyph.Text = WindowState == WindowState.Maximized ? "" : "";
         _clock.Tick += (_, _) => RenderTimer();
@@ -257,17 +257,29 @@ public partial class IntercomCallWindow : Window
 
     private async Task OpenVideoAsync()
     {
-        if (_intercom.ChannelId is not int channelId || _findChannel(channelId) is not { } node)
-        {
-            NoVideoText.Visibility = Visibility.Visible;
-            if (_intercom.ChannelId is not null)
-                NoVideoText.Text = "La cámara del frente no está disponible en este cliente (canal deshabilitado o sin permiso).";
-            return;
-        }
         try
         {
             // Perfil principal: es la cara del visitante, se necesita detalle.
-            await _cell.OpenAsync(node, StreamProfile.Main);
+            if (_intercom.ChannelId is not int channelId)
+            {
+                // Lo normal: la cámara propia del frente, servida como parte del
+                // frente (no es un canal de video ni ocupa uno de la licencia).
+                int id = _intercom.Id;
+                await _cell.OpenSourceAsync($"{_intercom.Name} · cámara del frente",
+                    profile => _api.RequestIntercomStreamAsync(id, profile), StreamProfile.Main);
+            }
+            else if (_findChannel(channelId) is { } node)
+            {
+                // Se eligió otra cámara (p. ej. la que ve el acceso desde un DVR).
+                await _cell.OpenAsync(node, StreamProfile.Main);
+            }
+            else
+            {
+                NoVideoText.Text = $"La cámara elegida para este frente ({_intercom.ChannelName ?? "un canal de video"}) no está " +
+                                   "disponible en este cliente: está deshabilitada o fuera de su alcance. Un administrador " +
+                                   "puede dejar la cámara propia del frente en el panel web (Dispositivos → Citofonía).";
+                NoVideoText.Visibility = Visibility.Visible;
+            }
         }
         catch (Exception)
         {

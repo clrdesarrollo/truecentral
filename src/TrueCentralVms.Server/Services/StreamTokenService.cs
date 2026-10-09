@@ -12,7 +12,10 @@ public sealed record StreamGrant(
     string DeviceName,
     int RtspChannel,
     string Profile,
-    DateTime ExpiresAt);
+    DateTime ExpiresAt,
+    /// <summary>Cámara propia de un frente de citofonía (ruta ic/...): el alcance
+    /// es el del frente, no el de un canal de video.</summary>
+    int? IntercomId = null);
 
 /// <summary>
 /// Tokens de streaming de corta vida: autorizan INICIAR una lectura RTSP de
@@ -27,13 +30,13 @@ public sealed class StreamTokenService
     private readonly ConcurrentDictionary<string, StreamGrant> _grants = new();
 
     public (string Token, StreamGrant Grant) Issue(int userId, string username, string path,
-        int deviceId, string deviceName, int rtspChannel, string profile)
+        int deviceId, string deviceName, int rtspChannel, string profile, int? intercomId = null)
     {
         PruneExpired();
         string token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24))
             .Replace('+', '-').Replace('/', '_').TrimEnd('=');
         var grant = new StreamGrant(userId, username, path, deviceId, deviceName, rtspChannel, profile,
-            DateTime.UtcNow.Add(Lifetime));
+            DateTime.UtcNow.Add(Lifetime), intercomId);
         _grants[token] = grant;
         return (token, grant);
     }

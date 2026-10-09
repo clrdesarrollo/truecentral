@@ -81,7 +81,7 @@ async function renderIntercoms() {
               <td class="muted">${esc(i.groupName ?? "—")}</td>
               <td class="muted">${esc(i.host)}:${i.port} · HTTP ${i.httpPort}</td>
               <td>${esc(i.model ?? "—")}<div class="muted" style="font-size:11px">${esc(i.firmwareVersion ?? "")}</div></td>
-              <td>${i.channelName ? esc(i.channelName) : `<span class="muted" title="Sin cámara asociada: al sonar no se verá video">sin video</span>`}</td>
+              <td>${i.channelId ? esc(i.channelName ?? `canal ${i.channelId}`) : `<span class="muted" title="El video sale del propio frente: no ocupa un canal de video de la licencia">propia del frente</span>`}</td>
               <td>${i.doorCount}</td>
               <td class="ic-status">${intercomStatusCell(i)}</td>
               <td class="ic-call">${intercomCallCell(i)}</td>
@@ -231,8 +231,11 @@ async function intercomModal(intercom, prefill) {
   const [drivers, channels, places] = await Promise.all([getIntercomDrivers(),
     Api.get("/api/intercoms/channels").then((c) => c ?? []), loadLocationChoices()]);
   const driver0 = drivers.find((d) => d.key === (intercom?.driverKey ?? seed.driverKey)) ?? drivers[0];
-  const channelOptions = (selected) => `<option value="">— Sin video —</option>` + channels.map((c) =>
-    `<option value="${c.id}" ${selected === c.id ? "selected" : ""}>${esc(c.name)} (${esc(c.host)})${c.enabled ? "" : " — deshabilitado"}</option>`).join("");
+  // Vacío = la cámara propia del frente (no ocupa un canal de video de la
+  // licencia). Otra cámara solo cuando la del frente no muestra lo que importa.
+  const channelOptions = (selected) => `<option value="">Cámara del propio frente (recomendado)</option>` +
+    (channels.length ? `<optgroup label="Otra cámara (canal de Fuentes de video)">` + channels.map((c) =>
+      `<option value="${c.id}" ${selected === c.id ? "selected" : ""}>${esc(c.name)} (${esc(c.host)})${c.enabled ? "" : " — deshabilitado: no se verá"}</option>`).join("") + `</optgroup>` : "");
   openModal(`
     <h3>${isNew ? "Agregar frente de citofonía" : "Editar frente de citofonía"}</h3>
     <div id="ic-modal-error"></div>
@@ -254,17 +257,22 @@ async function intercomModal(intercom, prefill) {
           ${drivers.map((dr) => `<option value="${esc(dr.key)}" ${driver0?.key === dr.key ? "selected" : ""}>${esc(dr.displayName)}</option>`).join("")}
         </select>
       </div>
-      <div class="form-grid">
-        <div class="field">
-          <label>Dirección (IP o hostname)</label>
-          <input id="ic-host" required value="${esc(intercom?.host ?? seed.host ?? "")}" placeholder="192.168.1.61">
+      <div class="field">
+        <label>Dirección (IP o hostname)</label>
+        <input id="ic-host" required value="${esc(intercom?.host ?? seed.host ?? "")}" placeholder="192.168.1.61">
+      </div>
+      <div style="display:flex;gap:12px">
+        <div class="field" style="flex:1;min-width:0">
+          <label>Puerto SDK</label>
+          <input id="ic-port" type="number" min="1" max="65535" required value="${intercom?.port ?? seed.port ?? driver0?.defaultPort ?? 8000}" title="Puerto del SDK: llamadas y voz">
         </div>
-        <div class="field">
-          <label>Puerto SDK / Puerto HTTP</label>
-          <div style="display:flex;gap:6px">
-            <input id="ic-port" type="number" min="1" max="65535" required value="${intercom?.port ?? seed.port ?? driver0?.defaultPort ?? 8000}" title="Puerto del SDK: llamadas y voz">
-            <input id="ic-http-port" type="number" min="1" max="65535" required value="${intercom?.httpPort ?? seed.httpPort ?? driver0?.defaultHttpPort ?? 80}" title="Puerto HTTP (ISAPI): estado y apertura de puerta">
-          </div>
+        <div class="field" style="flex:1;min-width:0">
+          <label>Puerto HTTP</label>
+          <input id="ic-http-port" type="number" min="1" max="65535" required value="${intercom?.httpPort ?? seed.httpPort ?? driver0?.defaultHttpPort ?? 80}" title="Puerto HTTP (ISAPI): estado y apertura de puerta">
+        </div>
+        <div class="field" style="flex:1;min-width:0">
+          <label>Puerto RTSP</label>
+          <input id="ic-rtsp-port" type="number" min="1" max="65535" required value="${intercom?.rtspPort ?? 554}" title="Puerto RTSP: video de la cámara del frente (554 de fábrica)">
         </div>
       </div>
       <div class="form-grid">
@@ -280,7 +288,7 @@ async function intercomModal(intercom, prefill) {
       <div class="field">
         <label>Cámara del frente (video al sonar)</label>
         <select id="ic-channel">${channelOptions(intercom?.channelId ?? null)}</select>
-        <div class="muted" style="font-size:11px;margin-top:3px">El video sale de un canal normal del VMS: agregue el frente también en <b>Fuentes de video</b> (como cámara Hikvision) y elíjalo aquí.</div>
+        <div class="muted" style="font-size:11px;margin-top:3px">La cámara del frente viene incluida: no hay que agregarlo en <b>Fuentes de video</b> ni ocupa un canal de video de la licencia. Elija otra cámara solo si la del frente no muestra lo que importa.</div>
       </div>
       <label class="checkbox-row"><input type="checkbox" id="ic-callcenter" checked> Configurar el botón del frente para que llame a la central (necesario para recibir las llamadas)</label>
       <label class="checkbox-row"><input type="checkbox" id="ic-optimize" checked> Ajustar el video del frente para que la imagen aparezca al instante (un cuadro completo por segundo)</label>
@@ -305,6 +313,7 @@ async function intercomModal(intercom, prefill) {
     host: $("#ic-host").value.trim(),
     port: Number($("#ic-port").value),
     httpPort: Number($("#ic-http-port").value),
+    rtspPort: Number($("#ic-rtsp-port").value),
     username: $("#ic-username").value.trim(),
     password: $("#ic-password").value || null,
     enabled: $("#ic-enabled").checked,
@@ -329,7 +338,7 @@ async function intercomModal(intercom, prefill) {
         resultBox.innerHTML = `<div class="error-box">${esc(r.error)}</div>`;
         return;
       }
-      if (r.suggestedChannelId && !$("#ic-channel").value) $("#ic-channel").value = String(r.suggestedChannelId);
+      const ownCamera = !$("#ic-channel").value;
       resultBox.innerHTML = `
         <div class="probe-box">
           <div class="probe-title">✔ Conexión validada</div>
@@ -342,7 +351,8 @@ async function intercomModal(intercom, prefill) {
             <span>Voz</span><b>${esc({ ulaw: "G.711 µ-law", alaw: "G.711 A-law" }[r.audioCodec] ?? "no soportada")}</b>
             <span>Botón → central</span><b>${r.callCenterEnabled ? "sí" : "no (se configurará al guardar)"}</b>
             <span>Cuadro completo</span><b>${r.keyFrameSeconds == null ? "—" : `cada ${r.keyFrameSeconds} s`}${r.keyFrameSeconds > 2 ? ` <span class="tag off" title="Hasta recibir un cuadro completo no se ve imagen: la llamada tardaría eso en mostrar el video">lento</span> (se ajustará a 1 s al guardar)` : ""}</b>
-            <span>Cámara</span><b>${r.suggestedChannelId ? "encontrada en Fuentes de video (seleccionada)" : "no registrada como fuente de video"}</b>
+            <span>Cámara</span><b>${ownCamera ? "la del propio frente (no ocupa canal de video)" : "otra cámara elegida"}${ownCamera && r.suggestedChannelId
+              ? ` <span class="tag off" title="Ese registro ocupa un canal de video de la licencia y ya no hace falta para la citofonía">también en Fuentes de video</span> (puede quitarlo de ahí para liberar el canal)` : ""}</b>
           </div>
         </div>`;
     } catch (err) {

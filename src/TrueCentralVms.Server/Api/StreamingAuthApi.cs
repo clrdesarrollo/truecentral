@@ -80,7 +80,8 @@ public static class StreamingAuthApi
                 return Results.Unauthorized();
             }
             // El alcance por ubicación pudo cambiar después de emitir el token (vive 60 s).
-            if (!(await scopes.ForUserAsync(grant.UserId)).CanViewRtsp(grant.DeviceId, grant.RtspChannel))
+            var scope = await scopes.ForUserAsync(grant.UserId);
+            if (grant.IntercomId is int intercomId ? !scope.CanViewIntercom(intercomId) : !scope.CanViewRtsp(grant.DeviceId, grant.RtspChannel))
             {
                 logger.LogWarning("MediaMTX: lectura rechazada en '{Path}': el canal quedó fuera del alcance de {User}.", path, grant.Username);
                 return Results.Unauthorized();
@@ -111,7 +112,13 @@ public static class StreamingAuthApi
 
             // El inicio de reproducción de grabaciones se audita en su propio
             // endpoint (con el rango pedido); aquí solo el vivo.
-            if (grant.Profile is "main" or "sub")
+            if (grant.IntercomId is int viewedIntercom)
+                await audit.LogSystemAsync("intercom", "video-viewed",
+                    targetType: "intercom", targetId: viewedIntercom.ToString(), targetName: grant.DeviceName,
+                    detail: $"Comenzó a ver la cámara del frente de citofonía '{grant.DeviceName}' " +
+                            $"({(grant.Profile == "main" ? "stream principal" : "stream secundario")}).",
+                    userId: grant.UserId, username: grant.Username, clientIp: ip, origin: fromWeb ? "web" : "client");
+            else if (grant.Profile is "main" or "sub")
                 await audit.LogSystemAsync("live", "view-started",
                     targetType: "channel", targetId: $"{grant.DeviceId}/{grant.RtspChannel}",
                     targetName: $"{grant.DeviceName} · canal {grant.RtspChannel}",

@@ -1,3 +1,5 @@
+using TrueCentralVms.Core.Drivers;
+
 namespace TrueCentralVms.Core.Contracts;
 
 // DTOs del módulo Citofonía (frentes de videoportero: el visitante toca el
@@ -42,7 +44,7 @@ public sealed record IntercomDto(
     IntercomStatus Status,
     string? LastError,
     DateTime? LastSeenAt,
-    /// <summary>Canal de video que muestra la cámara del frente (null = sin video asociado).</summary>
+    /// <summary>Otra cámara elegida para el frente (canal de video); null = la cámara propia del frente.</summary>
     int? ChannelId,
     string? ChannelName,
     int DoorCount,
@@ -55,7 +57,9 @@ public sealed record IntercomDto(
     /// <summary>Ubicación en el árbol de Recursos (null = por ubicar).</summary>
     int? LocationId = null,
     /// <summary>Ruta legible de esa ubicación ("Casa matriz › Portería").</summary>
-    string? Location = null);
+    string? Location = null,
+    /// <summary>Puerto RTSP de la cámara propia del frente.</summary>
+    int RtspPort = 554);
 
 public sealed record IntercomWriteDto(
     string Name,
@@ -75,7 +79,12 @@ public sealed record IntercomWriteDto(
     bool OptimizeVideo = true,
     /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
     /// por ubicar); 0 = por ubicar.</summary>
-    int? LocationId = null);
+    int? LocationId = null,
+    /// <summary>Puerto RTSP de la cámara propia del frente (554 de fábrica).</summary>
+    int RtspPort = 554);
+
+/// <summary>Concesión del video de la cámara propia de un frente (POST /api/intercoms/{id}/stream).</summary>
+public sealed record IntercomStreamRequestDto(StreamProfile Profile);
 
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record IntercomProbeResultDto(
@@ -88,7 +97,7 @@ public sealed record IntercomProbeResultDto(
     int DoorCount,
     bool CallCenterEnabled,
     string? AudioCodec,
-    /// <summary>Canal de video de un dispositivo ya registrado con la misma IP (sugerencia para asociar la cámara).</summary>
+    /// <summary>Canal de un dispositivo de Fuentes de video con la misma IP (el frente registrado además como cámara: ocupa un canal que no hace falta).</summary>
     int? SuggestedChannelId,
     /// <summary>Segundos entre cuadros completos del stream principal (null = no se pudo leer).</summary>
     double? KeyFrameSeconds = null);
@@ -113,7 +122,7 @@ public sealed record IntercomCallDto(
     string? EndReason,
     bool DoorOpened,
     string? DoorOpenedBy,
-    /// <summary>Canal de video del frente (para abrir la cámara al sonar).</summary>
+    /// <summary>Otra cámara elegida para el frente; null = la propia (POST /api/intercoms/{id}/stream).</summary>
     int? ChannelId,
     int DoorCount);
 

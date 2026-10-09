@@ -6,8 +6,10 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// Frente de citofonía (videoportero de calle, ej. Hikvision DS-KB8113). El
 /// servidor mantiene abierto su enlace de llamadas: cuando alguien toca el
 /// timbre la llamada suena en los clientes y un operador la contesta con voz
-/// bidireccional y apertura de puerta. El video sale de un canal normal del
-/// VMS (<see cref="ChannelId"/>): el frente se da de alta también como cámara.
+/// bidireccional y apertura de puerta. El video es la cámara propia del frente,
+/// servida como parte de él (ruta ic/{Id} de MediaMTX): no se registra en
+/// Fuentes de video ni ocupa un canal de la licencia de video. Opcionalmente
+/// puede mostrar otra cámara (<see cref="ChannelId"/>).
 /// La contraseña se guarda cifrada con AES-256-GCM (ver <see cref="CredentialProtector"/>).
 /// </summary>
 public class Intercom : ILocatable
@@ -21,6 +23,8 @@ public class Intercom : ILocatable
     public int Port { get; set; } = 8000;
     /// <summary>Puerto HTTP (ISAPI).</summary>
     public int HttpPort { get; set; } = 80;
+    /// <summary>Puerto RTSP de su cámara propia (otro que 554 detrás de NAT o si se cambió en el equipo).</summary>
+    public int RtspPort { get; set; } = 554;
     public string Username { get; set; } = "";
     public byte[] PasswordCiphertext { get; set; } = [];
     /// <summary>Grupo lógico (portería, acceso norte...); libre.</summary>
@@ -29,7 +33,7 @@ public class Intercom : ILocatable
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
 
-    /// <summary>Canal de video que muestra la cámara del frente (null = sin video).</summary>
+    /// <summary>Otra cámara (canal de Fuentes de video) en lugar de la propia del frente; null = la propia.</summary>
     public int? ChannelId { get; set; }
     public Channel? Channel { get; set; }
 

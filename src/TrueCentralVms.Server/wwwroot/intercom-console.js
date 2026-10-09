@@ -408,14 +408,16 @@ function icaOpenCall(intercomId) {
 
 function icaSetupSnapshot(i) {
   clearInterval(icaSnapTimer);
+  // Sin canal elegido, la foto sale de la cámara propia del frente.
   const cam = i.channelId ? icaCameras?.get(i.channelId) : null;
   const img = $("#ica-snap"), none = $("#ica-novideo");
-  if (!cam) { none.textContent = i.channelId ? "La cámara del frente no entrega fotos." : "Este frente no tiene cámara vinculada."; return; }
+  if (i.channelId && !cam) { none.textContent = "La cámara elegida para este frente no entrega fotos."; return; }
+  const source = cam ? `/api/devices/${cam.deviceId}/snapshot/${cam.channelNumber}` : `/api/intercoms/${i.id}/snapshot`;
   const load = () => {
     const next = new Image();
     next.onload = () => { if ($("#ica-snap")) { img.src = next.src; img.style.display = ""; none.textContent = ""; } };
     next.onerror = () => { if ($("#ica-novideo") && img.style.display === "none") none.textContent = "No se pudo obtener la imagen del frente."; };
-    next.src = `/api/devices/${cam.deviceId}/snapshot/${cam.channelNumber}?access_token=${encodeURIComponent(Api.token || "")}&t=${Date.now()}`;
+    next.src = `${source}?access_token=${encodeURIComponent(Api.token || "")}&t=${Date.now()}`;
   };
   none.textContent = "Cargando imagen…";
   load();

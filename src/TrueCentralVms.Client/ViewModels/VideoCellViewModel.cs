@@ -23,6 +23,15 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     private readonly ApiClient _api;
     private readonly ClientSettings _settings;
     private ChannelNode? _assigned;
+    /// <summary>
+    /// Fuente que no es un canal del árbol (la cámara propia de un frente de
+    /// citofonía): pide su concesión a su propio endpoint. Excluyente con
+    /// <see cref="_assigned"/>; las funciones de canal (PTZ, cambio de stream,
+    /// árbol) no aplican, pero apertura y reintentos son los mismos.
+    /// </summary>
+    private Func<StreamProfile, Task<Core.Contracts.StreamGrantDto>>? _grantSource;
+    /// <summary>El cuadro tiene algo que mostrar (un canal o una fuente propia).</summary>
+    private bool HasSource => _assigned is not null || _grantSource is not null;
     private int _openSequence;
     /// <summary>Secuencia que ya tiene un reintento esperando (-1 = ninguna).</summary>
     private int _retrySequence = -1;
@@ -160,7 +169,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         player.OpenCompleted += (sender, e) =>
         {
             if (OwnerOf(sender) is not { } cell) return;
-            if (!ReferenceEquals(sender, cell.Player) || cell._assigned is null) return;
+            if (!ReferenceEquals(sender, cell.Player) || !cell.HasSource) return;
             cell.IsConnecting = false;
             if (e.Success) { cell.Status = ""; return; }
             cell.Status = "No se pudo abrir el video: " + (e.Error ?? "error desconocido");
@@ -180,7 +189,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
                 cell.IsRecordingClip = false;
                 cell.NotifyClipSaved(notify: true);
             }
-            if (cell._assigned is null) return;
+            if (!cell.HasSource) return;
             if (!e.Success) cell.Status = "Sin señal — reintentando…";
             cell.ScheduleRetry(cell._openSequence);
         };
@@ -196,6 +205,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         ReleaseParked(); // era del canal anterior
         EnsurePlayer(); // el cuadro deja de estar libre: recién aquí necesita player
         _assigned = node;
+        _grantSource = null;
         Profile = profile;
         AssignedChannel = node;
         IsEmpty = false;
@@ -416,13 +426,39 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         ScheduleRetry(sequence);
     }
 
+    /// <summary>
+    /// Abre una fuente que no es un canal del árbol (la cámara propia de un
+    /// frente de citofonía); <paramref name="grantSource"/> pide la concesión
+    /// en cada apertura y reintento.
+    /// </summary>
+    public async Task OpenSourceAsync(string title, Func<StreamProfile, Task<Core.Contracts.StreamGrantDto>> grantSource,
+        StreamProfile profile)
+    {
+        int sequence = ++_openSequence;
+        StopClipRecording(notify: true);
+        ResetDigitalZoom();
+        ReleaseParked();
+        EnsurePlayer();
+        _assigned = null;
+        AssignedChannel = null;
+        _grantSource = grantSource;
+        Profile = profile;
+        IsEmpty = false;
+        Title = title;
+        Status = "Conectando…";
+        IsConnecting = true;
+        await ConnectAsync(sequence);
+    }
+
     /// <summary>Pide una concesión nueva y abre la URL RTSP resultante.</summary>
     private async Task ConnectAsync(int sequence)
     {
-        if (_assigned is not { } node) return;
+        if (!HasSource) return;
         try
         {
-            var grant = await _api.RequestStreamAsync(node.Device.Id, node.Channel.RtspChannel, Profile);
+            var grant = _grantSource is { } source
+                ? await source(Profile)
+                : await _api.RequestStreamAsync(_assigned!.Device.Id, _assigned.Channel.RtspChannel, Profile);
             if (sequence != _openSequence) return; // la celda ya se reasignó
             EnsurePlayer().OpenAsync(grant.RtspUrl);
         }
@@ -461,7 +497,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         await Task.Delay(RetryDelay);
         if (_retrySequence == sequence) _retrySequence = -1;
 
-        if (sequence != _openSequence || _assigned is null) return;
+        if (sequence != _openSequence || !HasSource) return;
         if (IsStreamAlive) return;
         Status = "Reconectando…";
         await ConnectAsync(sequence);
@@ -699,6 +735,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         if (b._parked is not null) PlayerOwners.AddOrUpdate(b._parked, b);
 
         (a._assigned, b._assigned) = (b._assigned, a._assigned);
+        (a._grantSource, b._grantSource) = (b._grantSource, a._grantSource);
         (a.AssignedChannel, b.AssignedChannel) = (b.AssignedChannel, a.AssignedChannel);
         (a.Title, b.Title) = (b.Title, a.Title);
         (a.Status, b.Status) = (b.Status, a.Status);
@@ -727,7 +764,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     /// intercambio puede haber quedado una apertura a medio hacer).</summary>
     private void RestartConnect()
     {
-        if (_assigned is null || IsStreamAlive) return;
+        if (!HasSource || IsStreamAlive) return;
         Status = "Reconectando…";
         IsConnecting = true;
         _ = ConnectAsync(_openSequence);
@@ -754,6 +791,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         ResetDigitalZoom();
         ReleaseParked();
         _assigned = null;
+        _grantSource = null;
         AssignedChannel = null;
         IsAudioOn = false;
         Player?.Stop();
@@ -770,6 +808,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         // la cápsula igual queda guardada, pero sin ventana que lo anuncie.
         StopClipRecording(notify: false);
         _assigned = null;
+        _grantSource = null;
         AssignedChannel = null; // el árbol deja de marcarlo en vivo
         ReleaseParked();
         Player?.Dispose();

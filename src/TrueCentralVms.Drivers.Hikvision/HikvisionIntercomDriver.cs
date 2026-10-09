@@ -158,6 +158,23 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
             ?? throw new DriverException("El citófono no aceptó el ajuste de video.");
     }
 
+    public string BuildRtspUrl(IntercomConnectionInfo info, StreamProfile profile) =>
+        $"rtsp://{Uri.EscapeDataString(info.Username)}:{Uri.EscapeDataString(info.Password)}" +
+        $"@{info.Host}:{info.RtspPort}/Streaming/Channels/{(profile == StreamProfile.Main ? 101 : 102)}";
+
+    public async Task<byte[]?> CaptureSnapshotAsync(IntercomConnectionInfo info, CancellationToken ct = default)
+    {
+        try
+        {
+            using var response = await Isapi(info).OpenStreamAsync(MainStreamPath + "/picture", ct);
+            byte[] jpeg = await response.Content.ReadAsByteArrayAsync(ct);
+            // Un equipo sin foto puede contestar 200 con un XML de error.
+            return jpeg is [0xFF, 0xD8, ..] ? jpeg : null;
+        }
+        catch (DriverException) { return null; }
+        catch (HttpRequestException) { return null; }
+    }
+
     private static async Task<List<XElement>> ReadKeysAsync(HikvisionIsapiClient client, CancellationToken ct)
     {
         string? xml = await client.RequestAsync(HttpMethod.Get, "/ISAPI/VideoIntercom/keyCfg", ct: ct);
