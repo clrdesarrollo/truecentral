@@ -36,11 +36,15 @@ public sealed partial class AlarmsViewModel : ObservableObject
             if (entity is "alarm-panels" or "locations")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadPanelsAsync());
         };
-        // Cambió lo que esta sesión puede operar: se re-evalúan los botones.
+        // Cambió lo que esta sesión puede operar (o sus permisos): se re-evalúan los botones.
         OperableScope.Current.Changed += () =>
         {
             foreach (var panel in Panels) panel.RefreshOperable();
         };
+        PermissionScope.Current.Changed += () => Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            foreach (var panel in Panels) panel.RefreshOperable();
+        });
 
         // Cuenta regresiva del retardo de salida ("Armando…"): actualiza cada
         // segundo el texto de las áreas que están armando para que no parezca
@@ -392,11 +396,14 @@ public sealed partial class AlarmPanelItem : ObservableObject
     /// <summary>Alguna área está en conteo de salida ("Armando…").</summary>
     public bool HasArming => Dto.Areas.Any(a => a.ArmState == AlarmArmState.Arming);
 
+    /// <summary>Sus roles incluyen "Operar alarmas" (armar, desarmar, silenciar y anular); sin él solo se ve el estado.</summary>
+    private static bool MayOperate => PermissionScope.Current.Has(Core.Domain.Permissions.AlarmsOperate);
+
     /// <summary>
-    /// Las órdenes de "todo el panel" exigen poder operar todas sus áreas
-    /// (alcance por ubicación); el servidor las rechazaría si no.
+    /// Las órdenes de "todo el panel" exigen el permiso y poder operar todas sus
+    /// áreas (alcance por ubicación); el servidor las rechazaría si no.
     /// </summary>
-    public bool CanOperateAll => OperableScope.Current.CanOperateWholePanel(Dto.Id);
+    public bool CanOperateAll => MayOperate && OperableScope.Current.CanOperateWholePanel(Dto.Id);
     /// <summary>Base para armar: en línea, sin tapa abierta y sin un armado en curso.</summary>
     private bool CanArmBase => IsOnline && !Dto.PanelTamper && !HasArming && CanOperateAll;
     /// <summary>Armar todo (total): solo si alguna área habilitada no está ya en total.</summary>
@@ -415,6 +422,7 @@ public sealed partial class AlarmPanelItem : ObservableObject
         get
         {
             if (CanOperateAll) return null;
+            if (!MayOperate) return "Sus roles no incluyen \"Operar alarmas\": puede ver el estado, pero no armar, desarmar ni anular.";
             bool some = Dto.Areas.Any(a => OperableScope.Current.CanOperateArea(Dto.Id, a.Number))
                         || Dto.Zones.Any(z => OperableScope.Current.CanOperateZone(Dto.Id, z.Number));
             return some
@@ -438,13 +446,14 @@ public sealed partial class AlarmPanelItem : ObservableObject
         }
 
         var operable = OperableScope.Current;
+        bool may = MayOperate;
         Areas.Clear();
         foreach (var a in Dto.Areas)
-            Areas.Add(new AlarmAreaItem(a, Dto.PanelTamper, operable.CanOperateArea(Dto.Id, a.Number)));
+            Areas.Add(new AlarmAreaItem(a, Dto.PanelTamper, may && operable.CanOperateArea(Dto.Id, a.Number)));
         Zones.Clear();
         foreach (var z in Dto.Zones)
             Zones.Add(new AlarmZoneItem(z, Dto.Areas.FirstOrDefault(a => a.Number == z.AreaNumber)?.Name,
-                operable.CanOperateZone(Dto.Id, z.Number)));
+                may && operable.CanOperateZone(Dto.Id, z.Number)));
     }
 }
 

@@ -449,8 +449,9 @@ public static class CercoApi
         app.MapGet("/api/cerco/events/export", async (HttpContext ctx, VmsDbContext db, AuditService audit, int? panelId,
             CercoEventKind? kind, DateTime? from, DateTime? to, CancellationToken ct) =>
         {
-            if (ApiSecurity.Require(ctx, Permissions.CercoMonitor, out _) is { } failure) return failure;
-            var rows = await FilterEvents(db, panelId, kind, from, to)
+            if (ApiSecurity.Require(ctx, Permissions.CercoMonitor, out var session) is { } failure) return failure;
+            // Lo mismo que muestra el historial: solo los paneles de su alcance.
+            var rows = await InScope(db, FilterEvents(db, panelId, kind, from, to), await ctx.ScopeAsync(session))
                 .OrderByDescending(e => e.ReceivedAt).ThenByDescending(e => e.Id)
                 .Take(MaxCsvRows)
                 .ToListAsync(ct);

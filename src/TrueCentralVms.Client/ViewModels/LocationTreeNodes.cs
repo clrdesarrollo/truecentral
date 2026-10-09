@@ -20,11 +20,16 @@ public sealed partial class LocationNode(LocationDto? location) : ObservableObje
     /// <summary>Es una ubicación de verdad (no el nodo "Sin ubicación"): admite órdenes.</summary>
     public bool IsRealLocation => Location is not null;
 
-    /// <summary>Admite órdenes Y está en el alcance de este usuario (las demás se ven, no se operan).</summary>
-    public bool CanCommand => Location is { } location && Services.OperableScope.Current.CanOperateLocation(location.Id);
+    /// <summary>Sus roles incluyen "Órdenes por ubicación".</summary>
+    private static bool MayCommand => Services.PermissionScope.Current.Has(Core.Domain.Permissions.LocationsCommand);
+
+    /// <summary>Admite órdenes, sus roles lo permiten Y está en el alcance de este usuario (las demás se ven, no se operan).</summary>
+    public bool CanCommand => Location is { } location && MayCommand && Services.OperableScope.Current.CanOperateLocation(location.Id);
 
     /// <summary>Por qué no se puede dar órdenes sobre esta ubicación (null = sí se puede).</summary>
-    public string? CommandHint => Location is not null && !CanCommand ? Services.OperableScope.DeniedHint : null;
+    public string? CommandHint => Location is null || CanCommand ? null
+        : !MayCommand ? "Sus roles no incluyen \"Órdenes por ubicación\"."
+        : Services.OperableScope.DeniedHint;
 
     /// <summary>Cambió lo que se puede operar: se re-evalúa este nodo y sus sububicaciones.</summary>
     public void RefreshOperable()

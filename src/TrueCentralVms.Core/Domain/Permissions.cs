@@ -96,7 +96,7 @@ public static class Permissions
         new(AlarmsOperate, "Monitoreo y operación", "Operar alarmas",
             "Armar, desarmar, reponer alarmas y anular zonas.", [AlarmsMonitor]),
         new(CercoMonitor, "Monitoreo y operación", "Ver cercos eléctricos",
-            "Ver el estado de los cercos eléctricos y sus eventos.", []),
+            "Ver el estado de los cercos eléctricos y sus eventos, y exportar su historial a CSV.", []),
         new(CercoOperate, "Monitoreo y operación", "Operar cercos eléctricos",
             "Armar, desarmar, silenciar y activar la sirena de los cercos.", [CercoMonitor]),
         new(AccessMonitor, "Monitoreo y operación", "Ver control de acceso",

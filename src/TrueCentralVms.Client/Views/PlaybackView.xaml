@@ -442,8 +442,10 @@
                                 Command="{Binding Playback.PlaySelectionCommand}"
                                 IsEnabled="{Binding Playback.HasSelection}"
                                 Content="Reproducir tramo"/>
+                        <!-- Solo con el permiso "Exportar grabaciones" (el Centro de descargas también) -->
                         <Button Style="{StaticResource GhostButton}" Padding="10,5" Margin="6,0,0,0"
                                 Command="{Binding Playback.DownloadCommand}"
+                                Visibility="{Binding CanDownloads, Converter={x:Static vm:BoolToVisibility.Instance}}"
                                 ToolTip="Exportar grabaciones: cámara, rango exacto de fecha/hora, carpeta, formato y división en archivos. El tramo marcado en la línea de tiempo prellena el rango.">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="11"

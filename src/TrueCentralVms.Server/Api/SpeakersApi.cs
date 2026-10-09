@@ -558,7 +558,7 @@ public static class SpeakersApi
         // ------------------------------------------------------------------
         app.Map("/api/speakers/talk", async (HttpContext ctx, string? ids, SpeakerService service, AuditService audit, ILoggerFactory loggers) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.SpeakersPlay, out var session) is { } failure) return failure;
             if (!ctx.WebSockets.IsWebSocketRequest) return Error("Este recurso solo acepta WebSocket.", StatusCodes.Status400BadRequest);
             var speakerIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(x => int.TryParse(x, out int id) ? id : 0).Where(id => id > 0).Distinct().ToList();

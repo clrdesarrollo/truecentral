@@ -197,13 +197,14 @@ function accessDoorCard(door, isAdmin) {
   const canCommand = door.supportsRemoteControl && !offline && door.enabled;
   const selected = accessMonitor.selected.has(door.id);
   // Alcance por ubicación: una puerta ajena se ve, pero no se opera ni entra en los lotes.
+  // Sin el permiso "Abrir y cerrar puertas" (isAdmin) no se ofrece ninguna orden.
   const op = `data-op="door:${door.id}"`;
   return `
     <div class="card access-door ${selected ? "selected" : ""} ${offline ? "offline" : ""}" data-id="${door.id}">
       <div class="acm-door-head">
-        <label class="acm-check" title="Seleccionar para órdenes por lote">
+        ${isAdmin ? `<label class="acm-check" title="Seleccionar para órdenes por lote">
           <input type="checkbox" class="acm-sel" ${op} ${selected ? "checked" : ""} ${canCommand ? "" : "disabled"}>
-        </label>
+        </label>` : ""}
         ${accessDoorHero(door)}
         <div style="min-width:0">
           <div class="card-label" style="margin-bottom:2px">${esc(door.deviceName)}${door.location ? ` · ${esc(door.location)}` : ""}</div>
@@ -216,16 +217,16 @@ function accessDoorCard(door, isAdmin) {
         ${door.enabled ? "" : `<span class="tag operator with-ico">${accessIcon("pause")}Puerta pausada</span>`}
       </div>
       ${offline ? "" : `<div class="acm-states">${accessDoorState(door)}</div>`}
-      <div class="row-actions acm-door-actions">
+      ${isAdmin ? `<div class="row-actions acm-door-actions">
         <button class="btn btn-door" ${op} data-cmd="Open" ${canCommand ? "" : "disabled"}
           title="Pulso de apertura: abre y se cierra sola">${accessIcon("doorOpen")}Abrir</button>
         <button class="btn ghost btn-door" ${op} data-cmd="RemainOpen" ${canCommand ? "" : "disabled"}
           title="Deja la puerta abierta hasta nueva orden">${accessIcon("unlock")}Mantener abierta</button>
         <button class="btn ghost btn-door" ${op} data-cmd="Close" ${canCommand ? "" : "disabled"}
           title="Vuelve al modo normal">${accessIcon("shield")}Normal</button>
-        ${isAdmin ? `<button class="btn danger btn-door" ${op} data-cmd="RemainLocked" ${canCommand ? "" : "disabled"}
-          title="Bloquea la puerta: no entra nadie">${accessIcon("lock")}Bloquear</button>` : ""}
-      </div>
+        <button class="btn danger btn-door" ${op} data-cmd="RemainLocked" ${canCommand ? "" : "disabled"}
+          title="Bloquea la puerta: no entra nadie">${accessIcon("lock")}Bloquear</button>
+      </div>` : ""}
     </div>`;
 }
 
@@ -255,7 +256,7 @@ async function renderAccessMonitor() {
 
   $("#view").innerHTML = `
     <div class="acm-toolbar">
-      <label class="checkbox-row" style="margin:0" title="Selecciona las puertas visibles que se pueden operar">
+      ${isAdmin ? `<label class="checkbox-row" style="margin:0" title="Selecciona las puertas visibles que se pueden operar">
         <input type="checkbox" id="acm-all"> Seleccionar todas
       </label>
       <div class="acm-batch">
@@ -263,8 +264,8 @@ async function renderAccessMonitor() {
         <button class="btn btn-batch" data-cmd="Open" disabled>${accessIcon("doorOpen")}Abrir</button>
         <button class="btn ghost btn-batch" data-cmd="RemainOpen" disabled>${accessIcon("unlock")}Mantener abiertas</button>
         <button class="btn ghost btn-batch" data-cmd="Close" disabled>${accessIcon("shield")}Normal</button>
-        ${isAdmin ? `<button class="btn danger btn-batch" data-cmd="RemainLocked" disabled>${accessIcon("lock")}Bloquear</button>` : ""}
-      </div>
+        <button class="btn danger btn-batch" data-cmd="RemainLocked" disabled>${accessIcon("lock")}Bloquear</button>
+      </div>` : ""}
       <div class="acm-filters">
         <span class="acm-filter-ico" title="Filtrar">${accessIcon("filter")}</span>
         <select id="acm-filter">
@@ -296,7 +297,7 @@ async function renderAccessMonitor() {
 
   $("#acm-filter").addEventListener("change", (e) => { accessMonitor.filter = e.target.value; renderAccessDoorCards(isAdmin); });
   $("#acm-q").addEventListener("input", (e) => { accessMonitor.q = e.target.value.trim(); renderAccessDoorCards(isAdmin); });
-  $("#acm-all").addEventListener("change", (e) => {
+  $("#acm-all")?.addEventListener("change", (e) => {
     for (const d of accessVisibleDoors())
       if (d.supportsRemoteControl && d.deviceStatus === "Online" && d.enabled && Operable.can("door", d.id)) {
         if (e.target.checked) accessMonitor.selected.add(d.id); else accessMonitor.selected.delete(d.id);
@@ -643,6 +644,8 @@ function accessRecordsQuery(extra = {}) {
 
 async function renderAccessEvents() {
   $("#page-title").textContent = "Control de acceso · Registros de acceso";
+  // Los reportes (Excel/PDF) solo con el permiso "Exportar registros de acceso".
+  const canExport = Perms.can("access.records.export");
   let doors, departments;
   try {
     [doors, departments] = await Promise.all([
@@ -734,16 +737,16 @@ async function renderAccessEvents() {
       <section class="acr-results">
         <div class="toolbar acr-toolbar">
           <div class="muted" id="acr-total"></div>
-          <div class="acr-export">
+          ${canExport ? `<div class="acr-export">
             <span class="acm-filter-ico" title="Reporte">${accessIcon("report")}</span>
             <select id="acr-report" title="Qué reporte exportar">
               ${Object.entries(ACCESS_REPORTS).map(([k, r]) => `<option value="${k}" title="${esc(r.hint)}">${esc(r.label)}</option>`).join("")}
             </select>
             <button class="btn ghost" id="acr-xlsx" title="Descargar en Excel con los filtros actuales">${accessIcon("sheet", "xlsx")}Excel</button>
             <button class="btn ghost" id="acr-pdf" title="Descargar en PDF con los filtros actuales">${accessIcon("pdf", "pdf")}PDF</button>
-          </div>
+          </div>` : ""}
         </div>
-        <div class="muted" id="acr-report-hint" style="font-size:12px;margin:-6px 0 10px;text-align:right"></div>
+        ${canExport ? `<div class="muted" id="acr-report-hint" style="font-size:12px;margin:-6px 0 10px;text-align:right"></div>` : ""}
         <div id="acr-table"><div class="info-box">Cargando…</div></div>
       </section>
     </div>`;
@@ -773,9 +776,11 @@ async function renderAccessEvents() {
   });
 
   $("#acr-period").addEventListener("change", (e) => $("#acr-custom").classList.toggle("hidden", e.target.value !== "custom"));
-  const showHint = () => { $("#acr-report-hint").textContent = ACCESS_REPORTS[$("#acr-report").value].hint; };
-  $("#acr-report").addEventListener("change", showHint);
-  showHint();
+  if (canExport) {
+    const showHint = () => { $("#acr-report-hint").textContent = ACCESS_REPORTS[$("#acr-report").value].hint; };
+    $("#acr-report").addEventListener("change", showHint);
+    showHint();
+  }
 
   const readFilters = () => {
     s.period = $("#acr-period").value;
@@ -812,8 +817,8 @@ async function renderAccessEvents() {
     const query = accessRecordsQuery({ format, report: $("#acr-report").value, access_token: Api.token });
     window.open(`/api/access/events/export?${query}`);
   };
-  $("#acr-xlsx").addEventListener("click", () => exportReport("xlsx"));
-  $("#acr-pdf").addEventListener("click", () => exportReport("pdf"));
+  $("#acr-xlsx")?.addEventListener("click", () => exportReport("xlsx"));
+  $("#acr-pdf")?.addEventListener("click", () => exportReport("pdf"));
 
   await loadAccessRecords();
 

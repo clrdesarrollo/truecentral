@@ -23,8 +23,8 @@ public sealed partial class IntercomItemViewModel(IntercomDto intercom) : Observ
     public bool HasVideo => Intercom.ChannelId is not null;
     public bool IsRinging => Intercom.ActiveCall?.State == IntercomCallState.Ringing;
 
-    /// <summary>El frente está en el alcance de este usuario: puede contestar, hablar y abrir.</summary>
-    public bool CanOperate => OperableScope.Current.CanOperateIntercom(Intercom.Id);
+    /// <summary>Sus roles permiten atender citofonía y el frente está en su alcance: puede contestar, hablar y abrir.</summary>
+    public bool CanOperate => IntercomsViewModel.CanAnswer(Intercom.Id);
 
     /// <summary>Cambió lo que esta sesión puede operar.</summary>
     public void RefreshOperable() => OnPropertyChanged(nameof(CanOperate));
@@ -124,6 +124,21 @@ public sealed partial class IntercomsViewModel : ObservableObject
     /// <summary>El operador pidió ver/hablar con un frente sin que haya llamada.</summary>
     public event Action<IntercomDto>? WindowRequested;
 
+    /// <summary>
+    /// Este puesto puede contestar, hablarle y abrirle la puerta al frente: sus
+    /// roles incluyen "Atender citofonía" y el frente está en su alcance. Si no,
+    /// la llamada no suena ni abre su ventana (el servidor lo rechazaría).
+    /// </summary>
+    public static bool CanAnswer(int intercomId) =>
+        PermissionScope.Current.Has(Core.Domain.Permissions.IntercomAnswer)
+        && OperableScope.Current.CanOperateIntercom(intercomId);
+
+    /// <summary>Por qué no se puede atender el frente (null = sí se puede).</summary>
+    public static string? DeniedHint(int intercomId) =>
+        CanAnswer(intercomId) ? null
+        : !PermissionScope.Current.Has(Core.Domain.Permissions.IntercomAnswer) ? "Sus roles no incluyen \"Atender citofonía\"."
+        : OperableScope.DeniedHint;
+
     public IntercomsViewModel(ApiClient api, VmsHubClient hub)
     {
         _api = api;
@@ -142,14 +157,17 @@ public sealed partial class IntercomsViewModel : ObservableObject
             // Al reconectar puede haber quedado una llamada sonando que no llegó por el hub.
             if (ok && _loaded) Application.Current.Dispatcher.InvokeAsync(() => _ = LoadActiveCallsAsync());
         };
-        // Cambió lo que esta sesión puede operar: botones de la lista y llamadas que suenan.
-        OperableScope.Current.Changed += () =>
-        {
-            foreach (var item in Intercoms) item.RefreshOperable();
-            foreach (var id in _ringing.Where(r => !OperableScope.Current.CanOperateIntercom(r.Value.IntercomId)).Select(r => r.Key).ToList())
-                _ringing.Remove(id);
-            UpdateRinger();
-        };
+        // Cambió lo que esta sesión puede operar (o sus permisos): botones de la lista y llamadas que suenan.
+        OperableScope.Current.Changed += OnOperableChanged;
+        PermissionScope.Current.Changed += () => Application.Current.Dispatcher.InvokeAsync(OnOperableChanged);
+    }
+
+    private void OnOperableChanged()
+    {
+        foreach (var item in Intercoms) item.RefreshOperable();
+        foreach (var id in _ringing.Where(r => !CanAnswer(r.Value.IntercomId)).Select(r => r.Key).ToList())
+            _ringing.Remove(id);
+        UpdateRinger();
     }
 
     public async Task InitializeAsync()
@@ -209,9 +227,9 @@ public sealed partial class IntercomsViewModel : ObservableObject
         Intercoms.FirstOrDefault(i => i.Id == call.IntercomId)?.ApplyCall(call);
 
         bool isNew = !_ringing.ContainsKey(call.Id);
-        // Alcance por ubicación: la llamada de un frente ajeno se ve en la lista,
-        // pero no suena ni abre su ventana (este puesto no la puede contestar).
-        if (call.State == IntercomCallState.Ringing && OperableScope.Current.CanOperateIntercom(call.IntercomId))
+        // Sin "Atender citofonía", o con el frente fuera de su alcance, la llamada
+        // se ve en la lista pero no suena ni abre su ventana (no la puede contestar).
+        if (call.State == IntercomCallState.Ringing && CanAnswer(call.IntercomId))
         {
             _ringing[call.Id] = call;
             if (isNew)

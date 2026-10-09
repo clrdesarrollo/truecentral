@@ -25,10 +25,14 @@ public static class LiveViewsApi
     private static bool CanEdit(LiveView view, SessionInfo session) =>
         view.OwnerUserId == session.UserId || session.Role == Roles.Admin;
 
-    /// <summary>Una vista compartida puede tener cámaras de otras ubicaciones: cada uno ve las de su alcance.</summary>
+    /// <summary>
+    /// Una vista compartida puede tener cámaras de otras ubicaciones: cada uno ve
+    /// las de su alcance. Sin el permiso "Guardar vistas" ninguna es editable (la
+    /// interfaz no ofrece actualizarla ni eliminarla).
+    /// </summary>
     private static LiveViewDto ToDto(LiveView view, SessionInfo session, UserScope scope) => new(
         view.Id, view.Name, view.LayoutName, view.Columns, view.Rows,
-        view.Shared, view.OwnerName, CanEdit(view, session), view.UpdatedAt,
+        view.Shared, view.OwnerName, CanEdit(view, session) && scope.Has(Permissions.LiveViewsManage), view.UpdatedAt,
         view.Items.Where(i => scope.CanViewChannel(i.ChannelId)).OrderBy(i => i.CellIndex)
             .Select(i => new LiveViewItemDto(i.CellIndex, i.ChannelId, i.StreamType))
             .ToList());
