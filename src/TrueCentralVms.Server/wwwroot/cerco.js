@@ -672,13 +672,13 @@ function cercoCard(p) {
         ${p.voltage != null ? `<span class="tag" title="Nivel Voltaje configurado (7–21): tiempo de carga del energizador. El panel no mide kV.">Nivel ${p.voltage}/21</span>` : ""}
         ${cercoSignal(p, false)}
       </div>
-      <div class="mon-actions">
+      ${Perms.can("cerco.operate") ? `<div class="mon-actions">
         ${p.armed
           ? `<button class="btn ghost btn-cmd" data-op="fence:${p.id}" data-id="${p.id}" data-cmd="disarm" ${off ? "disabled" : ""}>Desarmar</button>`
           : `<button class="btn btn-cmd" data-op="fence:${p.id}" data-id="${p.id}" data-cmd="arm" ${off ? "disabled" : ""}>Armar</button>`}
         <button class="btn danger btn-cmd" data-op="fence:${p.id}" data-id="${p.id}" data-cmd="silence" ${off || !p.siren ? "disabled" : ""}>Silenciar</button>
       </div>
-      ${off ? `<div class="muted" style="font-size:11px;margin-top:6px">Sin conexión — comandos deshabilitados.</div>` : ""}
+      ${off ? `<div class="muted" style="font-size:11px;margin-top:6px">Sin conexión — comandos deshabilitados.</div>` : ""}` : ""}
     </div>`;
 }
 

@@ -696,6 +696,7 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Download()
     {
+        if (!PermissionScope.Current.Has(Core.Domain.Permissions.PlaybackExport)) return;
         var channels = _channelSource().ToList();
         if (channels.Count == 0)
         {

@@ -327,8 +327,10 @@ function resDrawHead() {
       <button class="btn ghost small" id="res-loc-edit">Editar</button>
       <button class="btn danger small" id="res-loc-delete">Eliminar</button>`;
   }
-  // Órdenes sobre la ubicación entera: las áreas de alarma que contiene.
-  const areas = typeof sel === "number" ? resInSelection().filter((r) => r.kind === "Partition").length : 0;
+  // Órdenes sobre la ubicación entera: las áreas de alarma que contiene (solo
+  // con el permiso "Órdenes por ubicación"; el alcance lo revisa data-op).
+  const areas = typeof sel === "number" && Perms.can("locations.command")
+    ? resInSelection().filter((r) => r.kind === "Partition").length : 0;
   $("#res-head").innerHTML = `
     ${crumb ? `<div class="res-crumb">${crumb}</div>` : ""}
     <div class="res-title">

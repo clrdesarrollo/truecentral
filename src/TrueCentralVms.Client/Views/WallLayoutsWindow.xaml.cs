@@ -16,7 +16,10 @@ public partial class WallLayoutsWindow : Window
     /// <summary>Módulo que abrió la ventana (para bloquearlo al aplicar).</summary>
     private WallView? _wallView;
 
-    private sealed record LayoutListItem(int Id, string Name, string Detail);
+    /// <param name="CanManage">Sus roles incluyen "Guardar diseños del muro" (guardar y eliminar).</param>
+    private sealed record LayoutListItem(int Id, string Name, string Detail, bool CanManage);
+
+    private static bool CanManage => PermissionScope.Current.Has(Core.Domain.Permissions.WallLayouts);
 
     public WallLayoutsWindow(ApiClient api, WallDto wall)
     {
@@ -24,6 +27,7 @@ public partial class WallLayoutsWindow : Window
         _wall = wall;
         InitializeComponent();
         TitleText.Text = $"Layouts de \"{wall.Name}\"";
+        SaveRow.Visibility = CanManage ? Visibility.Visible : Visibility.Collapsed;
         Loaded += async (_, _) =>
         {
             _wallView = Owner is null ? null : FindWallView(Owner);
@@ -49,7 +53,7 @@ public partial class WallLayoutsWindow : Window
             var layouts = await _api.GetWallLayoutsAsync(_wall.Id);
             LayoutsList.ItemsSource = layouts
                 .Select(l => new LayoutListItem(l.Id, l.Name,
-                    $"{l.Items.Count} cámara(s) · guardado {l.CreatedAt.ToLocalTime():g}"))
+                    $"{l.Items.Count} cámara(s) · guardado {l.CreatedAt.ToLocalTime():g}", CanManage))
                 .ToList();
             StatusText.Text = layouts.Count == 0 ? "No hay layouts guardados." : "";
         }

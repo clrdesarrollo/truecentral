@@ -1,6 +1,7 @@
 <Window x:Class="TrueCentralVms.Client.Views.WallLayoutsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
         Title="Layouts guardados"
         Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}"
         FontFamily="Segoe UI" FontSize="14"
@@ -24,7 +25,8 @@
 
             <TextBlock x:Name="TitleText" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,12"/>
 
-            <DockPanel Grid.Row="1" Margin="0,0,0,14">
+            <!-- Guardar y eliminar: solo con el permiso "Guardar diseños del muro" -->
+            <DockPanel x:Name="SaveRow" Grid.Row="1" Margin="0,0,0,14">
                 <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}"
                         Margin="8,0,0,0" Click="OnSaveClick">Guardar estado actual</Button>
                 <TextBox x:Name="NameBox" VerticalAlignment="Center"/>
@@ -42,7 +44,8 @@
                                     <Button Content="Aplicar" Style="{StaticResource PrimaryButton}"
                                             Padding="9,4" Click="OnApplyClick" Tag="{Binding Id}"/>
                                     <Button Content="Eliminar" Style="{StaticResource DangerButton}"
-                                            Padding="9,4" Margin="6,0,0,0" Click="OnDeleteClick" Tag="{Binding Id}"/>
+                                            Padding="9,4" Margin="6,0,0,0" Click="OnDeleteClick" Tag="{Binding Id}"
+                                            Visibility="{Binding CanManage, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                 </StackPanel>
                                 <StackPanel>
                                     <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
