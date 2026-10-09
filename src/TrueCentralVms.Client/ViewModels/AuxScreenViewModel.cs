@@ -33,6 +33,20 @@ public partial class AuxScreenViewModel : ObservableObject
     /// ubicación): cambia junto con el de la ventana principal.</summary>
     public System.Collections.IEnumerable TreeItems => _shell.TreeItems;
 
+    /// <summary>Texto del buscador: es el MISMO del shell, así que escribir en
+    /// cualquier ventana filtra el árbol de todas y se conserva al cambiar de modo.</summary>
+    public string SearchText
+    {
+        get => _shell.SearchText;
+        set => _shell.SearchText = value ?? "";
+    }
+
+    public bool IsTreeByDevice => _shell.IsTreeByDevice;
+    public bool IsTreeByLocation => _shell.IsTreeByLocation;
+
+    [RelayCommand] private void ShowTreeByDevice() => _shell.IsTreeByLocation = false;
+    [RelayCommand] private void ShowTreeByLocation() => _shell.IsTreeByLocation = true;
+
     public ObservableCollection<VideoCellViewModel> Cells { get; } = [];
 
     public IReadOnlyList<VideoLayoutGroup> LayoutGroups => VideoLayout.Groups;
@@ -76,7 +90,13 @@ public partial class AuxScreenViewModel : ObservableObject
 
     private void OnShellPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainViewModel.TreeItems)) OnPropertyChanged(nameof(TreeItems));
+        switch (e.PropertyName)
+        {
+            case nameof(MainViewModel.TreeItems): OnPropertyChanged(nameof(TreeItems)); break;
+            case nameof(MainViewModel.SearchText): OnPropertyChanged(nameof(SearchText)); break;
+            case nameof(MainViewModel.IsTreeByDevice): OnPropertyChanged(nameof(IsTreeByDevice)); break;
+            case nameof(MainViewModel.IsTreeByLocation): OnPropertyChanged(nameof(IsTreeByLocation)); break;
+        }
     }
 
     [RelayCommand]

@@ -152,9 +152,40 @@
                         BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
                         Visibility="{Binding IsTreeCollapsed, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
                     <DockPanel>
-                        <!-- Agrupa por equipo o por ubicación según elija la ventana principal -->
-                        <TextBlock DockPanel.Dock="Top" Text="CÁMARAS" Margin="14,12,14,8" FontSize="11"
-                                   FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"/>
+                        <!-- Modo del árbol y buscador: estado compartido con la ventana principal -->
+                        <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8">
+                            <Border DockPanel.Dock="Right" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                    CornerRadius="6" Padding="2">
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Style="{StaticResource SegmentButton}" Content="Equipo"
+                                            Tag="{Binding IsTreeByDevice}" Command="{Binding ShowTreeByDeviceCommand}"
+                                            ToolTip="Cámaras agrupadas por equipo (DVR, NVR, cámara)"/>
+                                    <Button Style="{StaticResource SegmentButton}" Content="Ubicación"
+                                            Tag="{Binding IsTreeByLocation}" Command="{Binding ShowTreeByLocationCommand}"
+                                            ToolTip="Cámaras agrupadas por ubicación (sitio, edificio, sector…)"/>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="CÁMARAS" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                                       Foreground="{StaticResource MutedBrush}"/>
+                        </DockPanel>
+                        <Grid DockPanel.Dock="Top" Margin="10,0,10,8">
+                            <TextBox x:Name="SearchBox" Style="{StaticResource DarkTextBox}" Padding="9,6" FontSize="12"
+                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Text="Buscar canal…" IsHitTestVisible="False"
+                                       Margin="11,0,0,0" VerticalAlignment="Center" FontSize="12">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
                         <TreeView x:Name="DeviceTree" ItemsSource="{Binding TreeItems}"
                                   Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
                                   MouseDoubleClick="OnTreeDoubleClick"
