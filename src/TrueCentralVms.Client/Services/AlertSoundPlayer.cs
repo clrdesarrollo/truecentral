@@ -34,13 +34,16 @@ public sealed class AlertSoundPlayer(ApiClient api)
     /// Hace sonar la alarma. <paramref name="sound"/> es el nombre de un
     /// sonido del servidor o <c>"sistema"</c>; <paramref name="repeat"/> las
     /// veces que se repite y <b>0 = sonar hasta que alguien confirme la alerta
-    /// o cierre la ventana</b> (lo corta <see cref="Stop"/>). Nunca lanza.
+    /// o cierre la ventana</b> (lo corta <see cref="Stop"/>). El bucle exige
+    /// <paramref name="requiresAck"/>: un aviso que no pide confirmación solo
+    /// muestra la notificación flotante, sin ventana ni botón para callarlo,
+    /// así que con 0 suena una vez (igual que en la web). Nunca lanza.
     /// </summary>
-    public async Task PlayAsync(string? sound, int repeat)
+    public async Task PlayAsync(string? sound, int repeat, bool requiresAck = false)
     {
         if (string.IsNullOrWhiteSpace(sound)) return;
         Stop();                                   // una alarma nueva reemplaza a la anterior
-        _loop = repeat <= 0;
+        _loop = repeat <= 0 && requiresAck;
         repeat = _loop ? 1 : Math.Clamp(repeat, 1, 5);
 
         if (sound == Core.Contracts.WorkflowNotificationDto.SystemSoundName)

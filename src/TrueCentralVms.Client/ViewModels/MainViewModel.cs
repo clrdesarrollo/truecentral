@@ -267,8 +267,9 @@ public partial class MainViewModel : ObservableObject
         if (dto.RequiresAck && dto.AlertId > 0 && dto.ResourceKey is { Length: > 0 } resourceKey)
             NoteAlertedResource(resourceKey);
         // El sonido arranca de inmediato, sin esperar a que baje la foto: es
-        // lo que hace que el operador levante la vista.
-        _ = _alertSound.PlayAsync(dto.Sound, dto.SoundRepeat);
+        // lo que hace que el operador levante la vista. En bucle solo si abre
+        // la ventana de alarma, que es la que tiene «Silenciar» y «Confirmar».
+        _ = _alertSound.PlayAsync(dto.Sound, dto.SoundRepeat, requiresAck: dto.RequiresAck && dto.AlertId > 0);
 
         if (dto.RequiresAck && dto.AlertId > 0)
         {

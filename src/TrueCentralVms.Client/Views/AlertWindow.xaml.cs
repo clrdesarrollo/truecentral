@@ -253,7 +253,7 @@ public partial class AlertWindow : Window
         RunText.Text = alert.RunId is { } run ? $"N° {run}" : "—";
         SoundText.Text = alert.Sound is { Length: > 0 } sound
             ? (sound == WorkflowNotificationDto.SystemSoundName ? "Pitido del sistema" : sound) +
-              (alert.SoundRepeat > 1 ? $" (×{alert.SoundRepeat})" : "")
+              (alert.SoundRepeat > 1 ? $" (×{alert.SoundRepeat})" : alert.SoundRepeat == 0 ? " (hasta confirmar)" : "")
             : "Sin sonido";
         MessageText.Text = alert.Message;
         // Consignas y ubicación del recurso que la originó (su ficha en Recursos).
