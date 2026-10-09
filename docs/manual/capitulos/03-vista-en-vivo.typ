@@ -9,7 +9,7 @@ la barra de herramientas con la división de la grilla, las vistas guardadas,
 las pantallas auxiliares y la pantalla completa. Este capítulo describe la
 Vista en Vivo del cliente de monitoreo y, al final, la del panel web.
 
-#captura-pendiente("Cliente de monitoreo: Vista en Vivo con división de 4 cuadros, tres con video y uno seleccionado (borde azul), la lista de cámaras por equipo y el panel PTZ abierto", alto: 6cm)
+#captura("cliente-vista-en-vivo.png", pie: [Vista en Vivo del cliente con una vista guardada cargada.])
 
 == Abrir la Vista en Vivo
 
@@ -102,7 +102,7 @@ de "NVR Bodega"… 8/16») y la ventana no acepta clics.
 Cada cuadro tiene arriba una barra y debajo el video. Un cuadro sin cámara
 dice «Cuadro libre».
 
-#captura-pendiente("Cliente de monitoreo: barra de un cuadro con video y grabación en curso; marcar número, nombre, estado, audio, P/S, captura, grabar con su contador y cerrar")
+#captura("cliente-vista-en-vivo-cuadro.png", pie: [Barra de un cuadro mientras graba.])
 
 #table(
   columns: (1fr, 2fr),
@@ -359,7 +359,7 @@ cualquier puesto y también desde el panel web. Para cargar una vista basta
 El botón #boton("Vistas") está al centro de la barra de herramientas; a su
 lado aparece el nombre de la última vista que cargó.
 
-#captura-pendiente("Cliente de monitoreo: desplegable Vistas con dos vistas guardadas, una de ellas compartida por otro usuario, y el campo para guardar la grilla actual")
+#captura("cliente-vista-en-vivo-vistas.png", ancho: 70%, pie: [Desplegable Vistas.])
 
 === Cargar una vista
 

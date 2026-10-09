@@ -1,42 +1,258 @@
 {
-  "_comentario": "Capturas del cliente de monitoreo (capturar-cliente). Se ejecutan en orden sobre la misma sesión. Localizadores: id (x:Name), nombre, contiene, ayuda (ToolTip), tipo (Button, Text, TreeItem…), indice, ventana (parte del título; sin ella se busca en todas). Pasos: ingresar, clic, escribir, seleccionar, expandir, contraer, alternar, esperar, esperarVentana, cerrarVentana (opcional), pausa, api, volcar.",
+  "_comentario": "Capturas del cliente de monitoreo (capturar-cliente). Se ejecutan en orden sobre la misma sesión. Localizadores: id (x:Name), nombre, contiene, ayuda (ToolTip), tipo (Button, Text, TreeItem…), indice, ventana (parte del título; sin ella se busca en todas). Pasos: ingresar, clic, escribir, seleccionar, expandir, contraer, alternar, esperar, esperarVentana, cerrarVentana (opcional), pausa, api, volcar. recorte: un localizador o una lista (lo que abarcan juntos). capas: true incluye menús desplegables con sombra.",
   "capturas": [
     {
       "archivo": "cliente-inicio-sesion.png",
       "ventana": "Iniciar sesión",
       "pasos": [
-        { "accion": "escribir", "ventana": "Iniciar sesión", "id": "UserBox", "texto": "jperez" },
-        { "accion": "volcar", "titulo": "Iniciar sesión", "archivo": "C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\C--Users-Jose-Desktop-CLRobotics-dev-CLRobotics-TrueCentral\\470c96de-f3dc-4303-a644-224a4d775cf1\\scratchpad\\cliente\\ingreso.txt" }
+        { "accion": "escribir", "ventana": "Iniciar sesión", "id": "UserBox", "texto": "jperez" }
       ],
       "marcas": [
-        { "ventana": "Iniciar sesión", "id": "ServerBox", "etiqueta": "Servidor" },
-        { "ventana": "Iniciar sesión", "id": "UserBox", "etiqueta": "Usuario (▾ muestra los recientes)" },
-        { "ventana": "Iniciar sesión", "id": "PasswordBox", "etiqueta": "Contraseña (el ojo la muestra)" },
-        { "ventana": "Iniciar sesión", "id": "RememberCheck", "etiqueta": "Recordar contraseña e inicio automático" },
+        { "ventana": "Iniciar sesión", "id": "ServerBox", "en": "izq-fuera", "etiqueta": "Servidor" },
+        { "ventana": "Iniciar sesión", "id": "UserBox", "en": "izq-fuera", "etiqueta": "Usuario (▾ muestra los recientes)" },
+        { "ventana": "Iniciar sesión", "id": "PasswordBox", "en": "izq-fuera", "etiqueta": "Contraseña (el ojo la muestra)" },
+        { "ventana": "Iniciar sesión", "id": "RememberCheck", "en": "izq-fuera", "etiqueta": "Recordar contraseña e inicio automático" },
         { "ventana": "Iniciar sesión", "id": "LoginButton", "etiqueta": "Ingresar" }
       ]
     },
     {
-      "archivo": "cliente-inicio.png",
+      "archivo": "cliente-ventana-de-alarma.png",
+      "ventana": "Información de la alarma",
       "pasos": [
         { "accion": "ingresar" },
-        { "accion": "cerrarVentana", "titulo": "Información de la alarma", "opcional": true, "ms": 4000 }
+        { "accion": "esperarVentana", "titulo": "Información de la alarma", "ms": 45000 },
+        { "accion": "pausa", "ms": 1500 }
       ],
       "marcas": [
-        { "tipo": "RadioButton", "en": "arriba-izq", "etiqueta": "Viñetas de los módulos abiertos" },
+        { "ventana": "Información de la alarma", "id": "TitleText", "etiqueta": "Título, origen y hora de la alerta" },
+        { "ventana": "Información de la alarma", "tipo": "Text", "nombre": "ORIGEN", "etiqueta": "Origen: automatización, disparo, severidad y alarma sonora" },
+        { "ventana": "Información de la alarma", "tipo": "Text", "nombre": "ACUSE DE RECIBO", "etiqueta": "Acuse de recibo" },
+        { "ventana": "Información de la alarma", "id": "Tabs", "en": "arriba-izq", "etiqueta": "Fotos, Video en vivo y Qué hizo el sistema" },
+        { "ventana": "Información de la alarma", "id": "AckButton", "en": "arriba", "etiqueta": "Enterado: confirma la alerta" },
+        { "ventana": "Información de la alarma", "id": "MuteButton", "en": "arriba", "etiqueta": "Silenciar la alarma sonora" },
+        { "ventana": "Información de la alarma", "id": "PagerText", "etiqueta": "Alertas sin confirmar y paginador" },
+        { "ventana": "Información de la alarma", "id": "CloseButton", "en": "arriba", "etiqueta": "Cerrar (la alerta sigue pendiente)" }
+      ],
+      "despues": [
+        { "accion": "cerrarVentana", "titulo": "Información de la alarma" }
+      ]
+    },
+    {
+      "archivo": "cliente-inicio.png",
+      "marcas": [
+        { "tipo": "RadioButton", "etiqueta": "Viñetas de los módulos abiertos" },
         { "tipo": "Text", "nombre": "Vista en Vivo", "etiqueta": "Tarjeta de un módulo" },
-        { "ayuda": "Inicio", "tipo": "Button", "etiqueta": "Riel con un botón por módulo" }
+        { "ayudaIgual": "Inicio", "etiqueta": "Riel con un botón por módulo" }
+      ]
+    },
+    {
+      "archivo": "cliente-ventana-principal.png",
+      "pasos": [
+        { "accion": "clic", "ayudaIgual": "Vista en Vivo" },
+        { "accion": "pausa", "ms": 1200 },
+        { "accion": "seleccionar", "tipo": "RadioButton", "indice": 0 }
+      ],
+      "marcas": [
+        { "tipo": "RadioButton", "indice": 1, "etiqueta": "Viñetas: una por módulo abierto" },
+        { "ayuda": "CPU del servidor", "en": "izq-fuera", "etiqueta": "Uso de procesador, memoria y disco del servidor" },
+        { "tipo": "Text", "nombre": "Conectado", "etiqueta": "Conexión con el servidor" },
+        { "id": "UserMenuToggle", "etiqueta": "Menú del usuario" },
+        { "ayudaIgual": "Vista en Vivo", "etiqueta": "Riel con un botón por módulo" },
+        { "tipo": "Text", "contiene": "El período de prueba", "en": "izq-fuera", "etiqueta": "Barra de estado, con el aviso de licencia a la derecha" }
       ]
     },
     {
       "archivo": "cliente-vista-en-vivo.png",
       "pasos": [
-        { "accion": "clic", "ayuda": "Vista en Vivo", "tipo": "Button" },
-        { "accion": "pausa", "ms": 1500 },
+        { "accion": "clic", "ayudaIgual": "Vista en Vivo" },
+        { "accion": "pausa", "ms": 1000 },
         { "accion": "clic", "id": "ViewsToggle" },
-        { "accion": "volcar", "titulo": "todas", "archivo": "C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\C--Users-Jose-Desktop-CLRobotics-dev-CLRobotics-TrueCentral\\470c96de-f3dc-4303-a644-224a4d775cf1\\scratchpad\\cliente\\vistas.txt" }
+        { "accion": "clic", "tipo": "Text", "nombre": "Centro de distribución" },
+        { "accion": "pausa", "ms": 9000 },
+        { "accion": "clic", "ayuda": "Minimizar / restaurar el control PTZ" },
+        { "accion": "pausa", "ms": 800 }
       ],
-      "marcas": []
+      "marcas": [
+        { "tipo": "Button", "nombre": "Equipo", "etiqueta": "Lista por Equipo o por Ubicación" },
+        { "tipo": "Text", "nombre": "Buscar canal…", "etiqueta": "Buscar canal…" },
+        { "tipo": "Text", "nombre": "División:", "etiqueta": "División de la grilla" },
+        { "ayuda": "Zoom digital", "tipo": "Button", "etiqueta": "Zoom digital" },
+        { "tipo": "Button", "nombre": "Limpiar todo", "etiqueta": "Limpiar todo" },
+        { "id": "ViewsToggle", "etiqueta": "Vistas guardadas" },
+        { "ayuda": "Abrir una pantalla auxiliar", "etiqueta": "Pantalla auxiliar" },
+        { "ayuda": "Pantalla completa de la grilla", "etiqueta": "Pantalla completa" },
+        { "tipo": "Text", "nombre": "Cámara 05 · Andén de carga", "etiqueta": "Barra del cuadro: cámara y botones" },
+        { "tipo": "Text", "contiene": "PTZ —", "etiqueta": "Panel PTZ: muestra la cámara del cuadro seleccionado" },
+        { "tipo": "Text", "contiene": "en pantalla", "etiqueta": "Barra de estado" }
+      ]
+    },
+    {
+      "archivo": "cliente-vista-en-vivo-cuadro.png",
+      "pasos": [
+        { "accion": "clic", "ayuda": "Grabar una cápsula de video local", "indice": 3 },
+        { "accion": "pausa", "ms": 4200 }
+      ],
+      "reposo": 300,
+      "recorte": [
+        { "tipo": "Text", "nombre": "Domo PTZ 08 · Domo patio" },
+        { "tipo": "Button", "nombre": "✕", "indice": 3 }
+      ],
+      "margen": 26,
+      "marcas": [
+        { "tipo": "Text", "nombre": "Domo PTZ 08 · Domo patio", "etiqueta": "Equipo y cámara (a la izquierda, el número del cuadro)" },
+        { "ayuda": "Audio de este cuadro", "indice": 3, "en": "arriba", "etiqueta": "Audio" },
+        { "tipo": "Button", "nombre": "S", "indice": 3, "en": "arriba", "etiqueta": "Stream: P principal o S secundario" },
+        { "ayuda": "Guardar una captura de imagen", "indice": 3, "en": "arriba", "etiqueta": "Captura de imagen" },
+        { "ayuda": "Grabando", "en": "abajo", "etiqueta": "Grabación local, con su contador" },
+        { "tipo": "Button", "nombre": "✕", "indice": 3, "en": "abajo", "etiqueta": "Cerrar el video del cuadro" }
+      ],
+      "despues": [
+        { "accion": "clic", "ayuda": "Grabando" }
+      ]
+    },
+    {
+      "archivo": "cliente-vista-en-vivo-vistas.png",
+      "capas": true,
+      "pasos": [
+        { "accion": "clic", "id": "ViewsToggle" },
+        { "accion": "pausa", "ms": 800 }
+      ],
+      "recorte": [
+        { "id": "ViewsToggle" },
+        { "tipo": "Text", "nombre": "VISTAS GUARDADAS" },
+        { "ayuda": "Guarda la división y las cámaras" },
+        { "tipo": "CheckBox", "nombre": "Compartir con todos los puestos" }
+      ],
+      "margen": 16,
+      "marcas": [
+        { "tipo": "DataItem", "contiene": "Name = Casa matriz", "etiqueta": "Una vista: clic para cargarla" },
+        { "tipo": "DataItem", "contiene": "Name = Centro de distribución", "en": "der", "etiqueta": "Actualizar con la grilla actual y eliminar (a la derecha de cada vista)" },
+        { "id": "ViewNameBox", "etiqueta": "Nombre de la vista nueva" },
+        { "tipo": "CheckBox", "nombre": "Compartir con todos los puestos", "etiqueta": "Compartir con todos los puestos" },
+        { "ayuda": "Guarda la división y las cámaras", "en": "abajo", "etiqueta": "Guardar la grilla como vista" }
+      ],
+      "despues": [
+        { "accion": "clic", "id": "ViewsToggle" }
+      ]
+    },
+    {
+      "archivo": "cliente-configuracion-video.png",
+      "ventana": "Configuración —",
+      "pasos": [
+        { "accion": "clic", "ayudaIgual": "Configuración" },
+        { "accion": "esperarVentana", "titulo": "Configuración —" },
+        { "accion": "pausa", "ms": 800 }
+      ],
+      "marcas": [
+        { "ventana": "Configuración —", "id": "NavVideo", "etiqueta": "Apartados de la configuración" },
+        { "ventana": "Configuración —", "id": "ProfileAuto", "etiqueta": "Stream al abrir un canal" },
+        { "ventana": "Configuración —", "id": "FitKeep", "etiqueta": "Ajuste de imagen" },
+        { "ventana": "Configuración —", "id": "GridFit", "etiqueta": "Al abrir un equipo completo" },
+        { "ventana": "Configuración —", "tipo": "Text", "nombre": "Volver a abrir las cámaras de la última sesión", "en": "izq-fuera", "etiqueta": "Volver a abrir las cámaras de la última sesión" },
+        { "ventana": "Configuración —", "tipo": "Button", "nombre": "Guardar", "etiqueta": "Guardar (Cancelar descarta los cambios)" }
+      ],
+      "despues": [
+        { "accion": "cerrarVentana", "titulo": "Configuración —" }
+      ]
+    },
+    {
+      "archivo": "cliente-centro-de-eventos.png",
+      "pasos": [
+        { "accion": "clic", "ayuda": "Centro de eventos — alertas", "tipo": "Button" },
+        { "accion": "pausa", "ms": 2500 }
+      ],
+      "marcas": [
+        { "tipo": "Text", "contiene": "alerta(s)", "etiqueta": "Resumen: alertas y cuántas faltan por confirmar" },
+        { "tipo": "CheckBox", "nombre": "Solo sin confirmar", "etiqueta": "Solo sin confirmar" },
+        { "tipo": "Button", "contiene": "Ventana aparte", "etiqueta": "Ventana aparte" },
+        { "tipo": "Text", "nombre": "PENDIENTE", "en": "izq-fuera", "etiqueta": "Estado de la alerta" },
+        { "tipo": "Button", "nombre": "Ver", "indice": 1, "en": "arriba", "etiqueta": "Ver: abre la ventana de alarma" },
+        { "tipo": "Button", "nombre": "Enterado", "en": "abajo", "etiqueta": "Enterado: confirma la alerta" },
+        { "tipo": "Text", "contiene": "Acuse de recibo: admin", "etiqueta": "Quién la confirmó, cuándo y desde dónde" },
+        { "ayuda": "Centro de eventos — alertas", "tipo": "Button", "etiqueta": "Botón del riel con las alertas sin confirmar" }
+      ]
+    },
+    {
+      "archivo": "cliente-exportar-grabaciones.png",
+      "ventana": "Exportar grabaciones",
+      "pasos": [
+        { "accion": "clic", "ayudaIgual": "Reproducción" },
+        { "accion": "pausa", "ms": 1500 },
+        { "accion": "clic", "tipo": "Text", "nombre": "Exportar…" },
+        { "accion": "esperarVentana", "titulo": "Exportar grabaciones" },
+        { "accion": "elegir", "ventana": "Exportar grabaciones", "id": "CameraBox", "opcion": "Andén de carga" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "FromTimeBox", "texto": "10:00:00" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "ToTimeBox", "texto": "11:00:00" },
+        { "accion": "seleccionar", "ventana": "Exportar grabaciones", "id": "SplitRadio" },
+        { "accion": "elegir", "ventana": "Exportar grabaciones", "id": "SplitBox", "opcion": "30" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "FolderBox", "texto": "C:\\Exportaciones" },
+        { "accion": "pausa", "ms": 600 }
+      ],
+      "marcas": [
+        { "ventana": "Exportar grabaciones", "id": "CameraBox", "en": "izq-fuera", "etiqueta": "Cámara" },
+        { "ventana": "Exportar grabaciones", "id": "FromDateBox", "en": "izq-fuera", "etiqueta": "Inicio y fin: fecha y hora" },
+        { "ventana": "Exportar grabaciones", "id": "FolderBox", "en": "izq-fuera", "etiqueta": "Carpeta de destino (… para elegirla)" },
+        { "ventana": "Exportar grabaciones", "id": "FormatBox", "en": "izq-fuera", "etiqueta": "Formato: MP4 o MKV" },
+        { "ventana": "Exportar grabaciones", "id": "SplitRadio", "etiqueta": "Una sola cápsula o dividir en archivos" },
+        { "ventana": "Exportar grabaciones", "id": "SummaryText", "etiqueta": "Resumen de lo que se va a exportar" },
+        { "ventana": "Exportar grabaciones", "tipo": "Button", "nombre": "Exportar", "etiqueta": "Exportar" }
+      ],
+      "despues": [
+        { "accion": "clic", "ventana": "Exportar grabaciones", "tipo": "Button", "nombre": "Cancelar" }
+      ]
+    },
+    {
+      "archivo": "cliente-centro-de-descargas.png",
+      "ventana": "Centro de descargas",
+      "_comentario": "Cuatro exportaciones: la de Perímetro sur falla (su línea de tiempo no se consultó desde que arrancó el servidor), una termina, otra queda descargando y la última en cola. Cada una dura un minuto real.",
+      "pasos": [
+        { "accion": "api", "metodo": "GET", "ruta": "/api/playback/5/1/segments?date={hoy}" },
+
+        { "accion": "clic", "tipo": "Text", "nombre": "Exportar…" },
+        { "accion": "esperarVentana", "titulo": "Exportar grabaciones" },
+        { "accion": "elegir", "ventana": "Exportar grabaciones", "id": "CameraBox", "opcion": "Perímetro sur" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "FromTimeBox", "texto": "09:00:00" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "ToTimeBox", "texto": "09:01:00" },
+        { "accion": "seleccionar", "ventana": "Exportar grabaciones", "id": "SingleFileRadio" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "FolderBox", "texto": "{grabaciones}" },
+        { "accion": "clic", "ventana": "Exportar grabaciones", "tipo": "Button", "nombre": "Exportar" },
+        { "accion": "pausa", "ms": 2000 },
+
+        { "accion": "clic", "tipo": "Text", "nombre": "Exportar…" },
+        { "accion": "esperarVentana", "titulo": "Exportar grabaciones" },
+        { "accion": "elegir", "ventana": "Exportar grabaciones", "id": "CameraBox", "opcion": "Andén de carga" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "FromTimeBox", "texto": "10:00:00" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "ToTimeBox", "texto": "10:01:00" },
+        { "accion": "clic", "ventana": "Exportar grabaciones", "tipo": "Button", "nombre": "Exportar" },
+        { "accion": "pausa", "ms": 1000 },
+
+        { "accion": "clic", "tipo": "Text", "nombre": "Exportar…" },
+        { "accion": "esperarVentana", "titulo": "Exportar grabaciones" },
+        { "accion": "elegir", "ventana": "Exportar grabaciones", "id": "CameraBox", "opcion": "Andén de carga" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "FromTimeBox", "texto": "10:05:00" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "ToTimeBox", "texto": "10:06:00" },
+        { "accion": "clic", "ventana": "Exportar grabaciones", "tipo": "Button", "nombre": "Exportar" },
+        { "accion": "pausa", "ms": 1000 },
+
+        { "accion": "clic", "tipo": "Text", "nombre": "Exportar…" },
+        { "accion": "esperarVentana", "titulo": "Exportar grabaciones" },
+        { "accion": "elegir", "ventana": "Exportar grabaciones", "id": "CameraBox", "opcion": "Andén de carga" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "FromTimeBox", "texto": "10:10:00" },
+        { "accion": "escribir", "ventana": "Exportar grabaciones", "id": "ToTimeBox", "texto": "10:11:00" },
+        { "accion": "clic", "ventana": "Exportar grabaciones", "tipo": "Button", "nombre": "Exportar" },
+        { "accion": "pausa", "ms": 72000 }
+      ],
+      "marcas": [
+        { "ventana": "Centro de descargas", "tipo": "Text", "contiene": "descargando ·", "en": "izq-fuera", "etiqueta": "Resumen de las descargas" },
+        { "ventana": "Centro de descargas", "tipo": "Button", "nombre": "Limpiar terminadas", "etiqueta": "Limpiar terminadas" },
+        { "ventana": "Centro de descargas", "tipo": "Text", "contiene": ".mp4", "etiqueta": "Archivo (el puntero muestra la ruta completa)" },
+        { "ventana": "Centro de descargas", "tipo": "Text", "nombre": "Descargando", "etiqueta": "Estado: Por comenzar, Descargando, Terminada, Fallida" },
+        { "ventana": "Centro de descargas", "ayuda": "Abrir la carpeta del archivo", "en": "arriba", "etiqueta": "Botones de la fila: abrir la carpeta, reintentar, cancelar o quitar" },
+        { "ventana": "Centro de descargas", "tipo": "Text", "contiene": "no soporta reproducción", "etiqueta": "Motivo de una exportación fallida" }
+      ],
+      "despues": [
+        { "accion": "cerrarVentana", "titulo": "Centro de descargas" }
+      ]
     }
   ]
 }

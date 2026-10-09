@@ -1,22 +1,165 @@
 {
+  "cliente-centro-de-descargas.png": [
+    {
+      "x": 0,
+      "y": 0.1417,
+      "etiqueta": "Resumen de las descargas"
+    },
+    {
+      "x": 0.842,
+      "y": 0.1417,
+      "etiqueta": "Limpiar terminadas"
+    },
+    {
+      "x": 0.1477,
+      "y": 0.325,
+      "etiqueta": "Archivo (el puntero muestra la ruta completa)"
+    },
+    {
+      "x": 0.8284,
+      "y": 0.4458,
+      "etiqueta": "Estado: Por comenzar, Descargando, Terminada, Fallida"
+    },
+    {
+      "x": 0.9153,
+      "y": 0.5792,
+      "etiqueta": "Botones de la fila: abrir la carpeta, reintentar, cancelar o quitar"
+    },
+    {
+      "x": 0.5989,
+      "y": 0.7615,
+      "etiqueta": "Motivo de una exportación fallida"
+    }
+  ],
+  "cliente-centro-de-eventos.png": [
+    {
+      "x": 0.0486,
+      "y": 0.0928,
+      "etiqueta": "Resumen: alertas y cuántas faltan por confirmar"
+    },
+    {
+      "x": 0.7465,
+      "y": 0.0811,
+      "etiqueta": "Solo sin confirmar"
+    },
+    {
+      "x": 0.9014,
+      "y": 0.0806,
+      "etiqueta": "Ventana aparte"
+    },
+    {
+      "x": 0.8299,
+      "y": 0.2644,
+      "etiqueta": "Estado de la alerta"
+    },
+    {
+      "x": 0.9101,
+      "y": 0.2778,
+      "etiqueta": "Ver: abre la ventana de alarma"
+    },
+    {
+      "x": 0.9559,
+      "y": 0.3156,
+      "etiqueta": "Enterado: confirma la alerta"
+    },
+    {
+      "x": 0.0764,
+      "y": 0.445,
+      "etiqueta": "Quién la confirmó, cuándo y desde dónde"
+    },
+    {
+      "x": 0.0042,
+      "y": 0.4367,
+      "etiqueta": "Botón del riel con las alertas sin confirmar"
+    }
+  ],
+  "cliente-configuracion-video.png": [
+    {
+      "x": 0.0118,
+      "y": 0.1521,
+      "etiqueta": "Apartados de la configuración"
+    },
+    {
+      "x": 0.2676,
+      "y": 0.2594,
+      "etiqueta": "Stream al abrir un canal"
+    },
+    {
+      "x": 0.2676,
+      "y": 0.4385,
+      "etiqueta": "Ajuste de imagen"
+    },
+    {
+      "x": 0.2676,
+      "y": 0.6156,
+      "etiqueta": "Al abrir un equipo completo"
+    },
+    {
+      "x": 0.2779,
+      "y": 0.8021,
+      "etiqueta": "Volver a abrir las cámaras de la última sesión"
+    },
+    {
+      "x": 0.8529,
+      "y": 0.9458,
+      "etiqueta": "Guardar (Cancelar descarta los cambios)"
+    }
+  ],
+  "cliente-exportar-grabaciones.png": [
+    {
+      "x": 0.0032,
+      "y": 0.1884,
+      "etiqueta": "Cámara"
+    },
+    {
+      "x": 0.0032,
+      "y": 0.2998,
+      "etiqueta": "Inicio y fin: fecha y hora"
+    },
+    {
+      "x": 0.0032,
+      "y": 0.4154,
+      "etiqueta": "Carpeta de destino (… para elegirla)"
+    },
+    {
+      "x": 0.0032,
+      "y": 0.5353,
+      "etiqueta": "Formato: MP4 o MKV"
+    },
+    {
+      "x": 0.029,
+      "y": 0.7634,
+      "etiqueta": "Una sola cápsula o dividir en archivos"
+    },
+    {
+      "x": 0.0258,
+      "y": 0.9443,
+      "etiqueta": "Resumen de lo que se va a exportar"
+    },
+    {
+      "x": 0.8548,
+      "y": 0.9443,
+      "etiqueta": "Exportar"
+    }
+  ],
   "cliente-inicio-sesion.png": [
     {
-      "x": 0.1024,
+      "x": 0.0643,
       "y": 0.3169,
       "etiqueta": "Servidor"
     },
     {
-      "x": 0.1024,
+      "x": 0.0643,
       "y": 0.4607,
       "etiqueta": "Usuario (▾ muestra los recientes)"
     },
     {
-      "x": 0.1024,
+      "x": 0.0643,
       "y": 0.6045,
       "etiqueta": "Contraseña (el ojo la muestra)"
     },
     {
-      "x": 0.1024,
+      "x": 0.0643,
       "y": 0.6843,
       "etiqueta": "Recordar contraseña e inicio automático"
     },
@@ -29,7 +172,7 @@
   "cliente-inicio.png": [
     {
       "x": 0.1042,
-      "y": 0,
+      "y": 0.0228,
       "etiqueta": "Viñetas de los módulos abiertos"
     },
     {
@@ -43,7 +186,196 @@
       "etiqueta": "Riel con un botón por módulo"
     }
   ],
-  "cliente-vista-en-vivo.png": [],
+  "cliente-ventana-de-alarma.png": [
+    {
+      "x": 0.0481,
+      "y": 0.0879,
+      "etiqueta": "Título, origen y hora de la alerta"
+    },
+    {
+      "x": 0.0179,
+      "y": 0.1786,
+      "etiqueta": "Origen: automatización, disparo, severidad y alarma sonora"
+    },
+    {
+      "x": 0.0179,
+      "y": 0.57,
+      "etiqueta": "Acuse de recibo"
+    },
+    {
+      "x": 0.3491,
+      "y": 0.1586,
+      "etiqueta": "Fotos, Video en vivo y Qué hizo el sistema"
+    },
+    {
+      "x": 0.058,
+      "y": 0.9329,
+      "etiqueta": "Enterado: confirma la alerta"
+    },
+    {
+      "x": 0.1406,
+      "y": 0.9329,
+      "etiqueta": "Silenciar la alarma sonora"
+    },
+    {
+      "x": 0.7104,
+      "y": 0.9571,
+      "etiqueta": "Alertas sin confirmar y paginador"
+    },
+    {
+      "x": 0.9528,
+      "y": 0.9329,
+      "etiqueta": "Cerrar (la alerta sigue pendiente)"
+    }
+  ],
+  "cliente-ventana-principal.png": [
+    {
+      "x": 0.1618,
+      "y": 0.0228,
+      "etiqueta": "Viñetas: una por módulo abierto"
+    },
+    {
+      "x": 0.7222,
+      "y": 0.0228,
+      "etiqueta": "Uso de procesador, memoria y disco del servidor"
+    },
+    {
+      "x": 0.8042,
+      "y": 0.0228,
+      "etiqueta": "Conexión con el servidor"
+    },
+    {
+      "x": 0.8535,
+      "y": 0.0228,
+      "etiqueta": "Menú del usuario"
+    },
+    {
+      "x": 0.0042,
+      "y": 0.13,
+      "etiqueta": "Riel con un botón por módulo"
+    },
+    {
+      "x": 0.5979,
+      "y": 0.9872,
+      "etiqueta": "Barra de estado, con el aviso de licencia a la derecha"
+    }
+  ],
+  "cliente-vista-en-vivo-cuadro.png": [
+    {
+      "x": 0.0472,
+      "y": 0.4932,
+      "etiqueta": "Equipo y cámara (a la izquierda, el número del cuadro)"
+    },
+    {
+      "x": 0.7541,
+      "y": 0.3514,
+      "etiqueta": "Audio"
+    },
+    {
+      "x": 0.7913,
+      "y": 0.3514,
+      "etiqueta": "Stream: P principal o S secundario"
+    },
+    {
+      "x": 0.8285,
+      "y": 0.3514,
+      "etiqueta": "Captura de imagen"
+    },
+    {
+      "x": 0.8657,
+      "y": 0.6486,
+      "etiqueta": "Grabación local, con su contador"
+    },
+    {
+      "x": 0.9592,
+      "y": 0.6486,
+      "etiqueta": "Cerrar el video del cuadro"
+    }
+  ],
+  "cliente-vista-en-vivo-vistas.png": [
+    {
+      "x": 0.0727,
+      "y": 0.3818,
+      "etiqueta": "Una vista: clic para cargarla"
+    },
+    {
+      "x": 0.9599,
+      "y": 0.5727,
+      "etiqueta": "Actualizar con la grilla actual y eliminar (a la derecha de cada vista)"
+    },
+    {
+      "x": 0.0727,
+      "y": 0.8,
+      "etiqueta": "Nombre de la vista nueva"
+    },
+    {
+      "x": 0.0777,
+      "y": 0.9127,
+      "etiqueta": "Compartir con todos los puestos"
+    },
+    {
+      "x": 0.8747,
+      "y": 0.8545,
+      "etiqueta": "Guardar la grilla como vista"
+    }
+  ],
+  "cliente-vista-en-vivo.png": [
+    {
+      "x": 0.1208,
+      "y": 0.0706,
+      "etiqueta": "Lista por Equipo o por Ubicación"
+    },
+    {
+      "x": 0.0507,
+      "y": 0.11,
+      "etiqueta": "Buscar canal…"
+    },
+    {
+      "x": 0.2264,
+      "y": 0.0694,
+      "etiqueta": "División de la grilla"
+    },
+    {
+      "x": 0.3188,
+      "y": 0.0694,
+      "etiqueta": "Zoom digital"
+    },
+    {
+      "x": 0.3722,
+      "y": 0.0694,
+      "etiqueta": "Limpiar todo"
+    },
+    {
+      "x": 0.5333,
+      "y": 0.0694,
+      "etiqueta": "Vistas guardadas"
+    },
+    {
+      "x": 0.8097,
+      "y": 0.0694,
+      "etiqueta": "Pantalla auxiliar"
+    },
+    {
+      "x": 0.8993,
+      "y": 0.0694,
+      "etiqueta": "Pantalla completa"
+    },
+    {
+      "x": 0.2479,
+      "y": 0.1156,
+      "etiqueta": "Barra del cuadro: cámara y botones"
+    },
+    {
+      "x": 0.0444,
+      "y": 0.6439,
+      "etiqueta": "Panel PTZ: muestra la cámara del cuadro seleccionado"
+    },
+    {
+      "x": 0.0083,
+      "y": 0.9872,
+      "etiqueta": "Barra de estado"
+    }
+  ],
   "web-acceso-horario.png": [
     {
       "x": 0.028,

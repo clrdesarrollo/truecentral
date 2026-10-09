@@ -8,7 +8,7 @@ operadores y lleva el registro de su acuse de recibo: quién se dio por
 enterado de cada una, a qué hora y desde dónde. Después de un incidente
 permite responder qué avisó el sistema y quién lo atendió, o si nadie lo hizo.
 
-#captura-pendiente("Cliente de monitoreo: Centro de eventos con varias alertas, una PENDIENTE y dos Confirmadas", alto: 6cm)
+#captura("cliente-centro-de-eventos.png", pie: [Centro de eventos del cliente de monitoreo.])
 
 Las alertas nacen de las automatizaciones: cada vez que una automatización
 ejecuta la acción «Avisar a los operadores», se crea una alerta
@@ -48,7 +48,7 @@ todas.
 
 #requiere("Atender alertas")
 
-#captura-pendiente("Cliente de monitoreo: ventana Información de la alarma con consignas, la pestaña Fotos y los botones Enterado y Silenciar", alto: 6cm)
+#captura("cliente-ventana-de-alarma.png", pie: [Ventana Información de la alarma, con una alerta pendiente.])
 
 A la izquierda de la ventana está el detalle del hecho:
 

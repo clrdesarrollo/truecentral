@@ -7,7 +7,7 @@ Este capítulo explica cómo ingresar al sistema, cómo moverse por el cliente d
 monitoreo y por el panel web, y cómo cerrar la sesión. Lo que se hace dentro de
 cada módulo está en su propio capítulo.
 
-#captura-pendiente("Cliente de monitoreo: ventana principal en la página Inicio, con las tarjetas de módulos y la viñeta Vista en Vivo abierta")
+#captura("cliente-inicio.png", pie: [Página Inicio del cliente de monitoreo.])
 
 == Ingresar al panel web
 
@@ -58,7 +58,7 @@ La nueva contraseña debe tener:
 
 == Ingresar desde el cliente de monitoreo
 
-#captura-pendiente("Cliente de monitoreo: ventana de inicio de sesión")
+#captura("cliente-inicio-sesion.png", ancho: 50%, pie: [Ventana de ingreso del cliente de monitoreo.])
 
 + En *Servidor*, escriba la dirección del servidor, la misma del panel web
   (puede omitir `http://`).
@@ -110,7 +110,7 @@ Tras ingresar se abre la ventana principal. Arriba está la barra con las
 viñetas de los módulos abiertos y el estado de la conexión; a la izquierda, el
 riel con un botón por módulo; abajo, la barra de estado.
 
-#captura-pendiente("Cliente de monitoreo: ventana principal con las viñetas Inicio y Vista en Vivo; marcar las viñetas, los indicadores CPU/RAM/disco, el estado de conexión, el botón del usuario, el riel lateral y la barra de estado")
+#captura("cliente-ventana-principal.png", pie: [Ventana principal del cliente de monitoreo.])
 
 === Viñetas de la barra superior
 
@@ -267,7 +267,7 @@ Las preferencias del cliente se guardan en este equipo. Para cambiarlas:
 Al guardar, la barra de estado dice «Configuración guardada.» y los cambios
 rigen de inmediato, salvo los que indican lo contrario.
 
-#captura-pendiente("Cliente de monitoreo: ventana Configuración en el apartado Video")
+#captura("cliente-configuracion-video.png", ancho: 85%, pie: [Configuración del cliente, apartado Video.])
 
 === Video
 

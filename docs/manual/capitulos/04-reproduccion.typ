@@ -261,7 +261,7 @@ Cada archivo entra como una descarga al Centro de descargas, que se abre solo
 (vea la sección siguiente). La ventana recuerda la carpeta, el formato y la
 división para la próxima vez.
 
-#captura-pendiente("Cliente de monitoreo: ventana Exportar grabaciones con un tramo de una hora, formato MP4 y división en archivos de 30 minutos")
+#captura("cliente-exportar-grabaciones.png", ancho: 75%, pie: [Ventana Exportar grabaciones: una hora dividida en archivos de 30 minutos.])
 
 - En ambos formatos el video se copia tal como lo grabó el equipo, sin pérdida
   de calidad. Si el video es HEVC (H.265), algunos reproductores no lo abren:
@@ -324,7 +324,7 @@ borra el archivo)*. #boton("Limpiar terminadas") quita de la lista las
 terminadas, fallidas y canceladas, sin borrar ningún archivo. La lista dura lo
 que dura la sesión del cliente.
 
-#captura-pendiente("Cliente de monitoreo: Centro de descargas con una exportación Descargando, una Por comenzar, una Terminada y una Fallida")
+#captura("cliente-centro-de-descargas.png", ancho: 90%, pie: [Centro de descargas con exportaciones en sus distintos estados.])
 
 #importante[Si sale del cliente o cierra sesión con descargas en curso o en
   cola, el sistema avisa y pide confirmar. Si confirma, las descargas se

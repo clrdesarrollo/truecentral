@@ -189,9 +189,36 @@ internal sealed class Cliente : IDisposable
         {
             case "ingresar": Ingresar(); break;
             case "clic": Clic(Objetivo()); break;
-            case "escribir": Escribir(Objetivo(), paso["texto"]!.GetValue<string>()); break;
+            case "escribir": Escribir(Objetivo(), Reemplazar(paso["texto"]!.GetValue<string>())); break;
+            case "elegir":
+                // Lista desplegable: abrirla y elegir la opción cuyo texto contiene "opcion".
+                var combo = Objetivo();
+                ((ExpandCollapsePattern)combo.GetCurrentPattern(ExpandCollapsePattern.Pattern)).Expand();
+                Thread.Sleep(400);
+                string opcion = paso["opcion"]!.GetValue<string>();
+                var item = combo.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem))
+                    .Cast<AutomationElement>()
+                    // La opción puede llevar varios textos (equipo y cámara): se miran todos.
+                    .FirstOrDefault(i => (i.Current.Name ?? "").Contains(opcion)
+                        || i.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text))
+                            .Cast<AutomationElement>().Any(t => (t.Current.Name ?? "").Contains(opcion)))
+                    ?? throw new InvalidOperationException($"No hay «{opcion}» en la lista.");
+                ((SelectionItemPattern)item.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+                if (combo.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var cerrar))
+                    ((ExpandCollapsePattern)cerrar).Collapse();
+                break;
             case "seleccionar":
-                ((SelectionItemPattern)Objetivo().GetCurrentPattern(SelectionItemPattern.Pattern)).Select(); break;
+                // Sube desde el elemento (p. ej. el texto de un nodo del árbol) hasta el seleccionable.
+                for (var e = Objetivo(); ; e = TreeWalker.ControlViewWalker.GetParent(e)
+                         ?? throw new InvalidOperationException("Nada seleccionable."))
+                {
+                    if (e.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var patron))
+                    {
+                        ((SelectionItemPattern)patron).Select();
+                        break;
+                    }
+                }
+                break;
             case "expandir":
                 ((ExpandCollapsePattern)Objetivo().GetCurrentPattern(ExpandCollapsePattern.Pattern)).Expand(); break;
             case "contraer":
@@ -209,6 +236,8 @@ internal sealed class Cliente : IDisposable
                 }
                 catch (InvalidOperationException) when (paso["opcional"]?.GetValue<bool>() == true) { }
                 break;
+            case "clicMouse": ClicPorMensaje(Objetivo(), 1); break;
+            case "doble": ClicPorMensaje(Objetivo(), 2); break;
             case "pausa": Thread.Sleep(paso["ms"]!.GetValue<int>()); break;
             case "api": Api(paso); break;
             case "volcar": Volcar(paso["titulo"]!.GetValue<string>(), paso["archivo"]!.GetValue<string>()); break;
@@ -218,6 +247,16 @@ internal sealed class Cliente : IDisposable
         FueraDePantalla();
     }
 
+    /// <summary>
+    /// Marcadores en textos y rutas: {hoy} (aaaa-mm-dd), {hoy-dma} (dd-mm-aaaa,
+    /// como los campos de fecha del cliente) y {grabaciones} (la carpeta de
+    /// grabaciones del cliente de la demo).
+    /// </summary>
+    private string Reemplazar(string texto) => texto
+        .Replace("{hoy}", DateTime.Now.ToString("yyyy-MM-dd"))
+        .Replace("{hoy-dma}", DateTime.Now.ToString("dd-MM-yyyy"))
+        .Replace("{grabaciones}", Path.Combine(_demo.Carpeta, "cliente-archivos", "Grabaciones"));
+
     /// <summary>Llama a la API REST de la demo como administrador (para provocar alertas, por ejemplo).</summary>
     private void Api(JsonNode paso)
     {
@@ -225,7 +264,7 @@ internal sealed class Cliente : IDisposable
                 new { username = _demo.Usuario, password = _demo.Clave }).Result
             .Content.ReadFromJsonAsync<JsonObject>().Result!["token"]!.GetValue<string>();
         var pedido = new HttpRequestMessage(new HttpMethod(paso["metodo"]!.GetValue<string>()),
-            $"{_demo.Servidor}{paso["ruta"]!.GetValue<string>()}");
+            $"{_demo.Servidor}{Reemplazar(paso["ruta"]!.GetValue<string>())}");
         pedido.Headers.Authorization = new("Bearer", _token);
         if (paso["cuerpo"] is { } cuerpo)
             pedido.Content = new StringContent(cuerpo.ToJsonString(), Encoding.UTF8, "application/json");
@@ -246,6 +285,31 @@ internal sealed class Cliente : IDisposable
         throw new InvalidOperationException($"«{elemento.Current.Name}» no se puede pulsar.");
     }
 
+    /// <summary>
+    /// Clic (o doble clic) con mensajes de mouse dirigidos a la ventana, para lo
+    /// que UI Automation no cubre (doble clic en un árbol, clic en la barra de un
+    /// cuadro). No usa el mouse real: la ventana está al fondo y un clic de
+    /// verdad le llegaría a lo que esté encima. WPF cuenta el doble clic por la
+    /// cercanía en tiempo de las pulsaciones.
+    /// </summary>
+    private static void ClicPorMensaje(AutomationElement elemento, int veces)
+    {
+        var hwnd = IntPtr.Zero;
+        for (var e = elemento; e is not null && hwnd == IntPtr.Zero; e = TreeWalker.ControlViewWalker.GetParent(e))
+            hwnd = new IntPtr(e.Current.NativeWindowHandle);
+        if (hwnd == IntPtr.Zero) throw new InvalidOperationException("No se encontró la ventana del elemento.");
+        var r = elemento.Current.BoundingRectangle;
+        var punto = new Win32.POINT { X = (int)(r.X + r.Width / 2), Y = (int)(r.Y + r.Height / 2) };
+        Win32.ScreenToClient(hwnd, ref punto);
+        var lParam = new IntPtr((punto.Y << 16) | (punto.X & 0xFFFF));
+        Win32.PostMessage(hwnd, 0x0200, IntPtr.Zero, lParam); // WM_MOUSEMOVE
+        for (int i = 0; i < veces; i++)
+        {
+            Win32.PostMessage(hwnd, i == 0 ? 0x0201u : 0x0203u, new IntPtr(1), lParam); // WM_LBUTTONDOWN / WM_LBUTTONDBLCLK
+            Win32.PostMessage(hwnd, 0x0202, IntPtr.Zero, lParam);                     // WM_LBUTTONUP
+        }
+    }
+
     private static void Escribir(AutomationElement elemento, string texto) =>
         ((ValuePattern)elemento.GetCurrentPattern(ValuePattern.Pattern)).SetValue(texto);
 
@@ -253,10 +317,24 @@ internal sealed class Cliente : IDisposable
     // Ventanas y elementos
     // ------------------------------------------------------------------
 
-    private List<AutomationElement> Ventanas() =>
-        AutomationElement.RootElement
-            .FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.ProcessIdProperty, _proceso!.Id))
-            .Cast<AutomationElement>().ToList();
+    /// <summary>
+    /// Ventanas del cliente: las de primer nivel y las que dependen de ellas
+    /// (una ventana con dueño, como la de alarma, UI Automation la muestra como
+    /// hija de la principal y no al lado).
+    /// </summary>
+    private List<AutomationElement> Ventanas()
+    {
+        var proceso = new PropertyCondition(AutomationElement.ProcessIdProperty, _proceso!.Id);
+        var primeras = AutomationElement.RootElement.FindAll(TreeScope.Children, proceso).Cast<AutomationElement>().ToList();
+        var todas = new List<AutomationElement>(primeras);
+        var esVentana = new AndCondition(proceso, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
+        foreach (var ventana in primeras)
+        {
+            try { todas.AddRange(ventana.FindAll(TreeScope.Descendants, esVentana).Cast<AutomationElement>()); }
+            catch (ElementNotAvailableException) { }
+        }
+        return todas;
+    }
 
     private static string Titulo(AutomationElement ventana)
     {
@@ -325,6 +403,9 @@ internal sealed class Cliente : IDisposable
         };
         string? contiene = loc["contiene"]?.GetValue<string>();
         string? ayuda = loc["ayuda"]?.GetValue<string>();
+        // ayudaIgual: ToolTip exacto (el riel dice "Vista en Vivo" y la ✕ de la
+        // viñeta "Cerrar Vista en Vivo…": con "ayuda" se confundirían).
+        string? ayudaIgual = loc["ayudaIgual"]?.GetValue<string>();
         int indice = loc["indice"]?.GetValue<int>() ?? 0;
 
         var fin = DateTime.UtcNow.AddMilliseconds(ms);
@@ -338,6 +419,7 @@ internal sealed class Cliente : IDisposable
                         if (e.Current.BoundingRectangle.IsEmpty) return false;
                         if (contiene is not null && !(e.Current.Name ?? "").Contains(contiene)) return false;
                         if (ayuda is not null && !(e.Current.HelpText ?? "").Contains(ayuda)) return false;
+                        if (ayudaIgual is not null && (e.Current.HelpText ?? "") != ayudaIgual) return false;
                         return true;
                     }
                     catch (ElementNotAvailableException) { return false; }
@@ -434,11 +516,14 @@ internal sealed class Cliente : IDisposable
         AutomationElement Elemento(JsonNode loc) =>
             loc["ventana"] is null ? BuscarEnTodas(loc, 5000) : Buscar(VentanaDe(loc), loc, 5000);
 
-        // Recorte: un elemento (con margen en px lógicos) o la ventana entera.
+        // Recorte: un elemento, o varios (lo que abarcan juntos, para zonas sin un
+        // contenedor propio), con margen en px lógicos; sin recorte, la ventana entera.
         var recorte = new Rectangle(0, 0, marco.Width, marco.Height);
         if (captura["recorte"] is { } loc)
         {
-            var r = Elemento(loc).Current.BoundingRectangle;
+            var partes = loc is JsonArray lista ? lista.Select(x => x!).ToList() : [loc];
+            var r = System.Windows.Rect.Empty;
+            foreach (var parte in partes) r.Union(Elemento(parte).Current.BoundingRectangle);
             int m = (int)((captura["margen"]?.GetValue<int>() ?? 0) * escala);
             recorte = Rectangle.Intersect(recorte, new Rectangle(
                 (int)r.X - marco.X - m, (int)r.Y - marco.Y - m, (int)r.Width + 2 * m, (int)r.Height + 2 * m));
@@ -449,11 +534,16 @@ internal sealed class Cliente : IDisposable
         {
             var r = Elemento(marca!).Current.BoundingRectangle;
             var (x, y) = Punto(r, marca!["en"]?.GetValue<string>() ?? "izq", escala);
+            double fx = (x - marco.X - recorte.X) / recorte.Width, fy = (y - marco.Y - recorte.Y) / recorte.Height;
+            string etiqueta = marca["etiqueta"]!.GetValue<string>();
+            // Igual que en el capturador web: una marca en el vacío es un error.
+            if (fx < -0.02 || fx > 1.02 || fy < -0.02 || fy > 1.02)
+                throw new InvalidOperationException($"La marca «{etiqueta}» queda fuera del recorte ({fx:0.00}; {fy:0.00}).");
             marcas.Add(new JsonObject
             {
-                ["x"] = Math.Round((x - marco.X - recorte.X) / recorte.Width, 4),
-                ["y"] = Math.Round((y - marco.Y - recorte.Y) / recorte.Height, 4),
-                ["etiqueta"] = marca["etiqueta"]!.GetValue<string>(),
+                ["x"] = Math.Round(fx, 4),
+                ["y"] = Math.Round(fy, 4),
+                ["etiqueta"] = etiqueta,
             });
         }
 
@@ -553,6 +643,12 @@ internal static class Win32
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
+
+    [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr hwnd, ref POINT point);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);

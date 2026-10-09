@@ -1,6 +1,6 @@
 # Capturas pendientes
 
-Las 39 capturas que faltan en el manual. Cada una está en su capítulo como
+Las 28 capturas que faltan en el manual. Cada una está en su capítulo como
 `#captura-pendiente("…")`. Al tomarla, se reemplaza por
 `#captura("archivo.png", marcas: (…), pie: […])` y se borra de esta lista.
 
@@ -12,23 +12,11 @@ Reglas:
   interesa. Cliente de monitoreo: ventana a 1600×900.
 - Las marcas son la lista numerada de cada fila, en ese orden.
 
-## 2 · Primeros pasos
-
-| Archivo | Pantalla y estado | Marcas |
-|---|---|---|
-| `cliente-inicio-sesion.png` | Ventana de ingreso del cliente | Servidor · Usuario con ▾ · Contraseña con su ojo · Recordar contraseña / Inicio de sesión automático · Ingresar |
-| `cliente-ventana-principal.png` | Viñetas Inicio y Vista en Vivo, aviso de licencia en la barra de estado | Viñetas · CPU/RAM/disco · punto y «Conectado» · botón del usuario · riel · barra de estado |
-| `cliente-inicio.png` | Página Inicio con las tarjetas (puede ser la misma imagen anterior) | Viñetas · una tarjeta · riel |
-| `cliente-configuracion-video.png` | Ventana Configuración, apartado Video | Menú de apartados · Guardar |
-
 ## 3 · Vista en vivo
 
 | Archivo | Pantalla y estado | Marcas |
 |---|---|---|
-| `cliente-vista-en-vivo.png` | Grilla 2×2 con 3 cámaras, una seleccionada, lista por equipo, PTZ abierto | Equipo/Ubicación · Buscar canal… · División · Zoom · Limpiar todo · Vistas · Pantalla auxiliar · Pantalla completa · cuadro seleccionado · panel PTZ · barra de estado |
-| `cliente-vista-en-vivo-cuadro.png` | Barra de un cuadro grabando | Número · nombre · estado · parlante · P/S · cámara · ● con contador · ✕ |
 | `cliente-vista-en-vivo-ptz.png` | Panel PTZ de una cámara PTZ, con Shift apretado si se puede | Encabezado · flechas · Zoom/Foco/Iris · Preset con Ir/Guardar/Borrar · Velocidad · píldora PRECISIÓN |
-| `cliente-vista-en-vivo-vistas.png` | Desplegable Vistas con una vista propia y una compartida | Fila · lápiz · basurero · Nombre de la vista… · Compartir con todos los puestos · Guardar |
 
 ## 4 · Reproducción
 
@@ -37,15 +25,6 @@ Reglas:
 | `cliente-reproduccion.png` | 4 posiciones, 2–3 cámaras a la misma hora, tramos de varios colores | Árbol GRABACIONES · barra Día · 1 canal / 4 posiciones y contador · leyenda · cuadro seleccionado y su barra · transporte y velocidad · reloj · Zoom/Recorte/pantalla completa · línea de tiempo con − / + |
 | `cliente-reproduccion-calendario.png` | Calendario abierto con días marcados | Flechas de mes · día con grabación · hoy · día seleccionado |
 | `cliente-reproduccion-recorte.png` | Recorte activo con un tramo marcado | Recorte · tramo sombreado · «Tramo:» con ✕ · Reproducir tramo · Exportar… |
-| `cliente-exportar-grabaciones.png` | Tramo de 1 h, MP4, división cada 30 min | Cámara · Inicio/Fin · Carpeta de destino con … · Formato · Archivos · resumen · Exportar |
-| `cliente-centro-de-descargas.png` | Filas Descargando, Por comenzar, Terminada y Fallida | Resumen · Limpiar terminadas · estado · botones de la fila |
-
-## 5 · Centro de eventos
-
-| Archivo | Pantalla y estado | Marcas |
-|---|---|---|
-| `cliente-centro-de-eventos.png` | Una alerta PENDIENTE y dos Confirmadas | Resumen · Solo sin confirmar · Ventana aparte · PENDIENTE · Ver · Enterado · «Acuse de recibo» · botón del riel con su número |
-| `cliente-ventana-de-alarma.png` | Información de la alarma con consignas, 2–3 fotos, pestaña Fotos | CONSIGNAS · ORIGEN · ACUSE DE RECIBO · pestañas · pantalla completa · Enterado · Silenciar · paginador · Cerrar |
 
 ## 6 · Paneles de alarma
 

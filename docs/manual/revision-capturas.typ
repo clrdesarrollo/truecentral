@@ -13,6 +13,8 @@
   block(breakable: false, below: 1.6em, {
     text(weight: "bold", size: 10pt, archivo)
     text(fill: gris)[ · #marcas.len() marcas]
-    captura(archivo, ancho: if archivo.starts-with("web-inicio") or archivo.starts-with("cliente-inicio-sesion") { 55% } else { 100% })
+    // Fija (no flotante): que el nombre quede junto a su imagen.
+    captura(archivo, flotante: false,
+      ancho: if archivo.starts-with("web-inicio") or archivo.starts-with("cliente-inicio-sesion") { 55% } else { 100% })
   })
 }
