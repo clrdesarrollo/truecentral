@@ -1,0 +1,33 @@
+{
+  "_comentario": "Entorno de demostración para las capturas del manual. Todo es ficticio y local (127.0.0.1). Las claves son solo de este entorno.",
+  "carpetaDatos": "%LOCALAPPDATA%\\TrueCentralDemo",
+  "puertos": {
+    "web": 5390,
+    "postgres": 25790,
+    "rtsp": 8954,
+    "apiVideo": 9951,
+    "webrtc": 9954,
+    "webrtcIce": 8670,
+    "camarasRtsp": 8955
+  },
+  "administrador": { "usuario": "admin", "clave": "Demo.Manual2026" },
+  "credencialesCamaras": { "usuario": "admin", "clave": "Camara.Demo2026" },
+  "_usuarios": "El período de prueba admite 5 usuarios habilitados (con el administrador).",
+  "usuarios": [
+    { "usuario": "jperez",     "clave": "Demo.Usuario2026", "rol": "Operador",                        "habilitado": true },
+    { "usuario": "mrojas",     "clave": "Demo.Usuario2026", "rol": "Supervisor de turno",             "habilitado": true },
+    { "usuario": "guardia.cd", "clave": "Demo.Usuario2026", "rol": "Guardia centro de distribución",  "habilitado": true },
+    { "usuario": "auditoria",  "clave": "Demo.Usuario2026", "rol": "Auditor",                         "habilitado": true },
+    { "usuario": "tecnico",    "clave": "Demo.Usuario2026", "rol": "Técnico",                         "habilitado": false }
+  ],
+  "camaras": [
+    { "id": 1, "nombre": "Acceso principal",  "puerto": 8901, "ptz": false, "colores": ["24384f", "5b6e7d"], "ubicacion": ["Casa matriz", "Recepción"] },
+    { "id": 2, "nombre": "Recepción",         "puerto": 8902, "ptz": false, "colores": ["3a2f28", "7d6a58"], "ubicacion": ["Casa matriz", "Recepción"] },
+    { "id": 3, "nombre": "Estacionamiento",   "puerto": 8903, "ptz": false, "colores": ["1f2d24", "52665a"], "ubicacion": ["Casa matriz", "Estacionamiento"] },
+    { "id": 4, "nombre": "Pasillo oficinas",  "puerto": 8904, "ptz": false, "colores": ["2b2b3a", "656579"], "ubicacion": ["Casa matriz", "Oficinas"] },
+    { "id": 5, "nombre": "Andén de carga",    "puerto": 8905, "ptz": false, "colores": ["33291c", "7a6a4f"], "ubicacion": ["Centro de distribución", "Andenes"] },
+    { "id": 6, "nombre": "Bodega pasillo 1",  "puerto": 8906, "ptz": false, "colores": ["202a33", "4f5f6d"], "ubicacion": ["Centro de distribución", "Bodega"] },
+    { "id": 7, "nombre": "Perímetro sur",     "puerto": 8907, "ptz": false, "colores": ["1c2a2a", "4c6464"], "ubicacion": ["Centro de distribución", "Perímetro"] },
+    { "id": 8, "nombre": "Domo patio",        "puerto": 8908, "ptz": true,  "colores": ["2a2433", "655a75"], "ubicacion": ["Centro de distribución", "Patio"] }
+  ]
+}

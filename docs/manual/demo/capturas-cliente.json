@@ -1,0 +1,42 @@
+{
+  "_comentario": "Capturas del cliente de monitoreo (capturar-cliente). Se ejecutan en orden sobre la misma sesión. Localizadores: id (x:Name), nombre, contiene, ayuda (ToolTip), tipo (Button, Text, TreeItem…), indice, ventana (parte del título; sin ella se busca en todas). Pasos: ingresar, clic, escribir, seleccionar, expandir, contraer, alternar, esperar, esperarVentana, cerrarVentana (opcional), pausa, api, volcar.",
+  "capturas": [
+    {
+      "archivo": "cliente-inicio-sesion.png",
+      "ventana": "Iniciar sesión",
+      "pasos": [
+        { "accion": "escribir", "ventana": "Iniciar sesión", "id": "UserBox", "texto": "jperez" },
+        { "accion": "volcar", "titulo": "Iniciar sesión", "archivo": "C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\C--Users-Jose-Desktop-CLRobotics-dev-CLRobotics-TrueCentral\\470c96de-f3dc-4303-a644-224a4d775cf1\\scratchpad\\cliente\\ingreso.txt" }
+      ],
+      "marcas": [
+        { "ventana": "Iniciar sesión", "id": "ServerBox", "etiqueta": "Servidor" },
+        { "ventana": "Iniciar sesión", "id": "UserBox", "etiqueta": "Usuario (▾ muestra los recientes)" },
+        { "ventana": "Iniciar sesión", "id": "PasswordBox", "etiqueta": "Contraseña (el ojo la muestra)" },
+        { "ventana": "Iniciar sesión", "id": "RememberCheck", "etiqueta": "Recordar contraseña e inicio automático" },
+        { "ventana": "Iniciar sesión", "id": "LoginButton", "etiqueta": "Ingresar" }
+      ]
+    },
+    {
+      "archivo": "cliente-inicio.png",
+      "pasos": [
+        { "accion": "ingresar" },
+        { "accion": "cerrarVentana", "titulo": "Información de la alarma", "opcional": true, "ms": 4000 }
+      ],
+      "marcas": [
+        { "tipo": "RadioButton", "en": "arriba-izq", "etiqueta": "Viñetas de los módulos abiertos" },
+        { "tipo": "Text", "nombre": "Vista en Vivo", "etiqueta": "Tarjeta de un módulo" },
+        { "ayuda": "Inicio", "tipo": "Button", "etiqueta": "Riel con un botón por módulo" }
+      ]
+    },
+    {
+      "archivo": "cliente-vista-en-vivo.png",
+      "pasos": [
+        { "accion": "clic", "ayuda": "Vista en Vivo", "tipo": "Button" },
+        { "accion": "pausa", "ms": 1500 },
+        { "accion": "clic", "id": "ViewsToggle" },
+        { "accion": "volcar", "titulo": "todas", "archivo": "C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\C--Users-Jose-Desktop-CLRobotics-dev-CLRobotics-TrueCentral\\470c96de-f3dc-4303-a644-224a4d775cf1\\scratchpad\\cliente\\vistas.txt" }
+      ],
+      "marcas": []
+    }
+  ]
+}

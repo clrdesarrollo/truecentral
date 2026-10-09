@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Capturador del cliente de monitoreo para el manual (ver Program.cs).
+       demo.ps1 lo copia y compila fuera del repositorio. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CapturarCliente</RootNamespace>
+    <AssemblyName>capturar-cliente</AssemblyName>
+  </PropertyGroup>
+
+</Project>
