@@ -1502,12 +1502,26 @@ public sealed class WallService
     /// </summary>
     public async Task ReleaseChannelsAsync(Decoder decoder, IEnumerable<int> channels)
     {
-        foreach (int channel in channels)
+        var list = channels.ToList();
+        if (list.Count == 0) return;
+        // Una sola sesión para todos: con el equipo apagado, cada orden por
+        // separado esperaba su propio intento de conexión (segundos cada una).
+        try
         {
-            try { await _sessions.WithDriverAsync(decoder, d => d.StopDecodingAsync(channel)); }
-            catch (Exception ex) { _logger.LogDebug(ex, "StopDecoding del canal liberado {Channel} falló", channel); }
-            try { await _sessions.WithDriverAsync(decoder, d => d.CloseWindowAsync(channel)); }
-            catch (Exception ex) { _logger.LogDebug(ex, "CloseWindow del canal liberado {Channel} falló", channel); }
+            await _sessions.WithDriverAsync(decoder, async d =>
+            {
+                foreach (int channel in list)
+                {
+                    try { await d.StopDecodingAsync(channel); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "StopDecoding del canal liberado {Channel} falló", channel); }
+                    try { await d.CloseWindowAsync(channel); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "CloseWindow del canal liberado {Channel} falló", channel); }
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "No se pudieron liberar {Count} canal(es) del decodificador {Decoder}", list.Count, decoder.Name);
         }
     }
 

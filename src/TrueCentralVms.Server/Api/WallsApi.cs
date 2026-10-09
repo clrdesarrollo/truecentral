@@ -91,21 +91,74 @@ public static class WallsApi
                 Math.Max(1, i.SpanCols), Math.Max(1, i.SpanRows)))
             .ToList());
 
+    /// <summary>Resultado de planificar las pantallas de un muro al crearlo o editarlo.</summary>
+    /// <param name="Kept">Pantallas existentes que siguen igual (conservan ventanas y cámaras).</param>
+    /// <param name="Added">Pantallas nuevas o cambiadas, con canales de decodificación ya asignados.</param>
+    /// <param name="Removed">Pantallas existentes que salen del muro.</param>
+    private sealed record ScreenPlan(List<WallScreen> Kept, List<WallScreen> Added, List<WallScreen> Removed, string? Warning);
+
     /// <summary>
-    /// Asigna canales de decodificación automáticamente: recorre las pantallas
-    /// en orden (fila, columna) y entrega canales consecutivos del pool del
-    /// decoder a cada sub-ventana. El operador nunca elige canales a mano.
+    /// Arma las pantallas del muro con lo que pide el editor. Una pantalla que
+    /// no cambió (misma posición, misma salida y misma división) CONSERVA sus
+    /// ventanas, sus canales de decodificación y sus cámaras: renombrar el muro
+    /// o sumarle un monitor ya no apaga lo que se está viendo. Las ventanas
+    /// nuevas toman canales LIBRES del decodificador, descontando los de las
+    /// flotantes y los de otros muros del mismo equipo, así dos ventanas nunca
+    /// comparten canal. El operador nunca elige canales a mano.
     /// </summary>
-    private static async Task<(List<WallScreen> Screens, string? Warning)> BuildScreensAsync(
-        DecoderSessionManager sessions, Decoder decoder, WallWriteDto request, CancellationToken ct)
+    private static async Task<ScreenPlan> PlanScreensAsync(VmsDbContext db, DecoderSessionManager sessions,
+        Decoder decoder, WallWriteDto request, VideoWall? existing, CancellationToken ct)
     {
-        int startChannel = 1;
+        int rows = Math.Max(1, request.Rows), columns = Math.Max(1, request.Columns);
+        var requested = (request.Screens ?? []).Where(s => s.DisplayChannel > 0).ToList();
+        if (requested.Any(s => s.Row < 0 || s.Row >= rows || s.Col < 0 || s.Col >= columns))
+            throw new InvalidOperationException("Hay monitores fuera de la grilla del muro: revise filas y columnas.");
+        if (requested.GroupBy(s => (s.Row, s.Col)).Any(g => g.Count() > 1))
+            throw new InvalidOperationException("Hay dos salidas en la misma posición del muro.");
+        if (requested.GroupBy(s => s.DisplayChannel).FirstOrDefault(g => g.Count() > 1) is { } repeated)
+            throw new InvalidOperationException(
+                $"La salida {repeated.First().Label} está en dos posiciones del muro: cada salida alimenta un solo monitor.");
+
+        // Una salida física alimenta un solo monitor: si ya está en otro muro
+        // del mismo decodificador, se rechaza en vez de pisarla.
+        var others = await db.Walls.AsNoTracking()
+            .Include(w => w.Screens).ThenInclude(s => s.Windows)
+            .Include(w => w.Floating)
+            .Where(w => w.DecoderId == decoder.Id && (existing == null || w.Id != existing.Id))
+            .AsSplitQuery()
+            .ToListAsync(ct);
+        foreach (var s in requested)
+        {
+            var taken = others.FirstOrDefault(w => w.Screens.Any(x => x.DisplayChannel == s.DisplayChannel));
+            if (taken is not null)
+                throw new InvalidOperationException(
+                    $"La salida {s.Label} ya alimenta un monitor del muro '{taken.Name}'. Quítela de ese muro primero.");
+        }
+
+        bool sameDecoder = existing is not null && existing.DecoderId == decoder.Id;
+        var current = sameDecoder ? existing!.Screens.ToDictionary(s => (s.Row, s.Col)) : [];
+        var kept = new List<WallScreen>();
+        var pending = new List<ScreenConfigDto>();
+        foreach (var s in requested)
+        {
+            if (current.TryGetValue((s.Row, s.Col), out var old)
+                && old.DisplayChannel == s.DisplayChannel && old.WindowMode == Math.Max(1, s.WindowMode))
+            {
+                old.Label = s.Label;
+                kept.Add(old);
+            }
+            else pending.Add(s);
+        }
+        var removed = existing?.Screens.Where(s => !kept.Contains(s)).ToList() ?? [];
+        if (pending.Count == 0) return new ScreenPlan(kept, [], removed, null);   // nada que asignar: no hace falta el equipo
+
+        int start = 1;
         int? capacity = null;
         string? warning = null;
         try
         {
             var caps = await sessions.WithDriverAsync(decoder, d => d.GetCapabilitiesAsync(ct), ct);
-            startChannel = caps.DecodeChannelStart;
+            start = caps.DecodeChannelStart;
             capacity = caps.DecodeChannelCount;
         }
         catch (Exception ex)
@@ -113,9 +166,32 @@ public static class WallsApi
             warning = $"No se pudo leer el decodificador para validar canales (se asignan desde el canal 1): {ex.Message}";
         }
 
-        int next = startChannel;
-        var screens = new List<WallScreen>();
-        foreach (var s in request.Screens.OrderBy(x => x.Row).ThenBy(x => x.Col))
+        var used = kept.SelectMany(s => s.Windows).Select(x => x.DecodeChannel)
+            .Concat(sameDecoder ? existing!.Floating.Select(f => f.DecodeChannel) : [])
+            .Concat(others.SelectMany(w => w.Screens).SelectMany(s => s.Windows).Select(x => x.DecodeChannel))
+            .Concat(others.SelectMany(w => w.Floating).Select(f => f.DecodeChannel))
+            .Where(c => c > 0)
+            .ToHashSet();
+        // Los canales de las pantallas que salen se reutilizan solo si no queda
+        // otro libre: el equipo los cierra antes de abrir las ventanas nuevas.
+        var leaving = removed.SelectMany(s => s.Windows).Select(x => x.DecodeChannel).ToHashSet();
+        int needed = pending.Sum(s => Math.Max(1, s.WindowMode));
+        var free = new List<int>();
+        for (int c = start; free.Count < needed && (capacity is not int cap0 || c < start + cap0) && c < start + 4096; c++)
+            if (!used.Contains(c) && !leaving.Contains(c)) free.Add(c);
+        free.AddRange(leaving.Where(c => !used.Contains(c)).OrderBy(c => c).Take(needed - free.Count));
+        if (free.Count < needed)
+        {
+            int total = used.Count + needed;
+            throw new InvalidOperationException(capacity is int cap
+                ? $"La configuración necesita {total} canales de decodificación (contando flotantes y otros muros del equipo) " +
+                  $"pero el decodificador solo tiene {cap}. Reduzca la cantidad de ventanas."
+                : "No quedan canales de decodificación libres para las ventanas nuevas.");
+        }
+
+        int next = 0;
+        var added = new List<WallScreen>();
+        foreach (var s in pending.OrderBy(x => x.Row).ThenBy(x => x.Col))
         {
             int windowCount = Math.Max(1, s.WindowMode);
             var screen = new WallScreen
@@ -127,17 +203,11 @@ public static class WallsApi
                 WindowMode = windowCount,
             };
             for (int i = 0; i < windowCount; i++)
-                screen.Windows.Add(new ScreenWindow { WindowIndex = i, DecodeChannel = next++ });
-            screens.Add(screen);
+                screen.Windows.Add(new ScreenWindow { WindowIndex = i, DecodeChannel = free[next++] });
+            added.Add(screen);
         }
 
-        int used = next - startChannel;
-        if (capacity is int cap && used > cap)
-            throw new InvalidOperationException(
-                $"La configuración necesita {used} canales de decodificación pero el decodificador solo tiene {cap}. " +
-                "Reduzca la cantidad de ventanas.");
-
-        return (screens, warning);
+        return new ScreenPlan(kept, added, removed, warning);
     }
 
     public static void MapWallsApi(this IEndpointRouteBuilder app)
@@ -170,10 +240,11 @@ public static class WallsApi
             if (decoder is null)
                 return Error("El decodificador indicado no existe.");
 
-            List<WallScreen> screens;
-            string? warning;
-            try { (screens, warning) = await BuildScreensAsync(sessions, decoder, request, ct); }
+            ScreenPlan plan;
+            try { plan = await PlanScreensAsync(db, sessions, decoder, request, null, ct); }
             catch (InvalidOperationException ex) { return Error(ex.Message); }
+            if (plan.Added.Count == 0) return Error("Ubique al menos una salida del decodificador en el muro.");
+            string? warning = plan.Warning;
 
             var wall = new VideoWall
             {
@@ -181,7 +252,7 @@ public static class WallsApi
                 DecoderId = request.DecoderId,
                 Rows = Math.Max(1, request.Rows),
                 Columns = Math.Max(1, request.Columns),
-                Screens = screens,
+                Screens = plan.Added,
             };
             db.Walls.Add(wall);
             await db.SaveChangesAsync(ct);
@@ -199,44 +270,65 @@ public static class WallsApi
         {
             if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var wall = await db.Walls.Include(w => w.Screens).ThenInclude(s => s.Windows)
+                .Include(w => w.Floating)
+                .AsSplitQuery()
                 .FirstOrDefaultAsync(w => w.Id == id, ct);
             if (wall is null) return Results.NotFound();
             var decoder = await db.Decoders.FindAsync([request.DecoderId], ct);
             if (decoder is null)
                 return Error("El decodificador indicado no existe.");
 
-            List<WallScreen> screens;
-            string? warning;
-            try { (screens, warning) = await BuildScreensAsync(sessions, decoder, request, ct); }
+            ScreenPlan plan;
+            try { plan = await PlanScreensAsync(db, sessions, decoder, request, wall, ct); }
             catch (InvalidOperationException ex) { return Error(ex.Message); }
+            if (plan.Kept.Count + plan.Added.Count == 0) return Error("Ubique al menos una salida del decodificador en el muro.");
+            string? warning = plan.Warning;
 
             var oldDecoder = await db.Decoders.FindAsync([wall.DecoderId], ct);
-            var oldChannels = wall.Screens.SelectMany(s => s.Windows).Select(x => x.DecodeChannel).ToHashSet();
+            bool decoderChanged = wall.DecoderId != request.DecoderId;
+            bool structureChanged = decoderChanged || plan.Added.Count > 0 || plan.Removed.Count > 0
+                || wall.Rows != Math.Max(1, request.Rows) || wall.Columns != Math.Max(1, request.Columns);
+            // Lo que sale del muro se apaga en el equipo: las pantallas quitadas
+            // o cambiadas y, si cambia el decodificador, también las flotantes
+            // (sus canales eran del equipo anterior).
+            var released = plan.Removed.SelectMany(s => s.Windows).Select(x => x.DecodeChannel).ToList();
+            var removedWindowIds = plan.Removed.SelectMany(s => s.Windows).Select(x => x.Id).ToHashSet();
+            if (decoderChanged)
+            {
+                released.AddRange(wall.Floating.Select(f => f.DecodeChannel));
+                db.WallFloatingWindows.RemoveRange(wall.Floating);
+            }
+            if (wall.FullscreenWindowId is int wallWin && removedWindowIds.Contains(wallWin))
+                wall.FullscreenWindowId = null;
 
             wall.Name = request.Name.Trim();
             wall.DecoderId = request.DecoderId;
             wall.Rows = Math.Max(1, request.Rows);
             wall.Columns = Math.Max(1, request.Columns);
-
-            // Reemplazo completo de pantallas: la reconfiguración física del
-            // muro invalida las asignaciones actuales (los layouts guardados
-            // que referencien ventanas eliminadas se reportan al aplicarlos).
-            db.WallScreens.RemoveRange(wall.Screens);
-            wall.Screens = screens;
-
+            foreach (var screen in plan.Removed)
+            {
+                wall.Screens.Remove(screen);
+                db.WallScreens.Remove(screen);
+            }
+            wall.Screens.AddRange(plan.Added);
             await db.SaveChangesAsync(ct);
 
-            // Liberar en el equipo los canales/ventanas que salieron del esquema.
-            var newChannels = screens.SelectMany(s => s.Windows).Select(x => x.DecodeChannel).ToHashSet();
-            if (oldDecoder is not null)
-                await walls.ReleaseChannelsAsync(oldDecoder, oldChannels.Except(newChannels));
+            if (oldDecoder is not null && released.Count > 0)
+                await walls.ReleaseChannelsAsync(oldDecoder, released.Where(c => c > 0).Distinct());
 
+            int kept = plan.Kept.Count;
             await audit.LogAsync(ctx, "wall", "wall-updated",
                 targetType: "wall", targetId: wall.Id.ToString(), targetName: wall.Name,
-                detail: $"Modificó la estructura del muro '{wall.Name}' ({wall.Rows}×{wall.Columns}, " +
-                        $"decodificador '{decoder.Name}'): las asignaciones anteriores se reemplazaron.");
-            var sync = await walls.SyncToDecoderAsync(wall.Id);
+                detail: $"Modificó el muro '{wall.Name}' ({wall.Rows}×{wall.Columns}, decodificador '{decoder.Name}')" +
+                        (structureChanged
+                            ? $": {plan.Added.Count} monitor(es) nuevo(s) o cambiado(s), {plan.Removed.Count} quitado(s)" +
+                              (kept > 0 ? $"; {kept} sin cambios conservan sus cámaras." : ".")
+                            : ": solo nombres, sin cambios en el equipo."));
+            // Si solo cambiaron nombres no se toca el equipo: sincronizar
+            // cancelaría las pantallas completas vigentes sin necesidad.
+            var sync = structureChanged ? await walls.SyncToDecoderAsync(wall.Id) : [];
             await walls.BroadcastConfigChangedAsync();
+            if (structureChanged) await walls.BroadcastWallStateAsync(wall.Id);
             return Results.Ok(new { wall = await walls.GetWallDtoAsync(wall.Id), warning, sync });
         });
 

@@ -932,7 +932,9 @@ const DEVICE_DISCOVERY = {
   container: "#online-devices",
   button: "#btn-device-scan",
   kind: "",
-  emptyText: "No se encontraron equipos de video en este segmento de red.",
+  emptyText: "No se encontraron equipos de video en este segmento de red. " +
+    "Los sondeos son de difusión y no cruzan routers ni VPN: solo ven el segmento del servidor. " +
+    "Un equipo fuera de él se agrega a mano con su dirección.",
   onUse: (d) => deviceModal(null, {
     name: d.model || d.ip,
     host: d.ip,
@@ -2194,7 +2196,9 @@ const routes = {
   "#/videowall": renderVideowall,
   "#/intercom-console": renderIntercomConsole,
   "#/decoders": renderDecoders,
+  "#/decoders/device": renderDecoderPage,
   "#/walls": renderWalls,
+  "#/walls/edit": renderWallEditor,
   "#/resources": renderResources,
   "#/sessions": renderSessions,
   "#/users": renderUsers,

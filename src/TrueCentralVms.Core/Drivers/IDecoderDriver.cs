@@ -20,6 +20,17 @@ public sealed record DisplayOutputInfo(DisplayOutputType Type, int Index, int Ch
     public string Label => $"{Type.ToString().ToUpperInvariant()} {Index}";
 }
 
+/// <summary>Estado en vivo de una salida física.</summary>
+/// <param name="ChannelNo">Canal de display, el mismo de <see cref="DisplayOutputInfo.ChannelNo"/>.</param>
+/// <param name="Resolution">Resolución actual legible ("1920×1080 a 60 Hz", "PAL"); null = el equipo no la informa.</param>
+/// <param name="Connected">Hay un monitor conectado a la salida; null = el equipo no lo informa.</param>
+public sealed record DisplayOutputStatus(int ChannelNo, string? Resolution, bool? Connected);
+
+/// <summary>Entrada de señal local del decodificador (el PC de un operador cableado por HDMI, por ejemplo).</summary>
+/// <param name="Type">Tipo de conector: "Hdmi", "Vga", "Dvi", "Bnc", "Dp", "Sdi"...</param>
+/// <param name="Signal">Hay señal en la entrada; null = el equipo no lo informa.</param>
+public sealed record LocalInputInfo(int Number, string Name, string Type, bool? Signal, string? Resolution);
+
 /// <summary>Capacidades reportadas por un decodificador.</summary>
 public sealed class DecoderCapabilities
 {
@@ -156,6 +167,28 @@ public interface IDecoderDriver : IAsyncDisposable
     /// </summary>
     Task ZoomWindowToWallAsync(int decodeChannel, bool on, CancellationToken ct = default) =>
         throw new NotSupportedException("Este decodificador no soporta ocupar el muro completo.");
+
+    /// <summary>
+    /// Resolución y monitor conectado de cada salida física (después de
+    /// <see cref="GetCapabilitiesAsync"/>). Vacío = el equipo no lo informa.
+    /// </summary>
+    Task<IReadOnlyList<DisplayOutputStatus>> GetOutputStatusAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<DisplayOutputStatus>>([]);
+
+    /// <summary>Entradas de señal locales del equipo. null = el equipo o el driver no las informa.</summary>
+    Task<IReadOnlyList<LocalInputInfo>?> GetLocalInputsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<LocalInputInfo>?>(null);
+
+    /// <summary>
+    /// El equipo puede mostrar en cada monitor el número de la salida que lo
+    /// alimenta (para saber qué monitor es cuál al armar el muro). Válido
+    /// después de <see cref="GetCapabilitiesAsync"/>.
+    /// </summary>
+    bool CanIdentifyOutputs => false;
+
+    /// <summary>Muestra (show=true) u oculta el número de salida en todos los monitores.</summary>
+    Task ShowOutputNumbersAsync(bool show, CancellationToken ct = default) =>
+        throw new NotSupportedException("Este decodificador no puede mostrar el número de salida en los monitores.");
 }
 
 /// <summary>

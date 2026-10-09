@@ -24,6 +24,28 @@ public static class WallSdk
     public const uint NET_DVR_WALLWINPARAM_GET = 9006;
     public const uint NET_DVR_SWITCH_WIN_TOP = 9017;               // traer ventana a la capa superior
     public const uint NET_DVR_SWITCH_WIN_BOTTOM = 9018;            // enviar ventana a la capa inferior
+    public const uint NET_DVR_WALLOUTPUT_GET = 9011;               // parámetros de las salidas (NET_DVR_WALLOUTPUTPARAM)
+    public const uint NET_DVR_DISPLAY_CHANNO_CONTROL = 1748;       // mostrar/ocultar el n.º de salida en los monitores
+
+    // NET_DVR_WALLOUTPUTPARAM (80 bytes; el PDF omite byLinkStatus, vale el .h):
+    // dwSize@0, dwResolution@4 (MAKE_RESOLUTION), byVideoFormat@16 (1 NTSC, 2 PAL),
+    // byLinkStatus@28 (1 monitor conectado, 2 sin monitor).
+    public const int WallOutputParamSize = 80;
+
+    // NET_DVR_SHOW_CONTROL_INFO (72 bytes): dwSize@0, dwDisplayNo@4 (0xFFFFFFFF =
+    // todas), byEnable@8, byChanType@9 (1 n.º de salida, 2 n.º de pantalla), dwWallNo@12.
+    public const int ShowControlInfoSize = 72;
+
+    // NET_DVR_INPUT_SIGNAL_LIST (88 bytes en x64): dwSize@0, dwInputSignalNums@4,
+    // pBuffer@8, dwBufLen@20. Cada elemento es un NET_DVR_INPUTSTREAMCFG_V40 de
+    // 712 bytes: byValid@4, byCamMode@5, wInputNo@6, sCamName[32]@8,
+    // dwResolution@544, byVideoFormat@548, byStatus@549 (1 con señal, 2 sin
+    // señal, 3 excepción), dwInputSignalNo@588. El PDF difiere: vale el .h.
+    public const int InputSignalListSize = 88;
+    public const int InputStreamCfgV40Size = 712;
+
+    [DllImport("HCNetSDK.dll")]
+    public static extern bool NET_DVR_GetInputSignalList_V40(int lUserID, uint dwDevNum, IntPtr lpInputSignalList);
 
     /// <summary>Parámetros de una ventana del muro; byWinMode = cantidad de sub-ventanas.</summary>
     [StructLayout(LayoutKind.Sequential)]
