@@ -203,6 +203,7 @@ public partial class MainViewModel : ObservableObject
         if (Application.Current.MainWindow is { IsLoaded: true } owner)
             Views.ToastWindow.ShowAlertWithAck(owner, toastId, $"Alarma de cerco · {dto.PanelName}",
                 $"{dto.Description}\n{dto.ReceivedAt.ToLocalTime():HH:mm:ss}", "\uE945", null,
+                "Calla la sirena de este puesto; la del panel se apaga con \u00ABSilenciar\u00BB.",
                 () =>
                 {
                     // "Enterado" apaga el sonido en este puesto (la sirena del panel se
@@ -267,8 +268,9 @@ public partial class MainViewModel : ObservableObject
         if (dto.RequiresAck && dto.AlertId > 0 && dto.ResourceKey is { Length: > 0 } resourceKey)
             NoteAlertedResource(resourceKey);
         // El sonido arranca de inmediato, sin esperar a que baje la foto: es
-        // lo que hace que el operador levante la vista.
-        _ = _alertSound.PlayAsync(dto.Sound, dto.SoundRepeat);
+        // lo que hace que el operador levante la vista. En bucle solo si abre
+        // la ventana de alarma, que es la que tiene «Silenciar» y «Confirmar».
+        _ = _alertSound.PlayAsync(dto.Sound, dto.SoundRepeat, requiresAck: dto.RequiresAck && dto.AlertId > 0);
 
         if (dto.RequiresAck && dto.AlertId > 0)
         {

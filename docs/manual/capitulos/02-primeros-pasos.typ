@@ -56,6 +56,22 @@ La nueva contraseña debe tener:
   «La contraseña está vencida: debe definir una nueva para continuar.»,
   cámbiela en el panel web y vuelva a ingresar en el cliente con la nueva.]
 
+== Instalar el cliente de monitoreo
+
+El servidor guarda el instalador del cliente de su misma versión. Para
+instalarlo en un puesto:
+
++ Desde ese puesto, ingrese al panel web.
++ Abra el menú de su usuario (arriba a la derecha) y haga clic en
+  *Descargar el cliente*. El navegador baja
+  `CLRTrueCentralVMS-Client-Setup-<versión>.exe`.
++ Ejecute el archivo y siga los pasos del instalador.
+
+#nota[En el propio servidor, el instalador queda además en
+  #menu("Inicio", "CLR TrueCentral VMS", "Instalador del cliente (para otros puestos)").
+  Al actualizar el servidor, el instalador publicado pasa a ser el de la
+  versión nueva: descárguelo otra vez para actualizar los puestos.]
+
 == Ingresar desde el cliente de monitoreo
 
 #captura("cliente-inicio-sesion.png", ancho: 50%, pie: [Ventana de ingreso del cliente de monitoreo.])
@@ -447,6 +463,10 @@ Haga clic en su nombre, arriba a la derecha:
 - *Su alcance*: aparece si su usuario está limitado a algunas ubicaciones, con
   la lista de ellas. «Ve el resto, sin operarlo» indica que puede ver lo demás
   pero no darle órdenes.
+- #boton("Descargar el cliente"): descarga el instalador del cliente de
+  monitoreo (ver «Instalar el cliente de monitoreo»). Si aparece «El instalador
+  del cliente no está publicado en este servidor (carpeta client-setup).»,
+  avise al administrador.
 - #boton("Descargar el complemento"): descarga el instalador del complemento
   de enrolamiento, que se instala en el equipo donde está el lector USB de
   huellas#modulo("access")[ (ver #capitulo(<cap-control-de-acceso>))]. Si

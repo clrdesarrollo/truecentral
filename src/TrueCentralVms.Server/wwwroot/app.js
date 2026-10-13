@@ -800,9 +800,14 @@ const ANPR_DRIVERS = ["hikvision-netsdk", "dahua-netsdk"];
 
 async function renderDevices() {
   $("#page-title").textContent = "Dispositivos";
-  let devices;
-  try { devices = await Api.get("/api/devices"); }
+  let devices, drivers;
+  try {
+    // Los drivers dan el nombre visible de la marca; si no llegan, la columna
+    // cae a la clave técnica en vez de dejar la página sin tabla.
+    [devices, drivers] = await Promise.all([Api.get("/api/devices"), getDrivers().catch(() => [])]);
+  }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
+  const brandOf = (key) => drivers.find((dr) => dr.key === key)?.displayName ?? key;
 
   const isAdmin = Perms.can("devices.manage");
   $("#view").innerHTML = `
@@ -826,7 +831,7 @@ async function renderDevices() {
             <tr data-id="${d.id}">
               <td>${esc(d.name)}${locationLineHtml(d.location)}</td>
               <td>${esc(typeLabel(d.deviceType))}</td>
-              <td class="muted">${esc(d.driverKey)}</td>
+              <td class="muted">${esc(brandOf(d.driverKey))}</td>
               <td class="muted">${esc(d.host)}:${d.sdkPort}</td>
               <td>${esc(d.model ?? "—")}</td>
               <td class="muted">${esc(d.serialNumber ?? "—")}</td>
@@ -2495,6 +2500,20 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") setUserMenu(false);
+});
+
+// Instalador del cliente de escritorio: la suite lo deja publicado en el
+// servidor (la descarga queda en la bitácora como system/client-installer-downloaded).
+$("#btn-download-client").addEventListener("click", async () => {
+  setUserMenu(false);
+  let info = null;
+  try { info = await Api.get("/api/system/client-installer/info"); } catch { /* servidor viejo o caído */ }
+  if (!info?.available) {
+    toast("El instalador del cliente no está publicado en este servidor (carpeta client-setup).", true);
+    return;
+  }
+  window.location.href = `/api/system/client-installer?access_token=${encodeURIComponent(Api.token)}`;
+  toast(`Descargando el cliente${info.version ? ` ${info.version}` : ""} (${info.sizeMb} MB)…`);
 });
 
 // Instalador del complemento de enrolamiento: lo publica el propio servidor

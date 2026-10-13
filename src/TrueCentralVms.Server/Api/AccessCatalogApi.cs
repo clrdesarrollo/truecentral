@@ -211,15 +211,7 @@ public static class AccessCatalogApi
         app.MapGet("/api/webcontrol/info", (HttpContext ctx, IConfiguration config, IWebHostEnvironment env) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            var file = FindWebControlInstaller(config, env);
-            return Results.Ok(new
-            {
-                available = file is not null,
-                fileName = file?.Name,
-                sizeMb = file is null ? (double?)null : Math.Round(file.Length / 1024d / 1024d, 1),
-                // La versión va en el nombre del instalador (…-Setup-1.2.3.exe).
-                version = file is null ? null : Path.GetFileNameWithoutExtension(file.Name).Split('-').LastOrDefault(),
-            });
+            return Results.Ok(PublishedInstallers.Describe(FindWebControlInstaller(config, env)));
         });
 
         // La descarga acepta el token por query: la inicia el navegador (no
@@ -312,18 +304,9 @@ public static class AccessCatalogApi
     /// copió. Se busca en <c>WebControl:InstallerPath</c> (por omisión, la
     /// carpeta <c>webcontrol</c> junto al servidor) y gana el más reciente.
     /// </summary>
-    private static FileInfo? FindWebControlInstaller(IConfiguration config, IWebHostEnvironment env)
-    {
-        string configured = config["WebControl:InstallerPath"] ?? "webcontrol";
-        string directory = Path.IsPathRooted(configured)
-            ? Environment.ExpandEnvironmentVariables(configured)
-            : Path.Combine(env.ContentRootPath, Environment.ExpandEnvironmentVariables(configured));
-        if (!Directory.Exists(directory)) return null;
-        return new DirectoryInfo(directory)
-            .GetFiles("CLRTrueCentralVMS-Complemento-Setup-*.exe")
-            .OrderByDescending(f => f.LastWriteTimeUtc)
-            .FirstOrDefault();
-    }
+    private static FileInfo? FindWebControlInstaller(IConfiguration config, IWebHostEnvironment env) =>
+        PublishedInstallers.Find(config, env, "WebControl:InstallerPath", "webcontrol",
+            "CLRTrueCentralVMS-Complemento-Setup-*.exe");
 
     // ==================================================================
     // Puertas

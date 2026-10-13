@@ -87,7 +87,7 @@ if (-not $SkipPublish) {
         Invoke-Publish 'src\TrueCentralVms.Server\TrueCentralVms.Server.csproj' (Join-Path $publish 'server')
         # El SDK Web publica todo *.json del proyecto como contenido: los restos
         # de desarrollo (ajustes locales, datos de runtime) no van al instalador.
-        foreach ($resto in 'appsettings.Local.json', 'appsettings.Development.json', 'mediamtx.runtime.yml',
+        foreach ($resto in 'appsettings.Local.json', 'appsettings.Development.json', 'mediamtx.runtime.yml', 'mediamtx.runtime.yml.tmp',
                            'pgdata', 'anpr', 'workflows', 'admin-initial.txt') {
             $ruta = Join-Path $publish "server\$resto"
             if (Test-Path $ruta) { Remove-Item -Recurse -Force $ruta }

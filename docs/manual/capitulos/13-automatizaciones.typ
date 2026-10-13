@@ -50,9 +50,10 @@ arriba aparecen #boton("Servidor de correo"), #boton("Sonidos") y
   arriba del listado: las acciones de correo fallarán hasta que se configure
   (vea «Configurar el servidor de correo», al final de este capítulo).]
 
-#nota[Quien tiene solo el permiso _Ver automatizaciones_ ve el listado, las
-  alertas y el historial, pero no puede abrir el editor: el botón #boton("Ver")
-  lleva a un aviso de que le falta el permiso _Editar automatizaciones_.]
+#nota[Quien tiene solo el permiso _Ver automatizaciones_ ve el listado y el
+  historial, y en cada fila tiene el botón #boton("Ver"), que abre el diagrama
+  en solo lectura (vea «Ver una automatización sin editarla»). Las alertas
+  exigen además el permiso _Atender alertas_.]
 
 == Alertas y acuse de recibo
 
@@ -157,7 +158,8 @@ flecha seleccionada. Sin nada seleccionado, ese panel muestra una ayuda breve
     60). Así un sensor que rebota no la ejecuta veinte veces seguidas. Cuenta
     desde el inicio de la última ejecución real.],
   [*Activa*], [Desmarcada, la automatización queda pausada y no se ejecuta sola.],
-  [#boton("Ordenar")], [Acomoda los pasos en filas a partir del punto de partida.],
+  [#boton("Ordenar")], [Acomoda los pasos en filas a partir del punto de
+    partida, sin cambiar el orden de izquierda a derecha de las ramas.],
   [#boton("Ajustar")], [Encuadra el diagrama completo en la ventana.],
   [#boton("Probar")], [Guarda y ejecuta la automatización de verdad con un evento de ejemplo.],
   [#boton("Guardar")], [Revisa el diagrama, lo guarda y vuelve al listado.],
@@ -200,7 +202,10 @@ otro. Cada clase de paso tiene sus salidas:
 )
 
 De una misma salida pueden partir varias flechas: esas ramas se ejecutan una
-tras otra, no al mismo tiempo.
+tras otra, no al mismo tiempo, de izquierda a derecha según dónde esté el
+primer paso de cada una en el lienzo. Para cambiar el orden, mueva los pasos:
+por ejemplo, deje a la izquierda la rama que captura la foto y a la derecha la
+que envía el correo, para que el correo ya lleve la foto.
 
 Para eliminar un paso o una flecha, selecciónelo con un clic y presione
 #tecla("Supr"). Con una flecha seleccionada también puede usar
@@ -218,11 +223,33 @@ se puede eliminar.
   table.header[Gesto][Acción],
   [Rueda del mouse], [Acerca o aleja, centrado en el puntero.],
   [Arrastrar el fondo], [Desplaza el diagrama.],
-  [Arrastrar un paso], [Lo cambia de lugar.],
+  [Arrastrar un paso], [Lo cambia de lugar (y, entre ramas que salen del mismo
+    punto, su orden de ejecución).],
   [Doble clic en el fondo], [Acerca.],
   [#boton("+") #boton("−")], [Acercan y alejan (esquina del lienzo).],
   [#tecla("Esc")], [Quita la selección y cierra el menú _Agregar después_.],
 )
+
+=== Ver una automatización sin editarla
+
+#requiere("Ver automatizaciones")
+
+Sin el permiso _Editar automatizaciones_, el botón #boton("Ver") del listado
+abre el mismo editor en solo lectura, con el título *Ver automatización*:
+
+- La barra superior muestra la etiqueta *Solo lectura* en lugar de
+  #boton("Probar") y #boton("Guardar"), y sus campos no se pueden cambiar.
+- En lugar de la paleta *Pasos* aparece un aviso de solo lectura, y el panel
+  de la derecha, sin nada seleccionado, muestra _Cómo leer el diagrama_.
+- Un clic en un paso o en una flecha muestra su configuración a la derecha,
+  con los campos bloqueados. Las listas de cámaras se pueden filtrar y el
+  botón ▶ hace sonar el sonido elegido.
+- Los pasos no se mueven, no se conectan ni se eliminan. #boton("Ordenar") y
+  #boton("Ajustar") sirven para mirar mejor el diagrama y no guardan nada.
+
+Con ese permiso solo no se pueden crear automatizaciones: si abre el editor
+de una nueva, aparece «Sus roles permiten ver las automatizaciones, no
+crearlas (permiso Editar automatizaciones).».
 
 == Disparadores
 
@@ -522,7 +549,9 @@ acuse de recibo»).
   sistema del equipo_ o uno de los sonidos de la biblioteca. El botón ▶ lo hace
   sonar en su navegador.
 - *Repeticiones del sonido*: de 0 a 5. Con 0, suena sin parar hasta que un
-  operador confirme la alerta, la silencie o cierre la ventana.
+  operador confirme la alerta, la silencie o cierre la ventana. El bucle exige
+  _Exigir que un operador se dé por enterado_: sin ella, el aviso es
+  informativo, no tiene botón para silenciarlo, y con 0 suena una vez.
 
 === Sonar parlante IP
 

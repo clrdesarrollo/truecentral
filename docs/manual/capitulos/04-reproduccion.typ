@@ -342,7 +342,8 @@ Motivos frecuentes de una exportación *Fallida*:
   [_Su rol no le permite hacer esto (requiere "Exportar grabaciones")._],
     [Su usuario no tiene el permiso para exportar. Pídaselo al administrador.],
   [_Este equipo aún no soporta reproducción remota desde el VMS._],
-    [Vea la sección siguiente si el equipo es ONVIF.],
+    [El equipo no ofrece reproducción de sus grabaciones al VMS. Vea la
+    sección siguiente si el equipo es ONVIF.],
 )
 
 == Diferencias según el equipo
@@ -359,9 +360,10 @@ Los equipos agregados por ONVIF tienen estas limitaciones:
   hora sobreimpresa en el video, si la cámara la muestra.
 - Solo informan el comienzo y el fin de cada grabación, así que sus tramos se
   pintan en gris (_Otra_) aunque tengan huecos.
-- Al exportar, el archivo también parte desde el inicio de esa grabación. Si la
-  exportación falla con _Este equipo aún no soporta reproducción remota desde el
-  VMS._, abra primero esa cámara en Reproducción y vuelva a exportar.
+- Al exportar, el archivo también parte desde el inicio de esa grabación.
+- Si el equipo no entrega la dirección de reproducción de sus grabaciones
+  (servicio _Replay_ de ONVIF), reproducir y exportar fallan con _Este equipo
+  aún no soporta reproducción remota desde el VMS._
 - Si el equipo no ofrece búsqueda de grabaciones, el cuadro muestra _El equipo
   ONVIF no ofrece el servicio de búsqueda de grabaciones (Perfil G): no se
   pueden consultar sus grabaciones desde el VMS._

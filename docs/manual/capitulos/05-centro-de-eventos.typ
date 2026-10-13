@@ -33,8 +33,10 @@ hace el cliente de monitoreo depende de si la alerta exige confirmación:
   estado también lo indica.
 - *Alerta informativa.* Aparece un aviso flotante en la esquina inferior
   derecha de la ventana principal, con la foto si la tiene, y suena la alarma
-  sonora si la automatización tiene una. El aviso se cierra solo a los 15
-  segundos (30 si trae foto); la ✕ lo descarta antes.
+  sonora si la automatización tiene una. Como nadie la confirma, el sonido no
+  queda en bucle: se repite las veces configuradas (con 0, suena una vez). El
+  aviso se cierra solo a los 15 segundos (30 si trae foto); la ✕ lo descarta
+  antes.
 
 Si el cliente estaba cerrado o sin conexión cuando se emitió una alerta, al
 abrirlo (o al recuperar la conexión) muestra las que siguen sin confirmar.
@@ -228,7 +230,9 @@ que ve el operador:
   [Alarma sonora en el equipo del operador], [El sonido que suena en el
     puesto.],
   [Repeticiones del sonido], [De 1 a 5; con 0 suena sin parar hasta que un
-    operador confirme la alerta, la silencie o cierre la ventana.],
+    operador confirme la alerta, la silencie o cierre la ventana. El bucle
+    solo existe si la alerta exige confirmación: en una informativa, 0 suena
+    una vez.],
   [Cámaras del video en vivo de la ventana de alarma], [Las cámaras de la
     pestaña Video en vivo. Si no marca ninguna, se usan las que capturaron foto
     o, si no hubo fotos, las asociadas al recurso en su ficha.],

@@ -579,7 +579,10 @@ public sealed record WorkflowNotificationDto(
     /// un aviso silencioso.
     /// </summary>
     string? Sound = null,
-    /// <summary>Cuántas veces se repite el sonido; 0 = hasta que alguien confirme la alerta.</summary>
+    /// <summary>
+    /// Cuántas veces se repite el sonido; 0 = hasta que alguien confirme la
+    /// alerta (solo con <see cref="RequiresAck"/>; sin él suena una vez).
+    /// </summary>
     int SoundRepeat = 1,
     /// <summary>
     /// Alerta a la que corresponde este aviso: con ella el operador confirma

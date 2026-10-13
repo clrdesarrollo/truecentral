@@ -268,7 +268,7 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
     /// <summary>
     /// Graba una cápsula de lo que se está reproduciendo, tal como llega
     /// (remux sin recomprimir). Un clic parte, otro detiene. Es distinto de
-    /// "Exportar MP4": eso pide al equipo un tramo por hora exacta; esto
+    /// "Exportar…": eso pide al equipo un tramo por hora exacta; esto
     /// guarda lo que el operador está mirando ahora.
     /// </summary>
     [RelayCommand]

@@ -69,12 +69,13 @@ public partial class ToastWindow : Window
     }
 
     /// <summary>
-    /// Alerta que EXIGE acuse de recibo: se queda en pantalla hasta que el
-    /// operador la confirme (o hasta que otro la confirme desde otro puesto,
-    /// en cuyo caso el servidor avisa y se cierra sola).
+    /// Alerta que EXIGE que alguien se dé por enterado: se queda en pantalla
+    /// hasta que el operador pulse "Enterado" (o hasta que se cierre desde
+    /// afuera con <see cref="DismissAlert"/>). <paramref name="ackHint"/> dice
+    /// junto al botón qué hace: no se promete un registro que no existe.
     /// </summary>
     public static void ShowAlertWithAck(Window owner, long alertId, string title, string message,
-        string glyph, byte[]? image, Func<Task> onAcknowledge)
+        string glyph, byte[]? image, string ackHint, Func<Task> onAcknowledge)
     {
         var toast = _current ??= new ToastWindow();
         toast.Owner = owner;
@@ -86,7 +87,7 @@ public partial class ToastWindow : Window
         toast.PathText.Visibility = Visibility.Collapsed;
         toast.MessageText.Visibility = Visibility.Visible;
         toast.SetImage(image);
-        toast.SetAcknowledge(alertId, onAcknowledge);
+        toast.SetAcknowledge(alertId, onAcknowledge, ackHint);
         toast.Present();
     }
 
@@ -96,13 +97,16 @@ public partial class ToastWindow : Window
         if (_current is { } toast && toast._alertId == alertId) toast.Close();
     }
 
-    private void SetAcknowledge(long alertId, Func<Task>? onAcknowledge)
+    private void SetAcknowledge(long alertId, Func<Task>? onAcknowledge, string ackHint = "")
     {
         _alertId = alertId;
         _onAcknowledge = onAcknowledge;
         AckPanel.Visibility = onAcknowledge is null ? Visibility.Collapsed : Visibility.Visible;
         AckButton.IsEnabled = true;
         AckButton.Content = "Enterado";
+        // Se repone siempre: la instancia se reutiliza y no debe heredar el
+        // "no se pudo…" de un aviso anterior.
+        AckHint.Text = ackHint;
     }
 
     private async void OnAcknowledge(object sender, RoutedEventArgs e)

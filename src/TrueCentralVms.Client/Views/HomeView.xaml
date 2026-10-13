@@ -65,7 +65,6 @@
             <TextBlock Text="MÓDULOS" Style="{StaticResource SectionHeader}"/>
 
             <WrapPanel>
-                <!-- Vista en Vivo: el único módulo operativo por ahora -->
                 <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenLiveViewCommand}"
                         Visibility="{Binding CanLiveView, Converter={x:Static vm:BoolToVisibility.Instance}}">
                     <DockPanel Margin="16,0">
@@ -74,7 +73,7 @@
                         </Border>
                         <StackPanel Style="{StaticResource CardBody}">
                             <TextBlock Text="Vista en Vivo" Style="{StaticResource CardTitle}"/>
-                            <TextBlock Text="Monitoreo en tiempo real, control PTZ y grillas de 1 a 16 cámaras."
+                            <TextBlock Text="Monitoreo en tiempo real, control PTZ y grillas de hasta 64 cámaras."
                                        Style="{StaticResource CardDescription}"/>
                         </StackPanel>
                     </DockPanel>
@@ -102,7 +101,7 @@
                         </Border>
                         <StackPanel Style="{StaticResource CardBody}">
                             <TextBlock Text="Centro de eventos" Style="{StaticResource CardTitle}"/>
-                            <TextBlock Text="Alarmas y eventos del sistema en tiempo real, con historial y filtros."
+                            <TextBlock Text="Alertas en tiempo real y su acuse de recibo; las últimas 200, con la opción de ver solo las sin confirmar."
                                        Style="{StaticResource CardDescription}"/>
                         </StackPanel>
                     </DockPanel>
@@ -183,21 +182,20 @@
                     </DockPanel>
                 </Button>
 
-                <Button Style="{StaticResource ModuleCard}" Command="{Binding ShowComingSoonCommand}"
-                        CommandParameter="Centro de descargas">
-                    <Grid>
-                        <DockPanel Margin="16,0">
-                            <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33F59E0B">
-                                <TextBlock Text="&#xE896;" Foreground="#F59E0B" Style="{StaticResource CardIcon}"/>
-                            </Border>
-                            <StackPanel Style="{StaticResource CardBody}">
-                                <TextBlock Text="Centro de descargas" Style="{StaticResource CardTitle}"/>
-                                <TextBlock Text="Exportación de video y evidencia desde el servidor central."
-                                           Style="{StaticResource CardDescription}"/>
-                            </StackPanel>
-                        </DockPanel>
-                        <Border Style="{StaticResource SoonBadge}"><TextBlock Style="{StaticResource SoonBadgeText}"/></Border>
-                    </Grid>
+                <!-- Mismo destino que el botón de abajo del riel: la ventana
+                     del Centro de descargas (no es una viñeta). -->
+                <Button Style="{StaticResource ModuleCard}" Command="{Binding OpenDownloadCenterCommand}"
+                        Visibility="{Binding CanDownloads, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#33F59E0B">
+                            <TextBlock Text="&#xE896;" Foreground="#F59E0B" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Centro de descargas" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Avance de las exportaciones de grabaciones: en cola, descargando, terminadas y fallidas."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
                 </Button>
             </WrapPanel>
 
