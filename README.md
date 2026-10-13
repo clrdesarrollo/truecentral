@@ -112,7 +112,7 @@ Dos instaladores de Windows (Inno Setup 6, x64, en español) salen de
 
 | Instalador | Qué instala | Dónde |
 |---|---|---|
-| `CLRTrueCentralVMS-Suite-Setup-<versión>.exe` | **Suite completa**: servidor como servicio de Windows `CLRTrueCentralVMS` (API, panel web, SignalR, drivers), PostgreSQL embebido, MediaMTX y FFmpeg; opcionalmente el cliente de escritorio en el mismo equipo (tarea marcada por defecto). El instalador del cliente queda además en `client-setup\` para llevarlo a los demás puestos. | `%ProgramFiles%\CLR TrueCentral VMS\Server` · datos en `%ProgramData%\CLRTrueCentralVMS` (pgdata, anpr, workflows, logs) |
+| `CLRTrueCentralVMS-Suite-Setup-<versión>.exe` | **Suite completa**: servidor como servicio de Windows `CLRTrueCentralVMS` (API, panel web, SignalR, drivers), PostgreSQL embebido, MediaMTX y FFmpeg; opcionalmente el cliente de escritorio en el mismo equipo (tarea marcada por defecto). El instalador del cliente queda además en `client-setup\`, de donde el panel web lo ofrece en descarga (menú del usuario → **Descargar el cliente**) para los demás puestos. | `%ProgramFiles%\CLR TrueCentral VMS\Server` · datos en `%ProgramData%\CLRTrueCentralVMS` (pgdata, anpr, workflows, logs) |
 | `CLRTrueCentralVMS-Client-Setup-<versión>.exe` | **Solo el cliente** de operación (WPF) con el FFmpeg de FlyleafLib, ffmpeg/ffprobe y MediaMTX para la proyección de pantalla al muro. | `%ProgramFiles%\CLR TrueCentral VMS\Client` · preferencias en `%AppData%\CLRTrueCentralVMS\client.json` |
 
 Ambos son self-contained (.NET 10 incluido: el equipo destino no necesita

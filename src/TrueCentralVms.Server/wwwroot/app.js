@@ -2502,6 +2502,20 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") setUserMenu(false);
 });
 
+// Instalador del cliente de escritorio: la suite lo deja publicado en el
+// servidor (la descarga queda en la bitácora como system/client-installer-downloaded).
+$("#btn-download-client").addEventListener("click", async () => {
+  setUserMenu(false);
+  let info = null;
+  try { info = await Api.get("/api/system/client-installer/info"); } catch { /* servidor viejo o caído */ }
+  if (!info?.available) {
+    toast("El instalador del cliente no está publicado en este servidor (carpeta client-setup).", true);
+    return;
+  }
+  window.location.href = `/api/system/client-installer?access_token=${encodeURIComponent(Api.token)}`;
+  toast(`Descargando el cliente${info.version ? ` ${info.version}` : ""} (${info.sizeMb} MB)…`);
+});
+
 // Instalador del complemento de enrolamiento: lo publica el propio servidor
 // (la descarga queda en la bitácora como access/webcontrol-downloaded).
 $("#btn-download-addon").addEventListener("click", async () => {

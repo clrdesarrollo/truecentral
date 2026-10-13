@@ -59,6 +59,33 @@ public static class SystemApi
             });
         });
 
+        // ------------------------------------------------------------------
+        // Instalador del cliente de escritorio
+        // ------------------------------------------------------------------
+        // La suite lo deja en client-setup\ junto al servidor; desde acá cada
+        // puesto lo baja con el navegador, sin ir a buscarlo al servidor.
+        // Cualquier usuario con sesión: es el mismo que reparte el instalador.
+        app.MapGet("/api/system/client-installer/info", (HttpContext ctx, IConfiguration config, IWebHostEnvironment env) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            return Results.Ok(PublishedInstallers.Describe(FindClientInstaller(config, env)));
+        });
+
+        // La descarga acepta el token por query: la inicia el navegador (no
+        // fetch) y no puede mandar la cabecera Authorization.
+        app.MapGet("/api/system/client-installer", async (HttpContext ctx, IConfiguration config, IWebHostEnvironment env,
+            AuditService audit) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            var file = FindClientInstaller(config, env);
+            if (file is null)
+                return Results.Json(new { error = "Este servidor no tiene publicado el instalador del cliente de escritorio." },
+                    statusCode: StatusCodes.Status404NotFound);
+            await audit.LogAsync(ctx, "system", "client-installer-downloaded",
+                detail: $"Descargó el instalador del cliente de escritorio ({file.Name}).");
+            return Results.File(file.FullName, "application/octet-stream", file.Name);
+        });
+
         // Uso de recursos del servidor (indicadores del cliente y del panel).
         // Cualquier usuario autenticado: los operadores también monitorean.
         app.MapGet("/api/system/metrics", (HttpContext ctx, SystemMetrics metrics) =>
@@ -147,6 +174,15 @@ public static class SystemApi
             return Results.Ok(new { message = result.Message });
         });
     }
+
+    /// <summary>
+    /// Instalador del cliente publicado por este servidor, o null si no está.
+    /// Se busca en <c>ClientSetup:InstallerPath</c> (por omisión, la carpeta
+    /// <c>client-setup</c> junto al servidor) y gana el más reciente.
+    /// </summary>
+    private static FileInfo? FindClientInstaller(IConfiguration config, IWebHostEnvironment env) =>
+        PublishedInstallers.Find(config, env, "ClientSetup:InstallerPath", "client-setup",
+            "CLRTrueCentralVMS-Client-Setup-*.exe");
 
     /// <summary>
     /// Ejecuta una orden sobre un servicio y la audita (éxito o rechazo) con
