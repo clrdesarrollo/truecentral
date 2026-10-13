@@ -30,15 +30,15 @@
                      del sector): el operador ve QUÉ pasó, no solo que pasó. -->
                 <Image x:Name="AlertImage" Margin="0,8,0,0" MaxWidth="400" MaxHeight="230"
                        Stretch="Uniform" HorizontalAlignment="Left" Visibility="Collapsed"/>
-                <!-- Acuse de recibo: mientras el aviso lo exija, la notificación
-                     NO se cierra sola; alguien tiene que darse por enterado y
-                     eso queda registrado en el servidor. -->
+                <!-- Acuse: mientras el aviso lo exija, la notificación NO se
+                     cierra sola; alguien tiene que darse por enterado. Qué hace
+                     "Enterado" lo dice quien muestra el aviso (AckHint). -->
                 <StackPanel x:Name="AckPanel" Orientation="Horizontal" Margin="0,10,0,0" Visibility="Collapsed">
                     <Button x:Name="AckButton" Content="Enterado" Click="OnAcknowledge"
                             Padding="14,5" Cursor="Hand" FontSize="11.5"/>
                     <TextBlock x:Name="AckHint" Margin="10,0,0,0" VerticalAlignment="Center"
                                FontSize="11" Foreground="{StaticResource MutedBrush}"
-                               Text="Queda registrado quién confirma y a qué hora"/>
+                               TextWrapping="Wrap" MaxWidth="250"/>
                 </StackPanel>
                 <TextBlock x:Name="PathText" Margin="0,4,0,0" TextWrapping="Wrap" FontSize="11.5">
                     <Hyperlink x:Name="PathLink" Click="OnOpenLocation" TextDecorations="None"

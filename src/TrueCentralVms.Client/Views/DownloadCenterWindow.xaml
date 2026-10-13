@@ -51,7 +51,7 @@
             <!-- Estado vacío -->
             <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
                        Foreground="{StaticResource MutedBrush}" FontSize="12.5" LineHeight="20"
-                       Text="No hay descargas en esta sesión.&#x0a;Marque un tramo en Reproducción y use «Exportar MP4»: la exportación aparecerá aquí.">
+                       Text="No hay descargas en esta sesión.&#x0a;En Reproducción, use «Exportar…»: cada exportación aparecerá aquí.">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
                         <Setter Property="Visibility" Value="Collapsed"/>

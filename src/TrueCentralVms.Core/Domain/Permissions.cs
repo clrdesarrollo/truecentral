@@ -90,7 +90,7 @@ public static class Permissions
         new(EventsAttend, "Monitoreo y operación", "Atender alertas",
             "Ver el centro de eventos y dar por atendidas las alertas.", []),
         new(LocationsCommand, "Monitoreo y operación", "Órdenes por ubicación",
-            "Armar, desarmar o abrir todo lo de una ubicación con una sola orden.", []),
+            "Armar o desarmar con una sola orden todas las áreas de alarma de una ubicación.", []),
         new(AlarmsMonitor, "Monitoreo y operación", "Ver alarmas",
             "Ver el estado de los paneles de alarma y sus eventos.", []),
         new(AlarmsOperate, "Monitoreo y operación", "Operar alarmas",

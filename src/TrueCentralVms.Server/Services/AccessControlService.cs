@@ -65,7 +65,8 @@ public sealed class AccessControlService(
         d.Doors.OrderBy(door => door.Number)
             .Select(door => new AccessDoorDto(door.Id, door.AccessDeviceId, door.Number, door.Name, door.Enabled))
             .ToList(),
-        d.LocationId);
+        d.LocationId,
+        SupportsCardCapture(d.DriverKey));
 
     /// <summary>Puerta con su equipo, para el monitoreo en vivo y los niveles de acceso.</summary>
     public AccessDoorStateDto ToDoorDto(AccessDoor door)
