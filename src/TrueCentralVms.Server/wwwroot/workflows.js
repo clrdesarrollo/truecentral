@@ -192,7 +192,7 @@ const WF_FIELDS = {
       def: "", rerender: true, help: "Los sonidos son los mismos que se cargan con el botón «Sonidos»." },
     { k: "soundRepeat", t: "number", label: "Repeticiones del sonido", def: 1, min: 0, max: 5,
       when: (c) => !!c.sound,
-      help: "0 = suena sin parar hasta que un operador confirme la alerta, la silencie o cierre la ventana." },
+      help: "0 = suena sin parar hasta que un operador confirme la alerta, la silencie o cierre la ventana. Solo si el aviso exige que un operador se dé por enterado: sin eso, 0 suena una vez." },
   ],
   door: [
     { k: "command", t: "select", label: "Orden", def: "Open",
