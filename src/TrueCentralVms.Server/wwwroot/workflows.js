@@ -78,6 +78,16 @@ function wfSpeakerPlays(c) {
   return (c.mode || "inventory") === "inventory" && (c.command || "play") === "play";
 }
 
+/** El aviso sale en la ventana de alarma de los operadores (lo de siempre, también sin destino). */
+function wfShowsPopup(c) {
+  return (c.destination || "popup") !== "screens";
+}
+
+/** El aviso sale en las pantallas de alarma de las casetas. */
+function wfShowsOnScreens(c) {
+  return c.destination === "screens" || c.destination === "both";
+}
+
 // Cómo se pinta la configuración de cada acción. `when` oculta campos según
 // otro campo (el modo del parlante, el tipo de autenticación...).
 const WF_FIELDS = {
@@ -181,17 +191,25 @@ const WF_FIELDS = {
       help: "Además de las marcas del disparador admite {ubicacion} (dónde está, según Recursos) y {consignas} (lo que debe hacer el operador con ese recurso)." },
     { k: "severity", t: "select", label: "Importancia", def: "Warning",
       options: [["Critical", "Crítica"], ["Warning", "Advertencia"], ["Info", "Informativa"]] },
-    { k: "userIds", t: "users", label: "Destinatarios",
+    { k: "destination", t: "select", label: "Dónde se muestra", def: "popup", rerender: true,
+      options: [["popup", "Ventana de alarma de los operadores"], ["screens", "Pantallas de alarma de las casetas"],
+        ["both", "Ventana de alarma y pantallas de alarma"]],
+      help: "Es un solo aviso: si un guardia lo marca como visto en una pantalla de la caseta, se cierra en la ventana de alarma de los operadores, y si un operador lo confirma, la pantalla deja de sonar." },
+    { k: "screenIds", t: "screens", label: "Pantallas de alarma",
+      when: (c) => wfShowsOnScreens(c),
+      help: "Sin ninguna marcada, el aviso va a todas las pantallas aprobadas. Si no hay ninguna disponible, sale en la ventana de alarma para que nadie se lo pierda." },
+    { k: "userIds", t: "users", label: "Destinatarios", when: (c) => wfShowsPopup(c),
       help: "Sin ninguno marcado, el aviso llega a todos los operadores conectados. Quien atiende alertas ve las dirigidas a él o a todos; el administrador las ve todas." },
     { k: "attachSnapshot", t: "check", label: "Mostrar la foto capturada en el aviso", def: true },
     { k: "requireAck", t: "check", label: "Exigir que un operador se dé por enterado", def: true,
       help: "El aviso queda en pantalla y en la lista de alertas hasta que alguien lo confirme; se registra quién y cuándo." },
-    { k: "channelIds", t: "cameras", label: "Cámaras del video en vivo de la ventana de alarma",
+    { k: "channelIds", t: "cameras", label: "Cámaras del video en vivo de la ventana de alarma", when: (c) => wfShowsPopup(c),
       help: "Si no marca ninguna, se usan las que capturaron foto en la misma ejecución y, si tampoco hubo fotos, las cámaras asociadas al recurso que la disparó (su ficha en Recursos)." },
-    { k: "sound", t: "audio", label: "Alarma sonora en el equipo del operador", optional: true, system: true,
-      def: "", rerender: true, help: "Los sonidos son los mismos que se cargan con el botón «Sonidos»." },
-    { k: "soundRepeat", t: "number", label: "Repeticiones del sonido", def: 1, min: 0, max: 5,
-      when: (c) => !!c.sound,
+    { k: "sound", t: "audio", label: "Alarma sonora", optional: true, system: true,
+      def: "", rerender: true,
+      help: "Los sonidos son los mismos que se cargan con el botón «Sonidos». En las pantallas de alarma suena este (el pitido del sistema usa el tono de la pantalla) y después el recordatorio que se configura en Pantallas de alarma." },
+    { k: "soundRepeat", t: "number", label: "Repeticiones del sonido en el equipo del operador", def: 1, min: 0, max: 5,
+      when: (c) => !!c.sound && wfShowsPopup(c),
       help: "0 = suena sin parar hasta que un operador confirme la alerta, la silencie o cierre la ventana. Solo si el aviso exige que un operador se dé por enterado: sin eso, 0 suena una vez." },
   ],
   door: [
@@ -667,6 +685,19 @@ function wfFieldHtml(action, field, lists) {
               ${esc(s.name)}${s.groupName ? ` <span class="muted">· ${esc(s.groupName)}</span>` : ""}</label>`).join("")}
           </div>`}${help}</div>`;
     }
+    case "screens": {
+      const selected = (current || []).map(String);
+      const screens = catalog?.screens || [];
+      const unlicensed = catalog && !catalog.screensLicensed
+        ? `<div class="muted wf-dest-hint" style="color:var(--warn)">Las pantallas de alarma no están incluidas en la licencia: mientras tanto el aviso sale en la ventana de alarma.</div>` : "";
+      return `<div class="field"><label>${esc(field.label)}</label>${unlicensed}
+        ${screens.length === 0 ? `<div class="muted">No hay pantallas de alarma emparejadas (Dispositivos → Pantallas de alarma).</div>` : `
+          <div class="wf-check-grid" ${attributes}>
+            ${screens.map((x) => `<label class="checkbox-row" ${x.enabled ? "" : 'title="Pantalla deshabilitada: no recibirá el aviso"'}>
+              <input type="checkbox" data-screen="${x.id}" ${selected.includes(String(x.id)) ? "checked" : ""}>
+              ${esc(x.name)} <span class="muted">· ${x.enabled ? (x.online ? "en línea" : "sin conexión") : "deshabilitada"}</span></label>`).join("")}
+          </div>`}${help}</div>`;
+    }
     case "users": {
       const selected = (current || []).map(String);
       return `<div class="field"><label>${esc(field.label)}</label>
@@ -900,6 +931,10 @@ function wfReadField(action, input) {
     case "users":
       action.config[key] = Array.from(input.querySelectorAll("[data-user]"))
         .filter((c) => c.checked).map((c) => Number(c.dataset.user));
+      break;
+    case "screens":
+      action.config[key] = Array.from(input.querySelectorAll("[data-screen]"))
+        .filter((c) => c.checked).map((c) => Number(c.dataset.screen));
       break;
     case "panel":
     case "area":

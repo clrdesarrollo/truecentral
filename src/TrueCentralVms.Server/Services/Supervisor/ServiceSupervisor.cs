@@ -124,6 +124,9 @@ public sealed class ServiceSupervisor : BackgroundService
         yield return new HostedServiceAdapter("io-modules", "Módulos de E/S",
             "Conexión con los módulos de entradas y salidas, lectura de sus entradas y órdenes a sus relés.",
             sp.GetRequiredService<IoModuleService>());
+        yield return new HostedServiceAdapter("alarm-screens", "Pantallas de alarma",
+            "Autodiscovery de las pantallas de las casetas y vigilancia de las que se desconectan.",
+            sp.GetRequiredService<AlarmScreenService>());
         yield return new HostedServiceAdapter("intercom", "Citofonía",
             "Enlace de llamadas y sondeo de cada frente de videoportero; conversaciones de los operadores.",
             sp.GetRequiredService<IntercomService>());

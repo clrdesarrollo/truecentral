@@ -1968,7 +1968,7 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0, roles: [] })
 let auditCatalog = null;           // catálogo de categorías/acciones (se pide una vez)
 const auditState = { page: 1 };    // filtros vigentes entre búsquedas
 
-const AUDIT_ORIGINS = { web: "Panel web", client: "Cliente", server: "Servidor" };
+const AUDIT_ORIGINS = { web: "Panel web", client: "Cliente", server: "Servidor", screen: "Pantalla de alarma" };
 
 function formatDateTime(iso) {
   if (!iso) return "—";
@@ -2188,6 +2188,7 @@ const routes = {
   "#/access-events": renderAccessEvents,
   "#/speakers": renderSpeakers,
   "#/io-modules": renderIoModules,
+  "#/alarm-screens": renderAlarmScreens,
   "#/intercoms": renderIntercoms,
   "#/device-maintenance": renderDeviceMaintenance,
   "#/workflows": renderWorkflows,
@@ -2303,6 +2304,7 @@ function leaveCurrentPage() {
   if (typeof resourcesDetachHub === "function") resourcesDetachHub(); // ídem la página Recursos
   if (typeof rolesDetachHub === "function") rolesDetachHub(); // ídem la página Roles
   if (typeof ioModulesDetachHub === "function") ioModulesDetachHub(); // ídem los módulos de E/S
+  if (typeof alarmScreensDetachHub === "function") alarmScreensDetachHub(); // ídem las pantallas de alarma
   clearInterval(eventCenterTimer); // ídem el del centro de eventos
   evcStopSound();                // y su alarma sonora no sigue en otra página
   clearInterval(videowallTimer); // ídem el del puesto de videowall

@@ -417,7 +417,12 @@ function wfeSubtitle(node) {
     }
     case "notify": {
       const who = (c.userIds || []).map((id) => (L.catalog?.users || []).find((u) => u.id === id)?.username || id);
-      return `${c.title || "aviso"} → ${who.length ? who.join(", ") : "todos los operadores"}`;
+      const operators = who.length ? who.join(", ") : "todos los operadores";
+      const screens = (c.screenIds || []).map((id) => (L.catalog?.screens || []).find((x) => x.id === id)?.name || id);
+      const onScreens = `pantallas: ${screens.length ? screens.join(", ") : "todas"}`;
+      const where = c.destination === "screens" ? onScreens
+        : c.destination === "both" ? `${operators} y ${onScreens}` : operators;
+      return `${c.title || "aviso"} → ${where}`;
     }
     case "door": {
       const verbs = { Open: "Abrir", Close: "Cerrar", RemainOpen: "Mantener abierta", RemainLocked: "Bloquear" };

@@ -448,7 +448,11 @@ public sealed record WorkflowCatalogDto(
     /// <summary>El servidor tiene FFmpeg (necesario para convertir sonidos de parlante).</summary>
     bool FfmpegAvailable,
     /// <summary>Usuarios del sistema, para elegir los destinatarios de un aviso.</summary>
-    IReadOnlyList<WorkflowUserDto>? Users = null);
+    IReadOnlyList<WorkflowUserDto>? Users = null,
+    /// <summary>Pantallas de alarma emparejadas, para elegir dónde se muestra un aviso.</summary>
+    IReadOnlyList<AlarmScreenOptionDto>? Screens = null,
+    /// <summary>La licencia incluye las pantallas de alarma (si no, los avisos van solo a la ventana).</summary>
+    bool ScreensLicensed = false);
 
 /// <summary>Usuario elegible como destinatario de un aviso.</summary>
 public sealed record WorkflowUserDto(int Id, string Username, string Role, bool Enabled);
@@ -562,7 +566,13 @@ public sealed record WorkflowAlertDto(
     /// <summary>Ubicación del recurso al momento del aviso.</summary>
     string? LocationPath = null,
     /// <summary>Consignas de la ficha del recurso al momento del aviso (lo que se le indicó al operador).</summary>
-    string? Instructions = null)
+    string? Instructions = null,
+    /// <summary>Se muestra en la ventana de alarma del cliente de escritorio.</summary>
+    bool ShowPopup = true,
+    /// <summary>Se muestra en las pantallas de alarma de las casetas.</summary>
+    bool ShowOnScreens = false,
+    /// <summary>Pantallas a las que se envió ("Caseta norte, Portería"); null = a todas.</summary>
+    string? Screens = null)
 {
     public bool Pending => RequiresAck && AcknowledgedAt is null;
 }

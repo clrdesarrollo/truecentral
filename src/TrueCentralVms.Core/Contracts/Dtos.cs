@@ -180,6 +180,13 @@ public static class VmsHubContract
     /// <summary>Alguien se dio por enterado de una alerta; el resto puede bajarla (payload: WorkflowAlertDto).</summary>
     public const string WorkflowAlertAcknowledged = nameof(WorkflowAlertAcknowledged);
 
+    /// <summary>
+    /// Cambió algo de las pantallas de alarma: una pidió emparejarse, se
+    /// conectó o se cayó (sin payload: el panel relee la lista). Solo a quien
+    /// configura pantallas.
+    /// </summary>
+    public const string AlarmScreensChanged = nameof(AlarmScreensChanged);
+
     /// <summary>Un parlante IP cambió de estado de conexión (payload: SpeakerDto).</summary>
     public const string SpeakerStatusChanged = nameof(SpeakerStatusChanged);
 

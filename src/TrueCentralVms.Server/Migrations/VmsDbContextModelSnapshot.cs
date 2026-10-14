@@ -929,6 +929,157 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("AlarmPanels");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmScreen", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AppVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("AudioOutput")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("AudioOutputsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Hostname")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("LastIp")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Layout")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("MachineId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("PairingCode")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Volume")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MachineId")
+                        .IsUnique();
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasFilter("\"TokenHash\" IS NOT NULL");
+
+                    b.ToTable("AlarmScreens");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmScreenDelivery", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AlertId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("DeliveredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ScreenId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScreenId");
+
+                    b.HasIndex("AlertId", "ScreenId")
+                        .IsUnique();
+
+                    b.ToTable("AlarmScreenDeliveries");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmScreenSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AlarmSound")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("HighPrioritySound")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("MaxReminders")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ReminderSound")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("RepeatBeepSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ResyncHours")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SiteName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AlarmScreenSettings");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmZone", b =>
                 {
                     b.Property<int>("Id")
@@ -3074,6 +3225,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<int?>("AcknowledgedScreenId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ChannelIdsJson")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
@@ -3120,10 +3274,24 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<long?>("RunId")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("ScreenIds")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Screens")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
                     b.Property<string>("Severity")
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
+
+                    b.Property<bool>("ShowOnScreens")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ShowPopup")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Sound")
                         .HasMaxLength(64)
@@ -3386,6 +3554,21 @@ namespace TrueCentralVms.Server.Migrations
                         .WithMany()
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmScreenDelivery", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.WorkflowAlert", null)
+                        .WithMany()
+                        .HasForeignKey("AlertId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.AlarmScreen", null)
+                        .WithMany()
+                        .HasForeignKey("ScreenId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmZone", b =>

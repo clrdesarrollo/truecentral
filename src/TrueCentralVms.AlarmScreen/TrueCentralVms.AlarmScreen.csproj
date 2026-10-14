@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Pantalla de alarma de las casetas (Raspberry Pi 4/5 con Raspberry Pi OS de
+    64 bits). Se conecta DIRECTO al servidor de TrueCentral: muestra los avisos
+    de las automatizaciones dirigidos a las pantallas y deja marcarlos como
+    vistos. La versión es la de todo el producto (archivo VERSION de la raíz):
+    el paquete que se publica para la actualización remota se llama
+    truecentral-screen-<versión>-linux-arm64.tar.gz y la Pi compara esa versión
+    con la que informa la propia app al pedirle su versión (argumento version).
+
+    win-x64 para desarrollo; para la Pi:
+      dotnet publish -c Release -r linux-arm64 (autocontenido); ver installer\screen\README.md
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TrueCentralVms.AlarmScreen</RootNamespace>
+    <AssemblyName>TrueCentralVms.AlarmScreen</AssemblyName>
+    <RollForward>LatestMajor</RollForward>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <SelfContained Condition="'$(SelfContained)' == ''">false</SelfContained>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.2" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.13" />
+    <!--
+      Avalonia.FreeDesktop 11.3.2 arrastra Tmds.DBus.Protocol 0.21.2, que tiene una
+      vulnerabilidad de gravedad alta (GHSA-xrw6-gwf8-vvr9, NU1903). El arreglo está backporteado
+      a 0.21.3, que es la misma línea de API contra la que compiló Avalonia.
+
+      No subir a 0.9x: parchean igual, pero movieron Tmds.DBus.Protocol.Connection y la app
+      revienta al arrancar en Linux con TypeLoadException. En Windows no se nota, porque
+      Avalonia.FreeDesktop solo se carga en X11 — es decir, revienta únicamente en la caseta.
+    -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Solo los contratos (Core no tiene dependencias ni código de Windows). -->
+    <ProjectReference Include="..\TrueCentralVms.Core\TrueCentralVms.Core.csproj" />
+  </ItemGroup>
+
+</Project>

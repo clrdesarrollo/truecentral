@@ -5,6 +5,7 @@ using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Licensing;
 
 namespace TrueCentralVms.Server.Services.Workflows.Actions;
 
@@ -28,19 +29,35 @@ namespace TrueCentralVms.Server.Services.Workflows.Actions;
 /// Si el recurso que disparó tiene ficha en Recursos, la alerta guarda su
 /// ubicación y sus consignas: la ventana del operador las muestra (así el
 /// puesto no abre además la verificación de ese recurso).
+///
+/// Destino (<c>"destination"</c>): la ventana de alarma del cliente de
+/// escritorio (<c>popup</c>, lo de siempre), las pantallas de alarma de las
+/// casetas (<c>screens</c>, todas o las de <c>"screenIds"</c>) o ambas
+/// (<c>both</c>). Es UNA sola alerta: confirmarla en cualquier lado la cierra
+/// en todos. Si las pantallas no están licenciadas o no hay ninguna, el aviso
+/// va igual a la ventana: un aviso que nadie puede ver es peor que uno en el
+/// lugar equivocado.
 /// </summary>
 public sealed class NotifyAction(
     ScopedHub hub,
     WorkflowStore store,
+    AlarmScreenService screens,
+    LicenseService license,
     IServiceScopeFactory scopeFactory,
     ILogger<NotifyAction> logger) : IWorkflowActionExecutor
 {
     public string Type => WorkflowActionTypes.Notify;
     public string Label => "Avisar a los operadores";
-    public string Description => "Aviso en pantalla (con foto y alarma sonora) que el operador debe confirmar.";
+    public string Description =>
+        "Aviso (con foto y alarma sonora) en la ventana de alarma de los operadores, en las pantallas de alarma de las casetas o en ambas.";
 
     public string? Validate(JsonElement config)
     {
+        string? destination = config.TryGetProperty("destination", out var target) && target.ValueKind == JsonValueKind.String
+            ? target.GetString()
+            : null;
+        if (destination is not null && !NotifyDestinations.IsValid(destination))
+            return $"Destino del aviso desconocido: '{destination}'.";
         string? sound = config.TryGetProperty("sound", out var value) ? value.GetString() : null;
         if (string.IsNullOrWhiteSpace(sound) || sound == WorkflowNotificationDto.SystemSoundName) return null;
         return store.FindAudio(sound) is null
@@ -122,6 +139,57 @@ public sealed class NotifyAction(
             recipientsWarning = "no se pudieron resolver los destinatarios: se avisó a todos los operadores";
         }
 
+        // Dónde se muestra: la ventana de alarma, las pantallas de las casetas o ambas.
+        string destination = context.Text("destination", NotifyDestinations.Popup).Trim();
+        if (!NotifyDestinations.IsValid(destination)) destination = NotifyDestinations.Popup;
+        bool showPopup = NotifyDestinations.ShowsPopup(destination);
+        bool showOnScreens = NotifyDestinations.ShowsOnScreens(destination);
+        var targetScreens = new List<(int Id, string Name)>();
+        bool allScreens = true;
+        string? screensWarning = null;
+        if (showOnScreens)
+        {
+            var wantedScreens = context.Numbers("screenIds").Distinct().ToList();
+            allScreens = wantedScreens.Count == 0;
+            if (!license.IsModuleEnabled(LicenseFeatures.ModuleAlarmScreens))
+            {
+                showOnScreens = false;
+                screensWarning = "las pantallas de alarma no están incluidas en la licencia";
+            }
+            else
+            {
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+                    targetScreens = await db.AlarmScreens.AsNoTracking()
+                        .Where(x => x.Status == AlarmScreenStatus.Approved && (allScreens || wantedScreens.Contains(x.Id)))
+                        .OrderBy(x => x.Name)
+                        .Select(x => new ValueTuple<int, string>(x.Id, x.Name))
+                        .ToListAsync(ct);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "No se pudieron resolver las pantallas del aviso de '{Name}'.", context.Workflow.Name);
+                }
+                if (targetScreens.Count == 0)
+                {
+                    showOnScreens = false;
+                    screensWarning = allScreens
+                        ? "no hay pantallas de alarma aprobadas"
+                        : "ninguna de las pantallas elegidas existe o está habilitada";
+                }
+                else if (!allScreens && targetScreens.Count < wantedScreens.Count)
+                    screensWarning = $"{wantedScreens.Count - targetScreens.Count} pantalla(s) elegida(s) ya no existe(n) o está(n) deshabilitada(s)";
+            }
+            // Sin ninguna pantalla que lo muestre, el aviso va a la ventana de alarma.
+            if (!showOnScreens && !showPopup)
+            {
+                showPopup = true;
+                screensWarning += ": se avisó en la ventana de alarma de los operadores";
+            }
+        }
+
         var alert = new WorkflowAlert
         {
             WorkflowId = context.Workflow.Id,
@@ -146,6 +214,10 @@ public sealed class NotifyAction(
             RequiresAck = requireAck,
             RecipientUserIds = recipients.Count > 0 ? "," + string.Join(",", recipients.Select(r => r.Id)) + "," : null,
             Recipients = recipients.Count > 0 ? Cut(string.Join(", ", recipients.Select(r => r.Username)), 512) : null,
+            ShowPopup = showPopup,
+            ShowOnScreens = showOnScreens,
+            ScreenIds = showOnScreens && !allScreens ? Cut("," + string.Join(",", targetScreens.Select(x => x.Id)) + ",", 512) : null,
+            Screens = showOnScreens && !allScreens ? Cut(string.Join(", ", targetScreens.Select(x => x.Name)), 512) : null,
         };
 
         try
@@ -161,17 +233,31 @@ public sealed class NotifyAction(
             // Sin registro no hay acuse de recibo posible: es un fallo de la
             // acción, no un detalle. El operador igual recibe el aviso.
             logger.LogError(ex, "No se pudo registrar la alerta de la automatización '{Name}'.", context.Workflow.Name);
+            // Sin registro las pantallas no pueden mostrarlo (necesitan el id para
+            // confirmarlo): va a la ventana de alarma, que sí puede.
             await PushAsync(context, alert, recipients, 0, false, ct);
             return WorkflowStepResult.Fail(
                 $"El aviso se envió pero NO se pudo registrar para acuse de recibo: {ex.Message}");
         }
 
-        await PushAsync(context, alert, recipients, alert.Id, requireAck, ct);
+        if (alert.ShowPopup) await PushAsync(context, alert, recipients, alert.Id, requireAck, ct);
+        // Persistir primero, difundir después: una pantalla desconectada lo
+        // recupera al resincronizar.
+        if (alert.ShowOnScreens) await screens.PublishRaisedAsync(alert, ct);
 
-        string detail = recipients.Count > 0
-            ? $"Aviso enviado a {string.Join(", ", recipients.Select(r => r.Username))}: «{alert.Title}»"
-            : $"Aviso enviado a los operadores conectados: «{alert.Title}»";
+        string where = alert.ShowOnScreens
+            ? (allScreens
+                ? $"a las pantallas de alarma ({targetScreens.Count})"
+                : $"a las pantallas de alarma {string.Join(", ", targetScreens.Select(x => x.Name))}")
+            : "";
+        string detail = !alert.ShowPopup
+            ? $"Aviso enviado {where}: «{alert.Title}»"
+            : (recipients.Count > 0
+                ? $"Aviso enviado a {string.Join(", ", recipients.Select(r => r.Username))}"
+                : "Aviso enviado a los operadores conectados") +
+              (alert.ShowOnScreens ? $" y {where}" : "") + $": «{alert.Title}»";
         if (recipientsWarning is not null) detail += $" ({recipientsWarning})";
+        if (screensWarning is not null) detail += $" ({screensWarning})";
         if (image is not null) detail += ", con la foto capturada";
         if (sound.Length > 0)
             detail += $", con alarma sonora ({(sound == WorkflowNotificationDto.SystemSoundName ? "pitido del sistema" : $"'{sound}'")}" +

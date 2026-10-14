@@ -146,6 +146,6 @@ public sealed partial class AlertItem(WorkflowAlertDto dto) : ObservableObject
 
     public string AckText => Dto.AcknowledgedAt is { } at
         ? $"{Dto.AcknowledgedBy} · {at.ToLocalTime():dd-MM-yyyy HH:mm:ss} · a los {Dto.ResponseSeconds} s · " +
-          (Dto.AcknowledgedFrom == "client" ? "cliente" : "panel web")
+          Dto.AcknowledgedFrom switch { "client" => "cliente", "screen" => "pantalla de alarma", _ => "panel web" }
         : Dto.RequiresAck ? "Nadie se ha dado por enterado" : "No requiere confirmación";
 }

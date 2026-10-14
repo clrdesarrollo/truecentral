@@ -75,6 +75,11 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<WorkflowRun> WorkflowRuns => Set<WorkflowRun>();
     /// <summary>Alertas mostradas a los operadores y su acuse de recibo.</summary>
     public DbSet<WorkflowAlert> WorkflowAlerts => Set<WorkflowAlert>();
+    // Pantallas de alarma de las casetas: los equipos, la constancia de qué
+    // aviso le llegó a cada una y los ajustes comunes (sonidos, recordatorio).
+    public DbSet<AlarmScreen> AlarmScreens => Set<AlarmScreen>();
+    public DbSet<AlarmScreenDelivery> AlarmScreenDeliveries => Set<AlarmScreenDelivery>();
+    public DbSet<AlarmScreenSettings> AlarmScreenSettings => Set<AlarmScreenSettings>();
     /// <summary>Servidor de correo saliente: fila única (Id = 1).</summary>
     public DbSet<SmtpSettings> SmtpSettings => Set<SmtpSettings>();
     /// <summary>Cómo debe estar el reloj de los equipos: fila única (Id = 1).</summary>
@@ -685,6 +690,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(a => a.AcknowledgedIp).HasMaxLength(64);
             e.Property(a => a.RecipientUserIds).HasMaxLength(512);
             e.Property(a => a.Recipients).HasMaxLength(512);
+            e.Property(a => a.ScreenIds).HasMaxLength(512);
+            e.Property(a => a.Screens).HasMaxLength(512);
             e.Property(a => a.ResourceKey).HasMaxLength(32);
             e.Property(a => a.LocationPath).HasMaxLength(1100);
             e.Property(a => a.Instructions).HasMaxLength(4000);
@@ -694,6 +701,43 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.HasIndex(a => new { a.AcknowledgedAt, a.RaisedAt });
             // Historial de la ficha de un recurso: sus avisos, los más recientes primero.
             e.HasIndex(a => new { a.ResourceKey, a.RaisedAt }).HasFilter("\"ResourceKey\" IS NOT NULL");
+        });
+
+        // Pantallas de alarma: una fila por equipo emparejado (o que pidió
+        // emparejarse). El MachineId es la identidad del equipo y la
+        // credencial se busca por su hash en cada conexión.
+        modelBuilder.Entity<AlarmScreen>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(128);
+            e.Property(x => x.MachineId).HasMaxLength(64);
+            e.Property(x => x.Hostname).HasMaxLength(128);
+            e.Property(x => x.AppVersion).HasMaxLength(32);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.PairingCode).HasMaxLength(8);
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.Property(x => x.Layout).HasMaxLength(16);
+            e.Property(x => x.AudioOutput).HasMaxLength(256);
+            e.Property(x => x.AudioOutputsJson).HasMaxLength(4000);
+            e.Property(x => x.ApprovedBy).HasMaxLength(64);
+            e.Property(x => x.LastIp).HasMaxLength(64);
+            e.HasIndex(x => x.MachineId).IsUnique();
+            e.HasIndex(x => x.TokenHash).IsUnique().HasFilter("\"TokenHash\" IS NOT NULL");
+        });
+        modelBuilder.Entity<AlarmScreenDelivery>(e =>
+        {
+            // Una constancia por aviso y pantalla: la primera entrega es la que vale.
+            e.HasIndex(x => new { x.AlertId, x.ScreenId }).IsUnique();
+            e.HasIndex(x => x.ScreenId);
+            e.HasOne<WorkflowAlert>().WithMany().HasForeignKey(x => x.AlertId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AlarmScreen>().WithMany().HasForeignKey(x => x.ScreenId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<AlarmScreenSettings>(e =>
+        {
+            e.Property(x => x.Id).ValueGeneratedNever();
+            e.Property(x => x.SiteName).HasMaxLength(128);
+            e.Property(x => x.AlarmSound).HasMaxLength(64);
+            e.Property(x => x.HighPrioritySound).HasMaxLength(64);
+            e.Property(x => x.ReminderSound).HasMaxLength(64);
         });
 
         modelBuilder.Entity<SmtpSettings>(e =>

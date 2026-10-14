@@ -46,6 +46,7 @@ public static class Permissions
     public const string CercoConfigure = "cerco.configure";
     public const string SpeakersConfigure = "speakers.configure";
     public const string IoConfigure = "io.configure";
+    public const string ScreensConfigure = "screens.configure";
     public const string SoundsManage = "sounds.manage";
     public const string IntercomConfigure = "intercom.configure";
     public const string ResourcesManage = "resources.manage";
@@ -135,6 +136,8 @@ public static class Permissions
             "Agregar y configurar parlantes IP y su biblioteca de audios.", []),
         new(IoConfigure, "Configuración", "Módulos de E/S",
             "Agregar y configurar módulos de entradas y salidas, y nombrar sus entradas y relés.", []),
+        new(ScreensConfigure, "Configuración", "Pantallas de alarma",
+            "Emparejar, configurar y reiniciar las pantallas de alarma de las casetas, y elegir sus sonidos.", []),
         new(SoundsManage, "Configuración", "Biblioteca de sonidos",
             "Subir, ajustar y borrar los sonidos que usan las automatizaciones.", []),
         new(IntercomConfigure, "Configuración", "Citofonía",
@@ -220,7 +223,7 @@ public static class Permissions
         new("technician", "Técnico",
             "Instala y configura equipos y su mantenimiento; no administra personas ni usuarios.",
             [LiveView, LivePtz, PlaybackView, DevicesManage, AccessConfigure, AlarmsConfigure, CercoConfigure,
-             SpeakersConfigure, IntercomConfigure, IoConfigure, ResourcesManage, MaintenanceView, MaintenanceManage,
+             SpeakersConfigure, IntercomConfigure, IoConfigure, ScreensConfigure, ResourcesManage, MaintenanceView, MaintenanceManage,
              AlarmsMonitor, CercoMonitor, AccessMonitor, SessionsManage]),
         new("auditor", "Auditor",
             "Solo consulta: bitácora, registros y grabaciones, sin operar nada.",

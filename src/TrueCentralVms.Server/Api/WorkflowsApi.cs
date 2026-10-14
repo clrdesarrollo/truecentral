@@ -186,20 +186,28 @@ public static class WorkflowsApi
         // Catálogo para el editor
         // ------------------------------------------------------------------
         app.MapGet("/api/workflows/catalog", async (HttpContext ctx, WorkflowEngine engine, SmtpSender smtp,
-            VmsDbContext db, CancellationToken ct) =>
+            VmsDbContext db, AlarmScreenService screens, LicenseService license, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out _) is { } failure) return failure;
             var settings = await smtp.LoadAsync(ct);
             // Destinatarios posibles de un aviso (solo nombre y rol: nada sensible).
             var users = await db.Users.AsNoTracking().OrderBy(u => u.Username)
                 .Select(u => new WorkflowUserDto(u.Id, u.Username, u.Role, u.Enabled)).ToListAsync(ct);
+            // Pantallas de alarma donde se puede mostrar un aviso (las emparejadas).
+            var alarmScreens = (await db.AlarmScreens.AsNoTracking()
+                    .Where(x => x.Status == AlarmScreenStatus.Approved || x.Status == AlarmScreenStatus.Disabled)
+                    .OrderBy(x => x.Name).Select(x => new { x.Id, x.Name, x.Status }).ToListAsync(ct))
+                .Select(x => new AlarmScreenOptionDto(x.Id, x.Name, screens.IsOnline(x.Id), x.Status == AlarmScreenStatus.Approved))
+                .ToList();
             return Results.Ok(new WorkflowCatalogDto(
                 Triggers,
                 engine.Executors.Select(e => new WorkflowActionInfoDto(e.Type, e.Label, e.Description, e.UsesSecret, ActionGroup(e.Type))).ToList(),
                 Placeholders,
                 settings is { Enabled: true, Host.Length: > 0 },
                 MediaMtxManager.LocateFfmpeg() is not null,
-                users));
+                users,
+                alarmScreens,
+                license.IsModuleEnabled(LicenseFeatures.ModuleAlarmScreens)));
         });
 
         // Cámaras elegibles en la acción "capturar foto" y en los filtros por
@@ -662,7 +670,7 @@ public static class WorkflowsApi
         // que esté frente al puesto); la PRIMERA confirmación es la que queda:
         // el registro no se puede reescribir ni "mejorar" después.
         app.MapPost("/api/workflows/alerts/{id:long}/ack", async (HttpContext ctx, long id, VmsDbContext db,
-            ScopedHub hub, AuditService audit, CancellationToken ct) =>
+            ScopedHub hub, AlarmScreenService screens, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.EventsAttend, out var session) is { } failure) return failure;
 
@@ -689,6 +697,8 @@ public static class WorkflowsApi
             // A quienes recibieron la alerta (no a todos: puede ser dirigida o de un recurso ajeno).
             await hub.SendToAsync(VmsHubContract.WorkflowAlertAcknowledged, dto,
                 s => ReceivesAlert(s, alert.RecipientUserIds, alert.ResourceKey), ct);
+            // Y a las pantallas de alarma que la muestran: dejan de sonar.
+            await screens.PublishAcknowledgedAsync(alert, ct);
 
             await audit.LogAsync(ctx, "workflows", "alert-acknowledged",
                 targetType: "workflow-alert", targetId: alert.Id.ToString(), targetName: alert.WorkflowName,

@@ -53,6 +53,10 @@ public static class LicenseFeatures
     public const string ModuleIo = "module_io";
     public const string IoModules = "io_modules";
 
+    // Pantallas de alarma (Raspberry Pi de las casetas que muestran los avisos)
+    public const string ModuleAlarmScreens = "module_alarm_screens";
+    public const string AlarmScreens = "alarm_screens";
+
     // Automatización
     public const string ModuleAutomation = "module_automation";
     public const string AutomationRules = "automation_rules";
@@ -74,6 +78,7 @@ public static class LicenseFeatures
         new(ModuleSpeakers, "Parlantes IP", SpeakerChannels, "parlantes"),
         new(ModuleIntercom, "Citofonía", IntercomDevices, "frentes"),
         new(ModuleIo, "Módulos de E/S", IoModules, "módulos"),
+        new(ModuleAlarmScreens, "Pantallas de alarma", AlarmScreens, "pantallas"),
         new(ModuleAutomation, "Automatizaciones", AutomationRules, "reglas"),
     ];
 

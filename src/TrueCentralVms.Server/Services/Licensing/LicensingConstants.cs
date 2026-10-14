@@ -55,6 +55,8 @@ public static class LicensingConstants
         [LicenseFeatures.IntercomDevices] = 2,
         [LicenseFeatures.ModuleIo] = true,
         [LicenseFeatures.IoModules] = 2,
+        [LicenseFeatures.ModuleAlarmScreens] = true,
+        [LicenseFeatures.AlarmScreens] = 2,
         [LicenseFeatures.ModuleAutomation] = true,
         [LicenseFeatures.AutomationRules] = 10,
     };

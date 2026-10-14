@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/TrueCentralVms.AlarmScreen/TrueCentralVms.AlarmScreen.csproj" />
     <Project Path="src/TrueCentralVms.Client/TrueCentralVms.Client.csproj" />
     <Project Path="src/TrueCentralVms.Core/TrueCentralVms.Core.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.Adam/TrueCentralVms.Drivers.Adam.csproj" />
