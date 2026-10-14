@@ -1,6 +1,6 @@
 # Capturas pendientes
 
-Las 29 capturas que faltan en el manual. Cada una está en su capítulo como
+Las 30 capturas que faltan en el manual. Cada una está en su capítulo como
 `#captura-pendiente("…")`. Al tomarla, se reemplaza por
 `#captura("archivo.png", marcas: (…), pie: […])` y se borra de esta lista.
 
@@ -70,6 +70,12 @@ Reglas:
 | Archivo | Pantalla y estado | Marcas |
 |---|---|---|
 | `web-modulos-es.png` | Dispositivos › Módulos de E/S con un módulo en línea, una entrada activa y un relé encendido | Nombre y ubicación · estado de conexión · entradas · relés · segundos del pulso · Pulso / Encender / Apagar |
+
+## Pantallas de alarma
+
+| Archivo | Pantalla y estado | Marcas |
+|---|---|---|
+| `pi-pantalla-alarma.png` | La app de la pantalla (Raspberry Pi) con avisos en la lista, uno pendiente seleccionado con foto y consignas | Nombre de la pantalla · conexión · SIN VER · QUÉ HACER · MARCAR COMO VISTA · TODAS VISTAS |
 
 ## 11 · Muro de video
 

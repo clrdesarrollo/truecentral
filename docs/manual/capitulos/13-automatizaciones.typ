@@ -543,26 +543,37 @@ correo»).
 === Avisar a los operadores
 
 Muestra un aviso en pantalla a los operadores conectados, con foto, video en
-vivo y alarma sonora. Cada aviso queda registrado como alerta (vea «Alertas y
-acuse de recibo»).
+vivo y alarma sonora, en las pantallas de alarma de las casetas, o en ambos
+lados. Cada aviso queda registrado como alerta (vea «Alertas y acuse de
+recibo»).
 
 - *Título* y *Mensaje*: por omisión, `{tipo}: {equipo}` y
   `{evento} · {fechahora}`. Además de las marcas del disparador, admiten
   `{ubicacion}` (dónde está el recurso, según Recursos) y `{consignas}` (lo que
   debe hacer el operador con ese recurso).
 - *Importancia*: Crítica, Advertencia o Informativa.
-- *Destinatarios*: los usuarios que reciben el aviso. Sin ninguno marcado,
-  llega a todos los operadores conectados que atienden alertas.
+- *Dónde se muestra*: _Ventana de alarma de los operadores_ (lo de siempre),
+  _Pantallas de alarma de las casetas_ o _Ventana de alarma y pantallas de
+  alarma_. Es un solo aviso: si un guardia lo marca como visto en una pantalla
+  de la caseta, se cierra la ventana de alarma de los operadores, y si un
+  operador lo confirma, la pantalla deja de sonar.
+- *Pantallas de alarma* (con las pantallas): a cuáles va. Sin ninguna marcada,
+  a todas las aprobadas. Si no hay ninguna disponible, o las pantallas no están
+  en la licencia, el aviso sale en la ventana de alarma.
+- *Destinatarios* (con la ventana de alarma): los usuarios que reciben el
+  aviso. Sin ninguno marcado, llega a todos los operadores conectados que
+  atienden alertas.
 - *Mostrar la foto capturada en el aviso*.
 - *Exigir que un operador se dé por enterado*: el aviso queda en pantalla y en
   la lista de alertas hasta que alguien lo confirme; se registra quién y cuándo.
 - *Cámaras del video en vivo de la ventana de alarma*: si no marca ninguna, se
   usan las que capturaron foto en la misma ejecución y, si tampoco hubo fotos,
   las cámaras asociadas al recurso que la disparó (su ficha en Recursos).
-- *Alarma sonora en el equipo del operador*: _(sin sonido)_, _Pitido del
-  sistema del equipo_ o uno de los sonidos de la biblioteca. El botón ▶ lo hace
-  sonar en su navegador.
-- *Repeticiones del sonido*: de 0 a 5. Con 0, suena sin parar hasta que un
+- *Alarma sonora*: _(sin sonido)_, _Pitido del sistema del equipo_ o uno de
+  los sonidos de la biblioteca. El botón ▶ lo hace sonar en su navegador. En
+  las pantallas de alarma suena este sonido (el pitido del sistema usa el tono
+  de la pantalla) y después el recordatorio de las pantallas.
+- *Repeticiones del sonido en el equipo del operador*: de 0 a 5. Con 0, suena sin parar hasta que un
   operador confirme la alerta, la silencie o cierre la ventana. El bucle exige
   _Exigir que un operador se dé por enterado_: sin ella, el aviso es
   informativo, no tiene botón para silenciarlo, y con 0 suena una vez.

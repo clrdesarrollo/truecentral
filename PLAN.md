@@ -1511,6 +1511,68 @@ estaba hecha y probada en `..\adamdemo` (demo WPF + simulador).
 - Pendiente: vista en el cliente de escritorio (hoy solo el panel web opera los relés a
   mano) y el padrón de vehículos ligado a personas (propuesta aparte).
 
+## Pantallas de alarma de las casetas (ex clrAlarm) — 2026-10-14
+
+Pedido: `clrAlarmCenter` (app autónoma) y `clrAlarmCenterServer` (servidor + Raspberry Pi)
+consumían los eventos de HikCentral. Ahora deben integrarse con TrueCentral, y cada
+automatización debe poder elegir si su alarma sale en la ventana de alarma (popup), en las
+pantallas de las casetas o en ambas; si el guardia la acepta en la caseta, la ventana del
+operador se cierra. Decisiones del usuario: **solo la app de la Raspberry, conectada directo a
+TrueCentral** (el servidor clrAlarm y la conexión con HikCentral dejan de ser necesarios),
+acuse en ambos sentidos, configuración en TrueCentral y **licenciado como expansión**.
+
+- **App** `src\TrueCentralVms.AlarmScreen`: copia adaptada de `ClrAlarm.Client` (Avalonia
+  11.3.2, mismas lecciones: Tmds.DBus 0.21.3, foto decodificada solo la seleccionada, salida
+  de audio por nombre, kiosco). Cambios: contratos de TrueCentral (`AlarmScreenDtos.cs`, ids
+  `long`), rutas `/api/screen/*`, hub `/hubs/screens`, autodiscovery UDP **5094** con sonda
+  `TCVMS_SCREEN_DISCOVER`, configuración en `~/.config/TrueCentralPantalla`, detalle y aviso
+  a pantalla completa con mensaje, ubicación y **consignas** («QUÉ HACER»), versión = la del
+  producto (`VERSION`), 403 = deshabilitada (conserva la credencial y espera).
+- **Servidor**: `AlarmScreens` (MachineId único, estado pending/approved/rejected/disabled,
+  código de 6 dígitos, hash de la credencial, volumen/disposición/salida), `AlarmScreenSettings`
+  (fila única: sonidos, recordatorio, ventana de resincronización, nombre de la instalación) y
+  `AlarmScreenDeliveries` (constancia de entrega por pantalla). `WorkflowAlert` suma
+  `ShowPopup` (true para las existentes: lo pone la migración, NO `HasDefaultValue`, que con
+  bool haría que EF omita el false), `ShowOnScreens`, `ScreenIds` (",1,4,"), `Screens` y
+  `AcknowledgedScreenId`. Migración `AlarmScreens`.
+- **Middleware**: en `/hubs/screens` y `/api/screen` se resuelve la credencial
+  (`X-Screen-Token` o `?access_token=`); el hub responde 401 (credencial desconocida → la Pi
+  vuelve a emparejarse) o 403 (pantalla deshabilitada) ANTES de abrir la conexión.
+- **Acuse**: primera confirmación gana con `ExecuteUpdate … where AcknowledgedAt == null`.
+  Pantalla → `WorkflowAlertAcknowledged` a los operadores que la recibieron
+  (`WorkflowsApi.ReceivesAlert`) + `AlarmAcknowledged` a las pantallas; operador → el endpoint
+  de siempre difunde además a las pantallas. El cliente de escritorio, con
+  `AcknowledgedFrom == "screen"`, saca la alerta de `AlertWindow` (`Remove`) y la cierra si no
+  queda otra; con otro operador sigue como antes (la muestra confirmada). Las alertas solo de
+  pantallas no abren la ventana al iniciar sesión (`LoadPendingAlertsAsync` filtra
+  `ShowPopup`) ni suenan en el centro de eventos web.
+- **Respaldo**: sin licencia, sin pantallas aprobadas o con las elegidas deshabilitadas, el
+  aviso cae a la ventana de alarma (lo dice el detalle del paso).
+- **Licencia** (catálogo **v3**, la v2 es la de E/S): `module_alarm_screens` + `alarm_screens`
+  (pantallas aprobadas); Professional 4, Enterprise 32, prueba 2, expansión
+  `addon_alarm_screens_2`. Falta importar el catálogo en el servidor de licencias.
+- **Permiso** `screens.configure` (*Pantallas de alarma*, grupo Configuración; plantilla
+  Técnico). La pantalla no tiene usuario: lo que hace queda en la bitácora con el actor
+  «pantalla <nombre>» y origen `screen`.
+- **Instalador**: `build-installers.ps1` publica la app linux-arm64 autocontenida y la comprime
+  (`dist\truecentral-screen-<v>-linux-arm64.tar.gz`, ~40 MB); `suite.iss` la deja en
+  `{app}\screen-packages` (el servidor sirve la más nueva). La regla UDP del servidor ya es por
+  programa (cubre el 5094). Scripts de la Pi en `installer\screen\` (`*.sh` con `eol=lf`).
+- **Seguridad** (mismo commit aparte): SignalR.Client 10.0.13 en el cliente y la pantalla
+  (CVE-2026-70159) y `System.Security.Cryptography.Pkcs` 10.0.13 fijado en el servidor
+  (CVE-2026-84008, lo arrastraban MimeKit y PDFsharp). Ambos avisos son del 2026-10-13.
+- **Probado** con un servidor aislado (6831/26831/9831/10831, UDP 5094): arnés de 61
+  verificaciones (dos pantallas simuladas + operador por los dos hubs: emparejamiento,
+  cupo de licencia, ambas/solo pantallas/solo ventana, acuse en los dos sentidos, «Todas
+  vistas», deshabilitar 403, reiniciar emparejamiento 401, bitácora) y con las apps reales:
+  la pantalla de Windows encontró el servidor por UDP, se aprobó desde la página web, mostró
+  el aviso y al marcarlo la ventana de alarma del cliente de escritorio se cerró; confirmar
+  en el cliente calló la pantalla. NO probado en una Raspberry Pi real ni el script de
+  instalación (solo `bash -n`).
+- Pendiente / propuesto: filtrar por ubicación (una pantalla que solo vea los avisos de los
+  recursos de su ubicación), sonido de prueba desde el panel, retiro de `clrAlarmCenter` y
+  `clrAlarmCenterServer` una vez migradas las casetas.
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

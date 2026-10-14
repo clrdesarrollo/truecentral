@@ -49,6 +49,7 @@ describe solo los de su edición:
   ("intercom", "Citofonía", "Atención de llamadas desde frentes de citofonía.", <cap-citofonia>),
   ("speakers", "Parlantes IP", "Voz en vivo, sonidos y texto leído en parlantes IP.", <cap-parlantes-ip>),
   ("io", "Módulos de E/S", "Relés que mueven barreras, portones y balizas, y entradas que leen pulsadores y sensores.", <cap-modulos-de-es>),
+  ("alarm_screens", "Pantallas de alarma", "Monitores en las casetas de guardia que muestran los avisos de las automatizaciones y dejan marcarlos como vistos.", <cap-pantallas-de-alarma>),
   ("videowall", "Muro de video", "Control de decodificadores y pantallas del muro.", <cap-muro-de-video>),
   ("anpr", "Reconocimiento de patentes", "Lecturas de patentes de cámaras con esa analítica.", <cap-reconocimiento-de-patentes>),
   ("automation", "Automatizaciones", "Reglas que reaccionan a eventos y actúan solas, y el Centro de eventos donde los operadores confirman las alertas.", <cap-automatizaciones>),
