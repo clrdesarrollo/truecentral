@@ -1471,6 +1471,46 @@ interfaz de la Vista en vivo del cliente de escritorio, en el navegador.
   integrado de la app no abre ventanas emergentes ni pasa a pantalla completa), ni el acceso
   desde otro equipo de la red.
 
+## Módulos de E/S (Advantech ADAM-6000) — 2026-10-14
+
+Pedido: una cámara ANPR debe levantar la barrera de los funcionarios con un relé de un
+ADAM-6066 (192.168.10.90), idealmente desde una automatización. La librería Modbus ya
+estaba hecha y probada en `..\adamdemo` (demo WPF + simulador).
+
+- **Driver** `TrueCentralVms.Drivers.Adam`: copia de `AdamIo` con `DriverException`;
+  `ModbusException` hereda de ella. Cambio respecto de la demo: el pulso y el parpadeo
+  **vuelven en cuanto la salida quedó energizada** y el resto corre aparte (antes
+  esperaban todo el pulso); si después no se puede soltar la salida se avisa por
+  `OutputEffectFailed` (bitácora `io/output-effect-failed`).
+- **Contrato** `Core/Drivers/IIoModuleDriver.cs`: `ProbeAsync` (conecta, lee el modelo
+  y una lectura completa) y `Open` → `IIoModuleSession` (sondeo + órdenes por la misma
+  conexión, eventos de estado, canal y conexión).
+- **Datos**: `IoModules` (recurso con `LocationId`, `Model` efectivo, `ModelKey` forzado,
+  `ReportedModel`) e `IoPoints` (una fila por DI/DO con nombre e `Inverted`, por omisión
+  true: activa al cerrar a GND). Migración `IoModules`: tablas, `IoModuleId` en el arco
+  exclusivo de `ResourceProfiles` (CHECK actualizado) y `io.operate` al rol Operador.
+- **Servicio** `IoModuleService` (supervisado): una sesión por módulo habilitado, repaso
+  cada 30 s o al guardar; los avisos de los monitores se procesan en orden por un canal;
+  conexión → estado, bitácora y `device-status` "io"; entrada que cambia →
+  `WorkflowTrigger.FromIoInput`; al detenerse cierra las sesiones (suelta pulsos).
+- **API** `/api/io/...`; la orden a una salida exige `io.operate` y `CanOperateIoModule`
+  (fuera de alcance → 403 auditado). La respuesta de la orden NO trae el estado: el que
+  había al responder llegaba después del aviso del hub y lo pisaba; el estado vivo va
+  solo por el hub. OJO: el hub serializa los enums como números (`io-modules.js`
+  normaliza con `ioNormalize`, igual que el monitoreo de acceso).
+- **Automatizaciones**: acción `relay` (`relayKeys` "módulo:salida", `seconds` del pulso,
+  `blinkSeconds`/`intervalMs` del parpadeo: claves distintas porque el editor aplica los
+  valores por omisión por clave) y disparador `io-input` (`IoModuleIds` + `IoInputKeys`
+  en OR, `IoInputStates`).
+- **Licencia** (catálogo v2): `module_io` + `io_modules`; Professional 4, Enterprise 32,
+  prueba 2, expansión `addon_io_2`. Falta importarlo en el servidor de licencias.
+- **Probado** con el simulador de `adamdemo` (ADAM-6066 en 127.0.0.1:1502) y un servidor
+  aislado: alta, prueba, pulso manual, automatización patente → pulso, entrada → relé,
+  caída y vuelta del módulo, alcance por rol, detener el servicio suelta un parpadeo y la
+  página web con el estado en vivo. NO probado contra el ADAM real.
+- Pendiente: vista en el cliente de escritorio (hoy solo el panel web opera los relés a
+  mano) y el padrón de vehículos ligado a personas (propuesta aparte).
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

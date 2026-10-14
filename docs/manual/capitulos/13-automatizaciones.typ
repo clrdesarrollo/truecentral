@@ -183,7 +183,7 @@ Hay tres formas de agregar un paso:
   [Capturar], [Capturar foto],
   [Avisar], [Enviar correo, Sonar parlante IP, Avisar a los operadores],
   [Integración], [Subir a FTP, Llamar a un servicio (HTTP)],
-  [Equipos], [Orden a una puerta, Armar / desarmar panel, Mover cámara PTZ a preset],
+  [Equipos], [Orden a una puerta, Armar / desarmar panel, Mover cámara PTZ a preset, Operar relé],
 )
 
 === Conectar y eliminar
@@ -271,7 +271,9 @@ textos*.
   [Control de acceso], [Evento de control de acceso],
   [alguien pasa (o lo rechazan) por una puerta, o la puerta informa forzada, mantenida abierta o sabotaje.],
   [Sistema], [Conexión de un equipo],
-  [una cámara o grabador, un terminal de acceso o un parlante IP pierde o recupera la conexión.],
+  [una cámara o grabador, un terminal de acceso, un parlante IP o un módulo de E/S pierde o recupera la conexión.],
+  [Entradas y salidas], [Entrada de módulo de E/S],
+  [una entrada de un módulo de E/S se activa o vuelve a reposo: un pulsador, el lazo de una barrera, un sensor.],
   [Sistema], [Horario programado], [llegan las horas indicadas, los días de la semana marcados.],
   [Sistema], [Llamada externa (HTTP)], [otro sistema llama a la dirección de esta automatización.],
 )
@@ -383,11 +385,23 @@ selección. Sin nada marcado, dispara cualquier equipo.
 
 === Conexión de un equipo
 
-- *Clase de equipo*: Cámaras y grabadores, Terminales de acceso o Parlantes IP.
+- *Clase de equipo*: Cámaras y grabadores, Terminales de acceso, Parlantes IP o
+  Módulos de E/S.
 - *Estado que dispara*: Sin conexión, Credenciales rechazadas o En línea
   (recuperado).
 - *Equipos*: con equipos marcados, solo esos disparan; sin ninguno, cualquiera
   de la clase elegida.
+
+=== Entrada de módulo de E/S
+
+- *Módulos y entradas*: un módulo completo (cualquiera de sus entradas) o solo
+  algunas entradas, con el botón #boton("Elegir entradas…").
+- *Cambio que dispara*: _Se activa_, _Vuelve a reposo_ o, sin nada marcado,
+  ambos. «Activa» ya considera si la entrada se activa al cerrar o al abrir el
+  contacto.
+
+#modulo("io")[Las entradas se nombran en #menu("Dispositivos", "Módulos de E/S");
+  vea #capitulo(<cap-modulos-de-es>).]
 
 === Horario programado
 
@@ -607,6 +621,21 @@ mensaje)_ (*URL* y *Método*).
 - *Preset (1–300)*: el preset debe estar guardado en la propia cámara, desde
   la vista en vivo del cliente o desde su web.
 
+=== Operar relé
+
+- *Relés*: una o varias salidas de los módulos de E/S, con su módulo y su
+  nombre.
+- *Orden*: _Pulso: encender y soltar (barrera, portón)_, _Encender y dejar
+  encendido_, _Apagar_, _Alternar_ o _Parpadear (baliza)_. _Apagar_ también
+  corta un pulso o un parpadeo en curso.
+- *Duración del pulso (segundos)*: de 0,1 a 3600; para la orden de subir de
+  una barrera suele bastar 1.
+- Al parpadear: *Parpadear durante (segundos; 0 = hasta otra orden)* y
+  *Alternar cada (ms)*, desde 100.
+
+Si el módulo no responde o está pausado, la acción falla y el flujo sigue por
+*Si falla*.
+
 === Subir a FTP
 
 Sube las fotos de la ejecución y, si quiere, un informe de texto.
@@ -673,6 +702,7 @@ Cada disparador agrega las suyas:
   [Evento de control de acceso],
   [`{puerta}`, `{puertanumero}`, `{persona}`, `{personaid}`, `{tarjeta}`, `{credencial}`, `{resultado}`],
   [Conexión de un equipo], [`{equipotipo}`, `{direccion}`, `{modelo}`, `{estado}`],
+  [Entrada de módulo de E/S], [`{modulo}`, `{entrada}`, `{entradanumero}`, `{estado}`, `{direccion}`],
   [Llamada externa], [`{cuerpo}`, `{ip}` y un campo por cada campo del JSON recibido],
 )
 
@@ -758,6 +788,8 @@ que se configura una sola vez.
   [Marque una cámara en la acción.],
   [«Sonar parlante IP»: Elija al menos un parlante o un grupo.],
   [Marque un parlante o escriba el nombre de un grupo.],
+  [«Operar relé»: Elija al menos un relé.],
+  [Marque un relé en la acción.],
   [El bucle hasta detener (0 repeticiones) solo está disponible con un sonido del servidor.],
   [Use un sonido del servidor o ponga 1 o más repeticiones.],
   [«Llamar a un servicio (HTTP)»: La URL debe ser absoluta y empezar con `http://` o `https://`.],

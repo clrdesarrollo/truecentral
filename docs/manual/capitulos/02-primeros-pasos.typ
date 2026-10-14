@@ -407,6 +407,7 @@ vacíos tampoco aparecen.
   [#menu("Dispositivos", "Paneles de cerco")], [Paneles de cerco],
   [#menu("Dispositivos", "Control de acceso")], [Equipos de acceso],
   [#menu("Dispositivos", "Parlantes IP")], [Parlantes IP, o Usar parlantes],
+  [#menu("Dispositivos", "Módulos de E/S")], [Módulos de E/S, u Operar relés],
   [#menu("Dispositivos", "Citofonía")], [Citofonía],
   [#menu("Dispositivos", "Hora y mantenimiento")], [Ver hora y mantenimiento],
   [#menu("Control de acceso", "Monitoreo") y

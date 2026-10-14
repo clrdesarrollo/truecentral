@@ -60,6 +60,7 @@ src\TrueCentralVms.Watchdog\           monitor de escritorio del servidor
 src\TrueCentralVms.Drivers.Hikvision\  interop HCNetSDK 6.1.9.48
 src\TrueCentralVms.Drivers.Dahua\      interop propio contra dhnetsdk.h (x64)
 src\TrueCentralVms.Drivers.Onvif\      SOAP manual (WS-UsernameToken)
+src\TrueCentralVms.Drivers.Adam\       Modbus TCP propio para los ADAM-6000 (sin DLL de Advantech)
 native\hikvision\ · native\dahua\      DLLs de los SDK (git-ignored)
 tools\postgres\ · tools\mediamtx\      binarios embebidos (git-ignored)
 tools\ffmpeg-flyleaf\                  FFmpeg compartido para FlyleafLib (git-ignored)
@@ -672,6 +673,32 @@ inventario (o todo un grupo) y puede reproducir un sonido del servidor, un
 audio de la biblioteca del equipo o un texto leído en voz alta con las marcas
 `{zona}`, `{panel}`, etc. Todo queda en la bitácora (categoría *Parlantes IP*):
 quién habló, cuánto tiempo, qué se reprodujo y en qué equipos.
+
+## Módulos de E/S (relés y entradas)
+
+Módulos de entradas y salidas digitales Advantech **ADAM-6050, 6051, 6052, 6055,
+6060 y 6066** por Modbus TCP (puerto 502), con un cliente Modbus propio
+(`src\TrueCentralVms.Drivers.Adam`, nacido de la demo `adamdemo`). Sus relés mueven
+barreras, portones y balizas; sus entradas leen pulsadores, lazos y sensores.
+
+- **Dispositivos → Módulos de E/S** (`#/io-modules`, permiso *Módulos de E/S* para
+  configurar, *Operar relés* para operar): alta con **Probar conexión** (el modelo se
+  lee del registro 40211; se puede forzar a mano para dar de alta un módulo apagado),
+  nombre de cada entrada y relé, y la lógica de cada entrada (*activa al cerrar* o *al
+  abrir el contacto*: en contacto seco el ADAM lee 1 abierto). Una tarjeta por módulo
+  con el estado vivo (hub `IoModuleChanged`) y **Pulso / Encender / Apagar** por relé.
+- **Una sola conexión por módulo**, la del servidor (`IoModuleService`): sondea las
+  entradas cada 250 ms (configurable 100–5000) y da las órdenes por la misma conexión.
+  Los pulsos y parpadeos los temporiza el servidor; al detenerse (o al pausar o
+  borrar el módulo) suelta los relés que estaban en uno. Si el proceso muere de golpe
+  el relé queda como esté: configurar el **watchdog FSV** del propio ADAM.
+- **Automatizaciones**: acción **Operar relé** (pulso con segundos, encender, apagar,
+  alternar, parpadear; varios relés de varios módulos) y disparador **Entrada de
+  módulo de E/S** (se activa / vuelve a reposo, por módulo completo o entrada
+  suelta). «Conexión de un equipo» incluye la clase *Módulos de E/S*.
+- Es un **recurso** (Recursos y ubicaciones, alcance del rol, ficha e historial):
+  el alcance se mide por módulo. Supervisor: servicio *Módulos de E/S*. Licencia:
+  `module_io` + cupo `io_modules` (catálogo v2). Bitácora: categoría *Módulos de E/S*.
 
 ## Control de acceso
 
