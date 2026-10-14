@@ -122,7 +122,7 @@ public sealed class IoModuleService(
         if (!_runtimes.TryGetValue(moduleId, out var runtime))
             return new(false, "El módulo está pausado o el servidor todavía no abre su conexión.");
         var session = runtime.Session;
-        string outputLabel = $"'{OutputName(runtime.Module, output)}' (DO{output})";
+        string outputLabel = OutputLabel(runtime.Module, output);
         string target = $"{outputLabel} de '{runtime.Module.Name}'";
         if (output < 0 || output >= session.Model.Outputs)
             return new(false, session.Model.Outputs == 0
@@ -182,9 +182,11 @@ public sealed class IoModuleService(
 
     private static string Seconds(double s) => s == Math.Floor(s) ? $"{s:0} s" : $"{s:0.0} s";
 
-    private static string OutputName(IoModule module, int number) =>
+    /// <summary>"'Barrera' (DO0)", o solo "DO2" si la salida no tiene nombre propio.</summary>
+    private static string OutputLabel(IoModule module, int number) =>
         module.Points.FirstOrDefault(p => p.Kind == IoPointKind.Output && p.Number == number) is { Name.Length: > 0 } point
-            ? point.Name : $"DO{number}";
+        && point.Name != point.Code
+            ? $"'{point.Name}' (DO{number})" : $"DO{number}";
 
     // ------------------------------------------------------------------
     // Conexiones
@@ -364,7 +366,7 @@ public sealed class IoModuleService(
             module.Name, output, error);
         await audit.LogSystemAsync("io", "output-effect-failed",
             targetType: "io-module", targetId: module.Id.ToString(), targetName: module.Name,
-            detail: $"No se pudo soltar '{OutputName(module, output)}' (DO{output}) del módulo '{module.Name}' al terminar " +
+            detail: $"No se pudo soltar {OutputLabel(module, output)} del módulo '{module.Name}' al terminar " +
                     $"su pulso o parpadeo: {error}. Puede haber quedado encendida; el watchdog del módulo la suelta si está configurado.",
             success: false);
     }
