@@ -152,7 +152,7 @@ switch ($Accion) {
             "--Streaming:WebRtcIcePort=$($p.webrtcIce)",
             "--Streaming:ServerPort=$($p.web)",
             '--Alarms:Receiver:Enabled=false',
-            '--Alarms:LocalReceiver:Enabled=false',
+            '--Isup:Enabled=false',
             '--Cerco:Receiver:Enabled=false',
             '--Cerco:Firmware:Enabled=false',
             '--Licensing:ServerUrl='
