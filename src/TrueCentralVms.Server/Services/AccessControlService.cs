@@ -27,6 +27,9 @@ public sealed class AccessControlService(
     CredentialProtector credentials,
     ScopedHub hub,
     AuditService audit,
+    Isup.IsupService isup,
+    Isup.IsupHostManager isupHost,
+    Licensing.LicenseService license,
     ILogger<AccessControlService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
@@ -42,7 +45,7 @@ public sealed class AccessControlService(
     }
 
     public AccessConnectionInfo ConnectionOf(AccessDevice device) =>
-        new(device.Host, device.Port, device.UseHttps, device.Username, credentials.Unprotect(device.PasswordCiphertext));
+        new(device.Host, device.Port, device.UseHttps, device.Username, credentials.Unprotect(device.PasswordCiphertext), device.IsupDeviceId);
 
     public IAccessControlDriver DriverOf(AccessDevice device) =>
         drivers.Find(device.DriverKey)?.Create()
@@ -66,7 +69,9 @@ public sealed class AccessControlService(
             .Select(door => new AccessDoorDto(door.Id, door.AccessDeviceId, door.Number, door.Name, door.Enabled))
             .ToList(),
         d.LocationId,
-        SupportsCardCapture(d.DriverKey));
+        SupportsCardCapture(d.DriverKey),
+        d.IsupDeviceId,
+        d.IsupKeyCiphertext is { Length: > 0 });
 
     /// <summary>Puerta con su equipo, para el monitoreo en vivo y los niveles de acceso.</summary>
     public AccessDoorStateDto ToDoorDto(AccessDoor door)
@@ -210,6 +215,11 @@ public sealed class AccessControlService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Un equipo ISUP que se conecta se sondea de inmediato y, si se agregó sin conexión, se completa (puertas y capacidades).
+        isup.DeviceOnlineChanged += (isupId, online) =>
+        {
+            if (online) _ = Task.Run(() => ProvisionIsupAsync(isupId, stoppingToken), stoppingToken);
+        };
         // Dar tiempo a que la API y el hub estén arriba antes del primer sondeo.
         try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
         catch (OperationCanceledException) { return; }
@@ -286,6 +296,14 @@ public sealed class AccessControlService(
     {
         try
         {
+            // Por ISUP: si el equipo no está conectado al servidor, se dice por qué (clave rechazada, sin registrarse…).
+            if (device.IsupDeviceId is { } isupId)
+            {
+                if (device.IsupKeyCiphertext is not { Length: > 0 })
+                    return (AccessDeviceStatus.Offline, "Falta la clave ISUP del equipo: edítelo y escriba la que tiene configurada.", []);
+                if (!isup.IsOnline(isupId))
+                    return (AccessDeviceStatus.Offline, await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct), []);
+            }
             var driver = DriverOf(device);
             var connection = ConnectionOf(device);
             await driver.PingAsync(connection, ct);
@@ -310,6 +328,45 @@ public sealed class AccessControlService(
         {
             return (AccessDeviceStatus.Offline, ex.Message, []);
         }
+    }
+
+    /// <summary>
+    /// Primer contacto de un equipo ISUP agregado sin conexión: lee su identificación, capacidades y puertas (lo que en un equipo por
+    /// IP se hace al darlo de alta). Si sus puertas no caben en la licencia, el equipo queda desactivado y se avisa.
+    /// </summary>
+    private async Task ProvisionIsupAsync(string isupId, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);   // que termine el intercambio de registro del equipo
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.IsupDeviceId == isupId, ct);
+            if (device is null) return;
+            if (device.Model is null || device.Doors.Count == 0)
+            {
+                var info = await DriverOf(device).ProbeAsync(ConnectionOf(device), ct);
+                Api.AccessApi.ApplyProbe(device, info);
+                string doors = Api.AccessApi.SyncDoors(device, info.Doors);
+                if (device.Enabled && license.Deny(LicenseFeatures.ModuleAccess, LicenseFeatures.AccessDoors,
+                        await Api.AccessApi.DoorsInUseAsync(db, device.Id, ct), info.Doors.Count) is not null)
+                {
+                    device.Enabled = false;
+                    device.LastError = $"Se conectó por ISUP pero sus {info.Doors.Count} puerta(s) no caben en la licencia: quedó desactivado.";
+                    await audit.LogSystemAsync("license", "license-denied", "access-device", device.Id.ToString(), device.Name,
+                        device.LastError, success: false);
+                }
+                await db.SaveChangesAsync(ct);
+                await audit.LogSystemAsync("access", "device-revalidated", "access-device", device.Id.ToString(), device.Name,
+                    $"El equipo de control de acceso '{device.Name}' se conectó por ISUP (ID {isupId}): {device.Model ?? "modelo desconocido"}, {doors}.",
+                    origin: "sistema");
+                var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<VmsHub>>();
+                await hubContext.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
+            }
+            RequestReconcile();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { logger.LogWarning("No se pudo completar el equipo ISUP {Id} en su primer contacto: {Error}", isupId, ex.Message); }
     }
 
     /// <summary>

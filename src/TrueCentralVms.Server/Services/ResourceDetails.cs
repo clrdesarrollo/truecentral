@@ -167,7 +167,7 @@ public static class ResourceDetails
 
     private static ResourceSourceDto PanelSource(AlarmPanel p) =>
         new("alarm-panels", p.Id, p.Name, p.Model, p.SerialNumber, p.FirmwareVersion,
-            Address(p.Host, p.Port, p.UseHttps) + (p.GatewayDeviceId is { } g ? $" · equipo {g} en la receptora" : ""),
+            p.IsupDeviceId is { } isupId ? $"ISUP {isupId} (el panel se conecta al servidor)" : Address(p.Host, p.Port, p.UseHttps),
             OnlineText(p.Status, p.Enabled), p.LastSeenAt);
 
     private static async Task<Part?> PartitionAsync(VmsDbContext db, int id, CancellationToken ct)

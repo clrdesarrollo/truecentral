@@ -73,23 +73,48 @@ public sealed partial class HikvisionIsapiClient
 
     /// <param name="digestOnly">
     /// No probar el login de sesión: autenticar siempre por Digest (lo que
-    /// documenta el Hik IP Receiver Pro para su API; su sesión web no habilita
-    /// la suscripción de eventos).
+    /// aceptan los terminales de acceso y los frentes de citofonía).
     /// </param>
     public HikvisionIsapiClient(AlarmConnectionInfo info, bool digestOnly = false, string deviceNoun = "panel")
     {
-        string key = $"{info.UseHttps}|{info.Host}|{info.Port}|{info.Username}|{info.Password}|{digestOnly}";
+        _noun = deviceNoun;
+        string key = KeyOf(info, digestOnly);
         _entry = Entries.GetOrAdd(key, _ =>
         {
+            // Equipo conectado por ISUP: todo viaja por el túnel del servidor, ya autenticado (ID + clave del equipo).
+            if (info.IsupId is { Length: > 0 } isupId) return CreateIsup(info, isupId, deviceNoun);
             var entry = Create(info);
             if (digestOnly) entry.AuthProbed = true; // sin sesión: el handler negocia Digest
             return entry;
         });
         _entry.LastUsed = DateTime.UtcNow;
-        _noun = deviceNoun;
     }
 
-    public string BaseUrl => $"{(_entry.Info.UseHttps ? "https" : "http")}://{_entry.Info.Host}:{_entry.Info.Port}";
+    private static string KeyOf(AlarmConnectionInfo info, bool digestOnly) =>
+        info.IsupId is { Length: > 0 } isupId ? $"isup|{isupId}" : $"{info.UseHttps}|{info.Host}|{info.Port}|{info.Username}|{info.Password}|{digestOnly}";
+
+    /// <summary>true si el equipo está conectado por ISUP (no por IP).</summary>
+    public bool IsIsup => _entry.Info.IsupId is { Length: > 0 };
+
+    /// <summary>Identifica la conexión (también se usa como clave de cachés): http(s)://host:puerto, o isup://ID para los equipos ISUP.</summary>
+    public string BaseUrl => IsIsup ? $"isup://{_entry.Info.IsupId}" : $"{(_entry.Info.UseHttps ? "https" : "http")}://{_entry.Info.Host}:{_entry.Info.Port}";
+
+    /// <summary>URL real de una petición: por ISUP el anfitrión no importa (el manejador sabe a qué equipo va).</summary>
+    private string RequestUrl(string path) => IsIsup ? "http://isup.invalid" + path : BaseUrl + path;
+
+    private static Entry CreateIsup(AlarmConnectionInfo info, string isupId, string noun)
+    {
+        HttpClient Make() => new(new IsupHttpHandler(isupId, noun)) { Timeout = Timeout.InfiniteTimeSpan };
+        return new Entry
+        {
+            Http = Make(),
+            PlainHttp = Make(),
+            LoginHttp = Make(),
+            Cookies = new CookieContainer(),
+            Info = info,
+            AuthProbed = true,
+        };
+    }
 
     private static Entry Create(AlarmConnectionInfo info)
     {
@@ -180,6 +205,19 @@ public sealed partial class HikvisionIsapiClient
         string filePartName, string fileName, byte[] file, string fileContentType, CancellationToken ct,
         HttpMethod? method = null)
     {
+        // Por ISUP el túnel no lleva multipart: la foto se publica en una URL de corta vida del servidor y el equipo la
+        // descarga (faceURL), que es como lo hacen las plataformas ISUP con su almacenamiento de imágenes.
+        if (IsIsup)
+        {
+            if (!jsonPartName.Equals("FaceDataRecord", StringComparison.Ordinal))
+                throw new DriverException($"El {_noun} está conectado por ISUP y esta operación necesita subirle un archivo, algo que el túnel ISUP no admite.");
+            var url = TrueCentralVms.Core.Isup.IsupGateway.Require().PublishDownload(file, fileContentType, TimeSpan.FromMinutes(10));
+            if (System.Text.Json.Nodes.JsonNode.Parse(json) is not System.Text.Json.Nodes.JsonObject record)
+                throw new DriverException("Datos del rostro inválidos.");
+            record["faceURL"] = url;
+            return await RequestAsync(method ?? HttpMethod.Post, path, record.ToJsonString(), "application/json", ct, timeout: TimeSpan.FromSeconds(60));
+        }
+
         HttpContent Build()
         {
             // El separador va SIN comillas. .NET escribe
@@ -261,7 +299,8 @@ public sealed partial class HikvisionIsapiClient
     private async Task<HttpResponseMessage> SendOnceAsync(HttpMethod method, string path, string? body, string contentType,
         CancellationToken ct, bool streaming, Func<HttpContent>? content = null, TimeSpan? timeout = null)
     {
-        var request = new HttpRequestMessage(method, BaseUrl + path);
+        var request = new HttpRequestMessage(method, RequestUrl(path));
+        request.Options.Set(IsupHttpHandler.TimeoutOption, timeout ?? RequestTimeout);
         // El contenido se FABRICA en cada intento: un HttpContent ya enviado no
         // se puede volver a mandar, y acá se reintenta al caducar la sesión.
         if (content is not null) request.Content = content();
@@ -285,11 +324,11 @@ public sealed partial class HikvisionIsapiClient
         }
         catch (HttpRequestException ex)
         {
-            throw new DriverException($"No se pudo conectar con el {_noun} en {_entry.Info.Host}:{_entry.Info.Port}: {ex.Message}", ex);
+            throw new DriverException($"No se pudo conectar con el {_noun} en {Address}: {ex.Message}", ex);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new DriverException($"El {_noun} en {_entry.Info.Host}:{_entry.Info.Port} no respondió a tiempo.");
+            throw new DriverException($"El {_noun} en {Address} no respondió a tiempo.");
         }
     }
 
@@ -541,9 +580,8 @@ public sealed partial class HikvisionIsapiClient
     // Errores
     // ------------------------------------------------------------------
 
-    // Los equipos contestan XML o JSON segun el endpoint (el IP Receiver Pro usa
-    // JSON), asi que los patrones aceptan las dos formas: <lockStatus>lock</...>
-    // y "lockStatus":"lock".
+    // Los equipos contestan XML o JSON segun el endpoint, asi que los patrones
+    // aceptan las dos formas: <lockStatus>lock</...> y "lockStatus":"lock".
     [GeneratedRegex("(<lockStatus>\\s*lock\\s*</lockStatus>)|(\"lockStatus\"\\s*:\\s*\"lock\")", RegexOptions.IgnoreCase)]
     private static partial Regex LockedPattern();
 
@@ -564,7 +602,7 @@ public sealed partial class HikvisionIsapiClient
     private void ThrowIfLocked(string? body) => ThrowIfLocked(body, _noun, Address);
 
     /// <summary>Dónde ocurrió: va en todos los mensajes, porque el operador suele tener varios equipos.</summary>
-    private string Address => $"{_entry.Info.Host}:{_entry.Info.Port}";
+    private string Address => IsIsup ? $"ISUP {_entry.Info.IsupId}" : $"{_entry.Info.Host}:{_entry.Info.Port}";
 
     private static void ThrowIfLocked(string? body, string noun = "panel", string? address = null)
     {
@@ -657,7 +695,7 @@ public sealed partial class HikvisionIsapiClient
     {
         foreach (bool digestOnly in new[] { false, true })
         {
-            string key = $"{info.UseHttps}|{info.Host}|{info.Port}|{info.Username}|{info.Password}|{digestOnly}";
+            string key = KeyOf(info, digestOnly);
             if (Entries.TryRemove(key, out var entry))
             {
                 entry.Http.Dispose();

@@ -147,9 +147,10 @@ public sealed class HikvisionAlarmPanelDriver : IAlarmPanelDriver
     /// </summary>
     internal static AlarmHostState? ParseHost(string json)
     {
-        // OJO: el Hik IP Receiver Pro devuelve a veces el status/host con los
-        // nombres de zona (ZoneList) en una codificación inválida que rompe el
-        // JSON completo. Solo se necesita el objeto HostStatus, que va al
+        // OJO: la receptora de Hikvision que se usaba antes devolvía a veces el
+        // status/host con los nombres de zona (ZoneList) en una codificación
+        // inválida que rompía el JSON completo (se conserva por si un firmware
+        // hace lo mismo). Solo se necesita el objeto HostStatus, que va al
         // principio y sin anidar, así que se aísla y se parsea por separado en
         // vez de todo el documento.
         string host = ExtractObjectAfter(json, "HostStatus") ?? json;
@@ -914,5 +915,20 @@ public sealed class HikvisionAlarmPanelDriverFactory : IAlarmPanelDriverFactory
     public string DisplayName => "Hikvision AX PRO / AX Hybrid / DS-PHA (ISAPI)";
     public int DefaultPort => 80;
     public bool DefaultHttps => false;
+    public IAlarmPanelDriver Create() => new HikvisionAlarmPanelDriver();
+}
+
+/// <summary>
+/// Paneles Hikvision conectados por ISUP (AX PRO / AX Hybrid PRO que reportan a una plataforma): el panel se registra contra el
+/// servidor con su ID y clave ISUP y por esa conexión se lee el estado, se arma y desarma y llegan sus eventos (Contact-ID). Es el
+/// mismo driver ISAPI: lo que cambia es el transporte, que decide <see cref="AlarmConnectionInfo.IsupId"/>.
+/// </summary>
+public sealed class HikvisionIsupAlarmPanelDriverFactory : IAlarmPanelDriverFactory
+{
+    public string DriverKey => "hikvision-isup";
+    public string DisplayName => "Hikvision AX PRO / AX Hybrid (ISUP, el panel se conecta al servidor)";
+    public int DefaultPort => 0;
+    public bool DefaultHttps => false;
+    public bool UsesIsup => true;
     public IAlarmPanelDriver Create() => new HikvisionAlarmPanelDriver();
 }

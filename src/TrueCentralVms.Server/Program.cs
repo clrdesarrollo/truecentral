@@ -107,11 +107,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprService>());
 // de estado y el canal de eventos de cada panel habilitado. Para otra marca
 // basta con implementar IAlarmPanelDriverFactory y agregarla aquí.
 builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionAlarmPanelDriverFactory>();
-builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionIpReceiverDriverFactory>();
-// Receptora de paneles instalada junto al servidor: el servidor la activa solo
-// (contraseña generada y guardada cifrada) para que sea un servicio interno
-// que el operador no ve ni administra.
-builder.Services.AddSingleton<LocalIpReceiverService>();
+builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionIsupAlarmPanelDriverFactory>();
 builder.Services.AddSingleton<AlarmDriverRegistry>();
 builder.Services.AddSingleton<AlarmPanelService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmPanelService>());
@@ -120,6 +116,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmPanelService>
 // Tres marcas, tres transportes: ISAPI (HTTP) en Hikvision, CGI (HTTP) en
 // Dahua y el protocolo propio del SDK (TCP 4370) en ZKTeco.
 builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionAccessDriverFactory>();
+builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionIsupAccessDriverFactory>();
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaAccessDriverFactory>();
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.ZkTeco.ZkTecoAccessDriverFactory>();
 builder.Services.AddSingleton<AccessDriverRegistry>();
@@ -195,6 +192,15 @@ builder.Services.AddSingleton<StreamTokenService>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Rtsp.PlaybackRelayManager>();
 builder.Services.AddSingleton<MediaMtxManager>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MediaMtxManager>());
+
+// ISUP propio: un proceso interno (TrueCentralVms.IsupHost.exe) con el SDK ISUP de Hikvision, al que se registran los equipos
+// que el servidor no alcanza por IP (paneles AX PRO, equipos detrás de NAT/4G/MPLS). El servicio es su cliente y el transporte
+// que usan los drivers "hikvision-isup" (IsupGateway.Current, que queda publicado al construirse el servicio, antes de que
+// arranque cualquier servicio de fondo).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Isup.IsupHostManager>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Isup.IsupHostManager>());
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Isup.IsupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Isup.IsupService>());
 builder.Services.AddSingleton<SessionAccounting>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionAccounting>());
 
@@ -251,32 +257,6 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(
             "Sistema sin inicializar: abra http://localhost:5090 EN ESTA MÁQUINA para crear el primer administrador.");
 }
-
-// La receptora local se activa en segundo plano: si no está instalada o tarda
-// en levantar, el servidor arranca igual y lo deja anotado en el registro. Se
-// reintenta un rato porque la receptora arranca sus propios servicios (nginx,
-// su PostgreSQL) y puede tardar más que este servidor.
-_ = Task.Run(async () =>
-{
-    var stopping = app.Lifetime.ApplicationStopping;
-    using var scope = app.Services.CreateScope();
-    var receiver = scope.ServiceProvider.GetRequiredService<LocalIpReceiverService>();
-    // La receptora crea su propia base en el primer arranque y puede tardar
-    // bastante más que este servidor; también puede reinstalarse por fuera. Por
-    // eso se insiste mientras el servicio viva: cada minuto la primera hora y
-    // cada diez minutos después, hasta que quede lista o se sepa que no se
-    // puede (activada por otro). Así la activación nunca depende de que alguien
-    // reinicie el servicio en el momento justo.
-    for (int attempt = 1; !stopping.IsCancellationRequested; attempt++)
-    {
-        var state = await receiver.EnsureActivatedAsync(stopping);
-        if (state.Final)
-            break;
-        var wait = attempt <= 60 ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(10);
-        try { await Task.Delay(wait, stopping); }
-        catch (OperationCanceledException) { break; }
-    }
-});
 
 app.UseCors();
 // WebSocket propio (fuera de SignalR) para la voz del operador hacia los parlantes.
@@ -373,6 +353,7 @@ app.MapResourcesApi();
 app.MapAnprApi();
 app.MapAuditApi();
 app.MapAlarmsApi();
+app.MapIsupApi();
 app.MapCercoApi();
 app.MapSpeakersApi();
 app.MapIntercomsApi();

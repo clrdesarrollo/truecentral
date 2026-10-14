@@ -6,6 +6,9 @@
     <ProjectReference Include="..\TrueCentralVms.Drivers.Hikvision\TrueCentralVms.Drivers.Hikvision.csproj" />
     <ProjectReference Include="..\TrueCentralVms.Drivers.Onvif\TrueCentralVms.Drivers.Onvif.csproj" />
     <ProjectReference Include="..\TrueCentralVms.Drivers.ZkTeco\TrueCentralVms.Drivers.ZkTeco.csproj" />
+    <!-- Servicio ISUP interno: un ejecutable aparte que el servidor lanza y vigila. Se referencia para que quede junto al
+         servidor (con el SDK ISUP en isup\); el instalador lo vuelve a publicar autocontenido en la misma carpeta. -->
+    <ProjectReference Include="..\TrueCentralVms.IsupHost\TrueCentralVms.IsupHost.csproj" />
   </ItemGroup>
 
   <!-- DLLs nativas de los SDK: se copian junto al ejecutable. Hikvision
@@ -43,6 +46,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Los SDK de Hikvision/Dahua son nativos de 64 bits: el proceso debe ser x64. -->
     <PlatformTarget>x64</PlatformTarget>
+    <!-- El host ISUP se referencia como ejecutable dependiente del framework; en la suite se publica autocontenido aparte
+         (build-installers.ps1), así que no hace falta que coincida aquí. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
   </PropertyGroup>
 
 </Project>

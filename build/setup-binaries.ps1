@@ -7,6 +7,8 @@
     Deja listas dos carpetas:
 
       native\hikvision  DLLs de HCNetSDK (el servidor las carga por P/Invoke)
+      native\hikvision-isup  DLLs del SDK ISUP 5.0 (las carga el servicio ISUP
+                        interno, TrueCentralVms.IsupHost, en su carpeta isup\)
       native\dahua      DLLs del NetSDK de Dahua
       tools\postgres    PostgreSQL portable (base embebida del servidor)
       tools\mediamtx    MediaMTX (media server que hace el fan-out RTSP)
@@ -137,6 +139,28 @@ if ($sadpDll) {
         "Sin él no se puede cambiar la IP de equipos Hikvision desde la búsqueda.")
 }
 
+# SDK ISUP 5.0 (Hikvision): lo carga el servicio ISUP interno (TrueCentralVms.IsupHost)
+# para que los equipos detrás de NAT/4G se registren contra el servidor. Se toma la
+# carpeta lib64 de Resources\ que tenga HCISUPCMS.dll (la de la versión más nueva).
+$isupLib = $null
+if (Test-Path $resources) {
+    $isupLib = Get-ChildItem $resources -Recurse -File -Filter 'HCISUPCMS.dll' -ErrorAction SilentlyContinue |
+        Where-Object { $_.DirectoryName -notmatch '\\(x86|win32|lib32)\b' } |
+        Sort-Object { [version]$_.VersionInfo.FileVersion } -Descending | Select-Object -First 1
+}
+if ($isupLib) {
+    Copy-Tree -Source $isupLib.DirectoryName -Destination (Join-Path $repo 'native\hikvision-isup') -Label "SDK ISUP $($isupLib.VersionInfo.FileVersion)" | Out-Null
+    foreach ($dep in 'libcrypto-1_1-x64.dll', 'libssl-1_1-x64.dll') {
+        # OpenSSL 1.1: si el paquete ISUP no la trae, vale la misma de HCNetSDK.
+        $dest = Join-Path $repo "native\hikvision-isup\$dep"
+        $alt = Join-Path $repo "native\hikvision\$dep"
+        if (-not (Test-Path $dest) -and (Test-Path $alt)) { Copy-Item $alt $dest -Force }
+    }
+} else {
+    Write-Warning ("SDK ISUP: no se encontró HCISUPCMS.dll (x64) en Resources\. " +
+        "Sin él los equipos no se pueden conectar por ISUP (paneles AX PRO, equipos detrás de NAT/4G).")
+}
+
 # ---------------------------------------------------------------------------
 # 2. Herramientas redistribuibles (tools\)
 # ---------------------------------------------------------------------------
@@ -209,7 +233,7 @@ $checks = [ordered]@{
     'tools\postgres\pgsql\bin\VCRUNTIME140.dll' = 'Runtime de Visual C++ para PostgreSQL'
     'tools\postgres\pgsql\bin\MSVCP140.dll'     = 'Runtime de Visual C++ para PostgreSQL (C++)'
     'tools\mediamtx\mediamtx.exe'            = 'MediaMTX (streaming)'
-    'tools\iprp\HikIpReceiverPro-Setup.exe'  = 'Hik IP Receiver Pro (receptor de paneles ISUP/OTAP)'
+    'native\hikvision-isup\HCISUPCMS.dll'    = 'SDK ISUP 5.0 (equipos que se conectan por ISUP)'
     'tools\ffmpeg-flyleaf\avcodec-63.dll'    = 'FFmpeg (cliente WPF)'
     'tools\ffmpeg\bin\ffmpeg.exe'           = 'FFmpeg CLI (exportación y proyección al muro)'
 }
@@ -233,8 +257,7 @@ if ($missing -gt 0) {
     Write-Host "                          solo hace falta para el complemento de enrolamiento, no para el servidor"
     Write-Host "  - PostgreSQL portable : https://www.enterprisedb.com/download-postgresql-binaries -> tools\postgres\pgsql"
     Write-Host "  - MediaMTX v1.20      : https://github.com/bluenviron/mediamtx/releases -> tools\mediamtx"
-    Write-Host "  - Hik IP Receiver Pro : instalador oficial de Hikvision (V2.5.0 o superior; el API de alta de equipos existe desde la 2.5.0)"
-    Write-Host "                          renombrado a tools\iprp\HikIpReceiverPro-Setup.exe (obligatorio para la suite: los AX PRO reportan por ISUP contra el)"
+    Write-Host "  - SDK ISUP 5.0        : ISUP SDK de Hikvision (Win64, carpeta lib64 con HCISUPCMS.dll y HCAapSDKCom\) -> Resources\"
     Write-Host "  - FFmpeg para Flyleaf : asset del release de FlyleafLib con la MISMA versión que el paquete NuGet"
     Write-Host "                          https://github.com/SuRGeoNix/Flyleaf/releases -> carpeta FFmpeg\ -> tools\ffmpeg-flyleaf"
     Write-Host "  - FFmpeg CLI          : build de Windows (gyan.dev / BtbN) -> tools\ffmpeg (con bin\ffmpeg.exe y bin\ffprobe.exe)"

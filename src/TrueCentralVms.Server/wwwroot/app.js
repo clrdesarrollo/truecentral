@@ -2210,6 +2210,7 @@ const routes = {
   "#/roles": renderRoles,
   "#/audit": renderAudit,
   "#/services": renderServices,
+  "#/isup": renderIsupStatus,
   "#/license": renderLicense,
 };
 

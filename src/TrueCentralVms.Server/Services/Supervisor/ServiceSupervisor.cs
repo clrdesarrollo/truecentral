@@ -91,6 +91,7 @@ public sealed class ServiceSupervisor : BackgroundService
     {
         yield return new PostgresManagedService(sp.GetRequiredService<EmbeddedPostgres>(), loggers.CreateLogger<PostgresManagedService>());
         yield return new MediaMtxManagedService(sp.GetRequiredService<MediaMtxManager>());
+        yield return new IsupManagedService(sp.GetRequiredService<Isup.IsupHostManager>(), sp.GetRequiredService<Isup.IsupService>());
         yield return new HostedServiceAdapter("device-monitor", "Monitor de dispositivos",
             "Sondea cada equipo de video y publica su estado (en línea / sin conexión).",
             sp.GetRequiredService<DeviceStatusMonitor>());

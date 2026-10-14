@@ -124,7 +124,7 @@ public static class Permissions
         new(AccessConfigure, "Configuración", "Equipos de acceso",
             "Agregar y configurar terminales y puertas, y sincronizarlos.", []),
         new(AlarmsConfigure, "Configuración", "Paneles de alarma",
-            "Agregar y configurar paneles de alarma y la receptora.", []),
+            "Agregar y configurar paneles de alarma.", []),
         new(CercoConfigure, "Configuración", "Paneles de cerco",
             "Agregar y configurar paneles de cerco, sus controles remotos y su firmware.", []),
         new(SpeakersConfigure, "Configuración", "Parlantes IP",

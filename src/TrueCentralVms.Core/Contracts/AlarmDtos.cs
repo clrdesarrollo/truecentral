@@ -109,8 +109,8 @@ public sealed record AlarmPanelDto(
     int Port,
     bool UseHttps,
     string Username,
-    /// <summary>Identificador del panel dentro de la pasarela (drivers que no hablan directo con el equipo).</summary>
-    string? DeviceId,
+    /// <summary>ID ISUP del panel (driver hikvision-isup: el panel se conecta al servidor); null si se conecta por IP.</summary>
+    string? IsupDeviceId,
     string? Model,
     string? SerialNumber,
     string? FirmwareVersion,
@@ -130,10 +130,8 @@ public sealed record AlarmPanelDto(
     DateTime CreatedAt,
     IReadOnlyList<AlarmAreaDto> Areas,
     IReadOnlyList<AlarmZoneDto> Zones,
-    /// <summary>El servidor guarda la clave ISUP/OTAP del panel (puede re-registrarlo solo en la receptora).</summary>
-    bool HasDeviceKey = false,
-    /// <summary>"isup" u "otap" (drivers de pasarela).</summary>
-    string? DeviceProtocol = null,
+    /// <summary>El servidor tiene guardada la clave ISUP del panel.</summary>
+    bool HasIsupKey = false,
     /// <summary>Ubicación del panel en el árbol de Recursos (null = por ubicar): la heredan sus áreas y zonas.</summary>
     int? LocationId = null,
     /// <summary>Ruta legible de esa ubicación ("Casa matriz › Bodega").</summary>
@@ -153,97 +151,13 @@ public sealed record AlarmPanelWriteDto(
     string Username,
     string? Password,
     bool Enabled = true,
-    /// <summary>Identificador del panel dentro de la pasarela (uuid, serie, cuenta o ID ISUP); solo drivers con NeedsDeviceId.</summary>
-    string? DeviceId = null,
-    /// <summary>
-    /// Clave ISUP/OTAP con la que el panel reporta a la receptora (drivers de
-    /// pasarela). El servidor la guarda cifrada y con ella vuelve a registrar
-    /// el equipo si desaparece de la receptora. En edición, null o vacía =
-    /// mantener la guardada.
-    /// </summary>
-    string? DeviceKey = null,
-    /// <summary>"isup" (por defecto) u "otap": protocolo con que el panel reporta a la receptora.</summary>
-    string? DeviceProtocol = null,
+    /// <summary>ID ISUP del panel (drivers con UsesIsup): el «ID del dispositivo» que tiene configurado en su plataforma ISUP.</summary>
+    string? IsupDeviceId = null,
+    /// <summary>Clave ISUP del panel (su «clave de cifrado»). Se guarda cifrada. En edición, null o vacía = mantener la guardada.</summary>
+    string? IsupKey = null,
     /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
     /// por ubicar); 0 = por ubicar. Las áreas y zonas que seguían al panel se mueven con él.</summary>
     int? LocationId = null);
-
-// ---------------------------------------------------------------------------
-// Equipos DENTRO de la receptora (Hik IP Receiver Pro)
-//
-// Los paneles que reportan por ISUP/OTAP primero tienen que estar dados de
-// alta en la receptora. Estos DTO permiten hacerlo desde el VMS, sin abrir la
-// interfaz web del fabricante. Las credenciales viajan en el cuerpo (nunca en
-// la URL) y se pueden omitir indicando el panel ya guardado del que tomarlas.
-// ---------------------------------------------------------------------------
-
-/// <summary>
-/// Receptora instalada junto al servidor. El servidor la activa solo y guarda
-/// su credencial: por eso aquí nunca viaja una contraseña, solo si el sistema
-/// ya la tiene (<c>Ready</c>) y dónde escucha.
-/// </summary>
-public sealed record AlarmLocalReceiverDto(
-    bool Present,
-    bool Ready,
-    string Host,
-    int Port,
-    string Username,
-    string? Message);
-
-/// <summary>
-/// Credencial que el sistema generó para la receptora de este servidor. Solo se
-/// entrega a administradores y queda registrada en la bitácora: existe para
-/// diagnósticos, no para el uso diario.
-/// </summary>
-public sealed record AlarmLocalReceiverCredentialDto(string Host, int Port, string Username, string Password);
-
-/// <summary>Conexión con la receptora para operar su lista de equipos.</summary>
-public sealed record AlarmReceiverConnectionDto(
-    string Host,
-    int Port,
-    bool UseHttps,
-    string Username,
-    string? Password,
-    /// <summary>Panel ya guardado del que tomar la contraseña cuando no se envía.</summary>
-    int? PanelId = null);
-
-/// <summary>Equipo agregado en la receptora.</summary>
-public sealed record AlarmReceiverDeviceDto(
-    string DevIndex,
-    string Name,
-    string? Serial,
-    string? AccountId,
-    string? IsupId,
-    string? Model,
-    string? Version,
-    string? Status);
-
-/// <summary>
-/// Equipos registrados en la receptora de este servidor que ningún panel del
-/// VMS usa (altas a medias o hechas por fuera). <paramref name="Error"/> va
-/// cuando la receptora no se pudo consultar.
-/// </summary>
-public sealed record AlarmReceiverOrphansDto(IReadOnlyList<AlarmReceiverDeviceDto> Devices, string? Error);
-
-/// <summary>Alta de un panel en la receptora (ISUP 5.0 u OTAP).</summary>
-public sealed record AlarmReceiverAddDeviceDto(
-    AlarmReceiverConnectionDto Receiver,
-    /// <summary>"isup" (ISUP 5.0 / EHome, por defecto) u "otap".</summary>
-    string Protocol,
-    /// <summary>ID del equipo configurado en el panel para reportar a la receptora.</summary>
-    string DeviceId,
-    /// <summary>Clave del equipo (EHome/OTAP key).</summary>
-    string? DeviceKey,
-    string Name,
-    /// <summary>"SecurityCP" (panel, por defecto) o "encodingDev".</summary>
-    string? DeviceType = null,
-    string? AccountId = null,
-    string? Remark = null);
-
-/// <summary>Baja de un equipo de la receptora por su uuid.</summary>
-public sealed record AlarmReceiverDeleteDeviceDto(
-    AlarmReceiverConnectionDto Receiver,
-    string DevIndex);
 
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record AlarmPanelProbeResultDto(
@@ -256,8 +170,8 @@ public sealed record AlarmPanelProbeResultDto(
     IReadOnlyList<AlarmZoneDto> Zones);
 
 public sealed record AlarmDriverDto(string Key, string DisplayName, int DefaultPort, bool DefaultHttps,
-    /// <summary>El driver habla con una pasarela: el mantenedor debe pedir además el identificador del panel en ella.</summary>
-    bool NeedsDeviceId = false);
+    /// <summary>El panel se conecta por ISUP: el mantenedor pide su ID y clave ISUP en vez de dirección y credenciales.</summary>
+    bool UsesIsup = false);
 
 /// <summary>Orden de armado de un área.</summary>
 public sealed record AlarmArmRequestDto(AlarmArmMode Mode);

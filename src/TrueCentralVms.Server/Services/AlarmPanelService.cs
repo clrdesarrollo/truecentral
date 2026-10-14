@@ -32,6 +32,8 @@ public sealed class AlarmPanelService(
     Workflows.WorkflowEngine workflows,
     IConfiguration config,
     Auth.UserScopeService scopes,
+    Isup.IsupService isup,
+    Isup.IsupHostManager isupHost,
     ILogger<AlarmPanelService> logger) : BackgroundService
 {
     private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(20);
@@ -126,6 +128,17 @@ public sealed class AlarmPanelService(
     public void RequestReconcile()
     {
         if (_wake.CurrentCount == 0) _wake.Release();
+    }
+
+    private void OnIsupDeviceChanged(string isupId, bool online)
+    {
+        if (!online) return;
+        foreach (var worker in _workers.Values.Where(w => w.Fingerprint?.Contains($"|{isupId}|", StringComparison.Ordinal) == true))
+        {
+            worker.NextRetryAt = DateTime.MinValue;
+            worker.NextPollAt = DateTime.MinValue;
+        }
+        RequestReconcile();
     }
 
     /// <summary>
@@ -270,6 +283,8 @@ public sealed class AlarmPanelService(
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        // Un panel ISUP que se conecta (o vuelve) se lee de inmediato, sin esperar el reintento de un minuto.
+        isup.DeviceOnlineChanged += OnIsupDeviceChanged;
         var consumer = Task.Run(() => ConsumeAsync(ct), ct);
         var purger = Task.Run(() => PurgeLoopAsync(ct), ct);
 
@@ -340,8 +355,8 @@ public sealed class AlarmPanelService(
             }
 
             var connection = ConnectionOf(panel);
-            string fingerprint = $"{panel.DriverKey}|{connection.UseHttps}|{connection.Host}|{connection.Port}|{connection.Username}|{connection.Password}|{connection.DeviceId}" +
-                                 $"|{Convert.ToBase64String(panel.GatewayKeyCiphertext ?? [])}|{panel.GatewayProtocol}";
+            string fingerprint = $"{panel.DriverKey}|{connection.UseHttps}|{connection.Host}|{connection.Port}|{connection.Username}|{connection.Password}|{connection.IsupId}" +
+                                 $"|{Convert.ToBase64String(panel.IsupKeyCiphertext ?? [])}";
             if (worker.Fingerprint != fingerprint)
             {
                 await CloseAsync(panel.Id, worker);
@@ -401,7 +416,7 @@ public sealed class AlarmPanelService(
     private AlarmConnectionInfo ConnectionOf(AlarmPanel panel) => new(
         panel.Host, panel.Port, panel.UseHttps, panel.Username,
         panel.PasswordCiphertext.Length == 0 ? "" : credentials.Unprotect(panel.PasswordCiphertext),
-        panel.GatewayDeviceId);
+        panel.IsupDeviceId);
 
     private async Task CloseAsync(int panelId, Worker worker)
     {
@@ -448,43 +463,14 @@ public sealed class AlarmPanelService(
             {
                 var driver = factory.Create();
                 var connection = ConnectionOf(panel);
-                // Pasarela (receptora): antes de leer, asegurar que el equipo
-                // siga registrado en ella. Es la verdad de lo que funciona; el
-                // VMS guarda ID y clave y aquí los hace cumplir sin que nadie
-                // tenga que mirar la receptora.
-                if (driver is IAlarmGatewayDriver gateway && panel.GatewayDeviceId is { Length: > 0 })
+                // Por ISUP: si el panel no está conectado al servidor no hay a quién preguntarle; se explica por qué (rechazado por
+                // clave, o todavía sin registrarse) en vez del error genérico del túnel.
+                if (connection.IsupId is { Length: > 0 } && panel.IsupKeyCiphertext is not { Length: > 0 })
+                    throw new DriverException("Falta la clave ISUP del panel: edítelo y escriba la misma clave que tiene configurada en su plataforma ISUP.");
+                if (connection.IsupId is { Length: > 0 } isupId && !isup.IsOnline(isupId))
                 {
-                    var registration = await gateway.EnsureRegisteredAsync(connection, panel.GatewayDeviceId,
-                        panel.GatewayKeyCiphertext is { Length: > 0 } cipher ? credentials.Unprotect(cipher) : null,
-                        panel.GatewayProtocol, replaceIfPresent: false, name: panel.Name, ct: ct);
-                    if (registration.StableDeviceId is { Length: > 0 } stable &&
-                        !string.Equals(stable, panel.GatewayDeviceId, StringComparison.Ordinal))
-                    {
-                        // El uuid de la pasarela cambia si el equipo se vuelve a
-                        // registrar; el ID ISUP/OTAP no. Se guarda el estable.
-                        logger.LogInformation("Panel '{Name}': identificador en la receptora '{Old}' → '{New}'.",
-                            panel.Name, panel.GatewayDeviceId, stable);
-                        panel.GatewayDeviceId = stable;
-                        panel.UpdatedAt = DateTime.UtcNow;
-                        await db.SaveChangesAsync(ct);
-                        connection = connection with { DeviceId = stable };
-                    }
-                    switch (registration.Outcome)
-                    {
-                        case GatewayRegistrationOutcome.ReRegistered:
-                            await audit.LogSystemAsync("alarms", "receiver-device-added",
-                                targetType: "alarm-receiver", targetName: $"{panel.Host}:{panel.Port}",
-                                detail: $"Sincronización con la receptora: el panel '{panel.Name}' (ID {panel.GatewayDeviceId}) " +
-                                        $"no estaba registrado y se registró de nuevo (uuid {registration.DevIndex}).",
-                                origin: "sistema");
-                            logger.LogWarning("Panel '{Name}': {Message}", panel.Name, registration.Message);
-                            break;
-                        case GatewayRegistrationOutcome.NotRegistered:
-                            throw new DriverException(registration.Message ?? "El equipo no está registrado en la receptora.");
-                        case GatewayRegistrationOutcome.RegisteredOffline:
-                            gatewayMessage = registration.Message;
-                            break;
-                    }
+                    gatewayMessage = await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "panel", ct);
+                    throw new DriverException(gatewayMessage);
                 }
                 state = await driver.GetStateAsync(connection, ct);
             }
@@ -504,7 +490,7 @@ public sealed class AlarmPanelService(
                     await db.SaveChangesAsync(ct);
                     await audit.LogSystemAsync("alarms", "panel-offline",
                         targetType: "alarm-panel", targetId: panel.Id.ToString(), targetName: panel.Name,
-                        detail: $"El panel '{panel.Name}' ({panel.Host}) no responde: {message}", success: false, origin: "panel");
+                        detail: $"El panel '{panel.Name}' ({(panel.IsupDeviceId is { } isupId2 ? $"ISUP {isupId2}" : panel.Host)}) no responde: {message}", success: false, origin: "panel");
                     await hub.SendTrimmedAsync(VmsHubContract.AlarmPanelStateChanged,
                         AlarmMapper.ToDto(panel, false, message), (scope, d) => scope.Visible(d), ct);
                     workflows.Publish(Workflows.WorkflowTrigger.FromPanelStatus(panel, newStatus, message));
@@ -1008,14 +994,14 @@ public sealed class AlarmPanelService(
 public static class AlarmMapper
 {
     public static AlarmPanelDto ToDto(AlarmPanel p, bool live, string? lastError) => new(
-        p.Id, p.Name, p.DriverKey, p.Host, p.Port, p.UseHttps, p.Username, p.GatewayDeviceId,
+        p.Id, p.Name, p.DriverKey, p.Host, p.Port, p.UseHttps, p.Username, p.IsupDeviceId,
         p.Model, p.SerialNumber, p.FirmwareVersion, p.Enabled, p.Status, live,
         p.PanelTamper, p.AcLoss,
         lastError ?? p.LastError, p.LastSeenAt, p.LastStateAt, p.CreatedAt,
         p.Areas.OrderBy(a => a.Number).Select(a => new AlarmAreaDto(a.Number, a.Name, a.Enabled, a.ArmState, a.InAlarm,
             p.Zones.Count(z => z.AreaNumber == a.Number), a.ExitDelaySeconds)).ToList(),
         p.Zones.OrderBy(z => z.Number).Select(ToDto).ToList(),
-        p.GatewayKeyCiphertext is { Length: > 0 }, p.GatewayProtocol,
+        p.IsupKeyCiphertext is { Length: > 0 },
         p.LocationId, Auth.LocationPaths.Of(p.LocationId));
 
     public static AlarmZoneDto ToDto(AlarmZone z) => new(

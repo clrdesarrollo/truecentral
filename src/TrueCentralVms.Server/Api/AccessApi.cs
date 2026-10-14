@@ -9,6 +9,7 @@ using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
 using TrueCentralVms.Server.Services.Licensing;
+using TrueCentralVms.Server.Services.Isup;
 using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
@@ -32,12 +33,14 @@ public static class AccessApi
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
             return "El nombre es obligatorio (máximo 128 caracteres).";
+        if (drivers.Find(request.DriverKey) is not { } factory)
+            return $"Driver desconocido: '{request.DriverKey}'.";
+        // Por ISUP el equipo no tiene dirección ni credenciales: lo identifican su ID y su clave (se validan aparte).
+        if (factory.UsesIsup) return null;
         if (string.IsNullOrWhiteSpace(request.Host))
             return "La dirección (IP o hostname) es obligatoria.";
         if (request.Port is < 1 or > 65535)
             return "El puerto debe estar entre 1 y 65535.";
-        if (drivers.Find(request.DriverKey) is not { } factory)
-            return $"Driver desconocido: '{request.DriverKey}'.";
         // ZKTeco no tiene usuario: su credencial es la clave de comunicación,
         // que es un número (0 = el equipo no tiene ninguna).
         if (factory.AuthMode == AccessAuthMode.UserPassword && string.IsNullOrWhiteSpace(request.Username))
@@ -56,7 +59,10 @@ public static class AccessApi
         catch (Exception ex) { return (null, $"Error inesperado al comunicarse con el equipo: {ex.Message}"); }
     }
 
-    private static void ApplyProbe(AccessDevice device, AccessDeviceInfo info)
+    /// <summary>Cómo se nombra dónde está el equipo en la bitácora: su dirección, o su ID ISUP.</summary>
+    internal static string WhereOf(AccessDevice device) => device.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : $"{device.Host}:{device.Port}";
+
+    internal static void ApplyProbe(AccessDevice device, AccessDeviceInfo info)
     {
         device.Kind = info.Kind;
         device.Model = info.Model;
@@ -85,7 +91,7 @@ public static class AccessApi
     /// equipo dejó de administrar (cambio de firmware o de modelo en la misma
     /// dirección). Devuelve un resumen para la bitácora.
     /// </summary>
-    private static string SyncDoors(AccessDevice device, IReadOnlyList<AccessDoorInfo> doors)
+    internal static string SyncDoors(AccessDevice device, IReadOnlyList<AccessDoorInfo> doors)
     {
         int added = 0, renamed = 0;
         foreach (var door in doors)
@@ -118,7 +124,7 @@ public static class AccessApi
     }
 
     /// <summary>Puertas habilitadas de los demás equipos: lo que ya consume el cupo de la licencia.</summary>
-    private static Task<int> DoorsInUseAsync(VmsDbContext db, int? exceptDeviceId, CancellationToken ct) =>
+    internal static Task<int> DoorsInUseAsync(VmsDbContext db, int? exceptDeviceId, CancellationToken ct) =>
         db.AccessDoors.CountAsync(d => d.Enabled && d.AccessDevice!.Enabled &&
                                        (exceptDeviceId == null || d.AccessDeviceId != exceptDeviceId), ct);
 
@@ -132,7 +138,7 @@ public static class AccessApi
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             return Results.Ok(drivers.All.Select(f =>
                 new AccessDriverDto(f.DriverKey, f.DisplayName, f.DefaultPort, f.DefaultHttps, f.AuthMode, f.Hint,
-                    f.SupportsPersonSync)));
+                    f.SupportsPersonSync, f.UsesIsup)));
         });
 
         // ------------------------------------------------------------------
@@ -181,21 +187,33 @@ public static class AccessApi
 
         app.MapPost("/api/access/devices", async (HttpContext ctx, AccessDeviceWriteDto request, VmsDbContext db,
             AccessDriverRegistry drivers, LicenseService license, CredentialProtector protector, IHubContext<VmsHub> hub,
-            AccessControlService service, AuditService audit, CancellationToken ct) =>
+            AccessControlService service, AuditService audit, IsupService isup, IsupHostManager isupHost, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
+            var factory = drivers.Find(request.DriverKey)!;
+            bool viaIsup = factory.UsesIsup;
+            string? isupId = viaIsup ? request.IsupDeviceId?.Trim() : null;
+            string? isupKey = viaIsup ? request.IsupKey : null;
+            if (viaIsup)
+            {
+                if (IsupEquipmentRules.Validate(isupId, isupKey, keyStored: false) is { } isupError) return Error(isupError);
+                if (await db.AccessDevices.AnyAsync(d => d.IsupDeviceId == isupId, ct))
+                    return Error($"Ya existe un equipo de control de acceso con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId!, isupKey!, IsupEquipmentRules.Access, null, ct) is { } conflict)
+                    return Error(conflict, StatusCodes.Status409Conflict);
+            }
             // Con clave de comunicación, vacío es un valor válido: significa 0.
-            if (drivers.Find(request.DriverKey)!.AuthMode == AccessAuthMode.UserPassword &&
-                string.IsNullOrEmpty(request.Password))
+            else if (factory.AuthMode == AccessAuthMode.UserPassword && string.IsNullOrEmpty(request.Password))
                 return Error("La contraseña del equipo es obligatoria.");
             // El módulo se verifica antes de tocar el equipo; el cupo de puertas,
             // después del sondeo (recién ahí se sabe cuántas administra).
             if (license.Deny(LicenseFeatures.ModuleAccess, null, 0) is { } moduleDenied)
                 return await license.DenyAsync(ctx, moduleDenied, "access-device", request.Name?.Trim());
 
-            string host = request.Host.Trim();
-            if (await db.AccessDevices.AnyAsync(d => d.Host == host && d.Port == request.Port, ct))
+            string host = viaIsup ? "" : request.Host.Trim();
+            int port = viaIsup ? 0 : request.Port;
+            if (!viaIsup && await db.AccessDevices.AnyAsync(d => d.IsupDeviceId == null && d.Host == host && d.Port == port, ct))
                 return Error("Ya existe un equipo de control de acceso con esa dirección y puerto.", StatusCodes.Status409Conflict);
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
@@ -203,45 +221,65 @@ public static class AccessApi
             // Sin clave = cadena vacía, no null: los equipos con clave de
             // comunicación (ZKTeco) se dan de alta sin contraseña y "vacío"
             // significa 0 para ellos.
-            var conn = new AccessConnectionInfo(host, request.Port, request.UseHttps, request.Username,
-                request.Password ?? "");
-            var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
-            if (info is null)
+            var conn = viaIsup
+                ? new AccessConnectionInfo("", 0, false, "", "", isupId)
+                : new AccessConnectionInfo(host, port, request.UseHttps, request.Username, request.Password ?? "");
+            // Por IP el equipo tiene que contestar para darlo de alta. Por ISUP se conecta recién cuando el VMS lo conoce: se guarda
+            // igual y, en su primer contacto, el servicio lee sus puertas y capacidades.
+            AccessDeviceInfo? info = null;
+            string? waiting = null;
+            if (!viaIsup || isup.IsOnline(isupId!))
             {
-                await audit.LogAsync(ctx, "access", "device-created", targetType: "access-device", targetName: request.Name.Trim(),
-                    detail: $"Alta de equipo de control de acceso rechazada por el equipo {host}:{request.Port}: {probeError}",
-                    success: false);
-                return Error(probeError!);
+                (info, var probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+                if (info is null)
+                {
+                    await audit.LogAsync(ctx, "access", "device-created", targetType: "access-device", targetName: request.Name.Trim(),
+                        detail: $"Alta de equipo de control de acceso rechazada por el equipo {(viaIsup ? $"ISUP {isupId}" : $"{host}:{port}")}: {probeError}",
+                        success: false);
+                    return Error(probeError!);
+                }
+                if (request.Enabled &&
+                    license.Deny(LicenseFeatures.ModuleAccess, LicenseFeatures.AccessDoors,
+                        await DoorsInUseAsync(db, null, ct), info.Doors.Count) is { } denied)
+                    return await license.DenyAsync(ctx, denied, "access-device", request.Name?.Trim());
             }
-            if (request.Enabled &&
-                license.Deny(LicenseFeatures.ModuleAccess, LicenseFeatures.AccessDoors,
-                    await DoorsInUseAsync(db, null, ct), info.Doors.Count) is { } denied)
-                return await license.DenyAsync(ctx, denied, "access-device", request.Name?.Trim());
+            else waiting = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId!, "equipo", ct);
 
             var device = new AccessDevice
             {
                 Name = request.Name.Trim(),
                 DriverKey = request.DriverKey,
                 Host = host,
-                Port = request.Port,
-                UseHttps = request.UseHttps,
-                Username = request.Username,
-                PasswordCiphertext = protector.Protect(request.Password),
+                Port = port,
+                UseHttps = !viaIsup && request.UseHttps,
+                Username = viaIsup ? "" : request.Username,
+                PasswordCiphertext = protector.Protect(viaIsup ? "" : request.Password ?? ""),
+                IsupDeviceId = isupId,
+                IsupKeyCiphertext = isupKey is null ? null : protector.Protect(isupKey),
                 LocationId = locationId,
                 Enabled = request.Enabled,
             };
-            ApplyProbe(device, info);
-            SyncDoors(device, info.Doors);
+            if (info is not null)
+            {
+                ApplyProbe(device, info);
+                SyncDoors(device, info.Doors);
+            }
+            else
+            {
+                device.Status = AccessDeviceStatus.Offline;
+                device.LastError = waiting;
+            }
             db.AccessDevices.Add(device);
             await db.SaveChangesAsync(ct);
+            if (viaIsup) isup.InvalidateDirectory();
 
             await audit.LogAsync(ctx, "access", "device-created",
                 targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
-                detail: $"Agregó el equipo de control de acceso '{device.Name}' ({device.DriverKey}, {device.Host}:{device.Port}, " +
-                        $"{device.Model ?? "modelo desconocido"}" +
+                detail: $"Agregó el equipo de control de acceso '{device.Name}' ({device.DriverKey}, {WhereOf(device)}, " +
+                        (info is null ? "a la espera de que se conecte por ISUP" : $"{device.Model ?? "modelo desconocido"}") +
                         (device.LocationId is null ? "" : $", en {EquipmentLocation.Describe(device.LocationId)}") +
                         $", {device.Doors.Count} puerta(s)).",
-                data: new { device.Host, device.Port, device.UseHttps, device.DriverKey, device.Model, device.SerialNumber, device.LocationId });
+                data: new { device.Host, device.Port, device.UseHttps, device.DriverKey, device.IsupDeviceId, device.Model, device.SerialNumber, device.LocationId });
             EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
@@ -250,32 +288,47 @@ public static class AccessApi
 
         app.MapPut("/api/access/devices/{id:int}", async (HttpContext ctx, int id, AccessDeviceWriteDto request, VmsDbContext db,
             AccessDriverRegistry drivers, LicenseService license, CredentialProtector protector, IHubContext<VmsHub> hub,
-            AccessControlService service, AuditService audit, CancellationToken ct) =>
+            AccessControlService service, AuditService audit, IsupService isup, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
-
-            string host = request.Host.Trim();
-            if (await db.AccessDevices.AnyAsync(d => d.Host == host && d.Port == request.Port && d.Id != id, ct))
+            bool viaIsup = drivers.Find(request.DriverKey)!.UsesIsup;
+            string? isupId = viaIsup ? request.IsupDeviceId?.Trim() : null;
+            string? isupKey = viaIsup && !string.IsNullOrEmpty(request.IsupKey) ? request.IsupKey : null;
+            string host = viaIsup ? "" : request.Host.Trim();
+            int port = viaIsup ? 0 : request.Port;
+            if (viaIsup)
+            {
+                bool keyStored = device.IsupKeyCiphertext is { Length: > 0 } && device.IsupDeviceId == isupId;
+                if (IsupEquipmentRules.Validate(isupId, isupKey, keyStored) is { } isupError) return Error(isupError);
+                if (await db.AccessDevices.AnyAsync(d => d.Id != id && d.IsupDeviceId == isupId, ct))
+                    return Error($"Ya existe otro equipo de control de acceso con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
+                string effectiveKey = isupKey ?? protector.Unprotect(device.IsupKeyCiphertext!);
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId!, effectiveKey, IsupEquipmentRules.Access, id, ct) is { } conflict)
+                    return Error(conflict, StatusCodes.Status409Conflict);
+            }
+            else if (await db.AccessDevices.AnyAsync(d => d.IsupDeviceId == null && d.Host == host && d.Port == port && d.Id != id, ct))
                 return Error("Ya existe otro equipo de control de acceso con esa dirección y puerto.", StatusCodes.Status409Conflict);
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, device.LocationId, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
             int? previousLocation = device.LocationId;
 
-            string password = string.IsNullOrEmpty(request.Password)
-                ? protector.Unprotect(device.PasswordCiphertext)
-                : request.Password;
+            string password = viaIsup ? ""
+                : string.IsNullOrEmpty(request.Password) ? protector.Unprotect(device.PasswordCiphertext) : request.Password;
+            string username = viaIsup ? "" : request.Username;
+            bool isupChanged = device.IsupDeviceId != isupId || isupKey is not null;
 
-            // Si cambió cómo se llega al equipo, hay que revalidar contra él.
-            bool reachChanged = device.Host != host || device.Port != request.Port || device.UseHttps != request.UseHttps ||
-                                device.Username != request.Username || !string.IsNullOrEmpty(request.Password) ||
-                                device.DriverKey != request.DriverKey;
+            // Si cambió cómo se llega al equipo, hay que revalidar contra él. Con ID o clave ISUP nuevos el equipo tiene que
+            // volver a registrarse con ellos: se guarda y se valida en su próximo contacto.
+            bool reachChanged = device.Host != host || device.Port != port || device.UseHttps != (!viaIsup && request.UseHttps) ||
+                                device.Username != username || (!viaIsup && !string.IsNullOrEmpty(request.Password)) ||
+                                device.DriverKey != request.DriverKey || isupChanged;
             AccessDeviceInfo? info = null;
-            if (reachChanged)
+            if (reachChanged && (!viaIsup || (!isupChanged && isup.IsOnline(isupId!))))
             {
-                var conn = new AccessConnectionInfo(host, request.Port, request.UseHttps, request.Username, password);
+                var conn = new AccessConnectionInfo(host, port, !viaIsup && request.UseHttps, username, password, isupId);
                 string? probeError;
                 (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
                 if (info is null) return Error(probeError!);
@@ -287,10 +340,13 @@ public static class AccessApi
 
             var changes = new List<string>();
             if (device.Name != request.Name.Trim()) changes.Add($"nombre '{device.Name}' → '{request.Name.Trim()}'");
-            if (device.Host != host || device.Port != request.Port) changes.Add($"dirección {device.Host}:{device.Port} → {host}:{request.Port}");
-            if (device.UseHttps != request.UseHttps) changes.Add(request.UseHttps ? "HTTPS activado" : "HTTPS desactivado");
-            if (device.Username != request.Username) changes.Add($"usuario '{device.Username}' → '{request.Username}'");
-            if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
+            if (device.DriverKey != request.DriverKey) changes.Add($"conexión {device.DriverKey} → {request.DriverKey}");
+            if (!viaIsup && (device.Host != host || device.Port != port)) changes.Add($"dirección {WhereOf(device)} → {host}:{port}");
+            if (!viaIsup && device.UseHttps != request.UseHttps) changes.Add(request.UseHttps ? "HTTPS activado" : "HTTPS desactivado");
+            if (!viaIsup && device.Username != username) changes.Add($"usuario '{device.Username}' → '{username}'");
+            if (!viaIsup && !string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
+            if (device.IsupDeviceId != isupId) changes.Add($"ID ISUP '{device.IsupDeviceId}' → '{isupId}'");
+            if (isupKey is not null) changes.Add("clave ISUP cambiada");
             if (locationId != previousLocation)
                 changes.Add(EquipmentLocation.Change(previousLocation, locationId));
             if (device.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
@@ -301,10 +357,13 @@ public static class AccessApi
             device.Name = request.Name.Trim();
             device.DriverKey = request.DriverKey;
             device.Host = host;
-            device.Port = request.Port;
-            device.UseHttps = request.UseHttps;
-            device.Username = request.Username;
+            device.Port = port;
+            device.UseHttps = !viaIsup && request.UseHttps;
+            device.Username = username;
             device.PasswordCiphertext = protector.Protect(password);
+            device.IsupDeviceId = isupId;
+            if (!viaIsup) device.IsupKeyCiphertext = null;
+            else if (isupKey is not null) device.IsupKeyCiphertext = protector.Protect(isupKey);
             device.Enabled = request.Enabled;
             device.UpdatedAt = DateTime.UtcNow;
             // Las puertas que estaban con el equipo lo siguen; las ubicadas aparte se quedan.
@@ -317,6 +376,7 @@ public static class AccessApi
                 if (doorChanges != "sin cambios en las puertas") changes.Add(doorChanges);
             }
             await db.SaveChangesAsync(ct);
+            if (isupChanged) isup.InvalidateDirectory();
 
             await audit.LogAsync(ctx, "access", "device-updated",
                 targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
@@ -333,7 +393,7 @@ public static class AccessApi
         });
 
         app.MapDelete("/api/access/devices/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, IHubContext<VmsHub> hub,
-            AccessControlService service, AuditService audit, CancellationToken ct) =>
+            AccessControlService service, AuditService audit, IsupService isup, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -342,9 +402,10 @@ public static class AccessApi
             int doors = device.Doors.Count;
             db.AccessDevices.Remove(device);   // las puertas se van en cascada
             await db.SaveChangesAsync(ct);
+            if (device.IsupDeviceId is not null) isup.InvalidateDirectory();
             await audit.LogAsync(ctx, "access", "device-deleted",
                 targetType: "access-device", targetId: id.ToString(), targetName: device.Name,
-                detail: $"Eliminó el equipo de control de acceso '{device.Name}' ({device.Host}:{device.Port}) y sus {doors} puerta(s).");
+                detail: $"Eliminó el equipo de control de acceso '{device.Name}' ({WhereOf(device)}) y sus {doors} puerta(s).");
             EquipmentLocation.Changed(ctx);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
             return Results.Ok();
@@ -353,13 +414,18 @@ public static class AccessApi
         // Volver a sondear el equipo: identificación, capacidades y puertas.
         app.MapPost("/api/access/devices/{id:int}/revalidate", async (HttpContext ctx, int id, VmsDbContext db,
             AccessDriverRegistry drivers, IHubContext<VmsHub> hub, AccessControlService service, AuditService audit,
-            CancellationToken ct) =>
+            IsupService isup, IsupHostManager isupHost, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
 
-            var (info, probeError) = await ProbeAsync(drivers, device.DriverKey, service.ConnectionOf(device), ct);
+            AccessDeviceInfo? info = null;
+            string? probeError;
+            if (device.IsupDeviceId is { } isupId && !isup.IsOnline(isupId))
+                probeError = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct);
+            else
+                (info, probeError) = await ProbeAsync(drivers, device.DriverKey, service.ConnectionOf(device), ct);
             if (info is null)
             {
                 device.Status = AccessDeviceStatus.Offline;
@@ -367,7 +433,7 @@ public static class AccessApi
                 await db.SaveChangesAsync(ct);
                 await audit.LogAsync(ctx, "access", "device-revalidated",
                     targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
-                    detail: $"Revalidación del equipo '{device.Name}' ({device.Host}) fallida: {probeError}", success: false);
+                    detail: $"Revalidación del equipo '{device.Name}' ({WhereOf(device)}) fallida: {probeError}", success: false);
                 return Error(probeError!, StatusCodes.Status502BadGateway);
             }
 
@@ -378,7 +444,7 @@ public static class AccessApi
             EquipmentLocation.Changed(ctx);
             await audit.LogAsync(ctx, "access", "device-revalidated",
                 targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
-                detail: $"Revalidó el equipo de control de acceso '{device.Name}' ({device.Host}): " +
+                detail: $"Revalidó el equipo de control de acceso '{device.Name}' ({WhereOf(device)}): " +
                         $"{device.Model ?? "modelo desconocido"}, firmware {device.FirmwareVersion ?? "desconocido"}, {doorChanges}.");
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
             return Results.Ok(service.ToDto(device));
@@ -386,25 +452,45 @@ public static class AccessApi
 
         // Probar conexión (sin persistir). Con ?deviceId= reutiliza la clave guardada.
         app.MapPost("/api/access/probe", async (HttpContext ctx, AccessDeviceWriteDto request, VmsDbContext db,
-            AccessDriverRegistry drivers, CredentialProtector protector, AuditService audit, int? deviceId, CancellationToken ct) =>
+            AccessDriverRegistry drivers, CredentialProtector protector, AuditService audit, IsupService isup, IsupHostManager isupHost,
+            int? deviceId, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
-            string? password = request.Password;
-            if (string.IsNullOrEmpty(password) && deviceId is int existingId &&
-                await db.AccessDevices.FindAsync([existingId], ct) is { } existing)
-                password = protector.Unprotect(existing.PasswordCiphertext);
-            if (string.IsNullOrEmpty(password) && drivers.Find(request.DriverKey)!.AuthMode == AccessAuthMode.UserPassword)
-                return Error("La contraseña del equipo es obligatoria.");
-            password ??= "";
-
-            string host = request.Host.Trim();
-            var conn = new AccessConnectionInfo(host, request.Port, request.UseHttps, request.Username, password);
+            AccessConnectionInfo conn;
+            string target;
+            if (drivers.Find(request.DriverKey)!.UsesIsup)
+            {
+                string? isupId = request.IsupDeviceId?.Trim();
+                if (Core.Isup.IsupGateway.ValidateDeviceId(isupId) is { } idError) return Error(idError);
+                target = $"ISUP {isupId}";
+                if (!isup.IsOnline(isupId!))
+                {
+                    var why = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId!, "equipo", ct);
+                    await audit.LogAsync(ctx, "access", "device-probed", targetType: "access-device", targetName: request.Name.Trim(),
+                        detail: $"Probó la conexión con el equipo de control de acceso {target}: {why}", success: false);
+                    return Results.Ok(new AccessProbeResultDto(false, why, null, null, null, null,
+                        AccessDeviceKind.Unknown, 0, false, false, false, false, false, null, null, []));
+                }
+                conn = new AccessConnectionInfo("", 0, false, "", "", isupId);
+            }
+            else
+            {
+                string? password = request.Password;
+                if (string.IsNullOrEmpty(password) && deviceId is int existingId &&
+                    await db.AccessDevices.FindAsync([existingId], ct) is { } existing)
+                    password = protector.Unprotect(existing.PasswordCiphertext);
+                if (string.IsNullOrEmpty(password) && drivers.Find(request.DriverKey)!.AuthMode == AccessAuthMode.UserPassword)
+                    return Error("La contraseña del equipo es obligatoria.");
+                string host = request.Host.Trim();
+                conn = new AccessConnectionInfo(host, request.Port, request.UseHttps, request.Username, password ?? "");
+                target = $"{host}:{request.Port}";
+            }
             var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             await audit.LogAsync(ctx, "access", "device-probed", targetType: "access-device", targetName: request.Name.Trim(),
                 detail: info is null
-                    ? $"Probó la conexión con el equipo de control de acceso {host}:{request.Port}: {probeError}"
-                    : $"Probó la conexión con el equipo de control de acceso {host}:{request.Port}: correcta " +
+                    ? $"Probó la conexión con el equipo de control de acceso {target}: {probeError}"
+                    : $"Probó la conexión con el equipo de control de acceso {target}: correcta " +
                       $"({info.Model}, {info.Doors.Count} puerta(s)).",
                 success: info is not null);
             if (info is null)
