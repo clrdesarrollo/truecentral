@@ -1517,12 +1517,18 @@ hacer un ISUP propio basado en `..\isuptest` que cubra todos los tipos de equipo
   (`-fflags +genpts+nobuffer -flags low_delay -probesize 400000 -analyzeduration 1000000 -f mpeg`, los de isuptest; video
   copiado, audio a AAC). La reproducción va por ruta dinámica con el mismo relé; la exportación lee el PS sin dosificar
   (`pace=0`). A otra velocidad que 1× se rechaza. El muro no puede tomar canales ISUP (el decodificador no llega al equipo).
-- **Validado** (servidor aislado `%LOCALAPPDATA%\Temp\claude\isp1`, puerto 6741): terminales DS-K1T321MFWX y DS-K1T323MBWX-QRE1
-  por ISUP 5.0 (sondeo, puertas, capacidades, alta al primer contacto); el DS-K1T323 dado de alta también como equipo de video:
-  sondeo, vivo por MediaMTX (H.264 960×540, 4-5 s en frío) y foto desde el video.
-- **Pendiente de validar con equipos**: AX PRO por ISUP (su clave ISUP ya no es la anotada), cámaras LPR de isuptest (dejaron de
-  reintentar tras los rechazos), eventos físicos (pasar una tarjeta, una patente), llamadas de un frente por ISUP (formato real
-  del evento) y la voz de parlantes y frentes.
+- **Validado** (servidor aislado `%LOCALAPPDATA%\Temp\claude\isp1`, puerto 6741, con la IP pública y los puertos que el router
+  reenvía, los mismos de isuptest): terminales DS-K1T321MFWX y DS-K1T323MBWX-QRE1 por ISUP 5.0 (sondeo, puertas, capacidades,
+  alta al primer contacto); el DS-K1T323 también como equipo de video (vivo H.264 960×540 en 4-5 s, foto desde el video); un
+  **DVR móvil por 4G con ISUP 2.0/4.0** (fw V4.1.2, sin clave ni ISAPI: datos y 4 canales por el SDK, foto 3 s, vivo 352×288 en
+  5,5 s); dos **cámaras LPR iDS-2CD7A46G0/P-IZHSY remotas** (sondeo al primer contacto, foto ISAPI 0,7 s, vivo 3,7 s y
+  **lecturas de patentes reales** con escena, recorte, tipo/color de vehículo, sentido y recuadro). Sin tarjeta, la cámara
+  contesta `invalidMemoryCardOrNAS` a la búsqueda de grabaciones y el VMS lo dice así.
+- **Gotcha de red**: un equipo por 4G vuelve a conectarse al servidor para entregar el video; si `Isup:PublicAddress` es una IP
+  privada el DVR rechaza el video con error 29. Con la IP pública y los puertos reenviados, funciona.
+- **Pendiente de validar con equipos**: AX PRO por ISUP (su clave ISUP ya no es la anotada), eventos físicos de acceso (pasar
+  una tarjeta), reproducción de un grabador 5.0, llamadas de un frente por ISUP (formato real del evento) y la voz de parlantes y
+  frentes.
 
 ## Pendientes (al 2026-10-07)
 

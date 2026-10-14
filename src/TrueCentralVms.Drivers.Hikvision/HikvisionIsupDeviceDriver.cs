@@ -266,12 +266,21 @@ public sealed class HikvisionIsupDeviceDriver : IDeviceDriver
                 <metadataList><metadataDescriptor>//recordType.meta.std-cgi.com</metadataDescriptor></metadataList>
                 </CMSearchDescription>
                 """;
-            var root = await XmlAsync(id, "/ISAPI/ContentMgmt/search", ct, "POST", body, Slow);
-            if (root is null)
+            var bytes = await IsapiAsync(id, "POST", "/ISAPI/ContentMgmt/search", body, Slow, ct);
+            XElement? root = null;
+            try { if (bytes is { Length: > 0 }) root = XDocument.Parse(HikvisionIsapiClient.DecodeBody(bytes)).Root; }
+            catch (System.Xml.XmlException) { }
+            if (root is null || root.Name.LocalName == "ResponseStatus")
             {
-                if (guard == 0)
-                    throw new DriverException("El equipo no respondió la búsqueda de grabaciones (ISAPI ContentMgmt/search).");
-                break;
+                if (guard > 0) break;
+                // El motivo que da el equipo (verificado con una cámara LPR sin tarjeta: invalidMemoryCardOrNAS).
+                throw new DriverException(Text(root, "subStatusCode") switch
+                {
+                    null when root is null => "El equipo no respondió la búsqueda de grabaciones (ISAPI ContentMgmt/search).",
+                    "invalidMemoryCardOrNAS" or "noHDD" or "hdNotExist" => "El equipo no tiene tarjeta de memoria, disco ni NAS donde grabar.",
+                    "notSupport" => "El equipo no permite buscar grabaciones por ISAPI.",
+                    var sub => $"El equipo rechazó la búsqueda de grabaciones ({sub ?? Text(root, "statusString") ?? "sin motivo"}).",
+                });
             }
             int count = 0;
             foreach (var item in All(root, "searchMatchItem"))

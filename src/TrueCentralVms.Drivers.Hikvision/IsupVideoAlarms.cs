@@ -112,7 +112,8 @@ internal static class IsupVideoAlarms
             VehicleLengthCm: null,
             Direction: Lookup(f["direction"], Directions),
             Lane: f.Int("laneNo") is int lane and > 0 ? lane : null,
-            DetectionMethod: Known(f["detectionType"] ?? f["picRecogMode"]),
+            // picRecogMode y similares son códigos sin catálogo publicado: solo se muestra un texto.
+            DetectionMethod: Known(f["detectionType"]) is { } method && !int.TryParse(method, out _) ? method : null,
             Violation: Known(f["illegalInfo"] ?? f["violationType"]),
             PlateX: rect.X, PlateY: rect.Y, PlateWidth: rect.W, PlateHeight: rect.H,
             SceneImage: scene,
