@@ -24,17 +24,18 @@ puertos. Si entre los equipos, los puestos y el servidor hay otro firewall
   ..if tiene-modulo("alarms") {(
     [5091], [TCP], [Centro receptor de alarmas: reportes de paneles
       configurados con SIA DC-09.],
-    [7091, 7660–7667, 8661], [TCP], [Registro y eventos de los paneles de alarma
-      Hikvision que reportan a la receptora instalada junto al servidor.],
   )},
+  [7660–7667], [TCP \ UDP 7660 y 7663], [Conexión ISUP: registro, eventos, video y
+    voz de los equipos Hikvision que se conectan al servidor (paneles de
+    alarma, equipos de acceso, cámaras y grabadores, parlantes y frentes de
+    citofonía detrás de un router o por 4G).],
   [5092], [TCP], [Conexión de los paneles de cerco eléctrico.],
   [5093], [TCP], [Descarga de firmware de los paneles de cerco eléctrico.],
 )
 
 El servidor también usa puertos internos que no deben abrirse hacia la red:
-la base de datos (25490), el control del servidor de video (9911 y 9914)
-#modulo("alarms")[y la página de administración de la receptora de alarmas
-(8091, que el instalador bloquea)].
+la base de datos (25490), el control del servidor de video (9911 y 9914) y el
+del servicio ISUP (7699).
 
 #modulo("videowall")[
   #nota[Para proyectar una pantalla o un video al muro, el puesto que proyecta
@@ -126,6 +127,27 @@ límite.
   [`Streaming` › `WebRtcAdditionalHosts`], [vacío], [Otras IP o nombres del
     servidor que se ofrecen a los navegadores (varias redes o NAT), separados
     por comas.],
+)
+
+=== Conexión ISUP
+
+#table(
+  columns: (auto, auto, 1fr),
+  table.header[Ajuste][Por omisión][Qué controla],
+  [`Isup` › `Enabled`], [true], [Servicio ISUP del servidor: con `false` ningún
+    equipo puede conectarse por ISUP.],
+  [`Isup` › `PublicAddress`], [vacío], [IP o nombre con que los equipos llegan
+    al servidor, que se les anuncia al conectarse para las alarmas, el video y
+    la voz. Fíjelo cuando el servidor está detrás de un router (la IP pública o
+    el nombre DNS). Vacío = la IP local del servidor.],
+  [`Isup` › `RegistrationPorts`], [`[7660, 7661]`], [Puertos de registro. El
+    7661 es el que usaba la receptora de Hikvision de versiones anteriores:
+    los paneles que reportaban a ella se conectan ahí sin tocarlos.],
+  [`Isup` › `AlarmPort` … `PictureServerPort`], [7662 a 7667], [Alarmas (7662;
+    7663 para equipos ISUP 2.0/4.0), video en vivo (7664), reproducción
+    (7665), voz (7666) e imágenes de los eventos (7667).],
+  [`Isup` › `CommandTimeoutMs`], [15000], [Espera de cada orden a un equipo,
+    en milisegundos (los equipos por 4G tardan más).],
 )
 
 #modulo("alarms")[
