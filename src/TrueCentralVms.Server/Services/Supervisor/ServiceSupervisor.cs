@@ -121,6 +121,9 @@ public sealed class ServiceSupervisor : BackgroundService
         yield return new HostedServiceAdapter("speakers", "Parlantes IP",
             "Sondeo de estado, reproducción sincronizada y voz en vivo hacia los altavoces de red.",
             sp.GetRequiredService<SpeakerService>());
+        yield return new HostedServiceAdapter("io-modules", "Módulos de E/S",
+            "Conexión con los módulos de entradas y salidas, lectura de sus entradas y órdenes a sus relés.",
+            sp.GetRequiredService<IoModuleService>());
         yield return new HostedServiceAdapter("intercom", "Citofonía",
             "Enlace de llamadas y sondeo de cada frente de videoportero; conversaciones de los operadores.",
             sp.GetRequiredService<IntercomService>());

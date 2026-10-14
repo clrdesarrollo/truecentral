@@ -1792,6 +1792,116 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("IntercomCalls");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.IoModule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DriverKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ModelKey")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("PollIntervalMs")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ReportedModel")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("Host", "Port")
+                        .IsUnique();
+
+                    b.ToTable("IoModules");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.IoPoint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Inverted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("IoModuleId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IoModuleId", "Kind", "Number")
+                        .IsUnique();
+
+                    b.ToTable("IoPoints");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveView", b =>
                 {
                     b.Property<int>("Id")
@@ -2092,6 +2202,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("IntercomId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("IoModuleId")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("SpeakerId")
                         .HasColumnType("integer");
 
@@ -2124,13 +2237,17 @@ namespace TrueCentralVms.Server.Migrations
                         .IsUnique()
                         .HasFilter("\"IntercomId\" IS NOT NULL");
 
+                    b.HasIndex("IoModuleId")
+                        .IsUnique()
+                        .HasFilter("\"IoModuleId\" IS NOT NULL");
+
                     b.HasIndex("SpeakerId")
                         .IsUnique()
                         .HasFilter("\"SpeakerId\" IS NOT NULL");
 
                     b.ToTable("ResourceProfiles", t =>
                         {
-                            t.HasCheckConstraint("CK_ResourceProfiles_OneResource", "num_nonnulls(\"ChannelId\", \"AccessDoorId\", \"AlarmAreaId\", \"AlarmZoneId\", \"CercoPanelId\", \"SpeakerId\", \"IntercomId\") = 1");
+                            t.HasCheckConstraint("CK_ResourceProfiles_OneResource", "num_nonnulls(\"ChannelId\", \"AccessDoorId\", \"AlarmAreaId\", \"AlarmZoneId\", \"CercoPanelId\", \"SpeakerId\", \"IntercomId\", \"IoModuleId\") = 1");
                         });
                 });
 
@@ -3356,6 +3473,25 @@ namespace TrueCentralVms.Server.Migrations
                     b.Navigation("Channel");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.IoModule", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.IoPoint", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.IoModule", "IoModule")
+                        .WithMany("Points")
+                        .HasForeignKey("IoModuleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("IoModule");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveView", b =>
                 {
                     b.HasOne("TrueCentralVms.Server.Data.Entities.User", "OwnerUser")
@@ -3447,6 +3583,11 @@ namespace TrueCentralVms.Server.Migrations
                     b.HasOne("TrueCentralVms.Server.Data.Entities.Intercom", null)
                         .WithMany()
                         .HasForeignKey("IntercomId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.IoModule", null)
+                        .WithMany()
+                        .HasForeignKey("IoModuleId")
                         .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("TrueCentralVms.Server.Data.Entities.Speaker", null)
@@ -3714,6 +3855,11 @@ namespace TrueCentralVms.Server.Migrations
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Device", b =>
                 {
                     b.Navigation("Channels");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.IoModule", b =>
+                {
+                    b.Navigation("Points");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveView", b =>

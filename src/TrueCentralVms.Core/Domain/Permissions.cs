@@ -32,6 +32,7 @@ public static class Permissions
     public const string AnprView = "anpr.view";
     public const string AnprDelete = "anpr.delete";
     public const string SpeakersPlay = "speakers.play";
+    public const string IoOperate = "io.operate";
     public const string IntercomAnswer = "intercom.answer";
 
     // Personas
@@ -44,6 +45,7 @@ public static class Permissions
     public const string AlarmsConfigure = "alarms.configure";
     public const string CercoConfigure = "cerco.configure";
     public const string SpeakersConfigure = "speakers.configure";
+    public const string IoConfigure = "io.configure";
     public const string SoundsManage = "sounds.manage";
     public const string IntercomConfigure = "intercom.configure";
     public const string ResourcesManage = "resources.manage";
@@ -111,6 +113,8 @@ public static class Permissions
             "Eliminar lecturas de patentes guardadas.", [AnprView]),
         new(SpeakersPlay, "Monitoreo y operación", "Usar parlantes",
             "Reproducir audios, hablar y ajustar el volumen de los parlantes IP.", []),
+        new(IoOperate, "Monitoreo y operación", "Operar relés",
+            "Ver las entradas y salidas de los módulos de E/S y activar sus relés a mano (barreras, portones, balizas).", []),
         new(IntercomAnswer, "Monitoreo y operación", "Atender citofonía",
             "Contestar, rechazar y cortar llamadas, y abrir la puerta del frente.", []),
 
@@ -129,6 +133,8 @@ public static class Permissions
             "Agregar y configurar paneles de cerco, sus controles remotos y su firmware.", []),
         new(SpeakersConfigure, "Configuración", "Parlantes IP",
             "Agregar y configurar parlantes IP y su biblioteca de audios.", []),
+        new(IoConfigure, "Configuración", "Módulos de E/S",
+            "Agregar y configurar módulos de entradas y salidas, y nombrar sus entradas y relés.", []),
         new(SoundsManage, "Configuración", "Biblioteca de sonidos",
             "Subir, ajustar y borrar los sonidos que usan las automatizaciones.", []),
         new(IntercomConfigure, "Configuración", "Citofonía",
@@ -188,7 +194,7 @@ public static class Permissions
     [
         LiveView, LivePtz, LiveViewsManage, PlaybackView, PlaybackExport, WallOperate, WallLayouts,
         EventsAttend, LocationsCommand, AlarmsMonitor, AlarmsOperate, CercoMonitor, CercoOperate,
-        AccessMonitor, AccessDoors, AccessRecordsExport, AnprView, SpeakersPlay, IntercomAnswer,
+        AccessMonitor, AccessDoors, AccessRecordsExport, AnprView, SpeakersPlay, IntercomAnswer, IoOperate,
         PersonsView, WorkflowsView, MaintenanceView,
     ];
 
@@ -200,7 +206,7 @@ public static class Permissions
         new("guard", "Guardia",
             "Mira el video en vivo, atiende alertas y citofonía, y abre puertas.",
             [LiveView, LivePtz, EventsAttend, AlarmsMonitor, CercoMonitor, AccessMonitor, AccessDoors,
-             AnprView, SpeakersPlay, IntercomAnswer]),
+             AnprView, SpeakersPlay, IntercomAnswer, IoOperate]),
         new("monitoring", "Operador de central",
             "Opera todo lo que monitorea: alarmas, cercos, puertas, muro y órdenes por ubicación.",
             OperatorDefaults),
@@ -214,7 +220,7 @@ public static class Permissions
         new("technician", "Técnico",
             "Instala y configura equipos y su mantenimiento; no administra personas ni usuarios.",
             [LiveView, LivePtz, PlaybackView, DevicesManage, AccessConfigure, AlarmsConfigure, CercoConfigure,
-             SpeakersConfigure, IntercomConfigure, ResourcesManage, MaintenanceView, MaintenanceManage,
+             SpeakersConfigure, IntercomConfigure, IoConfigure, ResourcesManage, MaintenanceView, MaintenanceManage,
              AlarmsMonitor, CercoMonitor, AccessMonitor, SessionsManage]),
         new("auditor", "Auditor",
             "Solo consulta: bitácora, registros y grabaciones, sin operar nada.",

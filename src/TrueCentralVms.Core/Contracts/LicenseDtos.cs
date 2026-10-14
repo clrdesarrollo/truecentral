@@ -49,6 +49,10 @@ public static class LicenseFeatures
     public const string ModuleIntercom = "module_intercom";
     public const string IntercomDevices = "intercom_devices";
 
+    // Entradas y salidas (módulos de E/S digital: relés de barreras, portones, balizas)
+    public const string ModuleIo = "module_io";
+    public const string IoModules = "io_modules";
+
     // Automatización
     public const string ModuleAutomation = "module_automation";
     public const string AutomationRules = "automation_rules";
@@ -69,6 +73,7 @@ public static class LicenseFeatures
         new(ModuleVideowall, "Decodificadores de muro", VideowallDecoders, "decodificadores"),
         new(ModuleSpeakers, "Parlantes IP", SpeakerChannels, "parlantes"),
         new(ModuleIntercom, "Citofonía", IntercomDevices, "frentes"),
+        new(ModuleIo, "Módulos de E/S", IoModules, "módulos"),
         new(ModuleAutomation, "Automatizaciones", AutomationRules, "reglas"),
     ];
 

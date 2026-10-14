@@ -145,6 +145,12 @@ builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFac
 builder.Services.AddSingleton<SpeakerDriverRegistry>();
 builder.Services.AddSingleton<SpeakerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>());
+// Módulos de E/S: drivers, registro y servicio (una conexión por módulo, sondeo
+// de entradas y órdenes a los relés).
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Adam.AdamIoDriverFactory>();
+builder.Services.AddSingleton<IoModuleDriverRegistry>();
+builder.Services.AddSingleton<IoModuleService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IoModuleService>());
 // Citofonía: frentes de videoportero (enlace de llamadas por SDK, voz bidireccional y apertura de puerta).
 builder.Services.AddSingleton<IIntercomDriverFactory, HikvisionIntercomDriverFactory>();
 builder.Services.AddSingleton<IntercomDriverRegistry>();
@@ -181,6 +187,7 @@ builder.Services.AddSingleton<IWorkflowActionExecutor, NotifyAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, DoorAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, PanelAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, TrueCentralVms.Server.Services.Workflows.Actions.PtzPresetAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, RelayAction>();
 builder.Services.AddSingleton<WorkflowEngine>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkflowEngine>());
 // Eventos de analítica de las cámaras (movimiento, cruce de línea, intrusión...):
@@ -375,6 +382,7 @@ app.MapAuditApi();
 app.MapAlarmsApi();
 app.MapCercoApi();
 app.MapSpeakersApi();
+app.MapIoModulesApi();
 app.MapIntercomsApi();
 app.MapAccessApi();
 app.MapAccessSettingsApi();

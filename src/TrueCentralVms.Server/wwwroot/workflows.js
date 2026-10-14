@@ -213,6 +213,22 @@ const WF_FIELDS = {
     { k: "preset", t: "number", label: "Preset (1–300)", def: 1, min: 1, max: 300,
       help: "El preset se guarda en la propia cámara (desde la vista en vivo del cliente o su web)." },
   ],
+  relay: [
+    { k: "relayKeys", t: "relays", label: "Relés",
+      help: "Salidas de los módulos de E/S (Dispositivos → Módulos de E/S); se pueden marcar varias." },
+    { k: "command", t: "select", label: "Orden", def: "Pulse", rerender: true,
+      options: [["Pulse", "Pulso: encender y soltar (barrera, portón)"], ["On", "Encender y dejar encendido"], ["Off", "Apagar"],
+        ["Toggle", "Alternar"], ["Blink", "Parpadear (baliza)"]],
+      help: "«Apagar» también corta un pulso o un parpadeo en curso: es la pareja de «Encender» y de un parpadeo sin fin." },
+    { k: "seconds", t: "number", label: "Duración del pulso (segundos)", def: 1, min: 0.1, max: 3600, step: 0.1,
+      when: (c) => (c.command || "Pulse") === "Pulse",
+      help: "Lo que el relé queda energizado. Para la orden de subir de una barrera suele bastar 1 s." },
+    { k: "blinkSeconds", t: "number", label: "Parpadear durante (segundos; 0 = hasta otra orden)", def: 10, min: 0, max: 3600,
+      when: (c) => c.command === "Blink" },
+    { k: "intervalMs", t: "number", label: "Alternar cada (ms)", def: 500, min: 100, max: 60000, step: 50,
+      when: (c) => c.command === "Blink",
+      help: "Parpadear seguido desgasta los contactos de un relé: para una baliza permanente conviene una con destellador propio." },
+  ],
 };
 
 // --- Vista previa de sonidos ------------------------------------------------
@@ -587,7 +603,7 @@ function wfRunModal(run) {
 /// servidor: { cameras, audio, speakers, doors, panels, catalog } (los
 /// usuarios destinatarios vienen en catalog.users).
 function wfFieldHtml(action, field, lists) {
-  const { cameras = [], audio = [], speakers = [], doors = [], panels = [], catalog = null } = lists;
+  const { cameras = [], audio = [], speakers = [], doors = [], panels = [], ioModules = [], catalog = null } = lists;
   const users = catalog?.users || [];
   const value = action.config[field.k];
   const current = value === undefined ? field.def : value;
@@ -602,7 +618,7 @@ function wfFieldHtml(action, field, lists) {
         <textarea ${attributes} rows="${field.rows || 4}" placeholder="${esc(field.placeholder || "")}">${esc(current ?? "")}</textarea>${help}</div>`;
     case "number":
       return `<div class="field"><label>${esc(field.label)}</label>
-        <input type="number" ${attributes} min="${field.min ?? 0}" max="${field.max ?? 999999}" value="${current ?? field.def ?? 0}">${help}</div>`;
+        <input type="number" ${attributes} min="${field.min ?? 0}" max="${field.max ?? 999999}" step="${field.step ?? 1}" value="${current ?? field.def ?? 0}">${help}</div>`;
     case "password":
       return `<div class="field"><label>${esc(field.label)}${action.hasSecret ? " (guardada; vacío = no cambiar)" : ""}</label>
         <input type="password" autocomplete="new-password" ${attributes} value="${esc(action.secret || "")}">${help}</div>`;
@@ -669,6 +685,20 @@ function wfFieldHtml(action, field, lists) {
             ${doors.map((d) => `<label class="checkbox-row" ${d.enabled ? "" : 'title="Puerta desactivada"'}>
               <input type="checkbox" data-door="${d.doorId}" ${selected.includes(String(d.doorId)) ? "checked" : ""}>
               ${esc(d.deviceName)} · ${esc(d.name)}</label>`).join("")}
+          </div>`}${help}</div>`;
+    }
+    case "relays": {
+      const selected = (current || []).map(String);
+      const outputs = ioModules.flatMap((m) => m.outputs.map((o) => ({ key: `${m.id}:${o.number}`, module: m, output: o })));
+      const known = new Set(outputs.map((o) => o.key));
+      return `<div class="field"><label>${esc(field.label)}</label>
+        ${outputs.length === 0 ? `<div class="muted">No hay módulos de E/S con salidas (Dispositivos → Módulos de E/S).</div>` : `
+          <div class="wf-check-grid" ${attributes}>
+            ${outputs.map((o) => `<label class="checkbox-row" ${o.module.enabled ? "" : 'title="Módulo pausado"'}>
+              <input type="checkbox" data-relay="${esc(o.key)}" ${selected.includes(o.key) ? "checked" : ""}>
+              ${esc(o.module.name)} · ${esc(o.output.name)}${o.output.name === o.output.code ? "" : ` <span class="muted">${esc(o.output.code)}</span>`}</label>`).join("")}
+            ${selected.filter((k) => !known.has(k)).map((k) => `<label class="checkbox-row" title="Ese relé ya no existe">
+              <input type="checkbox" data-relay="${esc(k)}" checked> ${esc(k)} <span class="muted">(ya no existe)</span></label>`).join("")}
           </div>`}${help}</div>`;
     }
     case "panel":
@@ -862,6 +892,10 @@ function wfReadField(action, input) {
     case "doors":
       action.config[key] = Array.from(input.querySelectorAll("[data-door]"))
         .filter((c) => c.checked).map((c) => Number(c.dataset.door));
+      break;
+    case "relays":
+      action.config[key] = Array.from(input.querySelectorAll("[data-relay]"))
+        .filter((c) => c.checked).map((c) => c.dataset.relay);
       break;
     case "users":
       action.config[key] = Array.from(input.querySelectorAll("[data-user]"))

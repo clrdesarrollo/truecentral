@@ -145,13 +145,22 @@ public static class WorkflowsApi
                 new("resultado", "Resultado (concedido, denegado, alarma...)"),
             ], "Control de acceso"),
         new(WorkflowTriggerTypes.DeviceStatus, "Conexión de un equipo",
-            "Cuando una cámara/grabador, un terminal de acceso o un parlante IP pierde o recupera la conexión.",
+            "Cuando una cámara/grabador, un terminal de acceso, un parlante IP o un módulo de E/S pierde o recupera la conexión.",
             [
                 new("equipotipo", "Clase de equipo"),
                 new("direccion", "Dirección IP del equipo"),
                 new("modelo", "Modelo"),
                 new("estado", "Estado de conexión"),
             ], "Sistema"),
+        new(WorkflowTriggerTypes.IoInput, "Entrada de módulo de E/S",
+            "Cuando una entrada de un módulo de E/S se activa o vuelve a reposo: pulsador, lazo detector de la barrera, sensor de puerta.",
+            [
+                new("modulo", "Nombre del módulo"),
+                new("entrada", "Nombre de la entrada"),
+                new("entradanumero", "Rótulo de la entrada en el módulo (DI0, DI1...)"),
+                new("estado", "Activa o En reposo"),
+                new("direccion", "Dirección IP del módulo"),
+            ], "Entradas y salidas"),
         new(WorkflowTriggerTypes.Schedule, "Horario programado",
             "A las horas indicadas, los días de la semana marcados (armar a las 22:00, abrir el portón a las 07:30…).",
             [], "Sistema"),
@@ -167,7 +176,7 @@ public static class WorkflowsApi
     {
         WorkflowActionTypes.Snapshot => "Capturar",
         WorkflowActionTypes.Notify or WorkflowActionTypes.Email or WorkflowActionTypes.Speaker => "Avisar",
-        WorkflowActionTypes.Door or WorkflowActionTypes.Panel or WorkflowActionTypes.PtzPreset => "Equipos",
+        WorkflowActionTypes.Door or WorkflowActionTypes.Panel or WorkflowActionTypes.PtzPreset or WorkflowActionTypes.Relay => "Equipos",
         _ => "Integración",
     };
 
@@ -300,6 +309,21 @@ public static class WorkflowsApi
             var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.GroupName).ThenBy(s => s.Name).ToListAsync(ct);
             return Results.Ok(speakers.Where(s => scope.CanViewSpeaker(s.Id)).Select(s => new WorkflowSpeakerDto(s.Id, s.Name, s.GroupName, s.Enabled,
                 s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio)));
+        });
+
+        // Módulos de E/S con sus entradas y salidas (acción "operar relé" y disparador de entradas).
+        app.MapGet("/api/workflows/io-modules", async (HttpContext ctx, VmsDbContext db, IoModuleService io, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
+            var modules = await db.IoModules.AsNoTracking().Include(m => m.Points).OrderBy(m => m.Name).ToListAsync(ct);
+            return Results.Ok(modules.Where(m => scope.CanViewIoModule(m.Id)).Select(m =>
+            {
+                var dto = io.ToDto(m);
+                return new WorkflowIoModuleDto(m.Id, m.Name, m.Enabled,
+                    dto.Inputs.Select(p => new WorkflowIoPointDto(p.Number, p.Code, p.Name)).ToList(),
+                    dto.Outputs.Select(p => new WorkflowIoPointDto(p.Number, p.Code, p.Name)).ToList());
+            }));
         });
 
         // ------------------------------------------------------------------

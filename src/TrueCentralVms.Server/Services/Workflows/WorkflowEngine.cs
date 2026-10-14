@@ -406,15 +406,25 @@ public sealed class WorkflowEngine : BackgroundService
         // un filtro de cámaras no bloquea un evento de terminal de acceso si
         // además se marcaron terminales (una automatización "cualquier equipo
         // de estos" con equipos de varias clases).
-        bool anyDeviceFilter = Has(conditions.DeviceIds) || Has(conditions.AccessDeviceIds) || Has(conditions.SpeakerIds);
+        // Las entradas sueltas de un módulo de E/S cuentan como un equipo más:
+        // "el módulo A completo o la entrada 2 del módulo B".
+        bool anyDeviceFilter = Has(conditions.DeviceIds) || Has(conditions.AccessDeviceIds) || Has(conditions.SpeakerIds) ||
+                               Has(conditions.IoModuleIds) || Has(conditions.IoInputKeys);
         if (anyDeviceFilter)
         {
             bool listed =
                 (trigger.DeviceId is { } d && Has(conditions.DeviceIds) && conditions.DeviceIds!.Contains(d)) ||
                 (trigger.AccessDeviceId is { } a && Has(conditions.AccessDeviceIds) && conditions.AccessDeviceIds!.Contains(a)) ||
-                (trigger.SpeakerId is { } s && Has(conditions.SpeakerIds) && conditions.SpeakerIds!.Contains(s));
+                (trigger.SpeakerId is { } s && Has(conditions.SpeakerIds) && conditions.SpeakerIds!.Contains(s)) ||
+                (trigger.IoModuleId is { } m && Has(conditions.IoModuleIds) && conditions.IoModuleIds!.Contains(m)) ||
+                (trigger.IoModuleId is { } mi && trigger.IoInput is { } input && Has(conditions.IoInputKeys)
+                 && conditions.IoInputKeys!.Contains($"{mi}:{input}"));
             if (!listed) return false;
         }
+        if (Has(conditions.IoInputStates) &&
+            (trigger.IoActive is not { } active ||
+             !conditions.IoInputStates!.Any(s => string.Equals(s, active ? "Active" : "Inactive", StringComparison.OrdinalIgnoreCase))))
+            return false;
 
         // --- Video ---
         if (Has(conditions.VideoEventKinds) && (trigger.VideoKind is null || !conditions.VideoEventKinds!.Contains(trigger.VideoKind.Value)))
@@ -742,8 +752,17 @@ public sealed class WorkflowEngine : BackgroundService
             .FirstOrDefault(d => conditions.DoorNumbers is not { Count: > 0 } || conditions.DoorNumbers.Contains(d.Number))
             ?? accessDevice?.Doors.OrderBy(d => d.Number).FirstOrDefault();
 
+        // Módulo de E/S: la primera entrada elegida o, si no, el primer módulo marcado.
+        var inputKey = conditions.IoInputKeys?.Select(k => k.Split(':')).FirstOrDefault(p => p.Length == 2);
+        int? ioId = inputKey is { } key && int.TryParse(key[0], out int keyModule) ? keyModule
+            : conditions.IoModuleIds is { Count: > 0 } ? conditions.IoModuleIds[0] : null;
+        var ioModule = await db.IoModules.AsNoTracking().Include(m => m.Points)
+            .Where(m => ioId == null || m.Id == ioId).OrderBy(m => m.Id).FirstOrDefaultAsync(ct);
+        if (ioModule is not null && inputKey is { } chosen && int.TryParse(chosen[1], out int inputNumber))
+            ioModule.Points = ioModule.Points.Where(p => p.Kind != IoPointKind.Input || p.Number == inputNumber).ToList();
+
         return await ExecuteWorkflowAsync(workflow,
-            WorkflowTrigger.Sample(workflow, panel, device, channel, accessDevice, door), startedBy, ct);
+            WorkflowTrigger.Sample(workflow, panel, device, channel, accessDevice, door, ioModule), startedBy, ct);
     }
 
     /// <summary>Lo que se acumula mientras se recorre el diagrama de una ejecución.</summary>

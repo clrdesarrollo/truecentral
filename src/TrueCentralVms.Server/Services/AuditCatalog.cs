@@ -238,6 +238,17 @@ public static class AuditCatalog
             new("speaker-offline", "Parlante sin conexión"),
             new("speaker-online", "Parlante recuperó conexión"),
         ]),
+        new("io", "Módulos de E/S",
+        [
+            new("io-module-created", "Módulo de E/S agregado"),
+            new("io-module-updated", "Módulo de E/S modificado"),
+            new("io-module-deleted", "Módulo de E/S eliminado"),
+            new("io-module-probed", "Prueba de conexión con módulo de E/S"),
+            new("output-command", "Orden a un relé (pulso, encender, apagar, alternar, parpadear)"),
+            new("output-effect-failed", "Relé que no se pudo soltar al terminar su pulso o parpadeo"),
+            new("io-module-offline", "Módulo de E/S sin conexión"),
+            new("io-module-online", "Módulo de E/S recuperó conexión"),
+        ]),
         new("intercom", "Citofonía",
         [
             new("intercom-created", "Frente de citofonía agregado"),

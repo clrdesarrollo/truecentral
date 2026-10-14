@@ -30,12 +30,13 @@ public sealed record WorkflowTrigger(
     string? Source = null,
     string? Text = null,
     AlarmPanelStatus? PanelStatus = null,
-    // --- Equipos (cámaras/grabadores, terminales de acceso, parlantes) ---
-    /// <summary>"video" | "access" | "speaker".</summary>
+    // --- Equipos (cámaras/grabadores, terminales de acceso, parlantes, módulos de E/S) ---
+    /// <summary>"video" | "access" | "speaker" | "io".</summary>
     string? DeviceKind = null,
     int? DeviceId = null,
     int? AccessDeviceId = null,
     int? SpeakerId = null,
+    int? IoModuleId = null,
     /// <summary>"Online" | "Offline" | "AuthFailed".</summary>
     string? DeviceStatus = null,
     // --- Video ---
@@ -53,6 +54,11 @@ public sealed record WorkflowTrigger(
     AccessCredentialKind? Credential = null,
     int? DoorNumber = null,
     string? EmployeeNo = null,
+    // --- Entradas de módulos de E/S ---
+    /// <summary>Número de la entrada en el módulo (desde 0).</summary>
+    int? IoInput = null,
+    /// <summary>La entrada quedó activa (true) o en reposo (false), ya aplicada su lógica.</summary>
+    bool? IoActive = null,
     /// <summary>Foto que llegó con el evento (analíticas con captura), disponible para las acciones.</summary>
     byte[]? Image = null)
 {
@@ -220,8 +226,8 @@ public sealed record WorkflowTrigger(
 
     /// <summary>
     /// Disparo por cambio de conexión de un equipo. <paramref name="kind"/>:
-    /// "video" (cámara/grabador), "access" (terminal de acceso) o "speaker"
-    /// (parlante). <paramref name="status"/>: "Online" | "Offline" | "AuthFailed".
+    /// "video" (cámara/grabador), "access" (terminal de acceso), "speaker"
+    /// (parlante) o "io" (módulo de E/S). <paramref name="status"/>: "Online" | "Offline" | "AuthFailed".
     /// </summary>
     public static WorkflowTrigger FromDeviceStatus(string kind, int id, string name, string host, string? model,
         string status, string? error)
@@ -250,6 +256,7 @@ public sealed record WorkflowTrigger(
             DeviceId: kind == "video" ? id : null,
             AccessDeviceId: kind == "access" ? id : null,
             SpeakerId: kind == "speaker" ? id : null,
+            IoModuleId: kind == "io" ? id : null,
             DeviceStatus: status);
     }
 
@@ -258,6 +265,7 @@ public sealed record WorkflowTrigger(
         "video" => "Cámara/grabador",
         "access" => "Terminal de acceso",
         "speaker" => "Parlante IP",
+        "io" => "Módulo de E/S",
         _ => "Equipo",
     };
 
@@ -372,6 +380,38 @@ public sealed record WorkflowTrigger(
     }
 
     // ------------------------------------------------------------------
+    // Entradas de módulos de E/S
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Disparo por el cambio de una entrada. <paramref name="active"/> ya trae
+    /// aplicada la lógica de la entrada (activa al cerrar o al abrir el contacto).
+    /// </summary>
+    public static WorkflowTrigger FromIoInput(IoModule module, IoPoint input, bool active, DateTime atUtc)
+    {
+        var local = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc).ToLocalTime();
+        string state = active ? "Activa" : "En reposo";
+        var fields = NewFields(local);
+        fields["equipo"] = module.Name;
+        fields["equipoid"] = module.Id.ToString();
+        fields["modulo"] = module.Name;
+        fields["entrada"] = input.Name;
+        fields["entradanumero"] = input.Code;
+        fields["estado"] = state;
+        fields["direccion"] = module.Host;
+        fields["evento"] = $"{input.Name}: {(active ? "se activó" : "volvió a reposo")}";
+        fields["tipo"] = "Entrada de módulo de E/S";
+        fields["severidad"] = SeverityLabel(AlarmSeverity.Info);
+        fields["origen"] = "leído del módulo";
+
+        return new WorkflowTrigger(WorkflowTriggerTypes.IoInput,
+            Truncate($"Módulo '{module.Name}' · {input.Name} ({input.Code}): {state.ToLowerInvariant()}", 256),
+            fields, local,
+            Severity: AlarmSeverity.Info, Text: fields["evento"],
+            DeviceKind: "io", IoModuleId: module.Id, IoInput: input.Number, IoActive: active);
+    }
+
+    // ------------------------------------------------------------------
     // Horario y llamada externa
     // ------------------------------------------------------------------
 
@@ -439,7 +479,7 @@ public sealed record WorkflowTrigger(
     /// esperar a que el hecho ocurra de verdad.
     /// </summary>
     public static WorkflowTrigger Sample(Workflow workflow, AlarmPanel? panel, Device? device, Channel? channel,
-        AccessDevice? accessDevice, AccessDoor? door)
+        AccessDevice? accessDevice, AccessDoor? door, IoModule? ioModule = null)
     {
         var local = DateTime.Now;
         string cameraName = channel?.Name ?? "Cámara de prueba";
@@ -487,6 +527,15 @@ public sealed record WorkflowTrigger(
 
             case WorkflowTriggerTypes.Schedule:
                 return FromSchedule(local) with { Summary = $"Prueba manual · hora programada {local:HH:mm}" };
+
+            case WorkflowTriggerTypes.IoInput:
+            {
+                var module = ioModule ?? new IoModule { Id = 0, Name = "Módulo de prueba", Host = "192.168.1.90" };
+                var input = module.Points.Where(p => p.Kind == IoPointKind.Input).MinBy(p => p.Number)
+                            ?? new IoPoint { Kind = IoPointKind.Input, Number = 0, Name = "Entrada de prueba" };
+                return FromIoInput(module, input, true, DateTime.UtcNow) with
+                    { Summary = $"Prueba manual · {module.Name} · {input.Name} activa" };
+            }
 
             case WorkflowTriggerTypes.Webhook:
             {

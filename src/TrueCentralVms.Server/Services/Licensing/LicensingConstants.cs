@@ -53,6 +53,8 @@ public static class LicensingConstants
         [LicenseFeatures.SpeakerChannels] = 4,
         [LicenseFeatures.ModuleIntercom] = true,
         [LicenseFeatures.IntercomDevices] = 2,
+        [LicenseFeatures.ModuleIo] = true,
+        [LicenseFeatures.IoModules] = 2,
         [LicenseFeatures.ModuleAutomation] = true,
         [LicenseFeatures.AutomationRules] = 10,
     };

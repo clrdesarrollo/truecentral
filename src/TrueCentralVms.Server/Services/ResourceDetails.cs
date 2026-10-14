@@ -48,6 +48,7 @@ public static class ResourceDetails
             ResourceKind.Fence => await FenceAsync(db, id, ct),
             ResourceKind.Speaker => await SpeakerAsync(db, id, ct),
             ResourceKind.Intercom => await IntercomAsync(db, id, ct),
+            ResourceKind.IoModule => await IoModuleAsync(db, id, ct),
             _ => null,
         };
         if (part is null) return null;
@@ -281,5 +282,24 @@ public static class ResourceDetails
             new ResourceSourceDto("intercoms", i.Id, i.Name, i.Model, i.SerialNumber, i.FirmwareVersion,
                 Address(i.Host, i.Port), OnlineText(i.Status, i.Enabled), i.LastSeenAt),
             facts, CanRename: true, RenameNote: null, FixedCameras: fixedCameras);
+    }
+
+    private static async Task<Part?> IoModuleAsync(VmsDbContext db, int id, CancellationToken ct)
+    {
+        var m = await db.IoModules.AsNoTracking().Include(x => x.Points).FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (m is null) return null;
+        var facts = new List<ResourceFactDto>();
+        static string Names(IEnumerable<IoPoint> points) =>
+            string.Join(", ", points.OrderBy(p => p.Number).Select(p => p.Name == p.Code ? p.Code : $"{p.Code} {p.Name}"));
+        var inputs = m.Points.Where(p => p.Kind == IoPointKind.Input).ToList();
+        var outputs = m.Points.Where(p => p.Kind == IoPointKind.Output).ToList();
+        Add(facts, "Entradas", inputs.Count == 0 ? "Ninguna" : Names(inputs));
+        Add(facts, "Salidas (relés)", outputs.Count == 0 ? "Ninguna" : Names(outputs));
+        if (m.ReportedModel is { } reported && reported != m.Model)
+            Add(facts, "Modelo que informa el equipo", reported);
+        return new Part(
+            new ResourceSourceDto("io-modules", m.Id, m.Name, m.Model, null, null,
+                Address(m.Host, m.Port), OnlineText(m.Status, m.Enabled), m.LastSeenAt),
+            facts, CanRename: true, RenameNote: null, FixedCameras: []);
     }
 }

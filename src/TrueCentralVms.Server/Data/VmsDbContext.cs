@@ -45,6 +45,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     // Parlantes IP
     public DbSet<Speaker> Speakers => Set<Speaker>();
 
+    // Módulos de entradas y salidas (relés de barreras, portones, balizas)
+    public DbSet<IoModule> IoModules => Set<IoModule>();
+    public DbSet<IoPoint> IoPoints => Set<IoPoint>();
+
     // Citofonía (frentes de videoportero y su historial de llamadas)
     public DbSet<Intercom> Intercoms => Set<Intercom>();
     public DbSet<IntercomCall> IntercomCalls => Set<IntercomCall>();
@@ -270,6 +274,29 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(s => s.LastError).HasMaxLength(512);
             e.Property(s => s.Status).HasConversion<string>().HasMaxLength(16);
             e.HasIndex(s => new { s.Host, s.Port }).IsUnique();
+        });
+
+        // Módulos de entradas y salidas: una fila por módulo y una por cada
+        // entrada o salida con su nombre (se van con el módulo).
+        modelBuilder.Entity<IoModule>(e =>
+        {
+            e.Property(m => m.Name).HasMaxLength(128);
+            e.Property(m => m.DriverKey).HasMaxLength(32);
+            e.Property(m => m.Host).HasMaxLength(255);
+            e.Property(m => m.ModelKey).HasMaxLength(32);
+            e.Property(m => m.Model).HasMaxLength(32);
+            e.Property(m => m.ReportedModel).HasMaxLength(32);
+            e.Property(m => m.LastError).HasMaxLength(512);
+            e.Property(m => m.Status).HasConversion<string>().HasMaxLength(16);
+            e.HasIndex(m => new { m.Host, m.Port }).IsUnique();
+            e.HasMany(m => m.Points).WithOne(p => p.IoModule)
+                .HasForeignKey(p => p.IoModuleId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<IoPoint>(e =>
+        {
+            e.Property(p => p.Name).HasMaxLength(64);
+            e.Property(p => p.Kind).HasConversion<string>().HasMaxLength(8);
+            e.HasIndex(p => new { p.IoModuleId, p.Kind, p.Number }).IsUnique();
         });
 
         // -------------------------------------------------------------------
@@ -851,6 +878,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             .HasForeignKey(s => s.LocationId).OnDelete(DeleteBehavior.SetNull);
         modelBuilder.Entity<Intercom>().HasOne<Location>().WithMany()
             .HasForeignKey(i => i.LocationId).OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<IoModule>().HasOne<Location>().WithMany()
+            .HasForeignKey(m => m.LocationId).OnDelete(DeleteBehavior.SetNull);
         // Ubicación de los equipos que agrupan recursos: la heredan sus canales,
         // áreas, zonas y puertas nuevas (no es la de ellos: cada uno tiene la suya).
         modelBuilder.Entity<Device>().HasOne<Location>().WithMany()
@@ -873,6 +902,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.HasOne<CercoPanel>().WithMany().HasForeignKey(p => p.CercoPanelId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Speaker>().WithMany().HasForeignKey(p => p.SpeakerId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Intercom>().WithMany().HasForeignKey(p => p.IntercomId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<IoModule>().WithMany().HasForeignKey(p => p.IoModuleId).OnDelete(DeleteBehavior.Cascade);
             // Una sola ficha por recurso.
             e.HasIndex(p => p.ChannelId).IsUnique().HasFilter("\"ChannelId\" IS NOT NULL");
             e.HasIndex(p => p.AccessDoorId).IsUnique().HasFilter("\"AccessDoorId\" IS NOT NULL");
@@ -881,9 +911,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.HasIndex(p => p.CercoPanelId).IsUnique().HasFilter("\"CercoPanelId\" IS NOT NULL");
             e.HasIndex(p => p.SpeakerId).IsUnique().HasFilter("\"SpeakerId\" IS NOT NULL");
             e.HasIndex(p => p.IntercomId).IsUnique().HasFilter("\"IntercomId\" IS NOT NULL");
+            e.HasIndex(p => p.IoModuleId).IsUnique().HasFilter("\"IoModuleId\" IS NOT NULL");
             e.ToTable(t => t.HasCheckConstraint("CK_ResourceProfiles_OneResource",
                 "num_nonnulls(\"ChannelId\", \"AccessDoorId\", \"AlarmAreaId\", \"AlarmZoneId\", " +
-                "\"CercoPanelId\", \"SpeakerId\", \"IntercomId\") = 1"));
+                "\"CercoPanelId\", \"SpeakerId\", \"IntercomId\", \"IoModuleId\") = 1"));
         });
 
         modelBuilder.Entity<ResourceProfileCamera>(e =>

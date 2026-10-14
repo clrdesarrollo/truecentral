@@ -212,6 +212,25 @@ public static class ResourceCatalog
             }
         }
 
+        if (filter.Wants(ResourceKind.IoModule))
+        {
+            var modules = await Scope(db.IoModules, filter)
+                .Select(m => new { m.Id, m.Name, m.LocationId, m.Host, m.Model, m.Enabled, m.Status })
+                .ToListAsync(ct);
+            foreach (var m in modules)
+            {
+                var (health, state) = !m.Enabled ? (ResourceHealth.Disabled, "Pausado")
+                    : m.Status switch
+                    {
+                        IoModuleStatus.Online => (ResourceHealth.Ok, "En línea"),
+                        IoModuleStatus.Offline => (ResourceHealth.Offline, "Sin conexión"),
+                        _ => (ResourceHealth.Unknown, "—"),
+                    };
+                result.Add(new ResourceDto(ResourceKind.IoModule, m.Id, m.Name, m.LocationId,
+                    m.Model ?? "Módulo de E/S", "io-modules", m.Id, m.Host, health, state, m.Enabled));
+            }
+        }
+
         return result;
     }
 
@@ -240,6 +259,7 @@ public static class ResourceCatalog
         await AddAsync(db.CercoPanels);
         await AddAsync(db.Speakers);
         await AddAsync(db.Intercoms);
+        await AddAsync(db.IoModules);
         return counts;
     }
 
@@ -265,6 +285,7 @@ public static class ResourceCatalog
                 case ResourceKind.Fence: await ApplyAsync(db.CercoPanels, p => p.Name); break;
                 case ResourceKind.Speaker: await ApplyAsync(db.Speakers, s => s.Name); break;
                 case ResourceKind.Intercom: await ApplyAsync(db.Intercoms, i => i.Name); break;
+                case ResourceKind.IoModule: await ApplyAsync(db.IoModules, m => m.Name); break;
             }
 
             async Task ApplyAsync<T>(DbSet<T> set, Func<T, string> nameOf) where T : class, ILocatable
@@ -308,6 +329,7 @@ public static class ResourceCatalog
         ResourceKind.Fence => plural ? "cercos" : "cerco",
         ResourceKind.Speaker => plural ? "parlantes" : "parlante",
         ResourceKind.Intercom => plural ? "citófonos" : "citófono",
+        ResourceKind.IoModule => plural ? "módulos de E/S" : "módulo de E/S",
         _ => plural ? "recursos" : "recurso",
     };
 

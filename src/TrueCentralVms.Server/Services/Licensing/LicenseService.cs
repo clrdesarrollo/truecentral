@@ -190,6 +190,7 @@ public sealed class LicenseService : BackgroundService
             [LicenseFeatures.Videowalls] = await db.Walls.CountAsync(ct),
             [LicenseFeatures.VideowallDecoders] = await db.Decoders.CountAsync(d => d.Enabled, ct),
             [LicenseFeatures.SpeakerChannels] = await db.Speakers.CountAsync(s => s.Enabled, ct),
+            [LicenseFeatures.IoModules] = await db.IoModules.CountAsync(m => m.Enabled, ct),
             [LicenseFeatures.AutomationRules] = await db.Workflows.CountAsync(w => w.Enabled, ct),
             [LicenseFeatures.MaxUsers] = await db.Users.CountAsync(u => u.Enabled, ct),
             [LicenseFeatures.MaxClientSessions] = _tokens.CountDesktopSessions(),

@@ -44,6 +44,7 @@ public sealed class ScopeIndex
     public IReadOnlyDictionary<int, int?> Cercos { get; init; } = new Dictionary<int, int?>();
     public IReadOnlyDictionary<int, int?> Speakers { get; init; } = new Dictionary<int, int?>();
     public IReadOnlyDictionary<int, int?> Intercoms { get; init; } = new Dictionary<int, int?>();
+    public IReadOnlyDictionary<int, int?> IoModules { get; init; } = new Dictionary<int, int?>();
     /// <summary>Nombre legible por (tipo de <see cref="ScopeKinds"/>, id): "DVR Norte · Acceso".</summary>
     public IReadOnlyDictionary<(string Kind, int Id), string> Names { get; init; } = new Dictionary<(string, int), string>();
     /// <summary>Árbol de ubicaciones: id → (padre, nombre).</summary>
@@ -117,6 +118,7 @@ public sealed class ScopeIndex
         var cercos = await db.CercoPanels.AsNoTracking().Select(p => new { p.Id, p.LocationId, p.Name }).ToListAsync(ct);
         var speakers = await db.Speakers.AsNoTracking().Select(s => new { s.Id, s.LocationId, s.Name }).ToListAsync(ct);
         var intercoms = await db.Intercoms.AsNoTracking().Select(i => new { i.Id, i.LocationId, i.Name }).ToListAsync(ct);
+        var ioModules = await db.IoModules.AsNoTracking().Select(m => new { m.Id, m.LocationId, m.Name }).ToListAsync(ct);
         var locations = await db.Locations.AsNoTracking()
             .Select(l => new { l.Id, l.ParentId, l.Name }).ToListAsync(ct);
 
@@ -167,6 +169,7 @@ public sealed class ScopeIndex
         foreach (var p in cercos) names[(ScopeKinds.Fence, p.Id)] = p.Name;
         foreach (var s in speakers) names[(ScopeKinds.Speaker, s.Id)] = s.Name;
         foreach (var i in intercoms) names[(ScopeKinds.Intercom, i.Id)] = i.Name;
+        foreach (var m in ioModules) names[(ScopeKinds.IoModule, m.Id)] = m.Name;
 
         return new ScopeIndex
         {
@@ -193,6 +196,7 @@ public sealed class ScopeIndex
             Cercos = cercos.ToDictionary(p => p.Id, p => p.LocationId),
             Speakers = speakers.ToDictionary(s => s.Id, s => s.LocationId),
             Intercoms = intercoms.ToDictionary(i => i.Id, i => i.LocationId),
+            IoModules = ioModules.ToDictionary(m => m.Id, m => m.LocationId),
             Names = names,
             Locations = locations.ToDictionary(l => l.Id, l => (l.ParentId, l.Name)),
         };
@@ -225,6 +229,7 @@ internal sealed class ScopeSets
     public HashSet<int> Cercos { get; init; } = [];
     public HashSet<int> Speakers { get; init; } = [];
     public HashSet<int> Intercoms { get; init; } = [];
+    public HashSet<int> IoModules { get; init; } = [];
 }
 
 /// <summary>
@@ -305,6 +310,7 @@ public sealed class UserScope
         ResourceKind.Fence => s.Cercos,
         ResourceKind.Speaker => s.Speakers,
         ResourceKind.Intercom => s.Intercoms,
+        ResourceKind.IoModule => s.IoModules,
         _ => NoIds,
     };
 
@@ -404,6 +410,8 @@ public sealed class UserScope
     public bool CanOperateSpeaker(int speakerId) => Unrestricted || _sets!.Speakers.Contains(speakerId);
     public bool CanViewIntercom(int intercomId) => !FiltersView || _sets!.Intercoms.Contains(intercomId);
     public bool CanOperateIntercom(int intercomId) => Unrestricted || _sets!.Intercoms.Contains(intercomId);
+    public bool CanViewIoModule(int moduleId) => !FiltersView || _sets!.IoModules.Contains(moduleId);
+    public bool CanOperateIoModule(int moduleId) => Unrestricted || _sets!.IoModules.Contains(moduleId);
 
     // ---------- Recursos (clave "Kind:Id" de Recursos y de las alertas) ----------
 
@@ -417,6 +425,7 @@ public sealed class UserScope
         ResourceKind.Fence => _index.Cercos.GetValueOrDefault(id),
         ResourceKind.Speaker => _index.Speakers.GetValueOrDefault(id),
         ResourceKind.Intercom => _index.Intercoms.GetValueOrDefault(id),
+        ResourceKind.IoModule => _index.IoModules.GetValueOrDefault(id),
         _ => null,
     };
 
@@ -439,7 +448,7 @@ public sealed class UserScope
     /// </summary>
     public OperableDto Operable()
     {
-        if (_sets is not { } s) return new OperableDto(true, [], [], [], [], [], [], [], [], []);
+        if (_sets is not { } s) return new OperableDto(true, [], [], [], [], [], [], [], [], [], []);
         static string Key((int PanelId, int Number) k) => $"{k.PanelId}/{k.Number}";
         return new OperableDto(
             false,
@@ -451,7 +460,8 @@ public sealed class UserScope
             s.Doors.Order().ToList(),
             s.Cercos.Order().ToList(),
             s.Speakers.Order().ToList(),
-            s.Intercoms.Order().ToList());
+            s.Intercoms.Order().ToList(),
+            s.IoModules.Order().ToList());
     }
 
     /// <summary>Recurso por su clave "Kind:Id" (la de Recursos y de las alertas); sin clave no hay a qué restringir.</summary>
@@ -478,7 +488,8 @@ public sealed class UserScope
         var b = other._sets!;
         return b.Locations.IsSubsetOf(a.Locations) && b.Channels.IsSubsetOf(a.Channels) &&
                b.Doors.IsSubsetOf(a.Doors) && b.Areas.IsSubsetOf(a.Areas) && b.Zones.IsSubsetOf(a.Zones) &&
-               b.Cercos.IsSubsetOf(a.Cercos) && b.Speakers.IsSubsetOf(a.Speakers) && b.Intercoms.IsSubsetOf(a.Intercoms);
+               b.Cercos.IsSubsetOf(a.Cercos) && b.Speakers.IsSubsetOf(a.Speakers) && b.Intercoms.IsSubsetOf(a.Intercoms) &&
+               b.IoModules.IsSubsetOf(a.IoModules);
     }
 }
 
@@ -523,6 +534,7 @@ public static class ScopeBuilder
         var cercos = Pick(index.Cercos, items.Cercos);
         var speakers = Pick(index.Speakers, items.Speakers);
         var intercoms = Pick(index.Intercoms, items.Intercoms);
+        var ioModules = Pick(index.IoModules, items.IoModules);
         var wholeLocations = index.Locations.Keys.Where(id => InGrant(id) && InLimit(id)).ToHashSet();
 
         // El árbol que se le muestra: las ubicaciones completas y, para lo que
@@ -540,6 +552,7 @@ public static class ScopeBuilder
         Add(cercos, index.Cercos);
         Add(speakers, index.Speakers);
         Add(intercoms, index.Intercoms);
+        Add(ioModules, index.IoModules);
         var tree = new HashSet<int>(wholeLocations);
         tree.UnionWith(index.WithAncestors(looseLocations.OfType<int>()));
 
@@ -547,7 +560,7 @@ public static class ScopeBuilder
         {
             Locations = wholeLocations, VisibleTree = tree,
             Channels = channels, Doors = doors, Areas = areas, Zones = zones,
-            Cercos = cercos, Speakers = speakers, Intercoms = intercoms,
+            Cercos = cercos, Speakers = speakers, Intercoms = intercoms, IoModules = ioModules,
         };
 
         // En palabras: lo de sus roles y el límite propio.
@@ -588,6 +601,7 @@ public static class ScopeBuilder
         public HashSet<int> Cercos { get; } = [];
         public HashSet<int> Speakers { get; } = [];
         public HashSet<int> Intercoms { get; } = [];
+        public HashSet<int> IoModules { get; } = [];
     }
 
     private static Expanded Expand(IEnumerable<(string Kind, int Id)> items, ScopeIndex index)
@@ -614,6 +628,7 @@ public static class ScopeBuilder
                 case ScopeKinds.Fence: result.Cercos.Add(id); break;
                 case ScopeKinds.Speaker: result.Speakers.Add(id); break;
                 case ScopeKinds.Intercom: result.Intercoms.Add(id); break;
+                case ScopeKinds.IoModule: result.IoModules.Add(id); break;
             }
         }
         // Un área incluye sus zonas.

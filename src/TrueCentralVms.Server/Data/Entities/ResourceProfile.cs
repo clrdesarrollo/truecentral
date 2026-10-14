@@ -23,6 +23,7 @@ public class ResourceProfile
     public int? CercoPanelId { get; set; }
     public int? SpeakerId { get; set; }
     public int? IntercomId { get; set; }
+    public int? IoModuleId { get; set; }
 
     /// <summary>Qué es y dónde está exactamente ("Puerta de vidrio doble, lado estacionamiento").</summary>
     public string? Description { get; set; }
@@ -45,6 +46,7 @@ public class ResourceProfile
         ResourceKind.Fence => new() { CercoPanelId = id },
         ResourceKind.Speaker => new() { SpeakerId = id },
         ResourceKind.Intercom => new() { IntercomId = id },
+        ResourceKind.IoModule => new() { IoModuleId = id },
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -58,6 +60,7 @@ public class ResourceProfile
         ResourceKind.Fence => profiles.Where(p => p.CercoPanelId == id),
         ResourceKind.Speaker => profiles.Where(p => p.SpeakerId == id),
         ResourceKind.Intercom => profiles.Where(p => p.IntercomId == id),
+        ResourceKind.IoModule => profiles.Where(p => p.IoModuleId == id),
         _ => profiles.Where(_ => false),
     };
 }
