@@ -37,7 +37,11 @@ public sealed record DeviceDto(
     /// <summary>Ubicación del equipo en el árbol de Recursos (null = por ubicar): la heredan sus canales.</summary>
     int? LocationId = null,
     /// <summary>Ruta legible de esa ubicación ("Casa matriz › Bodega").</summary>
-    string? Location = null);
+    string? Location = null,
+    /// <summary>ID ISUP del equipo si se conecta por ISUP (entonces Host y puertos no aplican).</summary>
+    string? IsupDeviceId = null,
+    /// <summary>Hay clave ISUP guardada (la clave nunca viaja).</summary>
+    bool HasIsupKey = false);
 
 /// <summary>
 /// Alta/edición de dispositivo. En edición, Password null o vacía = mantener
@@ -58,7 +62,11 @@ public sealed record DeviceWriteDto(
     IReadOnlyList<int>? EnabledChannels = null,
     /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
     /// por ubicar); 0 = por ubicar. Los canales que seguían al equipo se mueven con él.</summary>
-    int? LocationId = null);
+    int? LocationId = null,
+    /// <summary>Solo con un driver ISUP: ID con que el equipo se registra en el servidor.</summary>
+    string? IsupDeviceId = null,
+    /// <summary>Solo con un driver ISUP: su clave; vacía en edición = conservar la guardada.</summary>
+    string? IsupKey = null);
 
 /// <summary>Resultado del botón "Probar conexión" del asistente (no persiste nada).</summary>
 public sealed record DeviceProbeResultDto(
@@ -107,4 +115,6 @@ public sealed record DriverDto(
     bool SupportsSnapshot,
     bool SupportsDiscovery,
     int DefaultSdkPort,
-    int DefaultRtspPort);
+    int DefaultRtspPort,
+    /// <summary>El equipo se conecta por ISUP: el asistente pide ID y clave en vez de dirección y credenciales.</summary>
+    bool UsesIsup = false);

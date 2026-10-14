@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -68,6 +69,9 @@ public sealed partial class IsupEngine
                 }
                 return 1;
             }
+            // Fotos subidas antes al servidor de imágenes: el evento las nombra por su URL.
+            foreach (var stored in StoredPicturesIn(text))
+                if (!pictures.Contains(stored)) pictures.Add(stored);
             var device = ResolveDevice(text, serial);
             if (device == null)
             {
@@ -176,7 +180,10 @@ public sealed partial class IsupEngine
                 if (len <= 0 || len > 20_000_000 || data == IntPtr.Zero) continue;
                 var buf = new byte[len];
                 Marshal.Copy(data, buf, 0, len);
-                var file = Path.Combine(dir, $"{now:HHmmssfff}_{Guid.NewGuid():N}_{i + 1}.jpg");
+                // El nombre que le dio el equipo (licensePlatePicture, detectionPicture…) dice qué es cada foto.
+                var name = Regex.Replace(Path.GetFileNameWithoutExtension(Isup.ReadCString(e + Layout.IsapiPicFile, 256)), "[^A-Za-z0-9_-]", "");
+                if (name.Length > 60) name = name[..60];
+                var file = Path.Combine(dir, $"{now:HHmmssfff}_{Guid.NewGuid().ToString("N")[..8]}_{i + 1}{(name.Length > 0 ? "_" + name : "")}.jpg");
                 File.WriteAllBytes(file, buf);
                 saved.Add(file);
             }
@@ -284,6 +291,17 @@ public sealed partial class IsupEngine
         foreach (var kv in _pictureFiles)
             if (kv.Key.Length > 3 && (reference.Contains(kv.Key, StringComparison.OrdinalIgnoreCase) || kv.Key.Contains(reference, StringComparison.OrdinalIgnoreCase))) return kv.Value;
         return null;
+    }
+
+    /// <summary>Rutas locales de las fotos del servidor de imágenes que referencia un evento (por URL o nombre de archivo).</summary>
+    List<string> StoredPicturesIn(string text)
+    {
+        var found = new List<string>();
+        if (_pictureFiles.IsEmpty || text.Length == 0) return found;
+        foreach (Match m in Regex.Matches(text, @"https?://[^\s<>""']+"))
+            if (FindStoredPicture(WebUtility.HtmlDecode(m.Value)) is { } path && File.Exists(path) && !found.Contains(path))
+                found.Add(path);
+        return found;
     }
 
     /// <summary>Borra las fotos de más de <paramref name="days"/> días (el servidor copia las que necesita al recibir el evento).</summary>

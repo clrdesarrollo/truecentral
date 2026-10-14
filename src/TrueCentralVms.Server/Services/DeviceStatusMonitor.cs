@@ -2,8 +2,11 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
+using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Isup;
+using TrueCentralVms.Server.Services.Licensing;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -11,11 +14,20 @@ namespace TrueCentralVms.Server.Services;
 /// Sonda periódica de disponibilidad: intenta abrir TCP al puerto de gestión
 /// de cada dispositivo y publica los cambios de estado por SignalR. No usa el
 /// SDK (sin logins repetidos): es solo alcance de red, suficiente para el
-/// semáforo online/offline del panel y del cliente.
+/// semáforo online/offline del panel y del cliente. Los equipos que se
+/// conectan por ISUP están en línea mientras tengan su registro abierto con
+/// el servidor; el primero de sus registros, además, los completa (datos y
+/// canales), porque se pueden agregar antes de que se conecten.
 /// </summary>
 public sealed class DeviceStatusMonitor(
     IServiceScopeFactory scopeFactory,
     ScopedHub hub,
+    IsupService isup,
+    DriverRegistry drivers,
+    CredentialProtector protector,
+    LicenseService license,
+    MediaMtxManager mtx,
+    AuditService audit,
     ILogger<DeviceStatusMonitor> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
@@ -23,6 +35,9 @@ public sealed class DeviceStatusMonitor(
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        // Un equipo ISUP que se conecta o se cae se refleja al instante, sin esperar la pasada.
+        isup.DeviceOnlineChanged += (isupId, online) => _ = Task.Run(() => OnIsupChangedAsync(isupId, online, ct), ct);
+
         // Dejar que el servidor termine de arrancar antes de la primera pasada.
         await Task.Delay(TimeSpan.FromSeconds(5), ct);
 
@@ -55,7 +70,9 @@ public sealed class DeviceStatusMonitor(
         if (devices.Count == 0) return;
 
         var results = await Task.WhenAll(devices.Select(async x =>
-            (x.Device, x.ChannelCount, x.EnabledCount, Reachable: await IsReachableAsync(x.Device.Host, x.Device.SdkPort, ct))));
+            (x.Device, x.ChannelCount, x.EnabledCount, Reachable: x.Device.IsupDeviceId is { } isupId
+                ? isup.IsOnline(isupId)
+                : await IsReachableAsync(x.Device.Host, x.Device.SdkPort, ct))));
 
         var changed = new List<(DeviceDto Dto, DeviceStatus Previous)>();
         foreach (var (device, channelCount, enabledCount, reachable) in results)
@@ -71,7 +88,8 @@ public sealed class DeviceStatusMonitor(
                     device.Id, device.Name, device.DeviceType, device.DriverKey, device.Host,
                     device.SdkPort, device.RtspPort, device.Username, device.Model, device.SerialNumber,
                     device.FirmwareVersion, channelCount, device.Status, device.LastSeenAt, device.CreatedAt,
-                    device.AnprEnabled, enabledCount), previous));
+                    device.AnprEnabled, enabledCount, IsupDeviceId: device.IsupDeviceId,
+                    HasIsupKey: device.IsupKeyCiphertext is { Length: > 0 }), previous));
             }
         }
         await db.SaveChangesAsync(ct);
@@ -87,8 +105,50 @@ public sealed class DeviceStatusMonitor(
             // La primera lectura tras arrancar (Desconocido → En línea) no es
             // una recuperación: no dispara automatizaciones.
             if (previous != DeviceStatus.Unknown || dto.Status != DeviceStatus.Online)
-                workflows.Publish(Workflows.WorkflowTrigger.FromDeviceStatus("video", dto.Id, dto.Name, dto.Host, dto.Model,
-                    dto.Status.ToString(), dto.Status == DeviceStatus.Online ? null : "el equipo no responde en su puerto de gestión"));
+                workflows.Publish(Workflows.WorkflowTrigger.FromDeviceStatus("video", dto.Id, dto.Name,
+                    dto.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : dto.Host, dto.Model, dto.Status.ToString(),
+                    dto.Status == DeviceStatus.Online ? null
+                    : dto.IsupDeviceId is null ? "el equipo no responde en su puerto de gestión" : "el equipo cortó su conexión ISUP"));
+        }
+    }
+
+    /// <summary>
+    /// Un equipo de video ISUP se conectó o se cayó. Si está pendiente de leer (se agregó sin conexión, o cambió su ID o su clave
+    /// sin estar conectado), se completa con sus datos y canales como en una revalidación; después se actualiza el semáforo.
+    /// </summary>
+    private async Task OnIsupChangedAsync(string isupId, bool online, CancellationToken ct)
+    {
+        try
+        {
+            if (online) await Task.Delay(TimeSpan.FromSeconds(3), ct);   // que termine el intercambio de registro del equipo
+            using (var scope = scopeFactory.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+                var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.IsupDeviceId == isupId, ct);
+                if (device is null) return;
+                // Sin canales (se agregó antes de conectarse) o sin modelo (cambió su ID o su clave sin estar conectado).
+                if (online && (device.Channels.Count == 0 || device.Model is null) && drivers.Find(device.DriverKey) is { } factory)
+                {
+                    var info = await factory.Create().ProbeAsync(DeviceConnections.Of(device, protector), ct);
+                    Api.DevicesApi.ApplyProbe(device, info, removeMissing: false);
+                    int trimmed = await Api.DevicesApi.EnforceChannelQuotaAsync(license, db, device, ct);
+                    await db.SaveChangesAsync(ct);
+                    await audit.LogSystemAsync("devices", "device-revalidated", "device", device.Id.ToString(), device.Name,
+                        $"El equipo '{device.Name}' se conectó por ISUP (ID {isupId}): {device.Model ?? "modelo desconocido"}, " +
+                        $"{device.Channels.Count} canales, {device.Channels.Count(c => c.Enabled)} habilitados" +
+                        (trimmed > 0 ? $"; {trimmed} quedaron deshabilitados por el cupo de canales de la licencia" : "") + ".",
+                        origin: "server");
+                    await mtx.RefreshPathsAsync(ct);
+                    var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<VmsHub>>();
+                    await hubContext.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
+                }
+            }
+            await CheckAllAsync(ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            logger.LogWarning("No se pudo completar el equipo de video ISUP {Id} al conectarse: {Error}", isupId, ex.Message);
         }
     }
 

@@ -1,7 +1,11 @@
 ﻿namespace TrueCentralVms.Core.Drivers;
 
-/// <summary>Datos de conexión de gestión a un dispositivo (puerto SDK/ONVIF, no RTSP).</summary>
-public sealed record DeviceConnectionInfo(string Host, int Port, string Username, string Password);
+/// <summary>
+/// Datos de conexión de gestión a un dispositivo (puerto SDK/ONVIF, no RTSP).
+/// <paramref name="IsupId"/>: el equipo no se alcanza por IP sino que se conecta él al servidor por ISUP con ese ID (dirección,
+/// puerto y credenciales no se usan).
+/// </summary>
+public sealed record DeviceConnectionInfo(string Host, int Port, string Username, string Password, string? IsupId = null);
 
 /// <summary>
 /// Resultado de sondear un dispositivo: credenciales validadas e información
@@ -280,6 +284,12 @@ public interface IDeviceDriverFactory
     string DisplayName { get; }
 
     DriverCapabilities Capabilities { get; }
+
+    /// <summary>
+    /// true si el equipo se conecta él al servidor por ISUP (con su ID y clave) en vez de que el servidor lo alcance por IP: el alta
+    /// pide esos datos y no dirección ni credenciales, y el video lo entrega el servicio ISUP.
+    /// </summary>
+    bool UsesIsup => false;
 
     IDeviceDriver Create();
 }

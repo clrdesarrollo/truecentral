@@ -359,7 +359,7 @@ public sealed class AccessControlService(
                 await db.SaveChangesAsync(ct);
                 await audit.LogSystemAsync("access", "device-revalidated", "access-device", device.Id.ToString(), device.Name,
                     $"El equipo de control de acceso '{device.Name}' se conectó por ISUP (ID {isupId}): {device.Model ?? "modelo desconocido"}, {doors}.",
-                    origin: "sistema");
+                    origin: "server");
                 var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<VmsHub>>();
                 await hubContext.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
             }

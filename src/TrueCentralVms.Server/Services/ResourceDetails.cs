@@ -115,7 +115,7 @@ public static class ResourceDetails
         if (d.AnprEnabled) Add(facts, "Patentes (ANPR)", "El equipo es fuente de patentes");
         return new Part(
             new ResourceSourceDto("devices", d.Id, d.Name, d.Model, d.SerialNumber, d.FirmwareVersion,
-                Address(d.Host, d.SdkPort), OnlineText(d.Status), d.LastSeenAt),
+                d.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : Address(d.Host, d.SdkPort), OnlineText(d.Status), d.LastSeenAt),
             facts, CanRename: true, RenameNote: null, FixedCameras: [],
             SnapshotPath: $"/api/devices/{d.Id}/snapshot/{c.ChannelNumber}");
     }

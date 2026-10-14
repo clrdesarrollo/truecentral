@@ -83,6 +83,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<LicenseService>())
 builder.Services.AddSingleton<IDeviceDriverFactory, HikvisionDeviceDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaDeviceDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Onvif.OnvifDeviceDriverFactory>();
+builder.Services.AddSingleton<IDeviceDriverFactory, HikvisionIsupDeviceDriverFactory>();
 builder.Services.AddSingleton<DriverRegistry>();
 builder.Services.AddSingleton<DeviceStatusMonitor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceStatusMonitor>());
@@ -139,11 +140,13 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceClockService
 // Parlantes IP: drivers, registro y servicio (sondeo de estado, reproducción sincronizada, voz en vivo).
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFactory>();
+builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionIsupSpeakerDriverFactory>();
 builder.Services.AddSingleton<SpeakerDriverRegistry>();
 builder.Services.AddSingleton<SpeakerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>());
 // Citofonía: frentes de videoportero (enlace de llamadas por SDK, voz bidireccional y apertura de puerta).
 builder.Services.AddSingleton<IIntercomDriverFactory, HikvisionIntercomDriverFactory>();
+builder.Services.AddSingleton<IIntercomDriverFactory, HikvisionIsupIntercomDriverFactory>();
 builder.Services.AddSingleton<IntercomDriverRegistry>();
 builder.Services.AddSingleton<IntercomService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IntercomService>());

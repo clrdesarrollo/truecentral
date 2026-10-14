@@ -10,6 +10,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Server.Services.Isup;
 using TrueCentralVms.Server.Services.Workflows;
 using TrueCentralVms.Core.Domain;
 
@@ -42,22 +43,31 @@ public static class SpeakersApi
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
 
-    private static string? ValidateWrite(SpeakerWriteDto request, SpeakerDriverRegistry drivers)
+    /// <param name="isupKeyStored">El parlante ya tiene clave ISUP guardada (en edición, dejarla vacía la conserva).</param>
+    private static string? ValidateWrite(SpeakerWriteDto request, SpeakerDriverRegistry drivers, bool isupKeyStored = false)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
             return "El nombre es obligatorio (máximo 128 caracteres).";
+        if (request.GroupName is { Length: > 64 })
+            return "El grupo no puede superar los 64 caracteres.";
+        if (drivers.Find(request.DriverKey) is not { } factory)
+            return $"Driver desconocido: '{request.DriverKey}'.";
+        // Por ISUP el parlante se conecta solo: se piden su ID y su clave, no dirección ni credenciales.
+        if (factory.UsesIsup)
+            return IsupEquipmentRules.Validate(request.IsupDeviceId, request.IsupKey, isupKeyStored);
         if (string.IsNullOrWhiteSpace(request.Host))
             return "La dirección (IP o hostname) es obligatoria.";
         if (request.Port is < 1 or > 65535)
             return "El puerto debe estar entre 1 y 65535.";
         if (string.IsNullOrWhiteSpace(request.Username))
             return "El usuario del parlante es obligatorio.";
-        if (request.GroupName is { Length: > 64 })
-            return "El grupo no puede superar los 64 caracteres.";
-        if (drivers.Find(request.DriverKey) is null)
-            return $"Driver desconocido: '{request.DriverKey}'.";
         return null;
     }
+
+    private static bool UsesIsup(SpeakerDriverRegistry drivers, string driverKey) => drivers.Find(driverKey)?.UsesIsup == true;
+
+    /// <summary>Dónde está el parlante, para la bitácora: dirección y puerto, o su ID ISUP.</summary>
+    private static string WhereOf(Speaker s) => s.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : $"{s.Host}:{s.Port}";
 
     private static async Task<(SpeakerInfo? Info, int LibraryCount, string? Error)> ProbeAsync(SpeakerDriverRegistry drivers,
         string driverKey, SpeakerConnectionInfo conn, CancellationToken ct)
@@ -82,7 +92,7 @@ public static class SpeakersApi
     private static string? GroupOf(SpeakerWriteDto request) =>
         string.IsNullOrWhiteSpace(request.GroupName) ? null : request.GroupName.Trim();
 
-    private static void ApplyProbe(Speaker speaker, SpeakerInfo info)
+    internal static void ApplyProbe(Speaker speaker, SpeakerInfo info)
     {
         speaker.Model = info.Model;
         speaker.SerialNumber = info.SerialNumber;
@@ -122,7 +132,7 @@ public static class SpeakersApi
         app.MapGet("/api/speakers/drivers", (HttpContext ctx, SpeakerDriverRegistry drivers) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            return Results.Ok(drivers.All.Select(f => new SpeakerDriverDto(f.DriverKey, f.DisplayName, f.DefaultPort, f.DefaultHttps)));
+            return Results.Ok(drivers.All.Select(f => new SpeakerDriverDto(f.DriverKey, f.DisplayName, f.DefaultPort, f.DefaultHttps, f.UsesIsup)));
         });
 
         app.MapGet("/api/speakers/tts-languages", (HttpContext ctx) =>
@@ -159,53 +169,77 @@ public static class SpeakersApi
         });
 
         app.MapPost("/api/speakers", async (HttpContext ctx, SpeakerWriteDto request, VmsDbContext db, SpeakerDriverRegistry drivers, LicenseService license,
-            CredentialProtector protector, IHubContext<VmsHub> hub, SpeakerService service, AuditService audit, CancellationToken ct) =>
+            CredentialProtector protector, IHubContext<VmsHub> hub, SpeakerService service, AuditService audit,
+            IsupService isup, IsupHostManager isupHost, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
-            if (string.IsNullOrEmpty(request.Password)) return Error("La contraseña del parlante es obligatoria.");
+            bool viaIsup = UsesIsup(drivers, request.DriverKey);
+            if (!viaIsup && string.IsNullOrEmpty(request.Password)) return Error("La contraseña del parlante es obligatoria.");
             if (license.Deny(LicenseFeatures.ModuleSpeakers, request.Enabled ? LicenseFeatures.SpeakerChannels : null,
                     await db.Speakers.CountAsync(s => s.Enabled, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "speaker", request.Name?.Trim());
-            string host = request.Host.Trim();
-            if (await db.Speakers.AnyAsync(s => s.Host == host && s.Port == request.Port, ct))
+            string host = viaIsup ? "" : request.Host.Trim();
+            string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
+            if (isupId is not null)
+            {
+                if (await db.Speakers.AnyAsync(s => s.IsupDeviceId == isupId, ct))
+                    return Error($"Ya existe un parlante con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, request.IsupKey!, IsupEquipmentRules.Speaker, null, ct) is { } conflict)
+                    return Error(conflict, StatusCodes.Status409Conflict);
+            }
+            else if (await db.Speakers.AnyAsync(s => s.Host == host && s.Port == request.Port, ct))
                 return Error("Ya existe un parlante con esa dirección y puerto.", StatusCodes.Status409Conflict);
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
-
-            var conn = new SpeakerConnectionInfo(host, request.Port, request.UseHttps, request.Username, request.Password);
-            var (info, libraryCount, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
-            if (info is null)
-            {
-                await audit.LogAsync(ctx, "speakers", "speaker-created", targetType: "speaker", targetName: request.Name.Trim(),
-                    detail: $"Alta de parlante rechazada por el equipo {host}:{request.Port}: {probeError}", success: false);
-                return Error(probeError!);
-            }
 
             var speaker = new Speaker
             {
                 Name = request.Name.Trim(),
                 DriverKey = request.DriverKey,
                 Host = host,
-                Port = request.Port,
-                UseHttps = request.UseHttps,
-                Username = request.Username,
-                PasswordCiphertext = protector.Protect(request.Password),
+                Port = viaIsup ? 0 : request.Port,
+                UseHttps = !viaIsup && request.UseHttps,
+                Username = viaIsup ? "" : request.Username,
+                PasswordCiphertext = viaIsup ? [] : protector.Protect(request.Password!),
+                IsupDeviceId = isupId,
+                IsupKeyCiphertext = viaIsup ? protector.Protect(request.IsupKey!) : null,
                 GroupName = GroupOf(request),
                 LocationId = locationId,
                 Enabled = request.Enabled,
             };
-            ApplyProbe(speaker, info);
+
+            // Por ISUP el parlante solo se conecta una vez que el servidor lo conoce: se guarda y se completa en su primer contacto.
+            int libraryCount = 0;
+            if (isupId is not null && !isup.IsOnline(isupId))
+            {
+                speaker.Status = SpeakerStatus.Offline;
+                speaker.LastError = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "parlante", ct);
+            }
+            else
+            {
+                var (info, count, probeError) = await ProbeAsync(drivers, request.DriverKey, service.ConnectionOf(speaker), ct);
+                if (info is null)
+                {
+                    await audit.LogAsync(ctx, "speakers", "speaker-created", targetType: "speaker", targetName: request.Name.Trim(),
+                        detail: $"Alta de parlante rechazada por el equipo {WhereOf(speaker)}: {probeError}", success: false);
+                    return Error(probeError!);
+                }
+                ApplyProbe(speaker, info);
+                libraryCount = count;
+            }
             db.Speakers.Add(speaker);
             await db.SaveChangesAsync(ct);
+            if (viaIsup) isup.InvalidateDirectory();
 
             await audit.LogAsync(ctx, "speakers", "speaker-created",
                 targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
-                detail: $"Agregó el parlante '{speaker.Name}' ({speaker.DriverKey}, {speaker.Host}:{speaker.Port}, {speaker.Model ?? "modelo desconocido"}" +
+                detail: $"Agregó el parlante '{speaker.Name}' ({speaker.DriverKey}, {WhereOf(speaker)}, " +
+                        (speaker.Model is null && viaIsup ? "a la espera de que se conecte por ISUP" : speaker.Model ?? "modelo desconocido") +
                         (speaker.GroupName is null ? "" : $", grupo '{speaker.GroupName}'") +
                         (speaker.LocationId is null ? "" : $", en {EquipmentLocation.Describe(speaker.LocationId)}") +
                         $", biblioteca: {libraryCount} audios).",
-                data: new { speaker.Host, speaker.Port, speaker.UseHttps, speaker.DriverKey, speaker.Model, speaker.SerialNumber, speaker.GroupName, speaker.LocationId });
+                data: new { speaker.Host, speaker.Port, speaker.UseHttps, speaker.DriverKey, speaker.IsupDeviceId, speaker.Model, speaker.SerialNumber, speaker.GroupName, speaker.LocationId });
             EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", cancellationToken: ct);
@@ -214,38 +248,69 @@ public static class SpeakersApi
 
         app.MapPut("/api/speakers/{id:int}", async (HttpContext ctx, int id, SpeakerWriteDto request, VmsDbContext db, LicenseService license,
             SpeakerDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub, SpeakerService service,
-            AuditService audit, CancellationToken ct) =>
+            AuditService audit, IsupService isup, IsupHostManager isupHost, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
-            if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.Id == id, ct);
             if (speaker is null) return Results.NotFound();
-            string host = request.Host.Trim();
-            if (await db.Speakers.AnyAsync(s => s.Id != id && s.Host == host && s.Port == request.Port, ct))
+            if (ValidateWrite(request, drivers, speaker.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
+            bool viaIsup = UsesIsup(drivers, request.DriverKey);
+            string host = viaIsup ? "" : request.Host.Trim();
+            int port = viaIsup ? 0 : request.Port;
+            string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
+            string? isupKey = !viaIsup ? null
+                : string.IsNullOrEmpty(request.IsupKey) ? protector.Unprotect(speaker.IsupKeyCiphertext!) : request.IsupKey;
+            if (isupId is not null)
+            {
+                if (await db.Speakers.AnyAsync(s => s.Id != id && s.IsupDeviceId == isupId, ct))
+                    return Error($"Ya existe otro parlante con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, isupKey!, IsupEquipmentRules.Speaker, id, ct) is { } conflict)
+                    return Error(conflict, StatusCodes.Status409Conflict);
+            }
+            else if (await db.Speakers.AnyAsync(s => s.Id != id && s.Host == host && s.Port == request.Port, ct))
                 return Error("Ya existe otro parlante con esa dirección y puerto.", StatusCodes.Status409Conflict);
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, speaker.LocationId, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
             int? previousLocation = speaker.LocationId;
 
-            string password = string.IsNullOrEmpty(request.Password) ? protector.Unprotect(speaker.PasswordCiphertext) : request.Password;
-            bool connectionChanged = speaker.Host != host || speaker.Port != request.Port || speaker.UseHttps != request.UseHttps ||
-                                     speaker.Username != request.Username || speaker.DriverKey != request.DriverKey ||
-                                     !string.IsNullOrEmpty(request.Password);
+            string password = viaIsup ? ""
+                : !string.IsNullOrEmpty(request.Password) ? request.Password
+                : speaker.PasswordCiphertext.Length > 0 ? protector.Unprotect(speaker.PasswordCiphertext)
+                : "";
+            if (!viaIsup && password.Length == 0) return Error("La contraseña del parlante es obligatoria.");
+            bool connectionChanged = speaker.DriverKey != request.DriverKey || (viaIsup
+                ? speaker.IsupDeviceId != isupId || !string.IsNullOrEmpty(request.IsupKey)
+                : speaker.IsupDeviceId is not null || speaker.Host != host || speaker.Port != request.Port ||
+                  speaker.UseHttps != request.UseHttps || speaker.Username != request.Username || !string.IsNullOrEmpty(request.Password));
             if (connectionChanged)
             {
                 HikvisionSpeakerDriver.Forget(service.ConnectionOf(speaker));
-                var conn = new SpeakerConnectionInfo(host, request.Port, request.UseHttps, request.Username, password);
-                var (info, _, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
-                if (info is null) return Error(probeError!);
-                ApplyProbe(speaker, info);
+                if (viaIsup && !isup.IsOnline(isupId!))
+                {
+                    // Aún no se conecta con estos datos: se completa (sin modelo = pendiente) en su próximo contacto.
+                    speaker.Model = null;
+                    speaker.Status = SpeakerStatus.Offline;
+                    speaker.LastError = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId!, "parlante", ct);
+                }
+                // Con el mismo ID ISUP y conectado, cambiar solo la clave no requiere volver a leer el equipo.
+                else if (!viaIsup || speaker.IsupDeviceId != isupId || speaker.DriverKey != request.DriverKey)
+                {
+                    var conn = new SpeakerConnectionInfo(host, port, !viaIsup && request.UseHttps, viaIsup ? "" : request.Username, password, isupId);
+                    var (info, _, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+                    if (info is null) return Error(probeError!);
+                    ApplyProbe(speaker, info);
+                }
             }
 
             var changes = new List<string>();
             if (speaker.Name != request.Name.Trim()) changes.Add($"nombre '{speaker.Name}' → '{request.Name.Trim()}'");
-            if (speaker.Host != host || speaker.Port != request.Port) changes.Add($"dirección {speaker.Host}:{speaker.Port} → {host}:{request.Port}");
-            if (speaker.UseHttps != request.UseHttps) changes.Add(request.UseHttps ? "HTTPS activado" : "HTTPS desactivado");
-            if (speaker.Username != request.Username) changes.Add($"usuario '{speaker.Username}' → '{request.Username}'");
-            if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
+            string whereBefore = WhereOf(speaker), whereAfter = viaIsup ? $"ISUP {isupId}" : $"{host}:{request.Port}";
+            if (whereBefore != whereAfter) changes.Add($"conexión {whereBefore} → {whereAfter}");
+            if (!viaIsup && speaker.UseHttps != request.UseHttps) changes.Add(request.UseHttps ? "HTTPS activado" : "HTTPS desactivado");
+            if (!viaIsup && speaker.Username != request.Username) changes.Add($"usuario '{speaker.Username}' → '{request.Username}'");
+            if (!viaIsup && !string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
+            if (viaIsup && !string.IsNullOrEmpty(request.IsupKey)) changes.Add("clave ISUP cambiada");
+            bool isupChanged = speaker.IsupDeviceId != isupId || (viaIsup && !string.IsNullOrEmpty(request.IsupKey));
             if (speaker.GroupName != GroupOf(request)) changes.Add($"grupo '{speaker.GroupName}' → '{GroupOf(request)}'");
             if (locationId != previousLocation)
                 changes.Add(EquipmentLocation.Change(previousLocation, locationId));
@@ -254,10 +319,12 @@ public static class SpeakersApi
             speaker.Name = request.Name.Trim();
             speaker.DriverKey = request.DriverKey;
             speaker.Host = host;
-            speaker.Port = request.Port;
-            speaker.UseHttps = request.UseHttps;
-            speaker.Username = request.Username;
-            speaker.PasswordCiphertext = protector.Protect(password);
+            speaker.Port = port;
+            speaker.UseHttps = !viaIsup && request.UseHttps;
+            speaker.Username = viaIsup ? "" : request.Username;
+            speaker.PasswordCiphertext = viaIsup ? [] : protector.Protect(password);
+            speaker.IsupDeviceId = isupId;
+            speaker.IsupKeyCiphertext = viaIsup ? protector.Protect(isupKey!) : null;
             speaker.GroupName = GroupOf(request);
             speaker.LocationId = locationId;
             if (!speaker.Enabled && request.Enabled
@@ -267,6 +334,7 @@ public static class SpeakersApi
             speaker.Enabled = request.Enabled;
             speaker.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
+            if (isupChanged) isup.InvalidateDirectory();
 
             await audit.LogAsync(ctx, "speakers", "speaker-updated",
                 targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
@@ -278,7 +346,7 @@ public static class SpeakersApi
         });
 
         app.MapDelete("/api/speakers/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, IHubContext<VmsHub> hub,
-            SpeakerService service, AuditService audit, CancellationToken ct) =>
+            SpeakerService service, AuditService audit, IsupService isup, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             var speaker = await db.Speakers.FindAsync([id], ct);
@@ -288,9 +356,10 @@ public static class SpeakersApi
             HikvisionSpeakerDriver.Forget(service.ConnectionOf(speaker));
             db.Speakers.Remove(speaker);
             await db.SaveChangesAsync(ct);
+            if (speaker.IsupDeviceId is not null) isup.InvalidateDirectory();
             await audit.LogAsync(ctx, "speakers", "speaker-deleted",
                 targetType: "speaker", targetId: id.ToString(), targetName: speaker.Name,
-                detail: $"Eliminó el parlante '{speaker.Name}' ({speaker.Host}:{speaker.Port}).");
+                detail: $"Eliminó el parlante '{speaker.Name}' ({WhereOf(speaker)}).");
             EquipmentLocation.Changed(ctx);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", cancellationToken: ct);
             return Results.Ok();
@@ -298,22 +367,46 @@ public static class SpeakersApi
 
         // Probar conexión (sin persistir). Con ?speakerId= reutiliza la clave guardada.
         app.MapPost("/api/speakers/probe", async (HttpContext ctx, SpeakerWriteDto request, VmsDbContext db, SpeakerDriverRegistry drivers,
-            CredentialProtector protector, AuditService audit, int? speakerId, CancellationToken ct) =>
+            CredentialProtector protector, AuditService audit, IsupService isup, IsupHostManager isupHost, int? speakerId, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
-            if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
-            string? password = request.Password;
-            if (string.IsNullOrEmpty(password) && speakerId is int existingId &&
-                await db.Speakers.FindAsync([existingId], ct) is { } existing)
-                password = protector.Unprotect(existing.PasswordCiphertext);
-            if (string.IsNullOrEmpty(password)) return Error("La contraseña del parlante es obligatoria.");
+            var existing = speakerId is int existingId ? await db.Speakers.FindAsync([existingId], ct) : null;
+            if (ValidateWrite(request, drivers, existing?.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
 
-            var conn = new SpeakerConnectionInfo(request.Host.Trim(), request.Port, request.UseHttps, request.Username, password);
+            SpeakerConnectionInfo conn;
+            string where;
+            if (UsesIsup(drivers, request.DriverKey))
+            {
+                // Por ISUP no hay nada que "probar" desde aquí: el parlante tiene que estar conectado.
+                string isupId = request.IsupDeviceId!.Trim();
+                where = $"ISUP {isupId}";
+                if (!isup.IsOnline(isupId))
+                {
+                    var status = await isup.GetHostStatusAsync(ct);
+                    string message = status?.Rejections.Any(r => r.DeviceId == isupId && r.Reason.Contains("no está dado de alta", StringComparison.Ordinal)) == true
+                        ? $"El parlante ya está intentando conectarse por ISUP con el ID {isupId}: guárdelo y el servidor lo aceptará."
+                        : await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "parlante", ct);
+                    await audit.LogAsync(ctx, "speakers", "speaker-probed", targetType: "speaker", targetName: request.Name.Trim(),
+                        detail: $"Probó la conexión con el parlante {where}: no está conectado.", success: false);
+                    return Results.Ok(new SpeakerProbeResultDto(false, message, null, null, null, false, false, false, null, 0));
+                }
+                conn = new SpeakerConnectionInfo("", 0, false, "", "", isupId);
+            }
+            else
+            {
+                string? password = request.Password;
+                if (string.IsNullOrEmpty(password) && existing is { PasswordCiphertext.Length: > 0 })
+                    password = protector.Unprotect(existing.PasswordCiphertext);
+                if (string.IsNullOrEmpty(password)) return Error("La contraseña del parlante es obligatoria.");
+                conn = new SpeakerConnectionInfo(request.Host.Trim(), request.Port, request.UseHttps, request.Username, password);
+                where = $"{request.Host.Trim()}:{request.Port}";
+            }
+
             var (info, libraryCount, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             await audit.LogAsync(ctx, "speakers", "speaker-probed", targetType: "speaker", targetName: request.Name.Trim(),
                 detail: info is null
-                    ? $"Probó la conexión con el parlante {request.Host.Trim()}:{request.Port}: {probeError}"
-                    : $"Probó la conexión con el parlante {request.Host.Trim()}:{request.Port}: correcta ({info.Model}).",
+                    ? $"Probó la conexión con el parlante {where}: {probeError}"
+                    : $"Probó la conexión con el parlante {where}: correcta ({info.Model}).",
                 success: info is not null);
             if (info is null)
                 return Results.Ok(new SpeakerProbeResultDto(false, probeError, null, null, null, false, false, false, null, 0));

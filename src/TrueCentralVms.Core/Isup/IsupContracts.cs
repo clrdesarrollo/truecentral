@@ -215,6 +215,12 @@ public interface IIsupGateway
     string PlaybackSourceUrl(string deviceId, int channel, DateTime localStart, DateTime localEnd);
 
     /// <summary>
+    /// Un cuadro JPEG del video en vivo del canal, para los equipos que no entregan foto por ISAPI (terminales, algunos
+    /// frentes); null si el equipo no está conectado o no llegó imagen a tiempo.
+    /// </summary>
+    Task<byte[]?> GrabFrameAsync(string deviceId, int channel, int streamType, CancellationToken ct = default);
+
+    /// <summary>
     /// Abre la voz con el equipo; el audio que mande llega por <paramref name="onAudio"/> en su codificación. Con
     /// <paramref name="broadcast"/> se pide solo bajada (parlantes): el equipo no capta ni envía audio.
     /// </summary>
@@ -237,6 +243,14 @@ public static class IsupGateway
     /// <summary>El transporte, o un error claro si el servicio ISUP no está disponible en este servidor.</summary>
     public static IIsupGateway Require() =>
         Current ?? throw new DriverException("El servicio ISUP del servidor no está disponible; revise Sistema → Servicios.");
+
+    /// <summary>
+    /// ¿Es una URL de video del servicio ISUP (<see cref="IIsupGateway.LiveSourceUrl"/> o <see cref="IIsupGateway.PlaybackSourceUrl"/>)?
+    /// Entregan MPEG-PS por HTTP local: quien la consuma (MediaMTX, la exportación) la lee con FFmpeg y no como RTSP.
+    /// </summary>
+    public static bool IsMediaSource(string? url) =>
+        url is not null && url.StartsWith("http://127.0.0.1:", StringComparison.Ordinal) &&
+        (url.Contains("/live/", StringComparison.Ordinal) || url.Contains("/playback/", StringComparison.Ordinal));
 
     /// <summary>Valida un ID ISUP: 1 a 32 caracteres, letras, números, guion y guion bajo.</summary>
     public static string? ValidateDeviceId(string? id)

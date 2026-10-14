@@ -165,6 +165,7 @@ public sealed class IsupService : BackgroundService, IIsupGateway
                 if (_states.TryGetValue(e.DeviceId, out var st)) _states[e.DeviceId] = st with { Asleep = true };
                 break;
             case IsupEventKinds.Alarm when e.Alarm is not null:
+                LogFirstOfKind(e.Alarm);
                 if (_alarmSubscribers.TryGetValue(e.DeviceId, out var list))
                 {
                     Action<IsupAlarm>[] handlers;
@@ -180,6 +181,24 @@ public sealed class IsupService : BackgroundService, IIsupGateway
     }
 
     private string? NameOf(string id) => _namesById.GetValueOrDefault(id);
+
+    private readonly ConcurrentDictionary<string, byte> _alarmKindsSeen = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Deja en el registro la primera alarma de cada tipo de cada equipo (tipo ISUP + eventType), recortada: así se ve el formato
+    /// real que envía un modelo nuevo (las llamadas de un frente, los eventos de una cámara) sin llenar el registro.
+    /// </summary>
+    private void LogFirstOfKind(IsupAlarm alarm)
+    {
+        string text = alarm.Text ?? "";
+        var m = System.Text.RegularExpressions.Regex.Match(text, @"<eventType>([^<]{1,60})</eventType>|""eventType""\s*:\s*""([^""]{1,60})""");
+        string kind = alarm.Cid is not null ? "cid" : alarm.Basic is { } b ? $"basic-{b.AlarmType}"
+            : m.Success ? (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value) : "?";
+        if (_alarmKindsSeen.Count > 2000 || !_alarmKindsSeen.TryAdd($"{alarm.DeviceId}|{alarm.Type}|{kind}", 0)) return;
+        string sample = text.Length > 800 ? text[..800] + "…" : text;
+        _logger.LogInformation("ISUP: primera alarma «{Kind}» (tipo {Type}) de {Device}{Pictures}: {Text}", kind, alarm.Type, alarm.DeviceId,
+            alarm.Pictures is { Count: > 0 } p ? $" con {p.Count} foto(s)" : "", sample.Replace("\r", "").Replace("\n", " "));
+    }
 
     /// <summary>Conexión y desconexión de cada equipo en la bitácora (acelerado: un equipo que oscila no llena la tabla).</summary>
     private void AuditConnection(string id, bool online, string? address)
@@ -370,6 +389,59 @@ public sealed class IsupService : BackgroundService, IIsupGateway
     public string PlaybackSourceUrl(string deviceId, int channel, DateTime localStart, DateTime localEnd) =>
         $"{_host.ApiBaseUrl}/playback/{Uri.EscapeDataString(deviceId)}/{channel}" +
         $"?from={localStart.ToString("yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture)}&to={localEnd.ToString("yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture)}&t={_host.MediaToken}";
+
+    /// <summary>Máximo de capturas de cuadro simultáneas (cada una pide video al equipo y decodifica).</summary>
+    private readonly SemaphoreSlim _grabs = new(2, 2);
+
+    public async Task<byte[]?> GrabFrameAsync(string deviceId, int channel, int streamType, CancellationToken ct = default)
+    {
+        if (!IsOnline(deviceId) || MediaMtxManager.LocateFfmpeg() is not { } ffmpeg) return null;
+        await _grabs.WaitAsync(ct);
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(ffmpeg)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            // Mismos parámetros de lectura que el relé de MediaMTX: arranque en 1-2 s sin esperar el sondeo completo.
+            foreach (string a in new[]
+                     {
+                         "-hide_banner", "-loglevel", "error", "-nostdin",
+                         "-fflags", "+genpts", "-probesize", "400000", "-analyzeduration", "1000000",
+                         "-f", "mpeg", "-i", LiveSourceUrl(deviceId, channel, streamType),
+                         "-frames:v", "1", "-q:v", "3", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
+                     })
+                psi.ArgumentList.Add(a);
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process is null) return null;
+            ChildProcessJob.Attach(process);
+            _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(TimeSpan.FromSeconds(20));
+            using var jpeg = new MemoryStream();
+            try
+            {
+                await process.StandardOutput.BaseStream.CopyToAsync(jpeg, limit.Token);
+                await process.WaitForExitAsync(limit.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                if (ct.IsCancellationRequested) throw;
+                _logger.LogInformation("ISUP: no llegó imagen de {Device} canal {Channel} para la foto en 20 s.", deviceId, channel);
+                return null;
+            }
+            byte[] bytes = jpeg.ToArray();
+            return bytes is [0xFF, 0xD8, ..] ? bytes : null;
+        }
+        finally
+        {
+            _grabs.Release();
+        }
+    }
 
     public async Task<IIsupVoiceSession> OpenVoiceAsync(string deviceId, int channel, Action<ReadOnlyMemory<byte>> onAudio, bool broadcast = false, CancellationToken ct = default)
     {

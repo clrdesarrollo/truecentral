@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using System.Xml.Linq;
 using TrueCentralVms.Core.Drivers;
+using TrueCentralVms.Core.Isup;
 
 namespace TrueCentralVms.Drivers.Hikvision;
 
@@ -15,6 +16,20 @@ public sealed class HikvisionSpeakerDriverFactory : ISpeakerDriverFactory
     public string DisplayName => "Hikvision (parlante IP por ISAPI)";
     public int DefaultPort => 80;
     public bool DefaultHttps => false;
+    public ISpeakerDriver Create() => new HikvisionSpeakerDriver();
+}
+
+/// <summary>
+/// El mismo parlante ISAPI cuando se conecta al servidor por ISUP: las órdenes van por el túnel ISAPI de ISUP y la voz por el
+/// servidor de voz de ISUP (difusión: el parlante solo reproduce). Lo que no admite el túnel es subirle archivos.
+/// </summary>
+public sealed class HikvisionIsupSpeakerDriverFactory : ISpeakerDriverFactory
+{
+    public string DriverKey => "hikvision-isup";
+    public string DisplayName => "Hikvision por ISUP (el parlante se conecta al servidor)";
+    public int DefaultPort => 0;
+    public bool DefaultHttps => false;
+    public bool UsesIsup => true;
     public ISpeakerDriver Create() => new HikvisionSpeakerDriver();
 }
 
@@ -61,6 +76,12 @@ public sealed class HikvisionSpeakerDriver : ISpeakerDriver
 
     private static readonly ConcurrentDictionary<string, DigestAuthenticator> Auths = new();
 
+    /// <summary>Clientes HTTP de los parlantes ISUP: cada uno habla con su equipo por el túnel del servidor (ya autenticado).</summary>
+    private static readonly ConcurrentDictionary<string, HttpClient> IsupClients = new();
+
+    /// <summary>Cómo se nombra el parlante en los mensajes: su dirección, o su ID ISUP.</summary>
+    private static string Where(SpeakerConnectionInfo info) => info.IsupId is { Length: > 0 } id ? $"ISUP {id}" : $"{info.Host}:{info.Port}";
+
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private static string BaseUrl(SpeakerConnectionInfo info) =>
@@ -85,6 +106,26 @@ public sealed class HikvisionSpeakerDriver : ISpeakerDriver
     private static async Task<HttpResponseMessage> SendAsync(SpeakerConnectionInfo info, HttpMethod method, string path,
         HttpContent? content, TimeSpan? timeout, CancellationToken ct)
     {
+        if (info.IsupId is { Length: > 0 } isupId)
+        {
+            // El túnel ISAPI de ISUP no lleva cabeceras: nada de multipart.
+            if (content is MultipartFormDataContent)
+                throw new DriverException("El parlante se conecta por ISUP y el túnel ISUP no admite subirle archivos: " +
+                                          "agréguelos a su biblioteca desde la misma red o use texto a voz.");
+            var http = IsupClients.GetOrAdd(isupId, id => new HttpClient(new IsupHttpHandler(id, "parlante")) { Timeout = Timeout.InfiniteTimeSpan });
+            var isupRequest = new HttpRequestMessage(method, "http://isup.invalid" + path) { Content = content };
+            isupRequest.Options.Set(IsupHttpHandler.TimeoutOption, timeout ?? RequestTimeout);
+            try
+            {
+                return await http.SendAsync(isupRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+            }
+            finally
+            {
+                isupRequest.Content = null;
+                isupRequest.Dispose();
+            }
+        }
+
         var auth = AuthFor(info);
         var uri = new Uri(BaseUrl(info) + path);
         bool replayable = content is null or ByteArrayContent or StringContent or MultipartFormDataContent;
@@ -104,11 +145,11 @@ public sealed class HikvisionSpeakerDriver : ISpeakerDriver
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                throw new DriverException($"El parlante en {info.Host}:{info.Port} no respondió a tiempo.");
+                throw new DriverException($"El parlante en {Where(info)} no respondió a tiempo.");
             }
             catch (HttpRequestException ex)
             {
-                throw new DriverException($"No se pudo conectar con el parlante en {info.Host}:{info.Port}: {ex.Message}", ex);
+                throw new DriverException($"No se pudo conectar con el parlante en {Where(info)}: {ex.Message}", ex);
             }
             finally
             {
@@ -588,12 +629,16 @@ public sealed class HikvisionSpeakerDriver : ISpeakerDriver
     /// <summary>Con el desafío Digest ya conocido las órdenes (y el flujo de audio) salen firmadas de entrada.</summary>
     private static async Task EnsureAuthAsync(SpeakerConnectionInfo info, CancellationToken ct)
     {
-        if (AuthFor(info).Ready) return;
+        // Por ISUP el equipo ya se autenticó al registrarse.
+        if (info.IsupId is { Length: > 0 } || AuthFor(info).Ready) return;
         await CallAsync(info, HttpMethod.Get, "/ISAPI/System/deviceInfo", null, ct);
     }
 
     public async Task<ISpeakerAudioSession> OpenLiveAudioAsync(SpeakerConnectionInfo info, CancellationToken ct = default)
     {
+        // Por ISUP el audio no puede ir en un PUT largo por el túnel: va por el servidor de voz de ISUP, en difusión.
+        if (info.IsupId is { Length: > 0 } isupId)
+            return await IsupVoiceSession.OpenAsync(isupId, static _ => { }, broadcast: true, "parlante", ct);
         await EnsureAuthAsync(info, ct);
         string list = await RequireAsync(info, HttpMethod.Get, "/ISAPI/System/TwoWayAudio/channels", null,
             "El parlante no entregó sus canales de audio", ct);
@@ -656,7 +701,7 @@ public sealed class HikvisionSpeakerDriver : ISpeakerDriver
             {
                 string reason = "el parlante cerró el canal de audio";
                 if (_upload.IsFaulted && _upload.Exception?.GetBaseException() is { } ex) reason = ex.Message;
-                throw new DriverException($"No se pudo enviar audio al parlante {_info.Host}: {reason}.");
+                throw new DriverException($"No se pudo enviar audio al parlante {Where(_info)}: {reason}.");
             }
             await _frames.Writer.WriteAsync(frame, ct);
         }

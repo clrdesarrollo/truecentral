@@ -40,7 +40,11 @@ public sealed record SpeakerDto(
     /// <summary>Ubicación en el árbol de Recursos (null = por ubicar).</summary>
     int? LocationId = null,
     /// <summary>Ruta legible de esa ubicación ("Casa matriz › Patio").</summary>
-    string? Location = null);
+    string? Location = null,
+    /// <summary>ID ISUP si el parlante se conecta al servidor por ISUP (entonces Host y puerto no aplican).</summary>
+    string? IsupDeviceId = null,
+    /// <summary>Hay clave ISUP guardada (la clave nunca viaja).</summary>
+    bool HasIsupKey = false);
 
 public sealed record SpeakerWriteDto(
     string Name,
@@ -55,7 +59,11 @@ public sealed record SpeakerWriteDto(
     string? GroupName = null,
     /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
     /// por ubicar); 0 = por ubicar.</summary>
-    int? LocationId = null);
+    int? LocationId = null,
+    /// <summary>Solo con un driver ISUP: ID con que el parlante se registra en el servidor.</summary>
+    string? IsupDeviceId = null,
+    /// <summary>Solo con un driver ISUP: su clave; vacía en edición = conservar la guardada.</summary>
+    string? IsupKey = null);
 
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record SpeakerProbeResultDto(
@@ -70,7 +78,7 @@ public sealed record SpeakerProbeResultDto(
     int? Volume,
     int LibraryCount);
 
-public sealed record SpeakerDriverDto(string Key, string DisplayName, int DefaultPort, bool DefaultHttps);
+public sealed record SpeakerDriverDto(string Key, string DisplayName, int DefaultPort, bool DefaultHttps, bool UsesIsup = false);
 
 /// <summary>Audio guardado en la biblioteca del propio parlante.</summary>
 public sealed record SpeakerAudioItemDto(
