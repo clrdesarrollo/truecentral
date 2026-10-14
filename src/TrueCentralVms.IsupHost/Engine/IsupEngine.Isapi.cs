@@ -98,6 +98,60 @@ public sealed partial class IsupEngine
     static bool IsapiOk(string? text) => text != null && (text.Contains("<statusCode>1</statusCode>") || text.Contains("<statusString>OK</statusString>")
                                                           || text.Contains("\"statusCode\":1") || text.Contains("\"statusCode\": 1"));
 
+    // ====================== datos del equipo por el SDK ======================
+
+    /// <summary>
+    /// Datos y cantidad de canales por la configuración del SDK (NET_EHOME_GET_DEVICE_INFO y _VERSION_INFO). Es lo que tienen los
+    /// equipos ISUP 2.0/4.0, que no hablan ISAPI. Bloqueante.
+    /// </summary>
+    public IsupDeviceInfo GetDeviceInfo(string deviceId, int timeoutMs)
+    {
+        if (!_userByDevice.TryGetValue(deviceId, out int userId)) throw new IsupCommandException(-1, "El equipo no está conectado al servidor por ISUP.");
+        lock (GateOf(deviceId))
+        {
+            var info = GetConfig(userId, Isup.NET_EHOME_GET_DEVICE_INFO, Layout.DevInfoSize, "sus datos");
+            string? firmware = null;
+            try
+            {
+                var version = GetConfig(userId, Isup.NET_EHOME_GET_VERSION_INFO, Layout.VersionInfoSize, "su versión");
+                firmware = Text(version, Layout.VersionSoftware, 32);
+            }
+            catch (IsupCommandException) { /* la versión es un extra */ }
+            int I(int offset) => BitConverter.ToInt32(info, offset);
+            return new IsupDeviceInfo(I(Layout.DevInfoChannels), I(Layout.DevInfoChannelAmount), I(Layout.DevInfoStartChannel),
+                I(Layout.DevInfoMaxDigital), I(Layout.DevInfoType), I(Layout.DevInfoDisks), Text(info, Layout.DevInfoSerial, 128), firmware,
+                I(Layout.DevInfoAudioEnc));
+        }
+
+        static string? Text(byte[] b, int offset, int max)
+        {
+            int n = 0;
+            while (n < max && offset + n < b.Length && b[offset + n] != 0) n++;
+            var t = Encoding.ASCII.GetString(b, offset, n).Trim();
+            return t.Length == 0 ? null : t;
+        }
+    }
+
+    byte[] GetConfig(int userId, uint command, int size, string what)
+    {
+        IntPtr pOut = Marshal.AllocHGlobal(size);
+        try
+        {
+            ZeroFill(pOut, size);
+            Marshal.WriteInt32(pOut, 0, size);   // dwSize
+            var cfg = new NET_EHOME_CONFIG { pOutBuf = pOut, dwOutSize = (uint)size };
+            if (!Isup.NET_ECMS_GetDevConfig(userId, command, ref cfg, (uint)Marshal.SizeOf<NET_EHOME_CONFIG>()))
+            {
+                int err = Isup.NET_ECMS_GetLastError();
+                throw new IsupCommandException(err, $"El equipo no entregó {what} (error {err}{ErrorHint(err)}).");
+            }
+            var data = new byte[size];
+            Marshal.Copy(pOut, data, 0, size);
+            return data;
+        }
+        finally { Marshal.FreeHGlobal(pOut); }
+    }
+
     // ====================== órdenes por XML (capítulo 16 de la guía) ======================
 
     int _xmlSequence;

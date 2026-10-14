@@ -142,6 +142,14 @@ public sealed record IsupCidAlarm(
     int ZoneNo,
     string? UserName);
 
+/// <summary>
+/// Datos del equipo por la configuración del SDK (NET_EHOME_DEVICE_INFO): lo que se sabe de un equipo ISUP 2.0/4.0, que no tiene
+/// ISAPI. <paramref name="DeviceType"/> según el SDK (1 DVR, 3 DVS, 30 cámara IP, 40 domo IP…); <paramref name="AudioEncoding"/>
+/// 0 G.722, 1 G.711µ, 2 G.711A…
+/// </summary>
+public sealed record IsupDeviceInfo(int AnalogChannels, int TotalChannels, int StartChannel, int MaxDigitalChannels, int DeviceType,
+    int Disks, string? Serial, string? Firmware, int AudioEncoding);
+
 /// <summary>Respuesta de una petición ISAPI por el túnel ISUP.</summary>
 public sealed record IsupIsapiResponse(bool Ok, byte[] Body, int ErrorCode, string? Error);
 
@@ -188,6 +196,9 @@ public interface IIsupGateway
     /// </summary>
     Task<IsupIsapiResponse> IsapiAsync(string deviceId, string method, string pathAndQuery, byte[]? body,
         TimeSpan timeout, CancellationToken ct = default);
+
+    /// <summary>Datos y canales por la configuración del SDK (sirve a los equipos ISUP 2.0/4.0). Lanza DriverException si no responde.</summary>
+    Task<IsupDeviceInfo> GetDeviceInfoAsync(string deviceId, CancellationToken ct = default);
 
     /// <summary>Movimiento PTZ (start=true lo inicia, false lo detiene; velocidad 0..7).</summary>
     Task PtzAsync(string deviceId, int channel, IsupPtzCommand command, bool start, int speed, CancellationToken ct = default);

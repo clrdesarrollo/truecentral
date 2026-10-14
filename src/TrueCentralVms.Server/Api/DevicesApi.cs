@@ -323,7 +323,7 @@ public static class DevicesApi
             {
                 if (await db.Devices.AnyAsync(d => d.IsupDeviceId == isupId, ct))
                     return Error($"Ya existe un equipo de video con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
-                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, request.IsupKey!, IsupEquipmentRules.Video, null, ct) is { } conflict)
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, request.IsupKey, IsupEquipmentRules.Video, null, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }
             else
@@ -346,7 +346,7 @@ public static class DevicesApi
                 Username = viaIsup ? "" : request.Username,
                 PasswordCiphertext = viaIsup ? [] : protector.Protect(request.Password!),
                 IsupDeviceId = isupId,
-                IsupKeyCiphertext = viaIsup ? protector.Protect(request.IsupKey!) : null,
+                IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(request.IsupKey, protector) : null,
                 LocationId = locationId,
             };
 
@@ -411,12 +411,12 @@ public static class DevicesApi
             bool viaIsup = UsesIsup(drivers, request.DriverKey);
             string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
             string? isupKey = !viaIsup ? null
-                : string.IsNullOrEmpty(request.IsupKey) ? protector.Unprotect(device.IsupKeyCiphertext!) : request.IsupKey;
+                : IsupEquipmentRules.EffectiveKey(request.IsupKey, device.IsupKeyCiphertext, protector);
             if (isupId is not null)
             {
                 if (await db.Devices.AnyAsync(d => d.Id != id && d.IsupDeviceId == isupId, ct))
                     return Error($"Ya existe otro equipo de video con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
-                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, isupKey!, IsupEquipmentRules.Video, id, ct) is { } conflict)
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, isupKey, IsupEquipmentRules.Video, id, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }
             else if (await db.Devices.AnyAsync(d => d.Id != id && d.Host == request.Host && d.SdkPort == request.SdkPort, ct))
@@ -490,7 +490,7 @@ public static class DevicesApi
             device.Username = viaIsup ? "" : request.Username;
             device.PasswordCiphertext = viaIsup ? [] : protector.Protect(password);
             device.IsupDeviceId = isupId;
-            device.IsupKeyCiphertext = viaIsup ? protector.Protect(isupKey!) : null;
+            device.IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(isupKey, protector) : null;
             device.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             if (isupChanged) isup.InvalidateDirectory();

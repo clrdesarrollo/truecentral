@@ -42,7 +42,8 @@ function isupFieldsHtml(prefix, current, isNew, noun) {
         <div class="field">
           <label>${keyLabel}</label>
           <input id="${prefix}-isup-key" type="password" autocomplete="new-password" maxlength="32"
-                 placeholder="La «clave de cifrado» del equipo" title="Hasta 32 caracteres, sin espacios.">
+                 placeholder="La «clave de cifrado» del equipo"
+                 title="Hasta 32 caracteres, sin espacios. Los equipos ISUP 2.0/4.0 no usan clave: déjela vacía.">
         </div>
       </div>
       <div class="info-box" id="${prefix}-isup-help">
@@ -75,7 +76,7 @@ async function wireIsupFields(prefix, noun) {
       <span>Dirección del servidor</span><b>${esc(c.address ?? "(la IP de este servidor)")}</b>
       <span>Puerto</span><b>${c.port}</b>
       <span>ID del dispositivo</span><b>el mismo ID de arriba</b>
-      <span>Clave de cifrado</span><b>la misma clave de arriba</b>
+      <span>Clave de cifrado</span><b>la misma clave de arriba (ISUP 2.0/4.0: sin clave)</b>
     </div>
     ${c.running ? "" : `<div class="muted" style="margin-top:6px">Aviso: el servicio ISUP no está en ejecución ahora (Sistema → Servicios).</div>`}
     Desde internet, el equipo tiene que llegar a esa dirección y a los puertos 7660 a 7667 del servidor.`;

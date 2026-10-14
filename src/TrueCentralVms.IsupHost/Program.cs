@@ -93,6 +93,13 @@ app.MapGet("/status", () => Results.Json(engine.GetStatus(version), json));
 app.MapGet("/state/{deviceId}", (string deviceId) =>
     engine.GetDeviceState(deviceId) is { } s ? Results.Json(s, json) : Results.NotFound());
 
+// Datos y canales por la configuración del SDK (los equipos ISUP 2.0/4.0 no tienen ISAPI).
+app.MapGet("/info/{deviceId}", async (string deviceId, HttpContext ctx) =>
+{
+    try { return Results.Json(await Task.Run(() => engine.GetDeviceInfo(deviceId, options.CommandTimeoutMs)), json); }
+    catch (IsupCommandException ex) { await WriteProblem(ctx, ex.Message, ex.Code); return Results.Empty; }
+});
+
 app.MapPut("/directory", async (HttpRequest req) =>
 {
     var entries = await JsonSerializer.DeserializeAsync<List<IsupDirectoryEntry>>(req.Body, json) ?? [];

@@ -200,7 +200,7 @@ public static class AccessApi
                 if (IsupEquipmentRules.Validate(isupId, isupKey, keyStored: false) is { } isupError) return Error(isupError);
                 if (await db.AccessDevices.AnyAsync(d => d.IsupDeviceId == isupId, ct))
                     return Error($"Ya existe un equipo de control de acceso con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
-                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId!, isupKey!, IsupEquipmentRules.Access, null, ct) is { } conflict)
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId!, isupKey, IsupEquipmentRules.Access, null, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }
             // Con clave de comunicación, vacío es un valor válido: significa 0.
@@ -305,7 +305,7 @@ public static class AccessApi
                 if (IsupEquipmentRules.Validate(isupId, isupKey, keyStored) is { } isupError) return Error(isupError);
                 if (await db.AccessDevices.AnyAsync(d => d.Id != id && d.IsupDeviceId == isupId, ct))
                     return Error($"Ya existe otro equipo de control de acceso con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
-                string effectiveKey = isupKey ?? protector.Unprotect(device.IsupKeyCiphertext!);
+                string effectiveKey = IsupEquipmentRules.EffectiveKey(isupKey, device.IsupKeyCiphertext, protector);
                 if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId!, effectiveKey, IsupEquipmentRules.Access, id, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }

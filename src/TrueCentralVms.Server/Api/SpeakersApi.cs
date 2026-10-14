@@ -185,7 +185,7 @@ public static class SpeakersApi
             {
                 if (await db.Speakers.AnyAsync(s => s.IsupDeviceId == isupId, ct))
                     return Error($"Ya existe un parlante con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
-                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, request.IsupKey!, IsupEquipmentRules.Speaker, null, ct) is { } conflict)
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, request.IsupKey, IsupEquipmentRules.Speaker, null, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }
             else if (await db.Speakers.AnyAsync(s => s.Host == host && s.Port == request.Port, ct))
@@ -203,7 +203,7 @@ public static class SpeakersApi
                 Username = viaIsup ? "" : request.Username,
                 PasswordCiphertext = viaIsup ? [] : protector.Protect(request.Password!),
                 IsupDeviceId = isupId,
-                IsupKeyCiphertext = viaIsup ? protector.Protect(request.IsupKey!) : null,
+                IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(request.IsupKey, protector) : null,
                 GroupName = GroupOf(request),
                 LocationId = locationId,
                 Enabled = request.Enabled,
@@ -259,12 +259,12 @@ public static class SpeakersApi
             int port = viaIsup ? 0 : request.Port;
             string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
             string? isupKey = !viaIsup ? null
-                : string.IsNullOrEmpty(request.IsupKey) ? protector.Unprotect(speaker.IsupKeyCiphertext!) : request.IsupKey;
+                : IsupEquipmentRules.EffectiveKey(request.IsupKey, speaker.IsupKeyCiphertext, protector);
             if (isupId is not null)
             {
                 if (await db.Speakers.AnyAsync(s => s.Id != id && s.IsupDeviceId == isupId, ct))
                     return Error($"Ya existe otro parlante con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
-                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, isupKey!, IsupEquipmentRules.Speaker, id, ct) is { } conflict)
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, isupKey, IsupEquipmentRules.Speaker, id, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }
             else if (await db.Speakers.AnyAsync(s => s.Id != id && s.Host == host && s.Port == request.Port, ct))
@@ -324,7 +324,7 @@ public static class SpeakersApi
             speaker.Username = viaIsup ? "" : request.Username;
             speaker.PasswordCiphertext = viaIsup ? [] : protector.Protect(password);
             speaker.IsupDeviceId = isupId;
-            speaker.IsupKeyCiphertext = viaIsup ? protector.Protect(isupKey!) : null;
+            speaker.IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(isupKey, protector) : null;
             speaker.GroupName = GroupOf(request);
             speaker.LocationId = locationId;
             if (!speaker.Enabled && request.Enabled

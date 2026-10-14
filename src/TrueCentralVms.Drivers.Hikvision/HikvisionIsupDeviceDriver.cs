@@ -65,8 +65,19 @@ public sealed class HikvisionIsupDeviceDriver : IDeviceDriver
     public async Task<DeviceProbeInfo> ProbeAsync(DeviceConnectionInfo info, CancellationToken ct = default)
     {
         string id = IdOf(info);
-        var device = await XmlAsync(id, "/ISAPI/System/deviceInfo", ct)
-            ?? throw new DriverException($"El equipo ISUP «{id}» no respondió a la consulta de sus datos (ISAPI deviceInfo).");
+        // ISUP 2.0/4.0 no tiene ISAPI: datos y canales por la configuración del SDK.
+        if (Online(id).GetState(id) is { Protocol: { } protocol } && !protocol.StartsWith('5'))
+            return await ProbeLegacyAsync(id, ct);
+        var device = await XmlAsync(id, "/ISAPI/System/deviceInfo", ct);
+        // Sin ISAPI (un 2.0/4.0 cuyo protocolo aún no se conocía, o un firmware que no lo pasa por el túnel): por el SDK.
+        if (device is null)
+        {
+            try { return await ProbeLegacyAsync(id, ct); }
+            catch (DriverException ex)
+            {
+                throw new DriverException($"El equipo ISUP «{id}» no respondió a la consulta de sus datos (ISAPI deviceInfo ni SDK: {ex.Message}).");
+            }
+        }
         string? firmware = Text(device, "firmwareVersion");
         if (firmware is not null && Text(device, "firmwareReleasedDate") is { } built) firmware += " " + built;
 
@@ -127,6 +138,27 @@ public sealed class HikvisionIsupDeviceDriver : IDeviceDriver
         string suggested = analog <= 1 && ip == 0 ? "Camera" : analog == 0 ? "Nvr" : "Dvr";
         return new DeviceProbeInfo(Text(device, "model"), Text(device, "serialNumber"), firmware, suggested, analog, ip,
             channels.OrderBy(c => c.ChannelNumber).ToList());
+    }
+
+    /// <summary>
+    /// Equipo ISUP 2.0/4.0 (grabadores móviles, por ejemplo): sin ISAPI, el SDK solo informa cuántos canales tiene. Las entradas
+    /// analógicas parten en su canal inicial y las cámaras IP en el 33, como en los grabadores Hikvision (el DVR de pruebas de
+    /// isuptest); el equipo no informa nombres ni qué entradas tienen señal.
+    /// </summary>
+    private static async Task<DeviceProbeInfo> ProbeLegacyAsync(string id, CancellationToken ct)
+    {
+        var d = await IsupGateway.Require().GetDeviceInfoAsync(id, ct);
+        int analog = Math.Max(0, d.AnalogChannels);
+        int ip = Math.Max(0, d.TotalChannels - analog);
+        int start = d.StartChannel > 0 ? d.StartChannel : 1;
+        var channels = new List<DeviceChannelInfo>();
+        for (int i = 0; i < analog; i++) channels.Add(new DeviceChannelInfo(start + i, start + i, $"Canal {i + 1}", true));
+        int ipStart = Math.Max(33, start + analog);
+        for (int i = 0; i < ip; i++) channels.Add(new DeviceChannelInfo(ipStart + i, ipStart + i, $"Cámara IP {i + 1}", true));
+        if (channels.Count == 0) channels.Add(new DeviceChannelInfo(1, 1, "Canal 1", true));
+        string kind = d.DeviceType switch { 30 => "Cámara IP", 40 => "Domo IP", 3 => "DVS", 1 => "DVR", _ => $"Equipo tipo {d.DeviceType}" };
+        string suggested = d.DeviceType is 30 or 40 || (analog <= 1 && ip == 0) ? "Camera" : analog == 0 ? "Nvr" : "Dvr";
+        return new DeviceProbeInfo($"{kind} (ISUP 2.0/4.0)", d.Serial, d.Firmware, suggested, analog, ip, channels);
     }
 
     /// <summary>

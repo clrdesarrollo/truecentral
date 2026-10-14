@@ -26,31 +26,38 @@ public static class IsupEquipmentRules
     };
 
     /// <summary>
-    /// Valida ID y clave del formulario. La clave es obligatoria si no hay una guardada (alta, o equipo que antes iba por IP);
-    /// en edición, vacía = conservar la guardada.
+    /// Valida ID y clave del formulario. La clave puede quedar vacía: en edición conserva la guardada, y los equipos ISUP 2.0/4.0
+    /// (grabadores móviles, por ejemplo) se registran sin clave. Un equipo 5.0 sin clave en el VMS es rechazado al conectarse, y el
+    /// motivo («la clave no coincide») queda a la vista en su formulario y en Sistema → Conexión ISUP.
     /// </summary>
     public static string? Validate(string? isupId, string? key, bool keyStored)
     {
         if (IsupGateway.ValidateDeviceId(isupId) is { } idError) return idError;
-        if (string.IsNullOrEmpty(key)) return keyStored ? null : "Falta la clave ISUP del equipo (la «clave de cifrado» de su plataforma ISUP).";
-        return IsupGateway.ValidateKey(key);
+        return string.IsNullOrEmpty(key) ? null : IsupGateway.ValidateKey(key);
     }
+
+    /// <summary>Clave con que queda el equipo: la escrita en el formulario, o la que ya tenía (vacía = sin clave).</summary>
+    public static string EffectiveKey(string? written, byte[]? stored, CredentialProtector protector) =>
+        !string.IsNullOrEmpty(written) ? written : stored is { Length: > 0 } ? protector.Unprotect(stored) : "";
+
+    /// <summary>La clave cifrada para guardarla; null si el equipo no usa clave.</summary>
+    public static byte[]? ProtectKey(string? key, CredentialProtector protector) =>
+        string.IsNullOrEmpty(key) ? null : protector.Protect(key);
 
     /// <summary>
     /// ¿Otro equipo del VMS usa ese ID ISUP con OTRA clave? Un mismo equipo físico puede estar en dos módulos (un frente de citofonía
     /// que además es terminal de acceso) y entonces comparte el registro: la clave tiene que ser la misma en ambos.
     /// </summary>
-    public static async Task<string?> KeyConflictAsync(VmsDbContext db, CredentialProtector protector, string isupId, string key,
+    public static async Task<string?> KeyConflictAsync(VmsDbContext db, CredentialProtector protector, string isupId, string? key,
         string selfKind, int? selfId, CancellationToken ct)
     {
         foreach (var (kind, eq) in await UsersOfAsync(db, isupId, ct))
         {
             if (kind == selfKind && eq.Id == selfId) continue;
-            if (eq.IsupKeyCiphertext is not { Length: > 0 } cipher) continue;
             string other;
-            try { other = protector.Unprotect(cipher); }
+            try { other = eq.IsupKeyCiphertext is { Length: > 0 } cipher ? protector.Unprotect(cipher) : ""; }
             catch (Exception) { continue; }
-            if (other != key)
+            if (other != (key ?? ""))
                 return $"El ID ISUP {isupId} ya lo usa «{eq.Name}» ({KindLabel(kind)}) con otra clave. Un mismo equipo debe tener la misma " +
                        "clave ISUP en todos los módulos donde esté agregado.";
         }

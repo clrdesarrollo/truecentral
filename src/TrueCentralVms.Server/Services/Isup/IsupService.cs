@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -146,10 +147,15 @@ public sealed class IsupService : BackgroundService, IIsupGateway
             case IsupEventKinds.Online:
                 _states.AddOrUpdate(e.DeviceId, _ => new IsupDeviceState(e.DeviceId, true, e.Detail, null, e.At, false, null, false),
                     (_, s) => s with { Online = true, Address = e.Detail ?? s.Address, OnlineSince = e.At, Asleep = false });
-                DeviceOnlineChanged?.Invoke(e.DeviceId, true);
                 AuditConnection(e.DeviceId, true, e.Detail);
-                // El estado completo (protocolo, firmware) se completa a los pocos segundos.
-                _ = Task.Run(() => RefreshStateAsync(e.DeviceId));
+                // Antes de avisar se lee el estado completo: quien completa el equipo necesita saber si es ISUP 2.0/4.0 (sin ISAPI).
+                // El enlace de alarmas se abre unos segundos después: se vuelve a leer.
+                _ = Task.Run(async () =>
+                {
+                    await RefreshStateAsync(e.DeviceId, TimeSpan.Zero);
+                    DeviceOnlineChanged?.Invoke(e.DeviceId, true);
+                    await RefreshStateAsync(e.DeviceId, TimeSpan.FromSeconds(8));
+                });
                 break;
             case IsupEventKinds.Offline:
                 SetOnline(e.DeviceId, false);
@@ -215,11 +221,11 @@ public sealed class IsupService : BackgroundService, IIsupGateway
         DeviceOnlineChanged?.Invoke(id, online);
     }
 
-    private async Task RefreshStateAsync(string id)
+    private async Task RefreshStateAsync(string id, TimeSpan delay)
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(8));
+            if (delay > TimeSpan.Zero) await Task.Delay(delay);
             using var r = await _http.GetAsync($"/state/{Uri.EscapeDataString(id)}");
             if (r.IsSuccessStatusCode && await r.Content.ReadFromJsonAsync<IsupDeviceState>(Json) is { } s) _states[id] = s;
         }
@@ -274,9 +280,10 @@ public sealed class IsupService : BackgroundService, IIsupGateway
         foreach (var eq in all)
         {
             if (eq.IsupDeviceId is { Length: > 0 } nid) names[nid.Trim()] = names.TryGetValue(nid.Trim(), out var prev) ? $"{prev} / {eq.Name}" : eq.Name;
-            if (string.IsNullOrWhiteSpace(eq.IsupDeviceId) || eq.IsupKeyCiphertext is not { Length: > 0 } cipher) continue;
-            string key;
-            try { key = _protector.Unprotect(cipher); }
+            if (string.IsNullOrWhiteSpace(eq.IsupDeviceId)) continue;
+            // Sin clave: equipo ISUP 2.0/4.0, que se registra sin autenticarse.
+            string key = "";
+            try { if (eq.IsupKeyCiphertext is { Length: > 0 } cipher) key = _protector.Unprotect(cipher); }
             catch (Exception) { _logger.LogWarning("No se pudo descifrar la clave ISUP de «{Name}».", eq.Name); continue; }
             var id = eq.IsupDeviceId.Trim();
             if (entries.TryGetValue(id, out var existing))
@@ -327,6 +334,17 @@ public sealed class IsupService : BackgroundService, IIsupGateway
         {
             return new IsupIsapiResponse(false, [], 10, "El equipo no respondió a tiempo por ISUP.");
         }
+    }
+
+    public async Task<IsupDeviceInfo> GetDeviceInfoAsync(string deviceId, CancellationToken ct = default)
+    {
+        if (!_host.IsRunning) throw new DriverException("El servicio ISUP del servidor no está en ejecución.");
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(40));
+        using var r = await _http.GetAsync($"/info/{Uri.EscapeDataString(deviceId)}", cts.Token);
+        if (!r.IsSuccessStatusCode) throw new DriverException(await ErrorOf(r));
+        return await r.Content.ReadFromJsonAsync<IsupDeviceInfo>(Json, cts.Token)
+               ?? throw new DriverException("El servicio ISUP no entregó los datos del equipo.");
     }
 
     public Task PtzAsync(string deviceId, int channel, IsupPtzCommand command, bool start, int speed, CancellationToken ct = default) =>

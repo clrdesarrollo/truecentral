@@ -99,7 +99,7 @@ public sealed class DeviceStatusMonitor(
         var workflows = scope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>();
         foreach (var (dto, previous) in changed)
         {
-            logger.LogInformation("Dispositivo '{Name}' ({Host}) ahora está {Status}.", dto.Name, dto.Host, dto.Status);
+            logger.LogInformation("Dispositivo '{Name}' ({Host}) ahora está {Status}.", dto.Name, dto.IsupDeviceId is { } logId ? $"ISUP {logId}" : dto.Host, dto.Status);
             // Solo a quien ve alguno de sus canales (alcance por ubicación).
             await hub.SendAsync(VmsHubContract.DeviceStatusChanged, dto, s => s.CanViewDevice(dto.Id), ct);
             // La primera lectura tras arrancar (Desconocido → En línea) no es

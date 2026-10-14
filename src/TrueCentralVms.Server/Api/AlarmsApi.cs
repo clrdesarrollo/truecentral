@@ -143,7 +143,7 @@ public static class AlarmsApi
                 if (IsupEquipmentRules.Validate(isupId, isupKey, keyStored: false) is { } isupError) return Error(isupError);
                 if (await db.AlarmPanels.AnyAsync(p => p.IsupDeviceId == isupId, ct))
                     return Error(DuplicateMessage(isupId), StatusCodes.Status409Conflict);
-                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId!, isupKey!, IsupEquipmentRules.Alarm, null, ct) is { } conflict)
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId!, isupKey, IsupEquipmentRules.Alarm, null, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }
             else
@@ -255,7 +255,7 @@ public static class AlarmsApi
                 if (IsupEquipmentRules.Validate(isupId, isupKey, keyStored) is { } isupError) return Error(isupError);
                 if (await db.AlarmPanels.AnyAsync(p => p.Id != id && p.IsupDeviceId == isupId, ct))
                     return Error(DuplicateMessage(isupId, other: true), StatusCodes.Status409Conflict);
-                string effectiveKey = isupKey ?? protector.Unprotect(panel.IsupKeyCiphertext!);
+                string effectiveKey = IsupEquipmentRules.EffectiveKey(isupKey, panel.IsupKeyCiphertext, protector);
                 if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId!, effectiveKey, IsupEquipmentRules.Alarm, id, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }

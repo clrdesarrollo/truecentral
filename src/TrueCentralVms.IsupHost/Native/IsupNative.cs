@@ -123,6 +123,11 @@ public static unsafe class Isup
     public const uint NET_EHOME_PTRACK = 1003;         // centrar en un punto (NET_EHOME_POINT)
     [DllImport(CMS)][return: MarshalAs(UnmanagedType.Bool)] public static extern bool NET_ECMS_RemoteControl(int lUserID, uint dwCommand, ref NET_EHOME_REMOTE_CTRL_PARAM lpCtrlParam);
 
+    // ---- Configuración por el SDK (NET_ECMS_GetDevConfig): sirve también a los equipos 2.0/4.0, que no tienen ISAPI ----
+    public const uint NET_EHOME_GET_DEVICE_INFO = 1;   // salida = NET_EHOME_DEVICE_INFO (Layout.DevInfo*)
+    public const uint NET_EHOME_GET_VERSION_INFO = 2;  // salida = NET_EHOME_VERSION_INFO (Layout.Version*)
+    [DllImport(CMS)][return: MarshalAs(UnmanagedType.Bool)] public static extern bool NET_ECMS_GetDevConfig(int lUserID, uint dwCommand, ref NET_EHOME_CONFIG lpConfig, uint dwConfigSize);
+
     /// <summary>Despierta un equipo en reposo (ENUM_DEV_SLEEP). Tarda alrededor de un minuto y el equipo vuelve a registrarse.</summary>
     [DllImport(CMS)][return: MarshalAs(UnmanagedType.Bool)] public static extern bool NET_ECMS_WakeUp(int lUserID);
 
@@ -516,6 +521,19 @@ public unsafe struct NET_EHOME_XML_CFG
     public fixed byte byRes[24];
 }
 
+/// <summary>Parámetro de NET_ECMS_GetDevConfig (NET_EHOME_CONFIG, HCISUPCMS.h; 88 bytes en x64): condición, entrada y salida.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NET_EHOME_CONFIG
+{
+    public IntPtr pCondBuf;
+    public uint dwCondSize;
+    public IntPtr pInBuf;
+    public uint dwInSize;
+    public IntPtr pOutBuf;
+    public uint dwOutSize;
+    public fixed byte byRes[40];
+}
+
 /// <summary>Parámetro de NET_ECMS_RemoteControl (HCISUPCMS.h; 72 bytes en x64): buffer de condición (p. ej. el canal) y buffer de control.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct NET_EHOME_REMOTE_CTRL_PARAM
@@ -647,6 +665,15 @@ public unsafe struct NET_EHOME_VOICETALK_DATA_CB_PARAM
 /// <summary>Offsets de las estructuras que el SDK entrega por puntero en sus callbacks (x64, de los .h oficiales).</summary>
 public static class Layout
 {
+    // NET_EHOME_DEVICE_INFO (512 bytes, solo DWORD y arreglos de bytes): dwSize 0 · dwChannelNumber (analógicos) 4 · dwChannelAmount
+    // (analógicos + IP) 8 · dwDevType 12 (1 DVR, 3 DVS, 30 IPC, 40 domo IP…) · dwDiskNumber 16 · sSerialNumber[128] 20 · alarmas 148-163 ·
+    // dwStartChannel 164 · dwAudioChanNum 168 · dwMaxDigitChannelNum 172 · dwAudioEncType 176 · SIM 180-339 · cero canal 340-351 ·
+    // wDevClass 352 · byStartDTalkChan 354 · byRes[157].
+    public const int DevInfoSize = 512, DevInfoChannels = 4, DevInfoChannelAmount = 8, DevInfoType = 12, DevInfoDisks = 16, DevInfoSerial = 20,
+        DevInfoStartChannel = 164, DevInfoMaxDigital = 172, DevInfoAudioEnc = 176;
+    // NET_EHOME_VERSION_INFO (256 bytes): dwSize · sSoftwareVersion[32] 4 · sDSPSoftwareVersion[32] · sPanelVersion[32] · sHardwareVersion[32] · byRes[124].
+    public const int VersionInfoSize = 256, VersionSoftware = 4;
+
     // NET_EHOME_VOICETALK_NEWLINK_CB_INFO: szDeviceID[256] · dwEncodeType (0 G.722, 1 G.711µ, 2 G.711a, 3 G.726, 4 AAC, 5 MP2L2, 6 PCM, 7 MP3)
     // · sDeviceSerial[12] · dwAudioChan · lSessionID · byToken[64] · fnVoiceTalkDataCB · pUserData. NET_EHOME_VOICETALK_DATA_CB_INFO: pData 0 · dwDataLen 8.
     public const int VoiceDeviceId = 0, VoiceEncodeType = 256, VoiceSerial = 260, VoiceAudioChannel = 272, VoiceSessionId = 276;

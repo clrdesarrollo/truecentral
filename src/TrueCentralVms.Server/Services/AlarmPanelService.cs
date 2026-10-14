@@ -465,8 +465,6 @@ public sealed class AlarmPanelService(
                 var connection = ConnectionOf(panel);
                 // Por ISUP: si el panel no está conectado al servidor no hay a quién preguntarle; se explica por qué (rechazado por
                 // clave, o todavía sin registrarse) en vez del error genérico del túnel.
-                if (connection.IsupId is { Length: > 0 } && panel.IsupKeyCiphertext is not { Length: > 0 })
-                    throw new DriverException("Falta la clave ISUP del panel: edítelo y escriba la misma clave que tiene configurada en su plataforma ISUP.");
                 if (connection.IsupId is { Length: > 0 } isupId && !isup.IsOnline(isupId))
                 {
                     gatewayMessage = await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "panel", ct);

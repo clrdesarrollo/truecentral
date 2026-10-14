@@ -200,7 +200,7 @@ public static class IntercomsApi
             {
                 if (await db.Intercoms.AnyAsync(i => i.IsupDeviceId == isupId, ct))
                     return Error($"Ya existe un frente con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
-                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, request.IsupKey!, IsupEquipmentRules.Intercom, null, ct) is { } conflict)
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, request.IsupKey, IsupEquipmentRules.Intercom, null, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }
             else if (await db.Intercoms.AnyAsync(i => i.Host == host && i.Port == request.Port, ct))
@@ -219,7 +219,7 @@ public static class IntercomsApi
                 Username = viaIsup ? "" : request.Username,
                 PasswordCiphertext = viaIsup ? [] : protector.Protect(request.Password!),
                 IsupDeviceId = isupId,
-                IsupKeyCiphertext = viaIsup ? protector.Protect(request.IsupKey!) : null,
+                IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(request.IsupKey, protector) : null,
                 GroupName = GroupOf(request),
                 ChannelId = request.ChannelId,
                 LocationId = locationId,
@@ -290,12 +290,12 @@ public static class IntercomsApi
             string host = viaIsup ? "" : request.Host.Trim();
             string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
             string? isupKey = !viaIsup ? null
-                : string.IsNullOrEmpty(request.IsupKey) ? protector.Unprotect(intercom.IsupKeyCiphertext!) : request.IsupKey;
+                : IsupEquipmentRules.EffectiveKey(request.IsupKey, intercom.IsupKeyCiphertext, protector);
             if (isupId is not null)
             {
                 if (await db.Intercoms.AnyAsync(i => i.Id != id && i.IsupDeviceId == isupId, ct))
                     return Error($"Ya existe otro frente con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
-                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, isupKey!, IsupEquipmentRules.Intercom, id, ct) is { } conflict)
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, isupKey, IsupEquipmentRules.Intercom, id, ct) is { } conflict)
                     return Error(conflict, StatusCodes.Status409Conflict);
             }
             else if (await db.Intercoms.AnyAsync(i => i.Id != id && i.Host == host && i.Port == request.Port, ct))
@@ -368,7 +368,7 @@ public static class IntercomsApi
             intercom.Username = viaIsup ? "" : request.Username;
             intercom.PasswordCiphertext = viaIsup ? [] : protector.Protect(password);
             intercom.IsupDeviceId = isupId;
-            intercom.IsupKeyCiphertext = viaIsup ? protector.Protect(isupKey!) : null;
+            intercom.IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(isupKey, protector) : null;
             intercom.GroupName = GroupOf(request);
             intercom.ChannelId = request.ChannelId;
             intercom.LocationId = locationId;

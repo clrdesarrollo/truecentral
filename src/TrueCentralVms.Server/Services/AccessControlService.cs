@@ -299,8 +299,6 @@ public sealed class AccessControlService(
             // Por ISUP: si el equipo no está conectado al servidor, se dice por qué (clave rechazada, sin registrarse…).
             if (device.IsupDeviceId is { } isupId)
             {
-                if (device.IsupKeyCiphertext is not { Length: > 0 })
-                    return (AccessDeviceStatus.Offline, "Falta la clave ISUP del equipo: edítelo y escriba la que tiene configurada.", []);
                 if (!isup.IsOnline(isupId))
                     return (AccessDeviceStatus.Offline, await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct), []);
             }
