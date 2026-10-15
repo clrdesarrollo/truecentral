@@ -368,6 +368,12 @@ selección. Sin nada marcado, dispara cualquier equipo.
   no se distinguen mayúsculas ni guiones.
 - *Confianza mínima de la lectura (0–100)*: vacío = sin mínimo.
 
+#nota[La lectura llega con sus fotos: la escena que tomó la cámara y, detrás,
+  el recorte de la patente. Ambas quedan en el aviso, el correo y el FTP de la
+  automatización sin agregar _Capturar foto_. Si la cámara no manda el
+  recorte, el sistema lo corta de la escena con el recuadro de la patente; si
+  no manda ninguna foto, toma una del canal (paso «Foto del evento»).]
+
 #modulo("anpr")[Las fuentes de patentes se activan como se explica en
   #capitulo(<cap-reconocimiento-de-patentes>).]
 
