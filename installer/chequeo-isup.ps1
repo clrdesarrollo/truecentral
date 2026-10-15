@@ -52,6 +52,40 @@ function Linea([string] $texto = '', [string] $color = '') {
 }
 
 # ---------------------------------------------------------------------------
+# appsettings admite comentarios // y /* */ y comas sobrantes (así lo lee .NET); ConvertFrom-Json de PowerShell 5.1 no.
+# ---------------------------------------------------------------------------
+function LeerJsonConComentarios([string] $ruta) {
+    $t = Get-Content $ruta -Raw -Encoding UTF8
+    $sb = New-Object Text.StringBuilder
+    $enCadena = $false
+    $i = 0
+    while ($i -lt $t.Length) {
+        $c = $t[$i]
+        if ($enCadena) {
+            [void]$sb.Append($c)
+            if ($c -eq [char]'\' -and $i + 1 -lt $t.Length) { [void]$sb.Append($t[$i + 1]); $i += 2; continue }
+            if ($c -eq [char]'"') { $enCadena = $false }
+            $i++
+            continue
+        }
+        if ($c -eq [char]'"') { $enCadena = $true; [void]$sb.Append($c); $i++; continue }
+        if ($c -eq [char]'/' -and $i + 1 -lt $t.Length -and $t[$i + 1] -eq [char]'/') {
+            while ($i -lt $t.Length -and $t[$i] -ne [char]"`n") { $i++ }
+            continue
+        }
+        if ($c -eq [char]'/' -and $i + 1 -lt $t.Length -and $t[$i + 1] -eq [char]'*') {
+            $fin = $t.IndexOf('*/', $i + 2)
+            $i = if ($fin -lt 0) { $t.Length } else { $fin + 2 }
+            continue
+        }
+        [void]$sb.Append($c)
+        $i++
+    }
+    $limpio = [regex]::Replace($sb.ToString(), ',(\s*[}\]])', '$1')
+    return $limpio | ConvertFrom-Json
+}
+
+# ---------------------------------------------------------------------------
 # API (solo GET y el listado de la receptora, que también es de lectura)
 # ---------------------------------------------------------------------------
 $script:token = $null
@@ -269,7 +303,12 @@ try {
         $archivoLocal = Join-Path $carpeta 'appsettings.Local.json'
         $publica = $null
         if (Test-Path $archivoLocal) {
-            try { $publica = (Get-Content $archivoLocal -Raw -Encoding UTF8 | ConvertFrom-Json).Isup.PublicAddress } catch { Linea "    appsettings.Local.json no se pudo leer: $_" 'Yellow' }
+            try { $publica = (LeerJsonConComentarios $archivoLocal).Isup.PublicAddress }
+            catch {
+                $motivo = "$($_.Exception.Message)".Split("`n")[0].Trim()
+                if ($motivo.Length -gt 150) { $motivo = $motivo.Substring(0, 150) + '…' }
+                Linea "    appsettings.Local.json no se pudo leer ($motivo): revise que el servidor arranque con él." 'Yellow'
+            }
         }
         if ($publica) {
             Linea "    Isup:PublicAddress = $publica"
