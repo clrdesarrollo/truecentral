@@ -266,8 +266,7 @@ public static class WorkflowsApi
                 if (drivers.Find(c.Device.DriverKey) is not { } factory) return null;
                 try
                 {
-                    var connection = new DeviceConnectionInfo(c.Device.Host, c.Device.SdkPort, c.Device.Username,
-                        protector.Unprotect(c.Device.PasswordCiphertext));
+                    var connection = DeviceConnections.Of(c.Device, protector);
                     return await factory.Create().GetAnalyticsRulesAsync(connection,
                         c.RtspChannel > 0 ? c.RtspChannel : c.ChannelNumber, kind, timeout.Token);
                 }

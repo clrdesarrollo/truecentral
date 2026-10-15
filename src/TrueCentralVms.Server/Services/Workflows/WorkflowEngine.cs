@@ -865,8 +865,7 @@ public sealed class WorkflowEngine : BackgroundService
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(8));
-            var connection = new Core.Drivers.DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                _credentials.Unprotect(device.PasswordCiphertext));
+            var connection = DeviceConnections.Of(device, _credentials);
             var overlay = await factory.Create().GetEventOverlayAsync(connection,
                 channel.RtspChannel > 0 ? channel.RtspChannel : channel.ChannelNumber, kind, trigger.RuleId, timeout.Token);
             return overlay is null ? trigger : trigger with { Overlay = overlay };

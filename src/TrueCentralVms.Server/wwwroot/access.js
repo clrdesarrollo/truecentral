@@ -126,7 +126,7 @@ async function renderAccessDevices() {
               <td class="muted">${d.location ? esc(d.location) : `<span class="loc-line none">Por ubicar</span>`}</td>
               <td class="muted">${esc(accessBrandOf(d.driverKey))}</td>
               <td>${esc(ACCESS_KIND_LABELS[d.kind] ?? d.kind)}</td>
-              <td class="muted">${d.useHttps ? "https://" : ""}${esc(d.host)}:${d.port}</td>
+              <td class="muted">${accessAddressHtml(d)}</td>
               <td>${esc(d.model ?? "—")}<div class="muted" style="font-size:11px">${esc(d.serialNumber ?? "")}</div></td>
               <td class="muted">${esc(d.firmwareVersion ?? "—")}</td>
               <td>${accessDoorsCell(d)}</td>
@@ -276,6 +276,25 @@ function accessCredentialFields(driver, device, isNew) {
 
 const accessPortLabel = (driver) => driver?.authMode === "CommKey" ? "Puerto del equipo" : "Puerto HTTP";
 
+/** Dónde está el equipo: su dirección, o su ID ISUP si es él quien se conecta al servidor. */
+function accessAddressHtml(d) {
+  return d.isupDeviceId ? isupAddressHtml(d.isupDeviceId) : `${d.useHttps ? "https://" : ""}${esc(d.host)}:${d.port}`;
+}
+
+/**
+ * Por IP se piden dirección, puerto y credenciales; por ISUP, el ID y la clave del equipo. Los campos que no
+ * corresponden se ocultan y dejan de ser obligatorios (si no, el navegador no deja guardar).
+ */
+function accessToggleIsup(driver) {
+  const isup = !!driver?.usesIsup;
+  $("#ac-ip-box").hidden = isup;
+  $("#ac-isup-wrap").hidden = !isup;
+  for (const el of $$("#ac-ip-box input")) {
+    if (isup) { if (el.required) el.dataset.req = "1"; el.required = false; }
+    else if (el.dataset.req) el.required = true;
+  }
+}
+
 /**
  * Alta de un equipo (modal). La edición ya no pasa por acá: cada equipo tiene
  * su página, con espacio para todo lo que se le configura. `device` queda
@@ -305,17 +324,20 @@ async function accessDeviceModal(device, prefill) {
           ${drivers.map((dr) => `<option value="${esc(dr.key)}" ${driver0?.key === dr.key ? "selected" : ""}>${esc(dr.displayName)}</option>`).join("")}
         </select>
       </div>
-      <div class="form-grid">
-        <div class="field">
-          <label>Dirección (IP o hostname)</label>
-          <input id="ac-host" required value="${esc(device?.host ?? seed.host ?? "")}" placeholder="192.168.1.65">
+      <div id="ac-ip-box">
+        <div class="form-grid">
+          <div class="field">
+            <label>Dirección (IP o hostname)</label>
+            <input id="ac-host" required value="${esc(device?.isupDeviceId ? "" : device?.host ?? seed.host ?? "")}" placeholder="192.168.1.65">
+          </div>
+          <div class="field">
+            <label id="ac-port-label">${accessPortLabel(driver0)}</label>
+            <input id="ac-port" type="number" min="1" max="65535" required value="${device?.isupDeviceId ? 80 : device?.port ?? seed.port ?? driver0?.defaultPort ?? 80}">
+          </div>
         </div>
-        <div class="field">
-          <label id="ac-port-label">${accessPortLabel(driver0)}</label>
-          <input id="ac-port" type="number" min="1" max="65535" required value="${device?.port ?? seed.port ?? driver0?.defaultPort ?? 80}">
-        </div>
+        <div id="ac-credentials">${accessCredentialFields(driver0, device, isNew)}</div>
       </div>
-      <div id="ac-credentials">${accessCredentialFields(driver0, device, isNew)}</div>
+      <div id="ac-isup-wrap">${isupFieldsHtml("ac", device, isNew, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${device ? (device.enabled ? "checked" : "") : "checked"}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
       <div class="info-box" style="margin-top:10px">Al guardar se leen del equipo el modelo, el firmware, las capacidades y las puertas que administra.</div>
       <div id="ac-probe-result"></div>
@@ -329,13 +351,16 @@ async function accessDeviceModal(device, prefill) {
 
   $("#ac-cancel").addEventListener("click", closeModal);
   if (!isNew) maintFillDeviceSection("access", device.id);
+  wireIsupFields("ac", "equipo");
+  accessToggleIsup(driver0);
   $("#ac-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#ac-driver").value);
     if (!dr) return;
-    if (isNew) $("#ac-port").value = dr.defaultPort;
+    if (isNew && !dr.usesIsup) $("#ac-port").value = dr.defaultPort;
     $("#ac-port-label").textContent = accessPortLabel(dr);
     // La credencial no es la misma en todas las marcas: se redibuja el bloque.
     $("#ac-credentials").innerHTML = accessCredentialFields(dr, device, isNew);
+    accessToggleIsup(dr);
   });
 
   const readForm = accessReadConnectionForm;
@@ -371,10 +396,12 @@ async function accessDeviceModal(device, prefill) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
-      if (isNew) await Api.post("/api/access/devices", body);
-      else await Api.put(`/api/access/devices/${device.id}`, body);
+      const saved = isNew ? await Api.post("/api/access/devices", body) : await Api.put(`/api/access/devices/${device.id}`, body);
       closeModal();
-      toast(isNew ? "Equipo agregado." : "Equipo actualizado.");
+      // Por ISUP el equipo puede no haberse conectado todavía: se guarda igual y se completa en su primer contacto.
+      toast(saved?.isupDeviceId && saved.status !== "Online"
+        ? "Equipo guardado: queda esperando que se conecte por ISUP (sus puertas se leen al conectarse)."
+        : (isNew ? "Equipo agregado." : "Equipo actualizado."));
       renderAccessDevices();
     } catch (err) {
       errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
@@ -390,6 +417,17 @@ async function accessDeviceModal(device, prefill) {
 // ---------------------------------------------------------------------------
 
 function accessReadConnectionForm() {
+  const isup = !$("#ac-isup-wrap")?.hidden;
+  if (isup) {
+    return {
+      name: $("#ac-name").value.trim() || "(sin nombre)",
+      driverKey: $("#ac-driver").value,
+      host: "", port: 0, useHttps: false, username: "", password: null,
+      enabled: $("#ac-enabled").checked,
+      locationId: locationFieldValue("ac-location"),
+      ...readIsupFields("ac"),
+    };
+  }
   return {
     name: $("#ac-name").value.trim() || "(sin nombre)",
     driverKey: $("#ac-driver").value,
@@ -479,7 +517,7 @@ function acdDrawPage() {
     ACCESS_KIND_LABELS[d.kind] && d.kind !== "Unknown" ? ACCESS_KIND_LABELS[d.kind] : null,
     d.model,
     d.firmwareVersion ? `firmware ${d.firmwareVersion}` : null,
-    `${d.useHttps ? "https://" : ""}${d.host}:${d.port}`,
+    d.isupDeviceId ? `ISUP ${d.isupDeviceId}` : `${d.useHttps ? "https://" : ""}${d.host}:${d.port}`,
     d.location || "Por ubicar",
   ].filter(Boolean).map(esc).join(" · ");
   $("#view").innerHTML = `
@@ -638,18 +676,21 @@ async function acdDrawConnection(body) {
             ${drivers.map((dr) => `<option value="${esc(dr.key)}" ${driver0?.key === dr.key ? "selected" : ""}>${esc(dr.displayName)}</option>`).join("")}
           </select>
         </div>
+      </div>
+      <div id="ac-ip-box">
         <div class="form-grid">
           <div class="field">
             <label>Dirección (IP o hostname)</label>
-            <input id="ac-host" required value="${esc(d.host)}" placeholder="192.168.1.65">
+            <input id="ac-host" required value="${esc(d.isupDeviceId ? "" : d.host)}" placeholder="192.168.1.65">
           </div>
           <div class="field">
             <label id="ac-port-label">${accessPortLabel(driver0)}</label>
-            <input id="ac-port" type="number" min="1" max="65535" required value="${d.port}">
+            <input id="ac-port" type="number" min="1" max="65535" required value="${d.isupDeviceId ? 80 : d.port}">
           </div>
         </div>
+        <div id="ac-credentials">${accessCredentialFields(driver0, d, false)}</div>
       </div>
-      <div id="ac-credentials">${accessCredentialFields(driver0, d, false)}</div>
+      <div id="ac-isup-wrap">${isupFieldsHtml("ac", d, false, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${d.enabled ? "checked" : ""}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
       <div class="info-box">Si cambia la dirección, el puerto, el usuario o la contraseña, al guardar se vuelve a validar contra
         el equipo y se releen su modelo, firmware, capacidades y puertas.</div>
@@ -663,12 +704,15 @@ async function acdDrawConnection(body) {
     ${acdDoorsHtml(d, isAdmin)}`;
 
   acdBindDoors();
+  wireIsupFields("ac", "equipo");
+  accessToggleIsup(driver0);
 
   $("#ac-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#ac-driver").value);
     if (!dr) return;
     $("#ac-port-label").textContent = accessPortLabel(dr);
     $("#ac-credentials").innerHTML = accessCredentialFields(dr, d, false);
+    accessToggleIsup(dr);
   });
 
   $("#ac-probe")?.addEventListener("click", async () => {

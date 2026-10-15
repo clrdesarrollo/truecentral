@@ -97,6 +97,15 @@ internal static class HikvisionRuleGeometry
 
     private static async Task<XDocument?> LoadAsync(DeviceConnectionInfo info, string path, CancellationToken ct)
     {
+        // Equipo conectado por ISUP: la configuración se lee por el túnel del servidor.
+        if (info.IsupId is { Length: > 0 } isupId)
+        {
+            if (Core.Isup.IsupGateway.Current is not { } gateway || !gateway.IsOnline(isupId)) return null;
+            var response = await gateway.IsapiAsync(isupId, "GET", path, null, TimeSpan.FromSeconds(10), ct);
+            try { return response.Ok && response.Body.Length > 0 ? XDocument.Parse(HikvisionIsapiClient.DecodeBody(response.Body)) : null; }
+            catch { return null; }
+        }
+
         string? text = await Task.Run(() =>
         {
             try

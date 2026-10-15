@@ -256,6 +256,17 @@ para conservar la actual). Para pausarlo sin borrarlo, desmarque *Activo*.
 #boton("Eliminar") pide confirmación; un parlante en uso no se puede eliminar
 hasta detenerlo.
 
+=== Parlantes que se conectan por ISUP
+
+Un parlante Hikvision que el servidor no alcanza por su dirección (detrás de un
+router, por 4G) se conecta él al servidor por ISUP. Elija la marca _Hikvision
+por ISUP (el parlante se conecta al servidor)_ y escriba el *ID ISUP del
+parlante* y su *Clave ISUP*, que el recuadro de ayuda indica dónde configurar
+en el equipo. Se puede guardar antes de que se conecte: en su primer contacto
+el sistema lee sus datos. La voz, los sonidos del servidor, los audios de su
+biblioteca, el texto a voz y el volumen funcionan igual; lo único que no se
+puede por ISUP es subirle audios nuevos a su biblioteca.
+
 === La biblioteca de cada parlante
 
 Con el permiso *Parlantes IP*, la #boton("Biblioteca") de cada fila suma estas

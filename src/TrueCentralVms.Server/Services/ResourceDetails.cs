@@ -116,7 +116,7 @@ public static class ResourceDetails
         if (d.AnprEnabled) Add(facts, "Patentes (ANPR)", "El equipo es fuente de patentes");
         return new Part(
             new ResourceSourceDto("devices", d.Id, d.Name, d.Model, d.SerialNumber, d.FirmwareVersion,
-                Address(d.Host, d.SdkPort), OnlineText(d.Status), d.LastSeenAt),
+                d.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : Address(d.Host, d.SdkPort), OnlineText(d.Status), d.LastSeenAt),
             facts, CanRename: true, RenameNote: null, FixedCameras: [],
             SnapshotPath: $"/api/devices/{d.Id}/snapshot/{c.ChannelNumber}");
     }
@@ -168,7 +168,7 @@ public static class ResourceDetails
 
     private static ResourceSourceDto PanelSource(AlarmPanel p) =>
         new("alarm-panels", p.Id, p.Name, p.Model, p.SerialNumber, p.FirmwareVersion,
-            Address(p.Host, p.Port, p.UseHttps) + (p.GatewayDeviceId is { } g ? $" · equipo {g} en la receptora" : ""),
+            p.IsupDeviceId is { } isupId ? $"ISUP {isupId} (el panel se conecta al servidor)" : Address(p.Host, p.Port, p.UseHttps),
             OnlineText(p.Status, p.Enabled), p.LastSeenAt);
 
     private static async Task<Part?> PartitionAsync(VmsDbContext db, int id, CancellationToken ct)

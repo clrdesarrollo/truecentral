@@ -56,31 +56,17 @@
 #define PgTools        "..\tools\postgres\pgsql"
 #define MediaMtxDir    "..\tools\mediamtx"
 #define FfmpegDir      "..\tools\ffmpeg"
-; Hik IP Receiver Pro: receptora de los paneles de alarma que reportan por
-; ISUP/OTAP (AX PRO, AX HYBRID PRO). Es un componente OBLIGATORIO del sistema,
-; no un extra: sin ella esos paneles no se pueden conectar, por eso se instala
-; siempre y sin preguntar. El VMS habla con ella por HTTP; su interfaz/API
-; viene en el 80 y aqui se mueve al 8091, que el firewall bloquea desde fuera:
-; solo la usa el servidor de este mismo equipo, nunca se expone a la red (los
-; paneles no usan ese puerto, se registran por 7660-7667/7091/8661).
-;
-; En una actualizacion NO se vuelve a ejecutar su instalador si ya esta la
-; misma version y este servidor la administra (ver IprpUpToDate): su base,
-; su activacion y sus equipos registrados quedan intactos. Solo se reinstala
-; encima cuando la version embebida es distinta (o falta / no es nuestra).
-#define IprpWebPort    "8091"
+; Hik IP Receiver Pro: hasta la 0.5.x los paneles AX PRO se conectaban a traves
+; de esta receptora de Hikvision, que la suite instalaba. Desde la 0.6 el
+; servidor trae su propio servicio ISUP (TrueCentralVms.IsupHost.exe) y la
+; receptora ya no se instala: al actualizar se retira la que instalo este
+; sistema (ver RetireIprp), porque ademas ocupa los mismos puertos.
 #define IprpService    "DeviceGatewayService"
 #define IprpDir        "{autopf}\Hik IP Receiver Pro"
-#define IprpSetup      "..\tools\iprp\HikIpReceiverPro-Setup.exe"
-#define IprpUninstKey  "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Hik IP Receiver Pro"
-#if FileExists(IprpSetup)
-  #define HasIprp
-  ; Version del setup embebido (FileVersion, p.ej. 2.5.0.6). Su instalador NSIS
-  ; deja la misma cadena en DisplayVersion de su clave de desinstalacion.
-  #define IprpVersion GetVersionNumbersString(IprpSetup)
-#else
-  #error No existe el instalador del Hik IP Receiver Pro (tools\iprp\HikIpReceiverPro-Setup.exe). Es un componente obligatorio de la suite: obtengalo con build\setup-binaries.ps1.
-#endif
+; Puertos del servicio ISUP hacia los equipos (registro, alarmas, video, voz e
+; imagenes): Isup:RegistrationPorts y siguientes en appsettings.json.
+#define IsupTcpPorts   "7660-7667"
+#define IsupUdpPorts   "7660,7663"
 
 ; Complemento de enrolamiento (lector de huellas USB): la suite lo publica en
 ; la carpeta webcontrol\ del servidor, que es de donde el panel web lo ofrece
@@ -221,12 +207,6 @@ Source: "{#AgentSetup}"; DestDir: "{app}\webcontrol"; Flags: ignoreversion
 Source: "{#ScreenPackage}"; DestDir: "{app}\screen-packages"; Flags: ignoreversion
 #endif
 
-; Receptor de paneles de alarma: se ejecuta y se borra (no queda ocupando
-; disco), su desinstalacion es independiente desde Programas y caracteristicas.
-#ifdef HasIprp
-Source: "{#IprpSetup}"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion
-#endif
-
 [Icons]
 Name: "{autoprograms}\CLR TrueCentral VMS\Panel web de CLR TrueCentral VMS"; Filename: "http://localhost:{#WebPort}"
 Name: "{autoprograms}\CLR TrueCentral VMS\Watchdog de CLR TrueCentral VMS"; Filename: "{app}\watchdog\{#WatchdogExe}"
@@ -355,7 +335,7 @@ end;
 procedure StopOrphanMediaMtx();
 begin
   RunHidden(PowerShellExe(),
-    '-NoProfile -NonInteractive -Command "Get-Process mediamtx,ffmpeg -ErrorAction SilentlyContinue | ' +
+    '-NoProfile -NonInteractive -Command "Get-Process mediamtx,ffmpeg,TrueCentralVms.IsupHost -ErrorAction SilentlyContinue | ' +
     'Where-Object { $_.Path -like ''' + ExpandConstant('{app}') + '\*'' } | Stop-Process -Force"');
 end;
 
@@ -541,6 +521,8 @@ begin
   RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS MediaMTX"');
   RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS MediaMTX (WebRTC UDP)"');
   RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS MediaMTX (WebRTC TCP)"');
+  RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS ISUP"');
+  RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS ISUP (UDP)"');
 end;
 
 procedure ConfigureFirewall();
@@ -572,6 +554,15 @@ begin
   RunHidden(SysTool('netsh.exe'),
     'advfirewall firewall add rule name="CLR TrueCentral VMS MediaMTX (WebRTC TCP)" dir=in action=allow protocol=TCP localport={#WebRtcIcePort} program="'
     + ExpandConstant('{app}') + '\tools\mediamtx\mediamtx.exe" profile=any');
+  // Servicio ISUP: los equipos detras de NAT o 4G se conectan ellos al
+  // servidor (registro 7660 y 7661, alarmas, video, reproduccion, voz e
+  // imagenes hasta el 7667; UDP para el registro y las alarmas de ISUP 2.0/4.0).
+  RunHidden(SysTool('netsh.exe'),
+    'advfirewall firewall add rule name="CLR TrueCentral VMS ISUP" dir=in action=allow protocol=TCP localport={#IsupTcpPorts} program="'
+    + ExpandConstant('{app}') + '\TrueCentralVms.IsupHost.exe" profile=any');
+  RunHidden(SysTool('netsh.exe'),
+    'advfirewall firewall add rule name="CLR TrueCentral VMS ISUP (UDP)" dir=in action=allow protocol=UDP localport={#IsupUdpPorts} program="'
+    + ExpandConstant('{app}') + '\TrueCentralVms.IsupHost.exe" profile=any');
 end;
 
 // Solo SYSTEM y Administradores (por SID: vale en cualquier idioma): la base
@@ -672,56 +663,25 @@ begin
 end;
 
 // ---------------------------------------------------------------------------
-// Receptor de paneles de alarma (Hik IP Receiver Pro)
+// Receptora anterior de paneles (Hik IP Receiver Pro)
 //
-// Se instala en silencio y se le cambia el puerto de su web/API: viene en el
-// 80 y aqui queda en el {#IprpWebPort}. El unico cliente de esa API es el
-// servidor del VMS, que corre en esta misma maquina; los paneles NO usan ese
-// puerto (se registran por ISUP/OTAP en 7660-7667, 7091 y 8661, que si quedan
-// abiertos).
-//
-// El puerto vive en dos archivos: Config.xml (el que manda) y nginx.conf (el
-// que escucha). Se cambian los dos, y solo si siguen en el valor de fabrica:
-// si alguien ya los ajusto, se respetan. OJO: el servicio de la receptora
-// REGENERA la linea "listen" de nginx.conf en cada arranque a partir del
-// puerto de Config.xml, sin direccion (queda "listen 8091;", en todas las
-// interfaces). Por eso atarla a 127.0.0.1 en nginx.conf no dura, y lo que de
-// verdad la deja fuera de la red es la regla de firewall que bloquea el
-// {#IprpWebPort} (ConfigureIprpFirewall) mas el 403 de su raiz (HideIprpWebUi),
-// que si sobrevive a la regeneracion (comprobado en una reinstalacion real).
-//
-// Actualizaciones: si ya esta instalada la MISMA version embebida y este
-// servidor la administra, su instalador no se vuelve a ejecutar (IprpUpToDate):
-// se comprueba la configuracion y se deja corriendo. Ejecutarlo encima
-// funciona (conserva base, activacion y equipos: comprobado), pero es un
-// riesgo sin motivo y tarda minutos; queda reservado para cambio de version.
+// Hasta la 0.5.x los paneles AX PRO se conectaban a traves del Hik IP Receiver
+// Pro, que esta suite instalaba como componente obligatorio. Ahora el servidor
+// tiene su propio servicio ISUP y la receptora sobra; ademas escucha en los
+// mismos puertos (7660-7667), asi que el servicio ISUP no podria abrirlos con
+// ella en marcha. Al actualizar se quita la que instalo este sistema (la
+// reconoce por tcvms-iprp.secret, que dejaba el servidor al activarla); una
+// receptora ajena se respeta y solo se avisa del choque de puertos. Los
+// paneles se reconectan solos: el servicio ISUP escucha tambien el 7661, donde
+// se registraban, y la migracion IsupConnections les conserva ID y clave.
 // ---------------------------------------------------------------------------
-#ifdef HasIprp
 function IprpDir(): string;
 begin
   Result := ExpandConstant('{#IprpDir}');
 end;
 
-// Quita espacios y tabuladores: permite comparar directivas de configuracion
-// sin depender de como esten alineadas.
-function Squeeze(const Value: string): string;
-var
-  I: Integer;
-begin
-  Result := '';
-  for I := 1 to Length(Value) do
-    if (Value[I] <> ' ') and (Value[I] <> #9) then
-      Result := Result + Value[I];
-end;
-
-function IprpServiceRunning(): Boolean;
-begin
-  Result := RunHidden(SysTool('cmd.exe'), '/c sc query {#IprpService} | find "RUNNING"') = 0;
-end;
-
 // «No esta RUNNING» no basta: durante el apagado el servicio pasa por
-// STOP_PENDING, y en ese estado el SCM rechaza la orden de arranque. Hay que
-// esperar a STOPPED de verdad antes de tocar sus archivos y volver a iniciarlo.
+// STOP_PENDING. Hay que esperar a STOPPED de verdad antes de desinstalarlo.
 function IprpServiceStopped(): Boolean;
 begin
   Result := RunHidden(SysTool('cmd.exe'), '/c sc query {#IprpService} | find "STOPPED"') = 0;
@@ -742,199 +702,15 @@ begin
   Sleep(1000);
 end;
 
-// Arranque con reintentos: si el SCM todavia estaba ocupado con el apagado, el
-// primer intento se pierde y antes se daba por bueno sin comprobar nada, con lo
-// que el instalador se quedaba esperando a un servicio que nadie habia
-// arrancado. Devuelve true si quedo corriendo.
-function StartIprpService(): Boolean;
-var
-  Attempt, I: Integer;
-begin
-  Result := False;
-  for Attempt := 1 to 5 do
-  begin
-    if IprpServiceRunning() then
-    begin
-      Result := True;
-      exit;
-    end;
-    RunHidden(SysTool('sc.exe'), 'start {#IprpService}');
-    for I := 1 to 60 do            // hasta 30 s por intento
-    begin
-      if IprpServiceRunning() then
-      begin
-        Result := True;
-        exit;
-      end;
-      Sleep(500);
-    end;
-  end;
-end;
-
-// nginx.conf: "listen 80;" -> "listen 127.0.0.1:8091;". Solo se toca la linea
-// del puerto por defecto; si ya esta en otro valor (p.ej. el "listen 8091;"
-// que la propia receptora regenera en cada arranque), se deja como esta. Es
-// solo la semilla para el primer arranque tras instalar: el puerto que manda
-// es el de Config.xml (PatchIprpConfigXml).
-function PatchIprpNginx(): Boolean;
-var
-  Path, Line, Trimmed: string;
-  Lines: TArrayOfString;
-  I: Integer;
-  Changed: Boolean;
-begin
-  Result := False;
-  Path := IprpDir() + '\nginx\conf\nginx.conf';
-  if not FileExists(Path) then
-    exit;
-  if not LoadStringsFromFile(Path, Lines) then
-    exit;
-
-  Changed := False;
-  for I := 0 to GetArrayLength(Lines) - 1 do
-  begin
-    Line := Lines[I];
-    Trimmed := Trim(Line);
-    // Comentarios fuera; y se compara sin espacios para no depender de como
-    // venga formateada la linea en la version del proveedor.
-    if (Copy(Trimmed, 1, 1) <> '#') and (Squeeze(Trimmed) = 'listen80;') then
-    begin
-      Lines[I] := '        listen       127.0.0.1:{#IprpWebPort};';
-      Changed := True;
-    end;
-  end;
-
-  if not Changed then
-  begin
-    // Ya estaba en 8091 (reinstalacion) o alguien lo cambio a mano.
-    Result := True;
-    exit;
-  end;
-  Result := SaveStringsToFile(Path, Lines, False);
-end;
-
-// La receptora sirve en el MISMO puerto su interfaz web (la raiz) y su API
-// (/ISAPI y companeros): un solo nginx reparte por ruta. Aqui se corta solo la
-// raiz, para que quede como un servicio interno sin cara visible: quien abra la
-// direccion en un navegador —incluso sentado frente al servidor— recibe 403,
-// mientras el VMS sigue usando la API con normalidad.
-//
-// Es reversible: antes de tocar nada se guarda nginx.conf.clr-original. Lo
-// unico que se pierde es el complemento de video de la propia receptora, que el
-// VMS no usa (verifica las alarmas con sus propias camaras).
-function HideIprpWebUi(): Boolean;
-var
-  Path, Backup: string;
-  Lines, Output: TArrayOfString;
-  I, Count, Written: Integer;
-  Blocked: Boolean;
-begin
-  Result := False;
-  Path := IprpDir() + '\nginx\conf\nginx.conf';
-  if not FileExists(Path) then
-    exit;
-  if not LoadStringsFromFile(Path, Lines) then
-    exit;
-
-  Count := GetArrayLength(Lines);
-
-  // Reinstalacion: si ya esta cortada, no hay nada que hacer.
-  for I := 0 to Count - 1 do
-    if Pos('CLR TrueCentral VMS: interfaz web', Lines[I]) > 0 then
-    begin
-      Result := True;
-      exit;
-    end;
-
-  SetArrayLength(Output, Count + 2);
-  Written := 0;
-  Blocked := False;
-  for I := 0 to Count - 1 do
-  begin
-    Output[Written] := Lines[I];
-    Written := Written + 1;
-    // Solo la raiz: "location / {". Las de la API (/ISAPI, /SDK, /daf...) no
-    // coinciden y quedan intactas.
-    if (not Blocked) and (Squeeze(Trim(Lines[I])) = 'location/{') then
-    begin
-      Output[Written] := '			# CLR TrueCentral VMS: interfaz web deshabilitada (la receptora es un servicio interno).';
-      Output[Written + 1] := '			return 403;';
-      Written := Written + 2;
-      Blocked := True;
-    end;
-  end;
-
-  if not Blocked then
-    exit; // formato inesperado: mejor no tocar el archivo
-
-  Backup := IprpDir() + '\nginx\conf\nginx.conf.clr-original';
-  if not FileExists(Backup) then
-    FileCopy(Path, Backup, False);
-
-  SetArrayLength(Output, Written);
-  Result := SaveStringsToFile(Path, Output, False);
-end;
-
-// Config.xml: el <Port>/<ExternalPort> del nodo <HTTP> es lo que la receptora
-// informa como su puerto. Se cambia el primer par 80 que aparece tras <HTTP>.
-function PatchIprpConfigXml(): Boolean;
-var
-  Path, Trimmed: string;
-  Lines: TArrayOfString;
-  I: Integer;
-  InHttp: Boolean;
-begin
-  Result := False;
-  Path := IprpDir() + '\Config.xml';
-  if not FileExists(Path) then
-    exit;
-  if not LoadStringsFromFile(Path, Lines) then
-    exit;
-
-  InHttp := False;
-  for I := 0 to GetArrayLength(Lines) - 1 do
-  begin
-    Trimmed := Trim(Lines[I]);
-    if Trimmed = '<HTTP>' then
-      InHttp := True
-    else if Trimmed = '</HTTP>' then
-      InHttp := False
-    else if InHttp then
-    begin
-      if Squeeze(Trimmed) = '<Port>80</Port>' then
-        Lines[I] := '            <Port>{#IprpWebPort}</Port>'
-      else if Squeeze(Trimmed) = '<ExternalPort>80</ExternalPort>' then
-        Lines[I] := '            <ExternalPort>{#IprpWebPort}</ExternalPort>';
-    end;
-  end;
-  Result := SaveStringsToFile(Path, Lines, False);
-end;
-
-// Las reglas de la receptora van aparte de DeleteFirewallRules(): esa se llama
-// tambien al instalar, DESPUES de InstallIprp(), y se llevaria por delante las
-// que acaba de poner ConfigureIprpFirewall().
+// Reglas de firewall que la suite le ponia a la receptora (versiones anteriores).
 procedure DeleteIprpFirewallRules();
 begin
   RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS IP Receiver Pro (solo local)"');
   RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS paneles ISUP"');
 end;
 
-// Doble candado sobre el puerto de la receptora: aunque su instalador (o una
-// actualizacion suya) abra el puerto, una regla de bloqueo gana sobre las de
-// permiso. El trafico por loopback no pasa por el firewall, asi que el
-// servidor del VMS sigue llegando.
-procedure ConfigureIprpFirewall();
-begin
-  DeleteIprpFirewallRules();
-  RunHidden(SysTool('netsh.exe'),
-    'advfirewall firewall add rule name="CLR TrueCentral VMS IP Receiver Pro (solo local)" dir=in action=block protocol=TCP localport={#IprpWebPort} profile=any');
-  // Puertos por los que los paneles se registran y reportan: esos si se abren.
-  RunHidden(SysTool('netsh.exe'),
-    'advfirewall firewall add rule name="CLR TrueCentral VMS paneles ISUP" dir=in action=allow protocol=TCP localport=7091,7660-7667,8661 profile=any');
-end;
-
-// ¿Este servidor ya administra la receptora? La marca es su credencial, que
-// el servidor genera al activarla (ver LocalIpReceiverService).
+// ¿La receptora es la que instalo y administraba este sistema? La marca es su
+// credencial, que el servidor de las versiones anteriores generaba al activarla.
 function IprpManagedByUs(): Boolean;
 begin
   Result := FileExists(DataDir() + '\pgdata\tcvms-iprp.secret');
@@ -945,128 +721,8 @@ begin
   Result := RunHidden(SysTool('sc.exe'), 'query {#IprpService}') = 0;
 end;
 
-// Version que dejo su instalador NSIS en la clave de desinstalacion (es de 32
-// bits, asi que normalmente cae en WOW6432Node; se miran las dos vistas).
-function InstalledIprpVersion(): string;
-begin
-  Result := '';
-  if not RegQueryStringValue(HKLM32, '{#IprpUninstKey}', 'DisplayVersion', Result) then
-    if not RegQueryStringValue(HKLM64, '{#IprpUninstKey}', 'DisplayVersion', Result) then
-      Result := '';
-  Result := Trim(Result);
-end;
-
-// ¿La receptora instalada es exactamente la version embebida y la administra
-// este servidor? Entonces volver a ejecutar su instalador no aporta nada y
-// se salta: conserva base, activacion y equipos sin correr riesgos. Cualquier
-// duda (sin servicio, sin credencial nuestra, version distinta o ilegible)
-// devuelve False y se instala como siempre.
-function IprpUpToDate(): Boolean;
-begin
-  Result := IprpServiceExists() and IprpManagedByUs() and
-            (InstalledIprpVersion() = '{#IprpVersion}');
-end;
-
-// ¿Config.xml ya tiene el puerto de la web/API en {#IprpWebPort}?
-function IprpPortConfigured(): Boolean;
-var
-  Lines: TArrayOfString;
-  I: Integer;
-  InHttp: Boolean;
-begin
-  Result := False;
-  if not LoadStringsFromFile(IprpDir() + '\Config.xml', Lines) then
-    exit;
-  InHttp := False;
-  for I := 0 to GetArrayLength(Lines) - 1 do
-  begin
-    if Trim(Lines[I]) = '<HTTP>' then
-      InHttp := True
-    else if Trim(Lines[I]) = '</HTTP>' then
-      InHttp := False
-    else if InHttp and (Squeeze(Trim(Lines[I])) = '<Port>{#IprpWebPort}</Port>') then
-    begin
-      Result := True;
-      exit;
-    end;
-  end;
-end;
-
-// ¿nginx.conf conserva el bloqueo de la interfaz web (HideIprpWebUi)?
-function IprpWebUiHidden(): Boolean;
-var
-  Lines: TArrayOfString;
-  I: Integer;
-begin
-  Result := False;
-  if not LoadStringsFromFile(IprpDir() + '\nginx\conf\nginx.conf', Lines) then
-    exit;
-  for I := 0 to GetArrayLength(Lines) - 1 do
-    if Pos('CLR TrueCentral VMS: interfaz web', Lines[I]) > 0 then
-    begin
-      Result := True;
-      exit;
-    end;
-end;
-
-// Caso incomodo: en el equipo ya habia una receptora instalada y activada a
-// mano, con una contrasena que este servidor no conoce y que el fabricante no
-// permite reiniciar en local (solo un Super Admin de Hik-Partner Pro puede).
-// Sin esa contrasena el VMS no puede administrarla.
-//
-// La unica salida es reinstalarla desde cero, y eso BORRA su historial de
-// eventos y los equipos que tenga registrados: por eso se pregunta siempre,
-// con No por defecto, y nunca se hace en una instalacion silenciosa. Quien
-// prefiera conservarla solo tiene que escribir esa contrasena una vez al
-// agregar el primer panel.
-procedure ResetOrphanIprp();
-var
-  Uninstaller: string;
-  ResultCode, I: Integer;
-begin
-  if WizardSilent() then
-    exit;
-  if not IprpServiceExists() then
-    exit;      // no hay nada instalado: la instalacion normal la activara sola
-  if IprpManagedByUs() then
-    exit;      // ya es nuestra: su credencial esta guardada
-
-  Uninstaller := IprpDir() + '\uninst.exe';
-  if not FileExists(Uninstaller) then
-    exit;
-
-  if MsgBox('En este equipo ya hay un receptor de paneles de alarma instalado y activado,' #13#10 +
-            'con una contrasena que este sistema no conoce. El fabricante no permite' #13#10 +
-            'reiniciarla localmente.' #13#10#13#10 +
-            '¿Desea reinstalarlo desde cero para que el sistema lo administre solo?' #13#10#13#10 +
-            'ATENCION: se BORRAN su historial de eventos y los equipos que tenga' #13#10 +
-            'registrados; los paneles habra que volver a darlos de alta.' #13#10#13#10 +
-            'Si responde No, el receptor se conserva tal cual y bastara con escribir su' #13#10 +
-            'contrasena una vez, al agregar el primer panel en el panel web.',
-            mbConfirmation, MB_YESNO or MB_DEFBUTTON2) <> IDYES then
-    exit;
-
-  WizardForm.StatusLabel.Caption := 'Quitando el receptor de paneles anterior...';
-  StopIprpService();
-  Exec(Uninstaller, '/S', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // El desinstalador NSIS se lanza y devuelve el control enseguida: hay que
-  // esperar a que el servicio desaparezca de verdad antes de reinstalar.
-  for I := 1 to 60 do
-  begin
-    if not IprpServiceExists() then
-      break;
-    Sleep(1000);
-  end;
-  Sleep(2000);
-  DelTree(IprpDir(), True, True, True);
-end;
-
-// Quita la receptora al desinstalar el VMS. Se hace SIEMPRE, sin preguntar: es
-// un componente obligatorio de la suite (la instala este mismo instalador, sin
-// preguntar tampoco), no un programa que el cliente eligiera tener. Dejarla
-// atras es dejar corriendo un servicio con su propio PostgreSQL, su nginx y el
-// historial de los paneles, que nadie va a administrar.
+// Quita la receptora que instalo este sistema (al actualizar a la 0.6 o al
+// desinstalar).
 //
 // Su desinstalador es NSIS: /S es silencioso y devuelve el control enseguida,
 // asi que hay que esperar a que el servicio desaparezca de verdad antes de
@@ -1101,215 +757,29 @@ begin
   DelTree(IprpDir(), True, True, True);
 end;
 
-// ¿Responde la API de la receptora en ese puerto? Un 401 (pide credenciales)
-// ya sirve: significa que esta arriba. curl sin --fail devuelve 0 con 401.
-function IprpApiResponds(Port: Integer): Boolean;
+procedure RetireIprp();
 begin
-  Result := FileExists(SysTool('curl.exe')) and
-            (RunHidden(SysTool('curl.exe'),
-               '--silent --output NUL --max-time 5 http://127.0.0.1:' + IntToStr(Port) +
-               '/ISAPI/System/deviceInfo?format=json') = 0);
-end;
-
-// Espera a que la receptora termine de arrancar, mirando los dos puertos: el
-// 80 de fabrica (instalacion nueva) y el {#IprpWebPort} (ya configurada por
-// nosotros en una actualizacion). Devuelve el puerto en que respondio, o 0.
-function WaitForIprpApi(TimeoutSeconds: Integer): Integer;
-var
-  I: Integer;
-begin
-  Result := 0;
-  for I := 1 to TimeoutSeconds div 2 do
+  if not IprpServiceExists() and not DirExists(IprpDir()) then
   begin
-    if IprpApiResponds({#IprpWebPort}) then
-    begin
-      Result := {#IprpWebPort};
-      exit;
-    end;
-    if IprpApiResponds(80) then
-    begin
-      Result := 80;
-      exit;
-    end;
-    Sleep(2000);
-  end;
-end;
-
-// ---------------------------------------------------------------------------
-// La ventana del navegador que abre el instalador del receptor
-//
-// Su script NSIS termina con un ExecShell a su propia pagina, y lo hace incluso
-// en modo silencioso: no hay parametro para evitarlo. Esa ventana queda muerta
-// en cuanto le cambiamos el puerto, asi que confunde mas de lo que ayuda.
-//
-// No se puede impedir que se abra, pero si cerrarla, y con precision: se cierra
-// UNICAMENTE el navegador cuya linea de comandos apunta al receptor (127.0.0.1,
-// con o sin :80). Una ventana abierta en otra cosa no coincide y no se toca; el
-// panel del VMS, que vive en el 5090, tampoco.
-//
-// Es seguro sin preguntar nada porque solo se cierran procesos que ARRANCARON
-// despues de lanzar su instalador. Si el usuario ya tenia el navegador abierto,
-// el ExecShell le abre una pestaña dentro de ese proceso, mas viejo, que queda
-// intacto: mejor una pestaña de mas que llevarse por delante su trabajo.
-// ---------------------------------------------------------------------------
-// Cierra el navegador que apunta al receptor: primero por las buenas (cierre de
-// ventana) y, si no hace caso en 3 s, a la fuerza.
-procedure CloseReceiverBrowser(const SinceText: string);
-var
-  Script: TArrayOfString;
-  Path: string;
-begin
-  Path := ExpandConstant('{tmp}\cerrar-navegador-receptor.ps1');
-  SetArrayLength(Script, 14);
-  Script[0]  := '# Cierra solo el navegador que abrio el instalador del receptor:';
-  Script[1]  := '# procesos nacidos DESPUES de lanzarlo y apuntando a su direccion.';
-  // Sin separadores: el '/' de un formato .NET se reemplaza por el separador
-  // del idioma del equipo, y en un Windows en espanol sale con guiones.
-  Script[2]  := '$desde = [datetime]::ParseExact(''' + SinceText + ''', ''yyyyMMddHHmmss'', [Globalization.CultureInfo]::InvariantCulture)';
-  Script[3]  := '$nombres = ''msedge.exe'',''chrome.exe'',''firefox.exe'',''brave.exe'',''opera.exe'',''iexplore.exe''';
-  Script[4]  := '$objetivo = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |';
-  Script[5]  := '  Where-Object { $nombres -contains $_.Name -and $_.CreationDate -ge $desde -and';
-  Script[6]  := '                 $_.CommandLine -match ''127\.0\.0\.1(:80)?([/\s"]|$)'' }';
-  Script[7]  := 'foreach ($p in $objetivo) {';
-  Script[8]  := '  $proc = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue';
-  Script[9]  := '  if ($proc) {';
-  Script[10] := '    $null = $proc.CloseMainWindow()';
-  Script[11] := '    Start-Sleep -Seconds 3';
-  Script[12] := '    if (-not $proc.HasExited) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }';
-  Script[13] := '  }' + #13#10 + '}';
-  if not SaveStringsToFile(Path, Script, False) then
-    exit;
-  RunHidden(PowerShellExe(), '-NoProfile -ExecutionPolicy Bypass -File "' + Path + '"');
-  DeleteFile(Path);
-end;
-
-// Configuracion posterior al setup del fabricante: puerto, interfaz web
-// oculta, firewall, arranque automatico y verificacion de que responde. Se
-// usa tambien cuando la receptora ya estaba y su configuracion se perdio.
-procedure ConfigureIprpAfterSetup();
-var
-  Healthy: Boolean;
-begin
-  WizardForm.StatusLabel.Caption := 'Dejando el receptor de paneles accesible solo desde este equipo...';
-  StopIprpService();
-  if not PatchIprpNginx() then
-    if not WizardSilent() then
-      MsgBox('El receptor de paneles se instalo, pero no se pudo cambiar su puerto en nginx.conf.' #13#10 +
-             'Quedara en el puerto 80 y accesible desde la red: cambielo en su configuracion.', mbInformation, MB_OK);
-  PatchIprpConfigXml();
-  if not HideIprpWebUi() then
-    if not WizardSilent() then
-      MsgBox('El receptor de paneles quedo instalado, pero no se pudo ocultar su interfaz web.' #13#10 +
-             'No afecta al funcionamiento: esa interfaz solo es accesible desde este mismo equipo.', mbInformation, MB_OK);
-  ConfigureIprpFirewall();
-
-  RunHidden(SysTool('sc.exe'), 'config {#IprpService} start= auto');
-  WizardForm.StatusLabel.Caption := 'Iniciando el receptor de paneles de alarma...';
-  if not StartIprpService() then
-    if not WizardSilent() then
-      MsgBox('El receptor de paneles quedo instalado y configurado, pero su servicio' #13#10 +
-             '({#IprpService}) no arranco despues de varios intentos.' #13#10#13#10 +
-             'Abralo a mano desde Servicios de Windows. El resto del sistema funciona:' #13#10 +
-             'el servidor lo activara solo en cuanto lo vea en marcha.', mbError, MB_OK);
-
-  // Verificacion final: ya con el puerto cambiado, la receptora tiene que
-  // contestar en {#IprpWebPort}. Su base ya existe (se espero antes), asi que
-  // aqui solo se le da margen para reiniciar sus servicios.
-  Healthy := False;
-  if FileExists(SysTool('curl.exe')) then
-  begin
-    WizardForm.StatusLabel.Caption := 'Esperando al receptor de paneles de alarma...';
-    Healthy := IprpApiResponds({#IprpWebPort});
-    if not Healthy then
-      Healthy := WaitForIprpApi(360) = {#IprpWebPort};
-    if not Healthy and not IprpServiceRunning() and not WizardSilent() then
-      MsgBox('El receptor de paneles se instalo, pero su servicio ({#IprpService}) no esta corriendo.' #13#10#13#10 +
-             'Abra Servicios de Windows, inicielo a mano y revise el Visor de eventos si vuelve' #13#10 +
-             'a detenerse. Los paneles que reportan por ISUP no conectaran hasta entonces.',
-             mbError, MB_OK)
-    else if not Healthy and not WizardSilent() then
-      MsgBox('El receptor de paneles se instalo, pero todavia no responde en 127.0.0.1:{#IprpWebPort}.' #13#10#13#10 +
-             'No hace falta hacer nada: el servidor lo detecta y lo activa solo en cuanto termine' #13#10 +
-             'de arrancar (lo reintenta durante una hora). Si pasado ese rato los paneles siguen' #13#10 +
-             'sin conectar, revise el servicio {#IprpService} en Servicios de Windows.',
-             mbInformation, MB_OK);
-  end;
-end;
-
-procedure InstallIprp();
-var
-  Setup: string;
-  ResultCode: Integer;
-  BrowserSince: string;
-begin
-  Setup := ExpandConstant('{tmp}\HikIpReceiverPro-Setup.exe');
-  if not FileExists(Setup) then
-    exit;
-
-  // Actualizacion con la misma receptora ya instalada y administrada por este
-  // servidor: no se vuelve a ejecutar su instalador. Se comprueba que la
-  // configuracion siga entera y que el servicio corra; si alguien la toco, se
-  // rehace la configuracion (sin reinstalar).
-  if IprpUpToDate() then
-  begin
-    Log('Receptora Hik IP Receiver Pro {#IprpVersion} ya instalada y administrada por el VMS: no se reinstala.');
-    if IprpPortConfigured() and IprpWebUiHidden() then
-    begin
-      WizardForm.StatusLabel.Caption := 'Comprobando el receptor de paneles de alarma ya instalado...';
-      ConfigureIprpFirewall();
-      RunHidden(SysTool('sc.exe'), 'config {#IprpService} start= auto');
-      if not StartIprpService() and not WizardSilent() then
-        MsgBox('El receptor de paneles ya estaba instalado, pero su servicio ({#IprpService})' #13#10 +
-               'no arranco despues de varios intentos.' #13#10#13#10 +
-               'Abralo a mano desde Servicios de Windows. El resto del sistema funciona.', mbError, MB_OK);
-      exit;
-    end;
-    Log('La configuracion de la receptora no esta completa: se rehace sin reinstalarla.');
-    ConfigureIprpAfterSetup();
+    DeleteIprpFirewallRules();
     exit;
   end;
-
-  ResetOrphanIprp();
-
-  // Partir sin navegadores abiertos es lo que permite cerrar despues, sin
-  // riesgo, la ventana que abre su instalador.
-  // Solo se cerraran navegadores ARRANCADOS despues de este momento: si el
-  // usuario ya tenia uno abierto, su instalador le abre una pestaña dentro de
-  // ese proceso, que es mas viejo y no se toca.
-  BrowserSince := GetDateTimeString('yyyymmddhhnnss', '-', ':');
-
-  // Su instalador abre el navegador en su propia pagina al terminar (un
-  // ExecShell que hace incluso en modo silencioso, y que no se puede
-  // desactivar por parametro). Se avisa para que no confunda: esa ventana no
-  // hay que usarla, y quedara en blanco en cuanto le cambiemos el puerto.
-  WizardForm.StatusLabel.Caption := 'Instalando el receptor de paneles de alarma (puede abrirse una ventana del navegador: cierrela)...';
-  // Instalador NSIS: /S es silencioso y /D (sin comillas y al final) fija la carpeta.
-  if not Exec(Setup, '/S /D=' + IprpDir(), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  if IprpManagedByUs() then
   begin
-    if not WizardSilent() then
-      MsgBox('No se pudo instalar el receptor de paneles de alarma (codigo ' + IntToStr(ResultCode) + ').' #13#10#13#10 +
-             'Es un componente necesario: sin el, los paneles AX PRO y AX HYBRID PRO que reportan' #13#10 +
-             'por ISUP/OTAP no podran conectarse. El resto del sistema quedo instalado; vuelva a' #13#10 +
-             'ejecutar este instalador para reintentarlo.', mbError, MB_OK);
+    WizardForm.StatusLabel.Caption := 'Quitando la receptora de paneles anterior (Hik IP Receiver Pro)...';
+    UninstallIprp();
+    DeleteFile(DataDir() + '\pgdata\tcvms-iprp.secret');
     exit;
   end;
-
-  CloseReceiverBrowser(BrowserSince);
-
-  // ANTES de tocar nada hay que dejar que la receptora termine su primer
-  // arranque: crea su propia base de datos (trae un PostgreSQL) y detener el
-  // servicio en mitad de eso deja el cluster a medio hacer y el servicio ya no
-  // vuelve a levantar. Se espera hasta 8 minutos a que su API conteste.
-  WizardForm.StatusLabel.Caption := 'Esperando a que el receptor termine de instalarse (crea su base de datos)...';
-  if WaitForIprpApi(480) = 0 then
-    if not WizardSilent() then
-      MsgBox('El receptor de paneles se instalo, pero no llego a arrancar dentro de 8 minutos.' #13#10#13#10 +
-             'Se continuara igual con su configuracion; si al terminar no responde, revise el' #13#10 +
-             'servicio {#IprpService} en Servicios de Windows.', mbInformation, MB_OK);
-
-  ConfigureIprpAfterSetup();
+  // Una receptora que no instalo este sistema no se toca.
+  DeleteIprpFirewallRules();
+  if not WizardSilent() then
+    MsgBox('En este equipo hay un Hik IP Receiver Pro que no instalo CLR TrueCentral VMS.' #13#10#13#10 +
+           'El servidor ahora tiene su propio servicio ISUP, que usa los mismos puertos (7660 a 7667): ' +
+           'mientras ese receptor este en marcha, los equipos ISUP no podran conectarse al VMS.' #13#10#13#10 +
+           'Si ya no lo usa, desinstalelo desde Aplicaciones instaladas (o detenga su servicio {#IprpService}).',
+           mbInformation, MB_OK);
 end;
-#endif
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
@@ -1317,12 +787,9 @@ begin
   begin
     TightenDataAcl();
     ConfigurePgPort();   // antes de arrancar: el clúster nace en el puerto elegido
-#ifdef HasIprp
-    // La receptora va ANTES de arrancar el servidor: este la activa sola en su
-    // arranque y necesita encontrarla escuchando. Si se instalara despues, la
-    // activacion quedaria pendiente hasta el siguiente reinicio del servicio.
-    InstallIprp();
-#endif
+    // Antes de arrancar el servidor: su servicio ISUP necesita los puertos que
+    // ocupaba la receptora anterior.
+    RetireIprp();
     ConfigureService();
     ConfigureFirewall();
     StartServiceAndVerify();
@@ -1335,7 +802,7 @@ end;
 // ---------------------------------------------------------------------------
 // CLR TrueCentral VMS es una solución cerrada: nada de lo que instala tiene
 // sentido sin el resto. Desinstalar significa BORRADO TOTAL — el servicio, la
-// base de datos, la receptora de paneles, el cliente, el complemento, las
+// base de datos, el cliente, el complemento, las
 // reglas de firewall y las preferencias de los operadores. No se pregunta por
 // partes: se avisa UNA vez, al principio (InitializeUninstall), y a partir de
 // ahí no queda nada a medias.
@@ -1541,11 +1008,10 @@ begin
     StopOrphanPostgres();
     StopOrphanMediaMtx();
     DeleteFirewallRules();
-#ifdef HasIprp
-    // Antes de borrar archivos: su desinstalador tarda y conviene que termine
-    // mientras Inno todavía no empezó a vaciar {app}.
-    UninstallIprp();
-#endif
+    // La receptora de versiones anteriores, si quedó (normalmente la retira la
+    // actualización). Antes de borrar archivos: su desinstalador tarda.
+    if IprpManagedByUs() then
+      UninstallIprp();
   end;
 
   if CurUninstallStep = usPostUninstall then

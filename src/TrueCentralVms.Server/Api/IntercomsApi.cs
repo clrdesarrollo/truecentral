@@ -11,6 +11,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Server.Services.Isup;
 using TrueCentralVms.Server.Services.Licensing;
 
 namespace TrueCentralVms.Server.Api;
@@ -28,22 +29,31 @@ public static class IntercomsApi
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
 
-    private static string? ValidateWrite(IntercomWriteDto request, IntercomDriverRegistry drivers)
+    /// <param name="isupKeyStored">El frente ya tiene clave ISUP guardada (en edición, dejarla vacía la conserva).</param>
+    private static string? ValidateWrite(IntercomWriteDto request, IntercomDriverRegistry drivers, bool isupKeyStored = false)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
             return "El nombre es obligatorio (máximo 128 caracteres).";
+        if (request.GroupName is { Length: > 64 })
+            return "El grupo no puede superar los 64 caracteres.";
+        if (drivers.Find(request.DriverKey) is not { } factory)
+            return $"Driver desconocido: '{request.DriverKey}'.";
+        // Por ISUP el frente se conecta solo: se piden su ID y su clave, no dirección ni credenciales.
+        if (factory.UsesIsup)
+            return IsupEquipmentRules.Validate(request.IsupDeviceId, request.IsupKey, isupKeyStored);
         if (string.IsNullOrWhiteSpace(request.Host))
             return "La dirección (IP o hostname) es obligatoria.";
         if (request.Port is < 1 or > 65535 || request.HttpPort is < 1 or > 65535 || request.RtspPort is < 1 or > 65535)
             return "Los puertos deben estar entre 1 y 65535.";
         if (string.IsNullOrWhiteSpace(request.Username))
             return "El usuario del frente es obligatorio.";
-        if (request.GroupName is { Length: > 64 })
-            return "El grupo no puede superar los 64 caracteres.";
-        if (drivers.Find(request.DriverKey) is null)
-            return $"Driver desconocido: '{request.DriverKey}'.";
         return null;
     }
+
+    private static bool UsesIsup(IntercomDriverRegistry drivers, string driverKey) => drivers.Find(driverKey)?.UsesIsup == true;
+
+    /// <summary>Dónde está el frente, para la bitácora: dirección y puerto, o su ID ISUP.</summary>
+    private static string WhereOf(Intercom i) => i.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : $"{i.Host}:{i.Port}";
 
     private static string? GroupOf(IntercomWriteDto request) =>
         string.IsNullOrWhiteSpace(request.GroupName) ? null : request.GroupName.Trim();
@@ -59,7 +69,7 @@ public static class IntercomsApi
         }
     }
 
-    private static void ApplyProbe(Intercom intercom, IntercomInfo info)
+    internal static void ApplyProbe(Intercom intercom, IntercomInfo info)
     {
         intercom.Model = info.Model;
         intercom.SerialNumber = info.SerialNumber;
@@ -140,7 +150,7 @@ public static class IntercomsApi
         app.MapGet("/api/intercoms/drivers", (HttpContext ctx, IntercomDriverRegistry drivers) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            return Results.Ok(drivers.All.Select(f => new IntercomDriverDto(f.DriverKey, f.DisplayName, f.DefaultPort, f.DefaultHttpPort)));
+            return Results.Ok(drivers.All.Select(f => new IntercomDriverDto(f.DriverKey, f.DisplayName, f.DefaultPort, f.DefaultHttpPort, f.UsesIsup)));
         });
 
         // Canales de video elegibles como cámara del frente (selector del mantenedor).
@@ -174,67 +184,92 @@ public static class IntercomsApi
 
         app.MapPost("/api/intercoms", async (HttpContext ctx, IntercomWriteDto request, VmsDbContext db, IntercomDriverRegistry drivers,
             LicenseService license, CredentialProtector protector, IHubContext<VmsHub> hub, IntercomService service, AuditService audit,
-            MediaMtxManager mtx, CancellationToken ct) =>
+            MediaMtxManager mtx, IsupService isup, IsupHostManager isupHost, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
-            if (string.IsNullOrEmpty(request.Password)) return Error("La contraseña del frente es obligatoria.");
+            bool viaIsup = UsesIsup(drivers, request.DriverKey);
+            if (!viaIsup && string.IsNullOrEmpty(request.Password)) return Error("La contraseña del frente es obligatoria.");
             if (await ValidateChannelAsync(db, request.ChannelId, ct) is { } badChannel) return badChannel;
             if (license.Deny(LicenseFeatures.ModuleIntercom, request.Enabled ? LicenseFeatures.IntercomDevices : null,
                     await db.Intercoms.CountAsync(i => i.Enabled, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "intercom", request.Name?.Trim());
-            string host = request.Host.Trim();
-            if (await db.Intercoms.AnyAsync(i => i.Host == host && i.Port == request.Port, ct))
+            string host = viaIsup ? "" : request.Host.Trim();
+            string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
+            if (isupId is not null)
+            {
+                if (await db.Intercoms.AnyAsync(i => i.IsupDeviceId == isupId, ct))
+                    return Error($"Ya existe un frente con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, request.IsupKey, IsupEquipmentRules.Intercom, null, ct) is { } conflict)
+                    return Error(conflict, StatusCodes.Status409Conflict);
+            }
+            else if (await db.Intercoms.AnyAsync(i => i.Host == host && i.Port == request.Port, ct))
                 return Error("Ya existe un frente con esa dirección y puerto.", StatusCodes.Status409Conflict);
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
-
-            var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, request.Password, request.RtspPort);
-            var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
-            if (info is null)
-            {
-                await audit.LogAsync(ctx, "intercom", "intercom-created", targetType: "intercom", targetName: request.Name.Trim(),
-                    detail: $"Alta de frente de citofonía rechazada por el equipo {host}:{request.Port}: {probeError}", success: false);
-                return Error(probeError!);
-            }
 
             var intercom = new Intercom
             {
                 Name = request.Name.Trim(),
                 DriverKey = request.DriverKey,
                 Host = host,
-                Port = request.Port,
-                HttpPort = request.HttpPort,
-                RtspPort = request.RtspPort,
-                Username = request.Username,
-                PasswordCiphertext = protector.Protect(request.Password),
+                Port = viaIsup ? 0 : request.Port,
+                HttpPort = viaIsup ? 0 : request.HttpPort,
+                RtspPort = viaIsup ? 0 : request.RtspPort,
+                Username = viaIsup ? "" : request.Username,
+                PasswordCiphertext = viaIsup ? [] : protector.Protect(request.Password!),
+                IsupDeviceId = isupId,
+                IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(request.IsupKey, protector) : null,
                 GroupName = GroupOf(request),
                 ChannelId = request.ChannelId,
                 LocationId = locationId,
                 Enabled = request.Enabled,
             };
-            ApplyProbe(intercom, info);
-            string? callCenterError = request.ConfigureCallCenter ? await ConfigureCallCenterAsync(drivers, intercom, conn, ct) : null;
-            bool optimize = request.OptimizeVideo && info.KeyFrameSeconds > 2;
-            string? videoError = optimize ? await OptimizeVideoAsync(drivers, request.DriverKey, conn, ct) : null;
+            var conn = service.ConnectionOf(intercom);
+
+            // Por ISUP el frente solo se conecta una vez que el servidor lo conoce: se guarda y en su primer contacto se leen sus
+            // datos, se configura su botón y se ajusta su video (IntercomService).
+            IntercomInfo? info = null;
+            string? callCenterError = null, videoError = null;
+            bool optimize = false;
+            if (isupId is not null && !isup.IsOnline(isupId))
+            {
+                intercom.Status = IntercomStatus.Offline;
+                intercom.LastError = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "frente", ct);
+            }
+            else
+            {
+                (info, string? probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+                if (info is null)
+                {
+                    await audit.LogAsync(ctx, "intercom", "intercom-created", targetType: "intercom", targetName: request.Name.Trim(),
+                        detail: $"Alta de frente de citofonía rechazada por el equipo {WhereOf(intercom)}: {probeError}", success: false);
+                    return Error(probeError!);
+                }
+                ApplyProbe(intercom, info);
+                callCenterError = request.ConfigureCallCenter ? await ConfigureCallCenterAsync(drivers, intercom, conn, ct) : null;
+                optimize = request.OptimizeVideo && info.KeyFrameSeconds > 2;
+                videoError = optimize ? await OptimizeVideoAsync(drivers, request.DriverKey, conn, ct) : null;
+            }
             db.Intercoms.Add(intercom);
             await db.SaveChangesAsync(ct);
+            if (viaIsup) isup.InvalidateDirectory();
 
             await audit.LogAsync(ctx, "intercom", "intercom-created",
                 targetType: "intercom", targetId: intercom.Id.ToString(), targetName: intercom.Name,
-                detail: $"Agregó el frente de citofonía '{intercom.Name}' ({intercom.DriverKey}, {intercom.Host}:{intercom.Port}, " +
-                        $"{intercom.Model ?? "modelo desconocido"}, {intercom.DoorCount} puerta(s)" +
+                detail: $"Agregó el frente de citofonía '{intercom.Name}' ({intercom.DriverKey}, {WhereOf(intercom)}, " +
+                        (info is null ? "a la espera de que se conecte por ISUP" : $"{intercom.Model ?? "modelo desconocido"}, {intercom.DoorCount} puerta(s)") +
                         (intercom.GroupName is null ? "" : $", grupo '{intercom.GroupName}'") +
                         (intercom.LocationId is null ? "" : $", en {EquipmentLocation.Describe(intercom.LocationId)}") + ").",
-                data: new { intercom.Host, intercom.Port, intercom.HttpPort, intercom.RtspPort, intercom.DriverKey, intercom.Model, intercom.SerialNumber, intercom.ChannelId, intercom.LocationId });
+                data: new { intercom.Host, intercom.Port, intercom.HttpPort, intercom.RtspPort, intercom.DriverKey, intercom.IsupDeviceId, intercom.Model, intercom.SerialNumber, intercom.ChannelId, intercom.LocationId });
             EquipmentLocation.Changed(ctx);
-            if (request.ConfigureCallCenter && !info.CallCenterEnabled)
+            if (info is not null && request.ConfigureCallCenter && !info.CallCenterEnabled)
                 await audit.LogAsync(ctx, "intercom", "call-center-configured", targetType: "intercom", targetId: intercom.Id.ToString(),
                     targetName: intercom.Name, success: callCenterError is null,
                     detail: callCenterError is null
                         ? $"Configuró el botón de '{intercom.Name}' para llamar a la central."
                         : $"No se pudo configurar el botón de '{intercom.Name}' para llamar a la central: {callCenterError}");
-            if (optimize) await AuditVideoAsync(ctx, audit, intercom, info, videoError);
+            if (optimize) await AuditVideoAsync(ctx, audit, intercom, info!, videoError);
             await mtx.RefreshPathsAsync(ct); // ruta de su cámara propia
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "intercoms", cancellationToken: ct);
@@ -244,35 +279,65 @@ public static class IntercomsApi
 
         app.MapPut("/api/intercoms/{id:int}", async (HttpContext ctx, int id, IntercomWriteDto request, VmsDbContext db, LicenseService license,
             IntercomDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub, IntercomService service,
-            AuditService audit, MediaMtxManager mtx, CancellationToken ct) =>
+            AuditService audit, MediaMtxManager mtx, IsupService isup, IsupHostManager isupHost, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
-            if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (await ValidateChannelAsync(db, request.ChannelId, ct) is { } badChannel) return badChannel;
             var intercom = await LoadAsync(db, id, ct);
             if (intercom is null) return Results.NotFound();
-            string host = request.Host.Trim();
-            if (await db.Intercoms.AnyAsync(i => i.Id != id && i.Host == host && i.Port == request.Port, ct))
+            if (ValidateWrite(request, drivers, intercom.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
+            bool viaIsup = UsesIsup(drivers, request.DriverKey);
+            string host = viaIsup ? "" : request.Host.Trim();
+            string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
+            string? isupKey = !viaIsup ? null
+                : IsupEquipmentRules.EffectiveKey(request.IsupKey, intercom.IsupKeyCiphertext, protector);
+            if (isupId is not null)
+            {
+                if (await db.Intercoms.AnyAsync(i => i.Id != id && i.IsupDeviceId == isupId, ct))
+                    return Error($"Ya existe otro frente con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, isupKey, IsupEquipmentRules.Intercom, id, ct) is { } conflict)
+                    return Error(conflict, StatusCodes.Status409Conflict);
+            }
+            else if (await db.Intercoms.AnyAsync(i => i.Id != id && i.Host == host && i.Port == request.Port, ct))
                 return Error("Ya existe otro frente con esa dirección y puerto.", StatusCodes.Status409Conflict);
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, intercom.LocationId, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
             int? previousLocation = intercom.LocationId;
 
-            string password = string.IsNullOrEmpty(request.Password) ? protector.Unprotect(intercom.PasswordCiphertext) : request.Password;
-            bool connectionChanged = intercom.Host != host || intercom.Port != request.Port || intercom.HttpPort != request.HttpPort ||
-                                     intercom.Username != request.Username || intercom.DriverKey != request.DriverKey ||
-                                     !string.IsNullOrEmpty(request.Password);
-            var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, password, request.RtspPort);
+            string password = viaIsup ? ""
+                : !string.IsNullOrEmpty(request.Password) ? request.Password
+                : intercom.PasswordCiphertext.Length > 0 ? protector.Unprotect(intercom.PasswordCiphertext)
+                : "";
+            if (!viaIsup && password.Length == 0) return Error("La contraseña del frente es obligatoria.");
+            bool connectionChanged = intercom.DriverKey != request.DriverKey || (viaIsup
+                ? intercom.IsupDeviceId != isupId || !string.IsNullOrEmpty(request.IsupKey)
+                : intercom.IsupDeviceId is not null || intercom.Host != host || intercom.Port != request.Port ||
+                  intercom.HttpPort != request.HttpPort || intercom.Username != request.Username || !string.IsNullOrEmpty(request.Password));
+            var conn = new IntercomConnectionInfo(host, viaIsup ? 0 : request.Port, viaIsup ? 0 : request.HttpPort,
+                viaIsup ? "" : request.Username, password, viaIsup ? 0 : request.RtspPort, isupId);
+            // Por ISUP solo se le puede hablar al frente si está conectado.
+            bool reachable = !viaIsup || isup.IsOnline(isupId!);
             IntercomInfo? probed = null;
             if (connectionChanged)
             {
                 HikvisionIntercomDriver.Forget(service.ConnectionOf(intercom));
-                var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
-                if (info is null) return Error(probeError!);
-                ApplyProbe(intercom, info);
-                probed = info;
+                if (!reachable)
+                {
+                    // Aún no se conecta con estos datos: se completa (sin modelo = pendiente) en su próximo contacto.
+                    intercom.Model = null;
+                    intercom.Status = IntercomStatus.Offline;
+                    intercom.LastError = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId!, "frente", ct);
+                }
+                // Con el mismo ID ISUP y conectado, cambiar solo la clave no requiere volver a leer el equipo.
+                else if (!viaIsup || intercom.IsupDeviceId != isupId || intercom.DriverKey != request.DriverKey)
+                {
+                    var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+                    if (info is null) return Error(probeError!);
+                    ApplyProbe(intercom, info);
+                    probed = info;
+                }
             }
-            else if (request.OptimizeVideo)
+            else if (request.OptimizeVideo && reachable)
             {
                 // Solo para leer el intervalo de cuadros completos; si el equipo no contesta, se guarda igual.
                 (probed, _) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
@@ -280,11 +345,14 @@ public static class IntercomsApi
 
             var changes = new List<string>();
             if (intercom.Name != request.Name.Trim()) changes.Add($"nombre '{intercom.Name}' → '{request.Name.Trim()}'");
-            if (intercom.Host != host || intercom.Port != request.Port) changes.Add($"dirección {intercom.Host}:{intercom.Port} → {host}:{request.Port}");
-            if (intercom.HttpPort != request.HttpPort) changes.Add($"puerto HTTP {intercom.HttpPort} → {request.HttpPort}");
-            if (intercom.RtspPort != request.RtspPort) changes.Add($"puerto RTSP {intercom.RtspPort} → {request.RtspPort}");
-            if (intercom.Username != request.Username) changes.Add($"usuario '{intercom.Username}' → '{request.Username}'");
-            if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
+            string whereBefore = WhereOf(intercom), whereAfter = viaIsup ? $"ISUP {isupId}" : $"{host}:{request.Port}";
+            if (whereBefore != whereAfter) changes.Add($"conexión {whereBefore} → {whereAfter}");
+            if (!viaIsup && intercom.HttpPort != request.HttpPort) changes.Add($"puerto HTTP {intercom.HttpPort} → {request.HttpPort}");
+            if (!viaIsup && intercom.RtspPort != request.RtspPort) changes.Add($"puerto RTSP {intercom.RtspPort} → {request.RtspPort}");
+            if (!viaIsup && intercom.Username != request.Username) changes.Add($"usuario '{intercom.Username}' → '{request.Username}'");
+            if (!viaIsup && !string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
+            if (viaIsup && !string.IsNullOrEmpty(request.IsupKey)) changes.Add("clave ISUP cambiada");
+            bool isupChanged = intercom.IsupDeviceId != isupId || (viaIsup && !string.IsNullOrEmpty(request.IsupKey));
             if (intercom.GroupName != GroupOf(request)) changes.Add($"grupo '{intercom.GroupName}' → '{GroupOf(request)}'");
             if (intercom.ChannelId != request.ChannelId) changes.Add($"canal de video {intercom.ChannelId?.ToString() ?? "ninguno"} → {request.ChannelId?.ToString() ?? "ninguno"}");
             if (locationId != previousLocation)
@@ -294,11 +362,13 @@ public static class IntercomsApi
             intercom.Name = request.Name.Trim();
             intercom.DriverKey = request.DriverKey;
             intercom.Host = host;
-            intercom.Port = request.Port;
-            intercom.HttpPort = request.HttpPort;
-            intercom.RtspPort = request.RtspPort;
-            intercom.Username = request.Username;
-            intercom.PasswordCiphertext = protector.Protect(password);
+            intercom.Port = viaIsup ? 0 : request.Port;
+            intercom.HttpPort = viaIsup ? 0 : request.HttpPort;
+            intercom.RtspPort = viaIsup ? 0 : request.RtspPort;
+            intercom.Username = viaIsup ? "" : request.Username;
+            intercom.PasswordCiphertext = viaIsup ? [] : protector.Protect(password);
+            intercom.IsupDeviceId = isupId;
+            intercom.IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(isupKey, protector) : null;
             intercom.GroupName = GroupOf(request);
             intercom.ChannelId = request.ChannelId;
             intercom.LocationId = locationId;
@@ -308,17 +378,18 @@ public static class IntercomsApi
                 return await license.DenyAsync(ctx, denied, "intercom", intercom.Name);
             intercom.Enabled = request.Enabled;
             bool wasCallCenter = intercom.CallCenterEnabled;
-            string? callCenterError = request.ConfigureCallCenter ? await ConfigureCallCenterAsync(drivers, intercom, conn, ct) : null;
+            string? callCenterError = request.ConfigureCallCenter && reachable ? await ConfigureCallCenterAsync(drivers, intercom, conn, ct) : null;
             bool optimize = request.OptimizeVideo && probed?.KeyFrameSeconds > 2;
             string? videoError = optimize ? await OptimizeVideoAsync(drivers, request.DriverKey, conn, ct) : null;
             intercom.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
+            if (isupChanged) isup.InvalidateDirectory();
 
             await audit.LogAsync(ctx, "intercom", "intercom-updated",
                 targetType: "intercom", targetId: intercom.Id.ToString(), targetName: intercom.Name,
                 detail: $"Modificó el frente de citofonía '{intercom.Name}': " + (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
             if (locationId != previousLocation) await EquipmentLocation.MovedAsync(ctx, ct);
-            if (request.ConfigureCallCenter && !wasCallCenter)
+            if (request.ConfigureCallCenter && !wasCallCenter && reachable)
                 await audit.LogAsync(ctx, "intercom", "call-center-configured", targetType: "intercom", targetId: intercom.Id.ToString(),
                     targetName: intercom.Name, success: callCenterError is null,
                     detail: callCenterError is null
@@ -333,7 +404,7 @@ public static class IntercomsApi
         });
 
         app.MapDelete("/api/intercoms/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, IHubContext<VmsHub> hub,
-            IntercomService service, AuditService audit, MediaMtxManager mtx, CancellationToken ct) =>
+            IntercomService service, AuditService audit, MediaMtxManager mtx, IsupService isup, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
             var intercom = await db.Intercoms.FindAsync([id], ct);
@@ -343,9 +414,10 @@ public static class IntercomsApi
             HikvisionIntercomDriver.Forget(service.ConnectionOf(intercom));
             db.Intercoms.Remove(intercom);
             await db.SaveChangesAsync(ct);
+            if (intercom.IsupDeviceId is not null) isup.InvalidateDirectory();
             await audit.LogAsync(ctx, "intercom", "intercom-deleted",
                 targetType: "intercom", targetId: id.ToString(), targetName: intercom.Name,
-                detail: $"Eliminó el frente de citofonía '{intercom.Name}' ({intercom.Host}:{intercom.Port}). Su historial de llamadas se conserva.");
+                detail: $"Eliminó el frente de citofonía '{intercom.Name}' ({WhereOf(intercom)}). Su historial de llamadas se conserva.");
             EquipmentLocation.Changed(ctx);
             await mtx.RefreshPathsAsync(ct);
             service.RequestReconcile();
@@ -355,29 +427,56 @@ public static class IntercomsApi
 
         // Probar conexión (sin persistir). Con ?intercomId= reutiliza la clave guardada.
         app.MapPost("/api/intercoms/probe", async (HttpContext ctx, IntercomWriteDto request, VmsDbContext db, IntercomDriverRegistry drivers,
-            CredentialProtector protector, AuditService audit, int? intercomId, CancellationToken ct) =>
+            CredentialProtector protector, AuditService audit, IsupService isup, IsupHostManager isupHost, int? intercomId, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.IntercomConfigure, out _) is { } failure) return failure;
-            if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
-            string? password = request.Password;
-            if (string.IsNullOrEmpty(password) && intercomId is int existingId &&
-                await db.Intercoms.FindAsync([existingId], ct) is { } existing)
-                password = protector.Unprotect(existing.PasswordCiphertext);
-            if (string.IsNullOrEmpty(password)) return Error("La contraseña del frente es obligatoria.");
+            var existing = intercomId is int existingId ? await db.Intercoms.FindAsync([existingId], ct) : null;
+            if (ValidateWrite(request, drivers, existing?.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
 
-            string host = request.Host.Trim();
-            var conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, password, request.RtspPort);
+            IntercomConnectionInfo conn;
+            string where;
+            string host = "";
+            string? isupId = null;
+            if (UsesIsup(drivers, request.DriverKey))
+            {
+                // Por ISUP no hay nada que "probar" desde aquí: el frente tiene que estar conectado.
+                isupId = request.IsupDeviceId!.Trim();
+                where = $"ISUP {isupId}";
+                if (!isup.IsOnline(isupId))
+                {
+                    var status = await isup.GetHostStatusAsync(ct);
+                    string message = status?.Rejections.Any(r => r.DeviceId == isupId && r.Reason.Contains("no está dado de alta", StringComparison.Ordinal)) == true
+                        ? $"El frente ya está intentando conectarse por ISUP con el ID {isupId}: guárdelo y el servidor lo aceptará."
+                        : await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "frente", ct);
+                    await audit.LogAsync(ctx, "intercom", "intercom-probed", targetType: "intercom", targetName: request.Name?.Trim(),
+                        detail: $"Probó la conexión con el frente {where}: no está conectado.", success: false);
+                    return Results.Ok(new IntercomProbeResultDto(false, message, null, null, null, null, 0, false, null, null));
+                }
+                conn = new IntercomConnectionInfo("", 0, 0, "", "", 0, isupId);
+            }
+            else
+            {
+                string? password = request.Password;
+                if (string.IsNullOrEmpty(password) && existing is { PasswordCiphertext.Length: > 0 })
+                    password = protector.Unprotect(existing.PasswordCiphertext);
+                if (string.IsNullOrEmpty(password)) return Error("La contraseña del frente es obligatoria.");
+                host = request.Host.Trim();
+                conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, password, request.RtspPort);
+                where = $"{host}:{request.Port}";
+            }
+
             var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             await audit.LogAsync(ctx, "intercom", "intercom-probed", targetType: "intercom", targetName: request.Name?.Trim(),
                 detail: info is null
-                    ? $"Probó la conexión con el frente {host}:{request.Port}: {probeError}"
-                    : $"Probó la conexión con el frente {host}:{request.Port}: correcta ({info.Model}).",
+                    ? $"Probó la conexión con el frente {where}: {probeError}"
+                    : $"Probó la conexión con el frente {where}: correcta ({info.Model}).",
                 success: info is not null);
             if (info is null)
                 return Results.Ok(new IntercomProbeResultDto(false, probeError, null, null, null, null, 0, false, null, null));
 
             // ¿El frente también está en Fuentes de video? Ese registro ocupa un canal de la licencia que la citofonía ya no necesita (el panel lo avisa).
-            int? suggested = await db.Channels.AsNoTracking().Where(c => c.Device.Host == host)
+            int? suggested = await db.Channels.AsNoTracking()
+                .Where(c => isupId != null ? c.Device.IsupDeviceId == isupId : c.Device.Host == host)
                 .OrderBy(c => c.ChannelNumber).Select(c => (int?)c.Id).FirstOrDefaultAsync(ct);
             return Results.Ok(new IntercomProbeResultDto(true, null, info.Model, info.SerialNumber, info.FirmwareVersion, info.DeviceName,
                 info.DoorCount, info.CallCenterEnabled, info.AudioCodec, suggested, info.KeyFrameSeconds));

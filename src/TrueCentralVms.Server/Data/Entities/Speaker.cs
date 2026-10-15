@@ -8,7 +8,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// una biblioteca de audios propia y un canal de audio en vivo. La contraseña
 /// se guarda cifrada con AES-256-GCM (ver <see cref="CredentialProtector"/>).
 /// </summary>
-public class Speaker : ILocatable
+public class Speaker : ILocatable, IIsupEquipment
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -19,6 +19,13 @@ public class Speaker : ILocatable
     public bool UseHttps { get; set; }
     public string Username { get; set; } = "";
     public byte[] PasswordCiphertext { get; set; } = [];
+    /// <summary>
+    /// ID ISUP del equipo cuando se conecta por ISUP (driver hikvision-isup): el equipo se registra contra el servidor y no hace falta
+    /// alcanzarlo por IP (detrás de NAT, 4G o MPLS). Null = conexión directa por IP.
+    /// </summary>
+    public string? IsupDeviceId { get; set; }
+    /// <summary>Clave ISUP del equipo (la «clave de cifrado» de su menú de plataforma), cifrada como la contraseña.</summary>
+    public byte[]? IsupKeyCiphertext { get; set; }
     /// <summary>Grupo lógico (sector) para elegir varios parlantes de una vez; libre.</summary>
     public string? GroupName { get; set; }
 

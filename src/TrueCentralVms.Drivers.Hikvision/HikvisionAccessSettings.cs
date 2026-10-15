@@ -51,7 +51,7 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
 
     /// <summary>Mismo transporte y mismo criterio (digest) que <see cref="HikvisionAccessDriver"/>.</summary>
     private static HikvisionIsapiClient Client(AccessConnectionInfo info) =>
-        new(new AlarmConnectionInfo(info.Host, info.Port, info.UseHttps, info.Username, info.Password),
+        new(new AlarmConnectionInfo(info.Host, info.Port, info.UseHttps, info.Username, info.Password, info.IsupId),
             digestOnly: true, deviceNoun: Noun);
 
     // ==================================================================

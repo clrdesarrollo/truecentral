@@ -22,6 +22,24 @@ public sealed class HikvisionAccessDriverFactory : IAccessControlDriverFactory
 }
 
 /// <summary>
+/// Terminales y controladoras Hikvision que se conectan al servidor por ISUP (detrás de NAT, 4G o MPLS): el mismo driver ISAPI,
+/// con el transporte por el túnel ISUP. Las fotos de rostro van por URL (el equipo las descarga del servidor) porque el túnel
+/// no lleva multipart.
+/// </summary>
+public sealed class HikvisionIsupAccessDriverFactory : IAccessControlDriverFactory
+{
+    public string DriverKey => "hikvision-isup";
+    public string DisplayName => "Hikvision DS-K por ISUP (el equipo se conecta al servidor)";
+    public int DefaultPort => 0;
+    public bool DefaultHttps => false;
+    public AccessAuthMode AuthMode => AccessAuthMode.UserPassword;
+    public string? Hint => "El equipo se conecta al servidor con su ID y su clave ISUP (Red → Acceso a plataforma → ISUP 5.0).";
+    public bool SupportsPersonSync => true;
+    public bool UsesIsup => true;
+    public IAccessControlDriver Create() => new HikvisionAccessDriver();
+}
+
+/// <summary>
 /// Control de acceso Hikvision (familias DS-K1T terminales, DS-K2
 /// controladoras y DS-K3 torniquetes) por ISAPI, sobre el mismo transporte
 /// que los paneles de alarma (<see cref="HikvisionIsapiClient"/>: Digest o
@@ -57,7 +75,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     private static AlarmConnectionInfo Transport(AccessConnectionInfo info) =>
         // El transporte ISAPI se comparte con los paneles de alarma; su registro
         // de conexión es el mismo dato (host, puerto, credenciales).
-        new(info.Host, info.Port, info.UseHttps, info.Username, info.Password);
+        new(info.Host, info.Port, info.UseHttps, info.Username, info.Password, info.IsupId);
 
     /// <summary>
     /// Cliente ISAPI para esta familia, forzado a DIGEST.
@@ -94,7 +112,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
     /// <summary>Clave de un equipo en las cachés del driver (esquema, dirección y puerto).</summary>
     private static string DeviceKey(AccessConnectionInfo info) =>
-        $"{(info.UseHttps ? "https" : "http")}://{info.Host}:{info.Port}";
+        info.IsupId is { Length: > 0 } isupId ? $"isup://{isupId}" : $"{(info.UseHttps ? "https" : "http")}://{info.Host}:{info.Port}";
 
     // ------------------------------------------------------------------
     // Capacidades declaradas (ver HikvisionAccessProfile)

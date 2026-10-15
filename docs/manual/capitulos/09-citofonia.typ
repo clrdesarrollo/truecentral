@@ -289,6 +289,20 @@ frente, revise que la casilla esté marcada y vuelva a guardar.
   conectado con él. Si el servidor está detenido o no llega al frente, el
   timbre llama solo al monitor interior del edificio (si lo hay).]
 
+=== Frentes que se conectan por ISUP
+
+Un frente Hikvision que el servidor no alcanza por su dirección (detrás de un
+router, por 4G) se conecta él al servidor por ISUP. Elija la marca _Hikvision
+por ISUP (el frente se conecta al servidor)_ y escriba el *ID ISUP del frente*
+y su *Clave ISUP*, que el recuadro de ayuda indica dónde configurar en el
+equipo. Se puede guardar antes de que se conecte: en su primer contacto el
+sistema lee sus datos, configura su botón para llamar a la central y ajusta su
+video. La voz, el video y la apertura de puerta van por esa misma conexión.
+
+#nota[La recepción de llamadas de un frente conectado por ISUP todavía no está
+  validada con un equipo real. Pruébela al instalarlo: toque el timbre y
+  verifique que la llamada suene en el cliente de monitoreo.]
+
 === Buscar frentes en la red
 
 Debajo de la tabla, *Equipos en línea* lista los frentes compatibles que el

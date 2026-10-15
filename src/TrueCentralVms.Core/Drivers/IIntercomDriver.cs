@@ -8,7 +8,12 @@ namespace TrueCentralVms.Core.Drivers;
 /// </summary>
 public sealed record IntercomConnectionInfo(string Host, int Port, int HttpPort, string Username, string Password,
     /// <summary>Puerto RTSP de la cámara propia del frente.</summary>
-    int RtspPort = 554);
+    int RtspPort = 554,
+    /// <summary>
+    /// El frente se conecta él al servidor por ISUP con este ID (detrás de NAT o 4G): todo viaja por esa conexión y dirección,
+    /// puertos y credenciales no se usan.
+    /// </summary>
+    string? IsupId = null);
 
 /// <summary>Identificación y capacidades del frente, leídas al validar las credenciales.</summary>
 public sealed record IntercomInfo(
@@ -152,6 +157,9 @@ public interface IIntercomDriverFactory
 
     /// <summary>Puerto HTTP (ISAPI).</summary>
     int DefaultHttpPort { get; }
+
+    /// <summary>El frente se conecta al servidor por ISUP (el alta pide su ID y clave, no dirección ni credenciales).</summary>
+    bool UsesIsup => false;
 
     IIntercomDriver Create();
 }

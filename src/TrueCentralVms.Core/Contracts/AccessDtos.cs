@@ -71,7 +71,11 @@ public sealed record AccessDeviceDto(
     /// <summary>Ubicación del equipo (null = por ubicar): la heredan sus puertas.</summary>
     int? LocationId = null,
     /// <summary>Su driver sabe leer una tarjeta a pedido en el lector (hoy, solo Hikvision).</summary>
-    bool SupportsCardCapture = false);
+    bool SupportsCardCapture = false,
+    /// <summary>ID ISUP del equipo si se conecta al servidor por ISUP (null = por IP).</summary>
+    string? IsupDeviceId = null,
+    /// <summary>El servidor tiene guardada su clave ISUP.</summary>
+    bool HasIsupKey = false);
 
 public sealed record AccessDeviceWriteDto(
     string Name,
@@ -85,7 +89,11 @@ public sealed record AccessDeviceWriteDto(
     bool Enabled = true,
     /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
     /// por ubicar); 0 = por ubicar. Las puertas que seguían al equipo se mueven con él.</summary>
-    int? LocationId = null);
+    int? LocationId = null,
+    /// <summary>ID ISUP (drivers con UsesIsup): el «ID del dispositivo» de su plataforma ISUP.</summary>
+    string? IsupDeviceId = null,
+    /// <summary>Clave ISUP; se guarda cifrada. En edición, vacía = mantener la guardada.</summary>
+    string? IsupKey = null);
 
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record AccessProbeResultDto(
@@ -124,7 +132,9 @@ public sealed record AccessDriverDto(
     /// <summary>Ayuda para el formulario: qué credencial espera este equipo.</summary>
     string? Hint,
     /// <summary>Los equipos de esta marca aceptan el padrón del VMS (personas, credenciales y horarios).</summary>
-    bool SupportsPersonSync);
+    bool SupportsPersonSync,
+    /// <summary>Los equipos se conectan por ISUP: el formulario pide ID y clave ISUP en vez de dirección y credenciales.</summary>
+    bool UsesIsup = false);
 
 // ---------------------------------------------------------------------------
 // Segunda etapa del módulo: puertas, horarios, personas, niveles de acceso e

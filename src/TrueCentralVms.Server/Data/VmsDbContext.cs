@@ -187,7 +187,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             // Los enums se guardan como texto: la base queda legible con psql.
             e.Property(d => d.DeviceType).HasConversion<string>().HasMaxLength(16);
             e.Property(d => d.Status).HasConversion<string>().HasMaxLength(16);
-            e.HasIndex(d => new { d.Host, d.SdkPort }).IsUnique();
+            e.HasIndex(d => new { d.Host, d.SdkPort }).IsUnique().HasFilter("\"IsupDeviceId\" IS NULL");
+            e.Property(d => d.IsupDeviceId).HasMaxLength(32);
+            // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
+            e.HasIndex(d => d.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
         });
 
         modelBuilder.Entity<Channel>(e =>
@@ -278,7 +281,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(s => s.FirmwareVersion).HasMaxLength(64);
             e.Property(s => s.LastError).HasMaxLength(512);
             e.Property(s => s.Status).HasConversion<string>().HasMaxLength(16);
-            e.HasIndex(s => new { s.Host, s.Port }).IsUnique();
+            e.HasIndex(s => new { s.Host, s.Port }).IsUnique().HasFilter("\"IsupDeviceId\" IS NULL");
+            e.Property(s => s.IsupDeviceId).HasMaxLength(32);
+            // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
+            e.HasIndex(s => s.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
         });
 
         // Módulos de entradas y salidas: una fila por módulo y una por cada
@@ -319,7 +325,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(i => i.FirmwareVersion).HasMaxLength(64);
             e.Property(i => i.LastError).HasMaxLength(512);
             e.Property(i => i.Status).HasConversion<string>().HasMaxLength(16);
-            e.HasIndex(i => new { i.Host, i.Port }).IsUnique();
+            e.HasIndex(i => new { i.Host, i.Port }).IsUnique().HasFilter("\"IsupDeviceId\" IS NULL");
+            e.Property(i => i.IsupDeviceId).HasMaxLength(32);
+            // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
+            e.HasIndex(i => i.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
             // Borrar el dispositivo de video deja el frente sin cámara, no lo borra.
             e.HasOne(i => i.Channel).WithMany().HasForeignKey(i => i.ChannelId).OnDelete(DeleteBehavior.SetNull);
         });
@@ -352,7 +361,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(a => a.LastError).HasMaxLength(512);
             e.Property(a => a.Kind).HasConversion<string>().HasMaxLength(16);
             e.Property(a => a.Status).HasConversion<string>().HasMaxLength(16);
-            e.HasIndex(a => new { a.Host, a.Port }).IsUnique();
+            e.HasIndex(a => new { a.Host, a.Port }).IsUnique().HasFilter("\"IsupDeviceId\" IS NULL");
+            e.Property(a => a.IsupDeviceId).HasMaxLength(32);
+            // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
+            e.HasIndex(a => a.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
         });
 
         modelBuilder.Entity<AccessDoor>(e =>
@@ -526,20 +538,15 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(p => p.DriverKey).HasMaxLength(32);
             e.Property(p => p.Host).HasMaxLength(255);
             e.Property(p => p.Username).HasMaxLength(64);
-            e.Property(p => p.GatewayDeviceId).HasMaxLength(128);
-            e.Property(p => p.GatewayProtocol).HasMaxLength(8);
             e.Property(p => p.Model).HasMaxLength(64);
             e.Property(p => p.SerialNumber).HasMaxLength(64);
             e.Property(p => p.FirmwareVersion).HasMaxLength(64);
             e.Property(p => p.LastError).HasMaxLength(512);
             e.Property(p => p.Status).HasConversion<string>().HasMaxLength(16);
-            // Unicidad = dirección + puerto + equipo: detrás de una pasarela
-            // (IP Receiver Pro) varios paneles comparten dirección y puerto y
-            // se distinguen por el equipo. Un panel directo (sin equipo) sigue
-            // siendo único por dirección y puerto: en PostgreSQL los NULL no
-            // chocan entre sí, por eso va un segundo índice filtrado.
-            e.HasIndex(p => new { p.Host, p.Port, p.GatewayDeviceId }).IsUnique();
-            e.HasIndex(p => new { p.Host, p.Port }).IsUnique().HasFilter("\"GatewayDeviceId\" IS NULL");
+            e.HasIndex(p => new { p.Host, p.Port }).IsUnique().HasFilter("\"IsupDeviceId\" IS NULL");
+            e.Property(p => p.IsupDeviceId).HasMaxLength(32);
+            // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
+            e.HasIndex(p => p.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
         });
 
         modelBuilder.Entity<AlarmArea>(e =>

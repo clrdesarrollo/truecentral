@@ -55,14 +55,32 @@ habilitados. Si hay deshabilitados muestra «habilitados / total»:
   [Dahua (SDK nativo)], [Cámaras y grabadores Dahua.], [37777], [554],
   [ONVIF (otras marcas)], [Equipos de otras marcas compatibles con ONVIF. El
     puerto SDK es el puerto web del equipo, donde atiende ONVIF.], [80], [554],
+  [Hikvision por ISUP (el equipo se conecta al servidor)], [Cámaras,
+    grabadores y cámaras de patentes Hikvision que el servidor no alcanza por
+    su dirección (detrás de un router, por 4G). Se conectan ellos al servidor
+    con su ID y su clave ISUP.], [—], [—],
 )
 
 Los puertos de la tabla son los que el formulario propone al elegir la marca;
 cámbielos si el equipo usa otros.
 
-#nota[Hoy solo los equipos _Hikvision (SDK nativo)_ envían eventos de cámara
-  (movimiento, cruce de línea…) a las automatizaciones, y las lecturas de
-  patentes llegan de equipos Hikvision y Dahua.]
+#nota[Hoy solo los equipos Hikvision (_SDK nativo_ y _por ISUP_) envían eventos
+  de cámara (movimiento, cruce de línea…) a las automatizaciones, y las
+  lecturas de patentes llegan de equipos Hikvision y Dahua.]
+
+=== Equipos que se conectan por ISUP
+
+Con la marca _Hikvision por ISUP_ el formulario no pide dirección, puertos ni
+credenciales, sino el *ID ISUP del equipo* y su *Clave ISUP*; el recuadro de
+ayuda muestra lo que hay que configurar en el equipo (en Hikvision: Red →
+Acceso a plataforma, protocolo ISUP 5.0, con la dirección del servidor y el
+puerto). El equipo se puede guardar antes de que se conecte: en su primer
+contacto el sistema lee solo su modelo y sus canales. Su video, sus
+grabaciones, el PTZ, las fotos, los eventos y las patentes funcionan igual que
+en los demás equipos, con dos diferencias: las grabaciones se reproducen a
+velocidad normal, y sus canales no pueden mostrarse en el muro de video (el
+decodificador no llega al equipo). Vea #menu("Sistema", "Conexión ISUP") en
+#capitulo(<cap-sistema>).
 
 == Agregar un dispositivo
 

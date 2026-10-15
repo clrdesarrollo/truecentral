@@ -1,0 +1,31 @@
+using TrueCentralVms.Core.Isup;
+
+namespace TrueCentralVms.Core.Contracts;
+
+/// <summary>Un equipo del VMS que usa un ID ISUP: tipo ("video", "access", "alarm", "speaker", "intercom"), su id y su nombre.</summary>
+public sealed record IsupEquipmentRefDto(string Kind, int Id, string Name);
+
+/// <summary>Un ID ISUP con su estado ante el servidor y los equipos del VMS que lo usan.</summary>
+public sealed record IsupDeviceDto(
+    string DeviceId,
+    bool Online,
+    string? Address,
+    string? Protocol,
+    DateTimeOffset? OnlineSince,
+    bool Asleep,
+    string? Firmware,
+    bool AlarmLinkUp,
+    IReadOnlyList<IsupEquipmentRefDto> Equipment);
+
+/// <summary>
+/// Página Sistema → Conexión ISUP: si el servicio corre, qué puertos abrió, qué dirección anuncia a los equipos, el estado de cada
+/// equipo dado de alta y los intentos rechazados (equipos que llaman pero no están en el VMS o traen otra clave).
+/// </summary>
+public sealed record IsupStatusDto(
+    bool Enabled,
+    bool Running,
+    string? Error,
+    string? PublicAddress,
+    IReadOnlyList<IsupListenerState> Listeners,
+    IReadOnlyList<IsupDeviceDto> Devices,
+    IReadOnlyList<IsupRejection> Rejections);

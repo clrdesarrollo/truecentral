@@ -163,7 +163,7 @@ public partial class IntercomCallWindow : Window
             .Select(n => new DoorItem(n, _intercom.DoorCount > 1 ? $"Abrir puerta {n}" : "Abrir puerta")).ToList();
 
         var call = _call;
-        string detail = call?.Origin is { Length: > 0 } origin ? origin : $"{_intercom.Model ?? "Frente"} · {_intercom.Host}";
+        string detail = call?.Origin is { Length: > 0 } origin ? origin : $"{_intercom.Model ?? "Frente"} · {(_intercom.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : _intercom.Host)}";
         string state;
         Color color;
         RingingPanel.Visibility = Visibility.Collapsed;

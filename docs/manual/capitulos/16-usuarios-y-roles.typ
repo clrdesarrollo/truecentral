@@ -291,7 +291,7 @@ control sobre la seguridad del sistema.
   grupo[Configuración],
   [Fuentes de video], [Agregar y configurar cámaras, grabadores, decodificadores y muros; buscar equipos en la red.],
   [Equipos de acceso], [Agregar y configurar terminales y puertas, y sincronizarlos.],
-  [Paneles de alarma], [Agregar y configurar paneles de alarma y la receptora.],
+  [Paneles de alarma], [Agregar y configurar paneles de alarma.],
   [Paneles de cerco], [Agregar y configurar paneles de cerco, sus controles remotos y su firmware.],
   [Parlantes IP], [Agregar y configurar parlantes IP y su biblioteca de audios.],
   [Módulos de E/S], [Agregar y configurar módulos de entradas y salidas, y nombrar sus entradas y relés.],

@@ -12,7 +12,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// puede mostrar otra cámara (<see cref="ChannelId"/>).
 /// La contraseña se guarda cifrada con AES-256-GCM (ver <see cref="CredentialProtector"/>).
 /// </summary>
-public class Intercom : ILocatable
+public class Intercom : ILocatable, IIsupEquipment
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -27,6 +27,13 @@ public class Intercom : ILocatable
     public int RtspPort { get; set; } = 554;
     public string Username { get; set; } = "";
     public byte[] PasswordCiphertext { get; set; } = [];
+    /// <summary>
+    /// ID ISUP del equipo cuando se conecta por ISUP (driver hikvision-isup): el equipo se registra contra el servidor y no hace falta
+    /// alcanzarlo por IP (detrás de NAT, 4G o MPLS). Null = conexión directa por IP.
+    /// </summary>
+    public string? IsupDeviceId { get; set; }
+    /// <summary>Clave ISUP del equipo (la «clave de cifrado» de su menú de plataforma), cifrada como la contraseña.</summary>
+    public byte[]? IsupKeyCiphertext { get; set; }
     /// <summary>Grupo lógico (portería, acceso norte...); libre.</summary>
     public string? GroupName { get; set; }
 

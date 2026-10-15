@@ -18,7 +18,7 @@ public sealed partial class IntercomItemViewModel(IntercomDto intercom) : Observ
 
     public int Id => Intercom.Id;
     public string Name => Intercom.Name;
-    public string Detail => $"{Intercom.Model ?? "—"} · {Intercom.Host}" + (Intercom.GroupName is { } g ? $" · {g}" : "");
+    public string Detail => $"{Intercom.Model ?? "—"} · {(Intercom.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : Intercom.Host)}" + (Intercom.GroupName is { } g ? $" · {g}" : "");
     public bool IsOnline => Intercom.Status == IntercomStatus.Online;
     public bool IsRinging => Intercom.ActiveCall?.State == IntercomCallState.Ringing;
 

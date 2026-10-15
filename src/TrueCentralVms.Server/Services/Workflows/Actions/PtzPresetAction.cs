@@ -51,8 +51,7 @@ public sealed class PtzPresetAction(
         string target = $"{channel.Device.Name} · {channel.Name}";
         try
         {
-            var connection = new DeviceConnectionInfo(channel.Device.Host, channel.Device.SdkPort,
-                channel.Device.Username, credentials.Unprotect(channel.Device.PasswordCiphertext));
+            var connection = DeviceConnections.Of(channel.Device, credentials);
             bool ok = await factory.Create().PtzPresetAsync(connection, channel.ChannelNumber,
                 TrueCentralVms.Core.Drivers.PtzPresetAction.Goto, preset, ct);
 

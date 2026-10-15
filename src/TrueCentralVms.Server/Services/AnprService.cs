@@ -205,9 +205,7 @@ public sealed class AnprService(
         }
     }
 
-    private DeviceConnectionInfo ConnectionOf(Device device) => new(
-        device.Host, device.SdkPort, device.Username,
-        device.PasswordCiphertext.Length == 0 ? "" : credentials.Unprotect(device.PasswordCiphertext));
+    private DeviceConnectionInfo ConnectionOf(Device device) => DeviceConnections.Of(device, credentials);
 
     private async Task CloseAsync(int deviceId, Source source)
     {

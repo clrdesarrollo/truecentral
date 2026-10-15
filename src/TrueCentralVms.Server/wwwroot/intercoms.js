@@ -79,7 +79,7 @@ async function renderIntercoms() {
             <tr data-id="${i.id}">
               <td>${esc(i.name)}${i.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${locationLineHtml(i.location)}</td>
               <td class="muted">${esc(i.groupName ?? "—")}</td>
-              <td class="muted">${esc(i.host)}:${i.port} · HTTP ${i.httpPort}</td>
+              <td class="muted">${i.isupDeviceId ? isupAddressHtml(i.isupDeviceId) : `${esc(i.host)}:${i.port} · HTTP ${i.httpPort}`}</td>
               <td>${esc(i.model ?? "—")}<div class="muted" style="font-size:11px">${esc(i.firmwareVersion ?? "")}</div></td>
               <td>${i.channelId ? esc(i.channelName ?? `canal ${i.channelId}`) : `<span class="muted" title="El video sale del propio frente: no ocupa un canal de video de la licencia">propia del frente</span>`}</td>
               <td>${i.doorCount}</td>
@@ -257,22 +257,23 @@ async function intercomModal(intercom, prefill) {
           ${drivers.map((dr) => `<option value="${esc(dr.key)}" ${driver0?.key === dr.key ? "selected" : ""}>${esc(dr.displayName)}</option>`).join("")}
         </select>
       </div>
+      <div id="ic-ip-box">
       <div class="field">
         <label>Dirección (IP o hostname)</label>
-        <input id="ic-host" required value="${esc(intercom?.host ?? seed.host ?? "")}" placeholder="192.168.1.61">
+        <input id="ic-host" required value="${esc(intercom?.isupDeviceId ? "" : intercom?.host ?? seed.host ?? "")}" placeholder="192.168.1.61">
       </div>
       <div style="display:flex;gap:12px">
         <div class="field" style="flex:1;min-width:0">
           <label>Puerto SDK</label>
-          <input id="ic-port" type="number" min="1" max="65535" required value="${intercom?.port ?? seed.port ?? driver0?.defaultPort ?? 8000}" title="Puerto del SDK: llamadas y voz">
+          <input id="ic-port" type="number" min="1" max="65535" required value="${intercom?.isupDeviceId ? 8000 : intercom?.port ?? seed.port ?? driver0?.defaultPort ?? 8000}" title="Puerto del SDK: llamadas y voz">
         </div>
         <div class="field" style="flex:1;min-width:0">
           <label>Puerto HTTP</label>
-          <input id="ic-http-port" type="number" min="1" max="65535" required value="${intercom?.httpPort ?? seed.httpPort ?? driver0?.defaultHttpPort ?? 80}" title="Puerto HTTP (ISAPI): estado y apertura de puerta">
+          <input id="ic-http-port" type="number" min="1" max="65535" required value="${intercom?.isupDeviceId ? 80 : intercom?.httpPort ?? seed.httpPort ?? driver0?.defaultHttpPort ?? 80}" title="Puerto HTTP (ISAPI): estado y apertura de puerta">
         </div>
         <div class="field" style="flex:1;min-width:0">
           <label>Puerto RTSP</label>
-          <input id="ic-rtsp-port" type="number" min="1" max="65535" required value="${intercom?.rtspPort ?? 554}" title="Puerto RTSP: video de la cámara del frente (554 de fábrica)">
+          <input id="ic-rtsp-port" type="number" min="1" max="65535" required value="${intercom?.isupDeviceId ? 554 : intercom?.rtspPort ?? 554}" title="Puerto RTSP: video de la cámara del frente (554 de fábrica)">
         </div>
       </div>
       <div class="form-grid">
@@ -281,10 +282,12 @@ async function intercomModal(intercom, prefill) {
           <input id="ic-username" required value="${esc(intercom?.username ?? seed.username ?? "admin")}" placeholder="admin">
         </div>
         <div class="field">
-          <label>Contraseña${isNew ? "" : " (vacío = no cambiar)"}</label>
-          <input id="ic-password" type="password" autocomplete="new-password" ${isNew ? "required" : ""}>
+          <label>Contraseña${isNew || intercom?.isupDeviceId ? "" : " (vacío = no cambiar)"}</label>
+          <input id="ic-password" type="password" autocomplete="new-password" ${isNew || intercom?.isupDeviceId ? "required" : ""}>
         </div>
       </div>
+      </div>
+      <div id="ic-isup-wrap">${isupFieldsHtml("ic", intercom, isNew, "frente")}</div>
       <div class="field">
         <label>Cámara del frente (video al sonar)</label>
         <select id="ic-channel">${channelOptions(intercom?.channelId ?? null)}</select>
@@ -302,20 +305,35 @@ async function intercomModal(intercom, prefill) {
     </form>`);
 
   $("#ic-cancel").addEventListener("click", closeModal);
+  // Por IP se piden dirección, puertos y credenciales; por ISUP, el ID y la clave. Lo que no corresponde se oculta y deja de ser obligatorio.
+  const toggleIsup = (dr) => {
+    const isup = !!dr?.usesIsup;
+    $("#ic-ip-box").hidden = isup;
+    $("#ic-isup-wrap").hidden = !isup;
+    for (const el of $$("#ic-ip-box input")) {
+      if (isup) { if (el.required) el.dataset.req = "1"; el.required = false; }
+      else if (el.dataset.req) el.required = true;
+    }
+  };
+  wireIsupFields("ic", "frente");
+  toggleIsup(driver0);
   $("#ic-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#ic-driver").value);
-    if (dr && isNew) { $("#ic-port").value = dr.defaultPort; $("#ic-http-port").value = dr.defaultHttpPort; }
+    if (dr && isNew && !dr.usesIsup) { $("#ic-port").value = dr.defaultPort; $("#ic-http-port").value = dr.defaultHttpPort; }
+    toggleIsup(dr);
   });
 
   const readForm = () => ({
     name: $("#ic-name").value.trim() || "(sin nombre)",
     driverKey: $("#ic-driver").value,
-    host: $("#ic-host").value.trim(),
-    port: Number($("#ic-port").value),
-    httpPort: Number($("#ic-http-port").value),
-    rtspPort: Number($("#ic-rtsp-port").value),
-    username: $("#ic-username").value.trim(),
-    password: $("#ic-password").value || null,
+    ...($("#ic-isup-wrap").hidden ? {
+      host: $("#ic-host").value.trim(),
+      port: Number($("#ic-port").value),
+      httpPort: Number($("#ic-http-port").value),
+      rtspPort: Number($("#ic-rtsp-port").value),
+      username: $("#ic-username").value.trim(),
+      password: $("#ic-password").value || null,
+    } : { host: "", port: 0, httpPort: 0, rtspPort: 0, username: "", password: null, ...readIsupFields("ic") }),
     enabled: $("#ic-enabled").checked,
     groupName: $("#ic-group").value.trim() || null,
     locationId: locationFieldValue("ic-location"),
@@ -374,6 +392,12 @@ async function intercomModal(intercom, prefill) {
       const body = readForm();
       const saved = isNew ? await Api.post("/api/intercoms", body) : await Api.put(`/api/intercoms/${intercom.id}`, body);
       closeModal();
+      // Por ISUP el frente puede no haberse conectado todavía: se guarda igual y se completa en su primer contacto.
+      if (saved?.isupDeviceId && saved.status !== "Online") {
+        toast(`Frente guardado: queda esperando que se conecte por ISUP (al conectarse se configura su botón y su video). ${saved.lastError ?? ""}`, false, { warning: true });
+        renderIntercoms();
+        return;
+      }
       toast(isNew ? "Frente agregado y validado." : "Frente actualizado.");
       if (body.configureCallCenter && !saved.callCenterEnabled)
         toast("No se pudo configurar el botón del frente para llamar a la central; revise la bitácora.", true);

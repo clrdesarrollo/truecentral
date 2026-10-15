@@ -796,7 +796,7 @@ async function getDrivers() {
 let lastScan = null; // resultados del último sondeo (persisten al re-renderizar)
 
 /** Drivers que entregan reconocimientos de patentes (ver DriverCapabilities.SupportsAnpr). */
-const ANPR_DRIVERS = ["hikvision-netsdk", "dahua-netsdk"];
+const ANPR_DRIVERS = ["hikvision-netsdk", "dahua-netsdk", "hikvision-isup"];
 
 async function renderDevices() {
   $("#page-title").textContent = "Dispositivos";
@@ -832,7 +832,7 @@ async function renderDevices() {
               <td>${esc(d.name)}${locationLineHtml(d.location)}</td>
               <td>${esc(typeLabel(d.deviceType))}</td>
               <td class="muted">${esc(brandOf(d.driverKey))}</td>
-              <td class="muted">${esc(d.host)}:${d.sdkPort}</td>
+              <td class="muted">${d.isupDeviceId ? isupAddressHtml(d.isupDeviceId) : `${esc(d.host)}:${d.sdkPort}`}</td>
               <td>${esc(d.model ?? "—")}</td>
               <td class="muted">${esc(d.serialNumber ?? "—")}</td>
               <td class="muted">${esc(d.firmwareVersion ?? "—")}</td>
@@ -1406,30 +1406,33 @@ async function deviceModal(device, prefill) {
           ${drivers.map((dr) => `<option value="${esc(dr.key)}" ${(device?.driverKey ?? seed.driverKey) === dr.key ? "selected" : ""}>${esc(dr.displayName)}</option>`).join("")}
         </select>
       </div>
-      <div class="form-grid">
-        <div class="field">
-          <label>Dirección (IP o hostname)</label>
-          <input id="df-host" required value="${esc(device?.host ?? seed.host ?? "")}" placeholder="192.168.1.64">
+      <div id="df-ip-box">
+        <div class="form-grid">
+          <div class="field">
+            <label>Dirección (IP o hostname)</label>
+            <input id="df-host" required value="${esc(device?.isupDeviceId ? "" : device?.host ?? seed.host ?? "")}" placeholder="192.168.1.64">
+          </div>
+          <div class="field">
+            <label>Puerto SDK</label>
+            <input id="df-sdkport" type="number" min="1" max="65535" required value="${device?.isupDeviceId ? 8000 : device?.sdkPort ?? seed.sdkPort ?? drivers[0]?.defaultSdkPort ?? 8000}">
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Puerto RTSP</label>
+            <input id="df-rtspport" type="number" min="1" max="65535" required value="${device?.isupDeviceId ? 554 : device?.rtspPort ?? drivers[0]?.defaultRtspPort ?? 554}">
+          </div>
+          <div class="field">
+            <label>Usuario del equipo</label>
+            <input id="df-username" required value="${esc(device?.username ?? seed.username ?? "")}" placeholder="admin">
+          </div>
         </div>
         <div class="field">
-          <label>Puerto SDK</label>
-          <input id="df-sdkport" type="number" min="1" max="65535" required value="${device?.sdkPort ?? seed.sdkPort ?? drivers[0]?.defaultSdkPort ?? 8000}">
+          <label>${isNew || device?.isupDeviceId ? "Contraseña del equipo" : "Contraseña (vacío = no cambiar)"}</label>
+          <input id="df-password" type="password" autocomplete="new-password" ${isNew || device?.isupDeviceId ? "required" : ""}>
         </div>
       </div>
-      <div class="form-grid">
-        <div class="field">
-          <label>Puerto RTSP</label>
-          <input id="df-rtspport" type="number" min="1" max="65535" required value="${device?.rtspPort ?? drivers[0]?.defaultRtspPort ?? 554}">
-        </div>
-        <div class="field">
-          <label>Usuario del equipo</label>
-          <input id="df-username" required value="${esc(device?.username ?? seed.username ?? "")}" placeholder="admin">
-        </div>
-      </div>
-      <div class="field">
-        <label>${isNew ? "Contraseña del equipo" : "Contraseña (vacío = no cambiar)"}</label>
-        <input id="df-password" type="password" autocomplete="new-password" ${isNew ? "required" : ""}>
-      </div>
+      <div id="df-isup-wrap">${isupFieldsHtml("df", device, isNew, "equipo")}</div>
       <div id="probe-result"></div>
       <div id="channel-picker"></div>
       <div class="modal-actions">
@@ -1440,9 +1443,23 @@ async function deviceModal(device, prefill) {
     </form>`);
 
   $("#df-cancel").addEventListener("click", closeModal);
+  // Por IP se piden dirección, puertos y credenciales; por ISUP, el ID y la clave del equipo. Los campos que no
+  // corresponden se ocultan y dejan de ser obligatorios (si no, el navegador no deja guardar).
+  const toggleIsup = (dr) => {
+    const isup = !!dr?.usesIsup;
+    $("#df-ip-box").hidden = isup;
+    $("#df-isup-wrap").hidden = !isup;
+    for (const el of $$("#df-ip-box input")) {
+      if (isup) { if (el.required) el.dataset.req = "1"; el.required = false; }
+      else if (el.dataset.req) el.required = true;
+    }
+  };
+  wireIsupFields("df", "equipo");
+  toggleIsup(drivers.find((x) => x.key === $("#df-driver").value));
   $("#df-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#df-driver").value);
-    if (dr && isNew) { $("#df-sdkport").value = dr.defaultSdkPort; $("#df-rtspport").value = dr.defaultRtspPort; }
+    if (dr && isNew && !dr.usesIsup) { $("#df-sdkport").value = dr.defaultSdkPort; $("#df-rtspport").value = dr.defaultRtspPort; }
+    toggleIsup(dr);
   });
 
   // Selector de canales del alta: aparece solo cuando el equipo reporta más
@@ -1495,7 +1512,14 @@ async function deviceModal(device, prefill) {
   };
 
   const readForm = () => {
-    const body = {
+    const isup = !$("#df-isup-wrap").hidden;
+    const body = isup ? {
+      name: $("#df-name").value.trim() || "(sin nombre)",
+      driverKey: $("#df-driver").value,
+      host: "", sdkPort: 0, rtspPort: 0, username: "", password: null,
+      locationId: locationFieldValue("df-location"),
+      ...readIsupFields("df"),
+    } : {
       name: $("#df-name").value.trim() || "(sin nombre)",
       driverKey: $("#df-driver").value,
       host: $("#df-host").value.trim(),
@@ -1535,7 +1559,7 @@ async function deviceModal(device, prefill) {
             <span>N° de serie</span><b>${esc(r.serialNumber ?? "—")}</b>
             <span>Firmware</span><b>${esc(r.firmwareVersion ?? "—")}</b>
             <span>Canales</span><b>${r.analogChannelCount} analógicos, ${r.ipChannelCount} IP</b>
-            <span>Puerto RTSP</span><b>${r.detectedRtspPort ? r.detectedRtspPort + " (detectado por SDK)" : "no reportado"}</b>
+            <span>Puerto RTSP</span><b>${$("#df-isup-wrap").hidden ? (r.detectedRtspPort ? r.detectedRtspPort + " (detectado por SDK)" : "no reportado") : "no aplica (el video llega por ISUP)"}</b>
             <span>Cupo de licencia</span><b>${r.availableVideoChannels} canales disponibles (${r.videoChannelsInUse} de ${r.videoChannelQuota} en uso)</b>
           </div>
           ${r.channels.length && !needsPicker ? `<div class="probe-channels">${r.channels.map((c) =>
@@ -1574,7 +1598,10 @@ async function deviceModal(device, prefill) {
         ? await Api.post("/api/devices", body)
         : await Api.put(`/api/devices/${device.id}`, body);
       closeModal();
-      toastDeviceSaved(result, isNew ? "Dispositivo agregado y validado." : "Dispositivo actualizado.");
+      // Por ISUP el equipo puede no haberse conectado todavía: se guarda igual y se completa en su primer contacto.
+      toastDeviceSaved(result, result?.isupDeviceId && result.status !== "Online"
+        ? (isNew ? "Dispositivo agregado." : "Dispositivo actualizado.")
+        : (isNew ? "Dispositivo agregado y validado." : "Dispositivo actualizado."));
       renderDevices();
     } catch (err) {
       errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
@@ -2212,6 +2239,7 @@ const routes = {
   "#/roles": renderRoles,
   "#/audit": renderAudit,
   "#/services": renderServices,
+  "#/isup": renderIsupStatus,
   "#/license": renderLicense,
 };
 

@@ -10,7 +10,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// el modelo, la serie, el firmware y las capacidades vienen del propio
 /// equipo al validar las credenciales.
 /// </summary>
-public class AccessDevice
+public class AccessDevice : IIsupEquipment
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -22,6 +22,13 @@ public class AccessDevice
     public bool UseHttps { get; set; }
     public string Username { get; set; } = "";
     public byte[] PasswordCiphertext { get; set; } = [];
+    /// <summary>
+    /// ID ISUP del equipo cuando se conecta por ISUP (driver hikvision-isup): el equipo se registra contra el servidor y no hace falta
+    /// alcanzarlo por IP (detrás de NAT, 4G o MPLS). Null = conexión directa por IP.
+    /// </summary>
+    public string? IsupDeviceId { get; set; }
+    /// <summary>Clave ISUP del equipo (la «clave de cifrado» de su menú de plataforma), cifrada como la contraseña.</summary>
+    public byte[]? IsupKeyCiphertext { get; set; }
     /// <summary>
     /// Ubicación del equipo en el árbol de Recursos (null = por ubicar; antes
     /// era un texto libre). La reciben sus puertas nuevas; al cambiarla se

@@ -91,6 +91,13 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("IsupDeviceId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<byte[]>("IsupKeyCiphertext")
+                        .HasColumnType("bytea");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -172,10 +179,15 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("IsupDeviceId")
+                        .IsUnique()
+                        .HasFilter("\"IsupDeviceId\" IS NOT NULL");
+
                     b.HasIndex("LocationId");
 
                     b.HasIndex("Host", "Port")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"IsupDeviceId\" IS NULL");
 
                     b.ToTable("AccessDevices");
                 });
@@ -847,21 +859,17 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<string>("GatewayDeviceId")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<byte[]>("GatewayKeyCiphertext")
-                        .HasColumnType("bytea");
-
-                    b.Property<string>("GatewayProtocol")
-                        .HasMaxLength(8)
-                        .HasColumnType("character varying(8)");
-
                     b.Property<string>("Host")
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<string>("IsupDeviceId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<byte[]>("IsupKeyCiphertext")
+                        .HasColumnType("bytea");
 
                     b.Property<string>("LastError")
                         .HasMaxLength(512)
@@ -917,14 +925,15 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("IsupDeviceId")
+                        .IsUnique()
+                        .HasFilter("\"IsupDeviceId\" IS NOT NULL");
+
                     b.HasIndex("LocationId");
 
                     b.HasIndex("Host", "Port")
                         .IsUnique()
-                        .HasFilter("\"GatewayDeviceId\" IS NULL");
-
-                    b.HasIndex("Host", "Port", "GatewayDeviceId")
-                        .IsUnique();
+                        .HasFilter("\"IsupDeviceId\" IS NULL");
 
                     b.ToTable("AlarmPanels");
                 });
@@ -1687,6 +1696,13 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("IsupDeviceId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<byte[]>("IsupKeyCiphertext")
+                        .HasColumnType("bytea");
+
                     b.Property<DateTime?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1731,10 +1747,15 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("IsupDeviceId")
+                        .IsUnique()
+                        .HasFilter("\"IsupDeviceId\" IS NOT NULL");
+
                     b.HasIndex("LocationId");
 
                     b.HasIndex("Host", "SdkPort")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"IsupDeviceId\" IS NULL");
 
                     b.ToTable("Devices");
                 });
@@ -1824,6 +1845,13 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int>("HttpPort")
                         .HasColumnType("integer");
 
+                    b.Property<string>("IsupDeviceId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<byte[]>("IsupKeyCiphertext")
+                        .HasColumnType("bytea");
+
                     b.Property<string>("LastError")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
@@ -1874,10 +1902,15 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.HasIndex("ChannelId");
 
+                    b.HasIndex("IsupDeviceId")
+                        .IsUnique()
+                        .HasFilter("\"IsupDeviceId\" IS NOT NULL");
+
                     b.HasIndex("LocationId");
 
                     b.HasIndex("Host", "Port")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"IsupDeviceId\" IS NULL");
 
                     b.ToTable("Intercoms");
                 });
@@ -2653,6 +2686,13 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("IsupDeviceId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<byte[]>("IsupKeyCiphertext")
+                        .HasColumnType("bytea");
+
                     b.Property<string>("LastError")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
@@ -2713,10 +2753,15 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("IsupDeviceId")
+                        .IsUnique()
+                        .HasFilter("\"IsupDeviceId\" IS NOT NULL");
+
                     b.HasIndex("LocationId");
 
                     b.HasIndex("Host", "Port")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"IsupDeviceId\" IS NULL");
 
                     b.ToTable("Speakers");
                 });

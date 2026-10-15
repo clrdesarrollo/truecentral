@@ -2,8 +2,11 @@ using TrueCentralVms.Core.Contracts;
 
 namespace TrueCentralVms.Core.Drivers;
 
-/// <summary>Datos de conexión a un equipo de control de acceso (API HTTP del fabricante).</summary>
-public sealed record AccessConnectionInfo(string Host, int Port, bool UseHttps, string Username, string Password);
+/// <summary>
+/// Datos de conexión a un equipo de control de acceso (API HTTP del fabricante). Con <paramref name="IsupId"/> el equipo se
+/// conecta al servidor por ISUP y no se lo alcanza por IP (Host, puerto y credenciales no se usan).
+/// </summary>
+public sealed record AccessConnectionInfo(string Host, int Port, bool UseHttps, string Username, string Password, string? IsupId = null);
 
 /// <summary>Puerta que declara el equipo. <paramref name="Number"/> es el número con el que la nombran sus propias órdenes.</summary>
 public sealed record AccessDoorInfo(int Number, string Name);
@@ -339,6 +342,12 @@ public interface IAccessControlDriverFactory
     /// interfaz lo advierte en vez de ofrecer algo que va a fallar.
     /// </summary>
     bool SupportsPersonSync => false;
+
+    /// <summary>
+    /// Los equipos de este driver se conectan por ISUP: el formulario pide su ID y clave ISUP en vez de dirección y
+    /// credenciales (<see cref="AccessConnectionInfo.IsupId"/>).
+    /// </summary>
+    bool UsesIsup => false;
 
     IAccessControlDriver Create();
 }

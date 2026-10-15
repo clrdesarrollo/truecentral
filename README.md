@@ -13,9 +13,11 @@ HikCentral / SmartPSS / iVMS-4200).
 │  ├─ PostgreSQL embebido      (tools\postgres, 127.0.0.1:25490)                 │
 │  ├─ MediaMTX embebido        (tools\mediamtx, RTSP :8654 solo TCP,             │
 │  │                            API 127.0.0.1:9911, auth delegada por HTTP)      │
+│  ├─ Servicio ISUP (TrueCentralVms.IsupHost.exe, proceso aparte, SDK HCISUP,    │
+│  │                 equipos detrás de NAT/4G :7660-7667, API 127.0.0.1:7699)    │
 │  ├─ Panel web de administración (wwwroot, SPA sin framework, :5090)            │
 │  ├─ API REST + SignalR (/hubs/vms)                                             │
-│  └─ Drivers de gestión: Hikvision (HCNetSDK) · Dahua (NetSDK) · ONVIF (SOAP)   │
+│  └─ Drivers de gestión: Hikvision (HCNetSDK/ISAPI/ISUP) · Dahua · ONVIF · ZK   │
 └─────────────────────────────────────────────────────────────────────────────────┘
         ▲ HTTPS/HTTP + SignalR                     ▲ RTSP/TCP con token
         │                                          │
@@ -44,6 +46,10 @@ HikCentral / SmartPSS / iVMS-4200).
 | Receptor de paneles de cerco (WebSocket) | **5092** | 0.0.0.0, TCP |
 | Descarga de firmware OTA de paneles de cerco | **5093** | 0.0.0.0, TCP (solo tokens de un uso) |
 | Autodiscovery de las pantallas de alarma | **5094** | 0.0.0.0, UDP (responde la URL del servidor) |
+| ISUP: registro de los equipos (7661 = el de la receptora de Hikvision anterior) | **7660, 7661** | 0.0.0.0, TCP y UDP |
+| ISUP: alarmas 5.0 (MQTT) · alarmas 2.0/4.0 | **7662 · 7663** | 0.0.0.0 (7663 TCP y UDP) |
+| ISUP: video en vivo · reproducción · voz · imágenes | **7664 · 7665 · 7666 · 7667** | 0.0.0.0, TCP |
+| ISUP: API interna servidor ↔ servicio ISUP | **7699** | 127.0.0.1 |
 
 El 8554 lo abre el propio puesto de operación mientras transmite su pantalla
 al muro (lo consume el decodificador); el resto del tiempo no escucha nada.
@@ -63,6 +69,8 @@ src\TrueCentralVms.Drivers.Hikvision\  interop HCNetSDK 6.1.9.48
 src\TrueCentralVms.Drivers.Dahua\      interop propio contra dhnetsdk.h (x64)
 src\TrueCentralVms.Drivers.Onvif\      SOAP manual (WS-UsernameToken)
 src\TrueCentralVms.Drivers.Adam\       Modbus TCP propio para los ADAM-6000 (sin DLL de Advantech)
+src\TrueCentralVms.IsupHost\          servicio ISUP (proceso aparte; SDK HCISUP 2.5)
+native\hikvision-isup\                 DLLs del SDK ISUP (git-ignored)
 native\hikvision\ · native\dahua\      DLLs de los SDK (git-ignored)
 tools\postgres\ · tools\mediamtx\      binarios embebidos (git-ignored)
 tools\ffmpeg-flyleaf\                  FFmpeg compartido para FlyleafLib (git-ignored)
@@ -133,8 +141,9 @@ Qué hace la suite en el equipo, además de copiar archivos:
   caídas de los servicios internos las cubre el supervisor del servidor.
 - Reglas de firewall: TCP 5090 (panel/API), 5091 (receptor SIA DC-09) y 5092
   (receptor de paneles de cerco por WebSocket), UDP por programa para el
-  descubrimiento de equipos (SADP 37020, WS-Discovery 3702, Dahua 37810) y TCP
-  8654 para el MediaMTX del servidor.
+  descubrimiento de equipos (SADP 37020, WS-Discovery 3702, Dahua 37810), TCP
+  8654 para el MediaMTX del servidor y, para el servicio ISUP
+  (`TrueCentralVms.IsupHost.exe`), TCP 7660-7667 y UDP 7660 y 7663.
 - ACL de `%ProgramData%\CLRTrueCentralVMS` solo para SYSTEM y
   Administradores (ahí viven la clave del clúster y la llave AES de las
   credenciales de los equipos).
@@ -148,37 +157,35 @@ Qué hace la suite en el equipo, además de copiar archivos:
   `MSVCP140`) junto a los binarios de PostgreSQL. No viene con Windows: sin
   él `initdb.exe` muere con `0xC0000135` en un servidor recién instalado y la
   base nunca se crea.
-- Instala en silencio el **Hik IP Receiver Pro**, la receptora de los paneles
-  que reportan por ISUP/OTAP (AX PRO, AX HYBRID PRO). No es opcional: sin ella
-  esos paneles no se pueden conectar. Queda escuchando en `127.0.0.1:8091` en
-  vez del puerto 80 abierto a la red, así que su web y su API las usa solo el
-  servidor del VMS desde este mismo equipo. Los paneles no usan ese puerto: se
-  registran por TCP 7091, 7660-7667 y 8661, que sí quedan abiertos en el
-  firewall. Aparece como un programa aparte en «Programas y características»,
-  pero no es opcional ni independiente: desinstalar el VMS la quita también
-  (ver «Desinstalación»).
-  Durante la instalación, el instalador del fabricante abre el navegador en la
-  página del receptor: es un paso suyo que hace incluso en modo silencioso y no
-  se puede desactivar. El instalador de la suite pide cerrar el navegador antes
-  de empezar y, si se partió sin ninguno abierto, cierra esa ventana al
-  terminar (solo la que apunta al receptor: mira la línea de comandos, así que
-  no toca ninguna otra). Si se prefiere seguir con el navegador abierto, la
-  ventana queda ahí y basta con cerrarla a mano; no se cierra un navegador que
-  ya estaba en uso, porque ahí Windows abre una pestaña en vez de un proceso
-  nuevo y se perdería lo que hubiera abierto.
-- **La receptora queda sin interfaz web.** Sirve en el mismo puerto su panel y
-  su API, repartiendo por ruta, así que el instalador corta solo la raíz: quien
-  abra `http://127.0.0.1:8091` recibe 403 y la API sigue funcionando. Así la
-  receptora es un servicio interno que nadie ve ni administra, ni siquiera
-  desde el propio servidor. Es reversible: el archivo original queda guardado
-  como `nginx.conf.clr-original` en la carpeta de la receptora.
-- **La receptora se activa sola.** En su primer arranque el servidor le crea la
-  contraseña de administrador, que genera al azar y guarda cifrada junto a los
-  datos (`tcvms-iprp.secret`, misma protección que la credencial de
-  PostgreSQL). Nadie la escribe ni la conoce: para el operador la receptora es
-  un servicio interno que no se ve, como PostgreSQL o MediaMTX. Al agregar un
-  panel basta marcar «Usar la receptora instalada en este servidor» y el
-  formulario deja de pedir dirección y credenciales.
+- **Servicio ISUP propio.** Los equipos Hikvision que el servidor no alcanza
+  por IP (detrás de NAT, 4G o MPLS) se conectan ellos al servidor por ISUP 5.0
+  con su ID y su clave: paneles AX PRO, terminales de acceso, cámaras/DVR/NVR,
+  parlantes y frentes de citofonía. El SDK ISUP de Hikvision corre en un
+  proceso aparte, `TrueCentralVms.IsupHost.exe` (en la carpeta del servidor),
+  que el servidor lanza y vigila como a MediaMTX («Conexión ISUP» en Sistema →
+  Servicios); se habla con él solo por `127.0.0.1:7699`. Sus puertos hacia los
+  equipos y la dirección que se les anuncia están en la sección `Isup` de
+  `appsettings.json`; la página Sistema → Conexión ISUP muestra los puertos,
+  los equipos conectados y los rechazados (ID desconocido o clave distinta).
+- **Ya no instala el Hik IP Receiver Pro.** Hasta la 0.5.x los paneles AX PRO
+  se conectaban a través de esa receptora de Hikvision, que la suite instalaba.
+  Al actualizar se desinstala la que instaló este sistema (la reconoce por
+  `tcvms-iprp.secret`), porque además ocupa los mismos puertos que el servicio
+  ISUP; una receptora ajena no se toca y el instalador avisa del choque de
+  puertos. Los paneles se reconectan solos con su mismo ID y clave: el
+  servicio ISUP también escucha el 7661, donde se registraban, y la migración
+  de la base los pasa al driver `hikvision-isup`.
+- **Antes de actualizar un servidor que usa la receptora**, ejecute en él
+  `installer\chequeo-isup.ps1` (solo lectura, con un usuario que tenga el
+  permiso de paneles): dice panel por panel si se reconectará solo o qué hay
+  que hacer (clave no guardada, ID guardado como uuid, OTAP, ID repetido, otra
+  receptora), lista los equipos de la receptora que ningún panel usa, y revisa
+  los puertos 7660-7667/7699 y `Isup:PublicAddress`. Deja un informe `.txt` y
+  una tabla `.csv`.
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\chequeo-isup.ps1 -Usuario admin
+  ```
 
 ### Desinstalación
 
@@ -194,11 +201,11 @@ elimina:
 - **la base de datos completa** y el resto de `%ProgramData%\CLRTrueCentralVMS`:
   personas, huellas, tarjetas, permisos, eventos, matrículas, workflows,
   registros y la licencia activada;
-- el **Hik IP Receiver Pro**, con su servicio `DeviceGatewayService`, su propio
-  PostgreSQL, su historial de eventos y los paneles que tenga registrados;
+- el **Hik IP Receiver Pro** de versiones anteriores, si quedó instalado por
+  este sistema (normalmente ya lo retiró la actualización);
 - el **cliente de escritorio** y el **complemento de enrolamiento** instalados
   en ese equipo (se lanzan sus desinstaladores en silencio);
-- las reglas de firewall de los cuatro programas;
+- las reglas de firewall de los programas del sistema;
 - las preferencias y registros por usuario, en todos los perfiles de la
   máquina: `%AppData%\CLRTrueCentralVMS` (cliente y complemento),
   `%LocalAppData%\CLRTrueCentral` (proyección de pantalla) y
@@ -223,9 +230,8 @@ respaldarla antes**.
 > una vez empezada la desinstalación, ya no.
 
 > **Actualizar no pasa por acá.** Para pasar a una versión nueva se ejecuta su
-> instalador **encima** de la anterior (mismo `AppId`): eso conserva los datos,
-> `appsettings.Local.json` y la receptora. Desinstalar para «reinstalar limpio»
-> borra todo.
+> instalador **encima** de la anterior (mismo `AppId`): eso conserva los datos
+> y `appsettings.Local.json`. Desinstalar para «reinstalar limpio» borra todo.
 
 Los desinstaladores del cliente y del complemento, ejecutados por su cuenta en
 un puesto de operación, también se llevan sus propios ajustes de ese usuario.
@@ -408,6 +414,51 @@ la familia video wall cada sub-ventana es una **ventana del muro** y el
 equipo tiene un presupuesto total de ventanas simultáneas; si se excede, el
 sistema lo avisa y hay que reducir la división de otros monitores.
 
+## Conexión ISUP
+
+Los equipos Hikvision que el servidor no alcanza por IP (detrás de NAT, por
+4G o en otra red) se conectan **ellos** al servidor por ISUP 5.0, con un ID y
+una clave que se escriben en el equipo (Red → Acceso a plataforma, o
+Comunicación → ISUP) y en su formulario del VMS. Sirve para los cinco tipos de
+equipo, cada uno con su driver `hikvision-isup`:
+
+| Equipo | Qué va por ISUP |
+|---|---|
+| Paneles de alarma (AX PRO, AX Hybrid PRO) | estado, armado/desarmado/bypass por ISAPI; eventos Contact-ID e ISAPI por el canal de alarmas |
+| Control de acceso (terminales DS-K1T…) | todo el driver ISAPI por el túnel; rostros por URL (`faceURL`), porque el túnel no lleva multipart; eventos por el canal de alarmas |
+| Video (cámaras, DVR/NVR, LPR) | datos y canales por ISAPI; video en vivo y grabaciones del servicio ISUP publicados en MediaMTX por FFmpeg; PTZ y presets; patentes y analíticas por el canal de alarmas |
+| Parlantes IP (DS-QAZ) | órdenes por ISAPI; voz y sonidos por el servidor de voz ISUP (difusión). Subir audios a su biblioteca no se puede por el túnel |
+| Frentes de citofonía | identificación, botón, puerta y órdenes de llamada por ISAPI; llamadas entrantes por el canal de alarmas; voz y video por el servicio ISUP |
+
+- **Proceso aparte.** El SDK ISUP corre en `TrueCentralVms.IsupHost.exe`, que
+  el servidor lanza, vigila y reinicia («Conexión ISUP» en Sistema →
+  Servicios). Así sus puertos hacia internet y sus estructuras nativas quedan
+  fuera del proceso del servidor: si el servicio ISUP cae, el VMS sigue. Se
+  hablan por `127.0.0.1:7699` con un token por arranque; el video sale con
+  otro token que solo sirve para eso.
+- **Alta sin conexión previa.** Un equipo ISUP se puede guardar antes de que
+  se conecte (el servicio no acepta IDs que el VMS no conozca): queda
+  «esperando que se conecte», con lo que hay que configurar en él, y en su
+  primer contacto se completa solo (modelo, canales, puertas, áreas…). Si
+  intentó conectarse y fue rechazado, el motivo (ID desconocido o clave
+  distinta) aparece en su formulario y en Sistema → Conexión ISUP.
+- **Un mismo equipo en dos módulos** (un frente que además es terminal de
+  acceso, un terminal que también se ve como cámara) comparte su registro:
+  la clave tiene que ser la misma en ambos, y el formulario lo valida.
+- **Video.** El servicio ISUP entrega el video como MPEG-PS por HTTP local y
+  MediaMTX lo publica con FFmpeg bajo demanda, así que el cliente y el panel
+  web lo ven igual que cualquier cámara (mismas concesiones y auditoría). La
+  reproducción va a velocidad normal (1×). Los equipos que no entregan foto
+  por ISAPI (terminales) dan un cuadro de su video en vivo. El decodificador
+  del muro no puede tomar un canal ISUP (no llega al equipo).
+- **Dirección pública.** Detrás de NAT, `Isup:PublicAddress` debe ser la IP o
+  el nombre con que los equipos llegan al servidor (se les anuncia al
+  registrarse para alarmas, video y voz), con los puertos 7660-7667
+  publicados hacia el servidor.
+- **Bitácora.** Conexiones, desconexiones y rechazos de cada equipo quedan en
+  la categoría «Conexión ISUP»; la primera alarma de cada tipo de cada equipo
+  queda en el registro del servidor, para ver el formato de un modelo nuevo.
+
 ## Paneles de alarma
 
 Centrales de intrusión (hoy **Hikvision por ISAPI**, sin SDK: AX PRO / AX
@@ -418,48 +469,27 @@ cada 30 s y apenas llega un evento, así que lo que ve el operador es siempre
 el estado real del equipo. Hay dos drivers Hikvision:
 
 - **Directo** (`hikvision-isapi`): el VMS habla con el panel por su IP.
-> Con la receptora de este servidor el formulario pide solo lo que hay que
-> copiar del panel: su **ID y clave ISUP** (en el AX PRO, Comunicación → ISUP) y
-> el protocolo. Dirección, puerto y credenciales de la receptora son internos y
-> no se muestran, y al guardar el sistema da de alta el panel en ella. Para una
-> receptora ajena (en otro equipo) el formulario sigue pidiendo su dirección y
-> credenciales, y ofrece «Equipos de la receptora…» para ver y administrar su
-> inventario. Todo queda en la bitácora ISO 27001.
->
-> **La clave ISUP/OTAP del panel debe ser de 8 a 32 letras y números.** La
-> receptora (Hik IP Receiver Pro V2.5.0.6) rechaza por API cualquier clave con
-> símbolos o espacios —responde `badParameters` / `addDeviceFailed`, tanto en
-> claro como cifrada—, así que una clave como `Clr$2023!` hace fallar el alta.
-> Si el panel tiene una clave con símbolos, hay que cambiarla en el panel
-> (Comunicación → ISUP) y usar esa misma en el VMS; el formulario lo valida
-> antes de enviar.
+- **Por ISUP** (`hikvision-isup`): el panel se conecta él al servidor (detrás
+  de NAT o por 4G, sin una IP que el servidor alcance) por el servicio ISUP
+  propio del VMS. El formulario pide solo lo que hay que copiar del panel: su
+  **ID y su clave ISUP** (en el AX PRO, Comunicación → ISUP, protocolo ISUP
+  5.0, con la dirección del servidor y el puerto que el mismo formulario
+  muestra). El panel se puede guardar antes de que se conecte: se completa en
+  su primer contacto, y mientras tanto el formulario y la lista dicen qué
+  configurar en él (o por qué fue rechazado: ID desconocido o clave distinta).
+  Estado, armado, desarmado y bypass van por ISAPI dentro de la conexión ISUP,
+  y los eventos por el canal de alarmas de ISUP (reportes Contact-ID con el
+  usuario que armó o desarmó, y notificaciones ISAPI). La clave admite hasta
+  32 caracteres ASCII imprimibles, sin espacios.
 
-> Los paneles se dan de alta **en la receptora desde el propio VMS**: en el
-> formulario del panel, «Equipos de la receptora…» lista los equipos que tiene
-> la pasarela, permite agregar uno nuevo con su ID y clave ISUP/OTAP y quitar
-> los que ya no se usan, sin entrar a la interfaz web del fabricante. Todo
-> queda en la bitácora ISO 27001.
+  Los paneles que reportaban al **Hik IP Receiver Pro** (driver
+  `hikvision-iprp`, hasta la 0.5.x) pasan solos a `hikvision-isup` al
+  actualizar, con el mismo ID y clave, y siguen registrándose en el 7661, que
+  el servicio ISUP también escucha. Si de un panel no se pudo deducir el ID
+  (la receptora lo identificaba por uuid), queda deshabilitado con el aviso
+  en su formulario: basta con escribir su ID ISUP.
 
-- **A través del Hik IP Receiver Pro** (`hikvision-iprp`): los paneles se
-  registran en la pasarela de Hikvision (ISUP 5.0, OTAP o Hik-Partner Pro) y
-  el VMS consume su API con la cuenta de la pasarela. En el mantenedor se
-  indica la dirección del IP Receiver Pro y el **equipo dentro de ella**
-  (uuid, serie, cuenta o ID ISUP; con el campo vacío, "Probar conexión"
-  lista los equipos disponibles). Para entregar eventos la pasarela necesita
-  *Automation Output → Protocol* habilitado con tipo **Private** —sin eso su
-  API contesta "Invalid operation" y el panel queda con el canal de eventos
-  cerrado, funcionando solo por sondeo—, pero **eso lo deja puesto el propio
-  sistema**: al activar la receptora de este servidor, y en cualquier
-  pasarela apenas una suscripción es rechazada. Solo hay que habilitarlo a
-  mano si la cuenta configurada no tiene permiso para cambiarlo. Estado,
-  armado, desarmado y bypass van por
-  la pasarela, y los eventos llegan por su suscripción (CIDAlarm con el
-  usuario que armó/desarmó, y la conexión/desconexión del panel respecto de
-  la pasarela). La pasarela admite **una sola suscripción a la vez** —a la
-  segunda le contesta «No more task can be added»—, así que el servidor abre
-  una por receptora y le cuelga todos sus paneles, repartiendo cada evento a
-  su dueño: con dos o más paneles en la misma receptora, si no, uno quedaba
-  siempre con el canal de eventos cerrado. Además el VMS actúa como **centro receptor de
+Además el VMS actúa como **centro receptor de
 alarmas (SIA DC-09, protocolos ADM-CID y SIA-DCS por TCP, puerto 5091,
 `Alarms:Receiver`)**: en el panel se configura como *Alarm Receiving Center*
 con la IP del servidor y ese puerto, y el equipo reporta con confirmación
@@ -468,11 +498,8 @@ anulaciones, fallas y pruebas periódicas). Solo se aceptan reportes desde la
 dirección de un panel habilitado; el resto se rechaza y queda en la bitácora.
 
 - **La dirección que se muestra dice de quién es.** Un panel que llega por
-  receptora aparece como `Receptora 127.0.0.1:8091 · panel 2001`, en el
-  cliente y en el panel web: esa IP es la de la **receptora**, no la del
-  panel. El panel es el que llama hacia ella (ISUP/OTAP), así que el sistema
-  nunca ve su dirección de red. En el formulario, el campo se rotula
-  «Dirección del IP Receiver Pro» cuando el driver es el de la pasarela.
+  ISUP aparece como `ISUP 1001` en el cliente y en el panel web: es el panel
+  el que llama al servidor, así que el sistema no usa su dirección de red.
 - **Nombres del panel: la codificación no se da por buena.** Varios firmwares
   declaran UTF-8 y mandan los nombres en otra codificación, y así un área
   «Portón Proveedores» llegaba ilegible y se guardaba rota en el inventario y

@@ -59,7 +59,11 @@ public sealed record IntercomDto(
     /// <summary>Ruta legible de esa ubicación ("Casa matriz › Portería").</summary>
     string? Location = null,
     /// <summary>Puerto RTSP de la cámara propia del frente.</summary>
-    int RtspPort = 554);
+    int RtspPort = 554,
+    /// <summary>ID ISUP si el frente se conecta al servidor por ISUP (entonces dirección y puertos no aplican).</summary>
+    string? IsupDeviceId = null,
+    /// <summary>Hay clave ISUP guardada (la clave nunca viaja).</summary>
+    bool HasIsupKey = false);
 
 public sealed record IntercomWriteDto(
     string Name,
@@ -81,7 +85,11 @@ public sealed record IntercomWriteDto(
     /// por ubicar); 0 = por ubicar.</summary>
     int? LocationId = null,
     /// <summary>Puerto RTSP de la cámara propia del frente (554 de fábrica).</summary>
-    int RtspPort = 554);
+    int RtspPort = 554,
+    /// <summary>Solo con un driver ISUP: ID con que el frente se registra en el servidor.</summary>
+    string? IsupDeviceId = null,
+    /// <summary>Solo con un driver ISUP: su clave; vacía en edición = conservar la guardada.</summary>
+    string? IsupKey = null);
 
 /// <summary>Concesión del video de la cámara propia de un frente (POST /api/intercoms/{id}/stream).</summary>
 public sealed record IntercomStreamRequestDto(StreamProfile Profile);
@@ -102,7 +110,7 @@ public sealed record IntercomProbeResultDto(
     /// <summary>Segundos entre cuadros completos del stream principal (null = no se pudo leer).</summary>
     double? KeyFrameSeconds = null);
 
-public sealed record IntercomDriverDto(string Key, string DisplayName, int DefaultPort, int DefaultHttpPort);
+public sealed record IntercomDriverDto(string Key, string DisplayName, int DefaultPort, int DefaultHttpPort, bool UsesIsup = false);
 
 /// <summary>Una llamada de citofonía (en curso o del historial).</summary>
 public sealed record IntercomCallDto(

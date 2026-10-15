@@ -566,8 +566,7 @@ public sealed partial class MediaMtxManager(
                     var factory = drivers.Find(device.DriverKey);
                     if (factory is null) continue;
                     var driver = factory.Create();
-                    var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                        protector.Unprotect(device.PasswordCiphertext));
+                    var conn = DeviceConnections.Of(device, protector);
 
                     foreach (var channel in device.Channels.Where(c => c.Enabled))
                     {
@@ -578,9 +577,32 @@ public sealed partial class MediaMtxManager(
                             // (sin credenciales: se inyectan aquí); las marcas
                             // con plantilla la construyen desde el driver.
                             string? stored = profile == StreamProfile.Main ? channel.RtspMainUrl : channel.RtspSubUrl;
-                            string source = stored is { Length: > 0 }
-                                ? InjectCredentials(stored, conn)
-                                : driver.BuildRtspUrl(conn, device.RtspPort, channel.RtspChannel, profile);
+                            string source;
+                            try
+                            {
+                                source = stored is { Length: > 0 }
+                                    ? InjectCredentials(stored, conn)
+                                    : driver.BuildRtspUrl(conn, device.RtspPort, channel.RtspChannel, profile);
+                            }
+                            catch (DriverException ex)
+                            {
+                                logger.LogWarning("MediaMTX: sin ruta para '{Device}' canal {Channel}: {Error}", device.Name, channel.RtspChannel, ex.Message);
+                                continue;
+                            }
+                            // Equipo conectado por ISUP: el video lo entrega el servicio ISUP como MPEG-PS por HTTP local, que
+                            // MediaMTX no sabe leer; FFmpeg lo toma bajo demanda y lo publica en la ruta.
+                            if (Core.Isup.IsupGateway.IsMediaSource(source))
+                            {
+                                if (ResolveFfmpeg() is not { } isupFfmpeg)
+                                {
+                                    logger.LogWarning("MediaMTX: '{Device}' llega por ISUP y no hay ffmpeg.exe para publicar su video.", device.Name);
+                                    continue;
+                                }
+                                yml.AppendLine($"  {name}:");
+                                AppendIsupRelay(yml, isupFfmpeg, source, name);
+                                pathCount++;
+                                continue;
+                            }
                             yml.AppendLine($"  {name}:");
                             if (channel.UseFfmpegProxy && ResolveFfmpeg() is { } ffmpeg)
                             {
@@ -620,12 +642,31 @@ public sealed partial class MediaMtxManager(
                 foreach (var intercom in intercoms)
                 {
                     if (intercomDrivers.Find(intercom.DriverKey) is not { } factory) continue;
-                    var conn = new IntercomConnectionInfo(intercom.Host, intercom.Port, intercom.HttpPort,
-                        intercom.Username, protector.Unprotect(intercom.PasswordCiphertext), intercom.RtspPort);
+                    var conn = new IntercomConnectionInfo(intercom.Host, intercom.Port, intercom.HttpPort, intercom.Username,
+                        intercom.PasswordCiphertext.Length == 0 ? "" : protector.Unprotect(intercom.PasswordCiphertext),
+                        intercom.RtspPort, intercom.IsupDeviceId);
                     foreach (var profile in new[] { StreamProfile.Main, StreamProfile.Sub })
                     {
-                        yml.AppendLine($"  {IntercomPathName(intercom.Id, profile)}:");
-                        yml.AppendLine($"    source: {factory.Create().BuildRtspUrl(conn, profile)}");
+                        string name = IntercomPathName(intercom.Id, profile);
+                        string source;
+                        try { source = factory.Create().BuildRtspUrl(conn, profile); }
+                        catch (DriverException ex)
+                        {
+                            logger.LogWarning("MediaMTX: sin ruta para el frente '{Name}': {Error}", intercom.Name, ex.Message);
+                            break;
+                        }
+                        // Frente conectado por ISUP: su video lo entrega el servicio ISUP y lo publica FFmpeg.
+                        if (Core.Isup.IsupGateway.IsMediaSource(source))
+                        {
+                            if (ResolveFfmpeg() is not { } isupFfmpeg) break;
+                            yml.AppendLine($"  {name}:");
+                            AppendIsupRelay(yml, isupFfmpeg, source, name);
+                        }
+                        else
+                        {
+                            yml.AppendLine($"  {name}:");
+                            yml.AppendLine($"    source: {source}");
+                        }
                         pathCount++;
                     }
                 }
@@ -678,6 +719,33 @@ public sealed partial class MediaMtxManager(
 
             """;
     }
+
+    /// <summary>
+    /// Argumentos de FFmpeg para leer el MPEG-PS de un equipo ISUP (los que validó isuptest con un DVR real: arranque en 1-2 s
+    /// en vez de esperar 5 MB de sondeo). El video se copia tal cual; el audio de los equipos (G.711 casi siempre) pasa a AAC.
+    /// </summary>
+    internal static string IsupInputArguments(string source) =>
+        "-fflags +genpts+nobuffer -flags low_delay -probesize 400000 -analyzeduration 1000000 " +
+        $"-f mpeg -i \"{source}\"";
+
+    /// <summary>FFmpeg que lee el video de un equipo ISUP y lo publica en la ruta (lo lanza MediaMTX cuando alguien mira).</summary>
+    private string IsupRelayCommand(string ffmpeg, string source, string name) =>
+        $"\"{ffmpeg}\" -hide_banner -loglevel error -nostdin {IsupInputArguments(source)} " +
+        $"-map 0:v:0 -map 0:a:0? -c:v copy -c:a aac -b:a 32k -f rtsp -rtsp_transport tcp \"{PublishUrlFor(name)}\"";
+
+    /// <summary>Ruta en vivo de un canal ISUP en el yml.</summary>
+    private void AppendIsupRelay(StringBuilder yml, string ffmpeg, string source, string name)
+    {
+        // Sin "source": la alimenta el relé (ver el proxy FFmpeg de arriba).
+        yml.AppendLine("    sourceOnDemand: no");
+        yml.AppendLine($"    runOnDemand: '{IsupRelayCommand(ffmpeg, source, name).Replace("'", "''")}'");
+        yml.AppendLine("    runOnDemandRestart: yes");
+        // El equipo se conecta de vuelta a entregar el video (por 4G puede tardar).
+        yml.AppendLine($"    runOnDemandStartTimeout: {IsupStartTimeout}");
+        yml.AppendLine("    runOnDemandCloseAfter: 30s");
+    }
+
+    private const string IsupStartTimeout = "25s";
 
     public static string PathName(int deviceId, int rtspChannel, StreamProfile profile) =>
         $"ch/{deviceId}/{rtspChannel}/{(profile == StreamProfile.Main ? "main" : "sub")}";
@@ -734,7 +802,7 @@ public sealed partial class MediaMtxManager(
         if (!IsRunning) return false;
         await SweepPlaybackPathsAsync(TimeSpan.FromHours(2), ct);
         await ReleaseSiblingPathsAsync(name, ct);
-        var payload = new
+        object payload = new
         {
             source = sourceUrl,
             sourceOnDemand = true,
@@ -744,6 +812,21 @@ public sealed partial class MediaMtxManager(
             // equipo (en el vivo, en cambio, conviene dejarla tibia 30 s).
             sourceOnDemandCloseAfter = "1s",
         };
+        // Grabación de un equipo ISUP: la entrega el servicio ISUP en MPEG-PS y la publica FFmpeg (sin reintentos: al terminar
+        // el tramo pedido, termina).
+        if (Core.Isup.IsupGateway.IsMediaSource(sourceUrl))
+        {
+            if (ResolveFfmpeg() is not { } ffmpeg) return false;
+            payload = new
+            {
+                source = "publisher",
+                sourceOnDemand = false,
+                runOnDemand = IsupRelayCommand(ffmpeg, sourceUrl, name),
+                runOnDemandRestart = false,
+                runOnDemandStartTimeout = IsupStartTimeout,
+                runOnDemandCloseAfter = "1s",
+            };
+        }
         try
         {
             using var response = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(
