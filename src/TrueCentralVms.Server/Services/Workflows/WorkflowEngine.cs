@@ -783,16 +783,28 @@ public sealed class WorkflowEngine : BackgroundService
         public int TimeoutSeconds;
     }
 
+    /// <summary>Guarda una foto que llegó con el evento y la deja disponible para las acciones, detrás de las anteriores.</summary>
+    private void AddEventPhoto(RunState state, byte[] image, string suffix)
+    {
+        var trigger = state.Trigger;
+        if (_store.Save(image, trigger.At, suffix) is not { } relative) return;
+        state.Files.Add(new WorkflowFile(relative, _store.FullPath(relative)!,
+            $"{WorkflowStore.Sanitize(suffix)}-{trigger.At:yyyyMMdd-HHmmss}.jpg"));
+        if (trigger.ChannelId is { } channelId && !state.Channels.Contains(channelId)) state.Channels.Add(channelId);
+    }
+
     /// <summary>
     /// Evento de cámara SIN foto (p. ej. un DVR/NVR que no reenvía la captura de
-    /// la cámara IP): se toma una del canal apenas llega, para que la alerta y
-    /// el correo no queden sin imagen. Se omite si la automatización ya tiene
-    /// su propia acción "capturar foto" (ella decide qué cámaras y cuántas).
+    /// la cámara IP, o una cámara ANPR configurada sin fotos): se toma una del
+    /// canal apenas llega, para que la alerta y el correo no queden sin imagen.
+    /// Se omite si la automatización ya tiene su propia acción "capturar foto"
+    /// (ella decide qué cámaras y cuántas).
     /// </summary>
     private async Task CaptureEventPhotoAsync(RunState state)
     {
         var trigger = state.Trigger;
-        if (trigger.Type != WorkflowTriggerTypes.VideoEvent || trigger.ChannelId is not { } channelId) return;
+        if (trigger.Type is not (WorkflowTriggerTypes.VideoEvent or WorkflowTriggerTypes.PlateRecognized) ||
+            trigger.ChannelId is not { } channelId) return;
         if (state.ActionsByNode.Count == 0 ||
             state.ActionsByNode.Values.Any(a => string.Equals(a.Type, WorkflowActionTypes.Snapshot, StringComparison.OrdinalIgnoreCase)))
             return;
@@ -895,25 +907,21 @@ public sealed class WorkflowEngine : BackgroundService
             TimeoutSeconds = Math.Clamp(_config.GetValue("Workflows:ActionTimeoutSeconds", 120), 5, 900),
         };
 
-        // La foto que trajo el propio evento (analíticas con captura) queda
-        // disponible como si la hubiera tomado la acción "capturar foto".
+        // La foto que trajo el propio evento (analíticas con captura, lecturas
+        // de patente) queda disponible como si la hubiera tomado la acción
+        // "capturar foto". De una patente van la escena y, detrás, el recorte.
+        string camera = trigger.Fields.TryGetValue("camara", out var cam) && cam.Length > 0 ? cam : "evento";
         if (trigger.Image is { Length: > 0 } image)
         {
             // Se marca dónde fue la detección (línea/región y objeto).
             if (trigger.Overlay is { } overlay && OperatingSystem.IsWindows())
                 image = EventPhotoAnnotator.Annotate(image, overlay) ?? image;
-            string suffix = trigger.Fields.TryGetValue("camara", out var cam) && cam.Length > 0 ? cam : "evento";
-            if (_store.Save(image, trigger.At, suffix) is { } relative)
-            {
-                state.Files.Add(new WorkflowFile(relative, _store.FullPath(relative)!,
-                    $"{WorkflowStore.Sanitize(suffix)}-{trigger.At:yyyyMMdd-HHmmss}.jpg"));
-                if (trigger.ChannelId is { } channelId) state.Channels.Add(channelId);
-            }
+            AddEventPhoto(state, image, camera);
         }
-        else
-        {
+        if (trigger.PlateImage is { Length: > 0 } plateImage)
+            AddEventPhoto(state, plateImage, trigger.Plate is { Length: > 0 } plate ? $"patente-{plate}" : "patente");
+        if (state.Files.Count == 0)
             await CaptureEventPhotoAsync(state);
-        }
         int automaticSteps = state.Steps.Count;
 
         try

@@ -60,7 +60,9 @@ public sealed record WorkflowTrigger(
     /// <summary>La entrada quedó activa (true) o en reposo (false), ya aplicada su lógica.</summary>
     bool? IoActive = null,
     /// <summary>Foto que llegó con el evento (analíticas con captura), disponible para las acciones.</summary>
-    byte[]? Image = null)
+    byte[]? Image = null,
+    /// <summary>Recorte de la patente que mandó la cámara ANPR: segunda foto del evento, después de la escena.</summary>
+    byte[]? PlateImage = null)
 {
     /// <summary>Etiquetas en español de la naturaleza de un evento de panel.</summary>
     public static string KindLabel(AlarmEventKind kind) => kind switch
@@ -304,7 +306,10 @@ public sealed record WorkflowTrigger(
     // Patentes
     // ------------------------------------------------------------------
 
-    public static WorkflowTrigger FromPlate(PlateEvent evt, string deviceName, string channelName, int? channelId)
+    /// <param name="sceneImage">Escena que mandó la cámara con la lectura (la foto principal del evento).</param>
+    /// <param name="plateImage">Recorte de la patente, si la cámara lo mandó.</param>
+    public static WorkflowTrigger FromPlate(PlateEvent evt, string deviceName, string channelName, int? channelId,
+        byte[]? sceneImage = null, byte[]? plateImage = null)
     {
         var local = DateTime.Now;
         var fields = NewFields(local);
@@ -334,7 +339,8 @@ public sealed record WorkflowTrigger(
             fields, local,
             Severity: AlarmSeverity.Info, Text: fields["evento"],
             DeviceKind: "video", DeviceId: evt.DeviceId, ChannelId: channelId,
-            Plate: evt.PlateNumber, Confidence: evt.Confidence >= 0 ? evt.Confidence : null);
+            Plate: evt.PlateNumber, Confidence: evt.Confidence >= 0 ? evt.Confidence : null,
+            Image: sceneImage, PlateImage: plateImage);
     }
 
     // ------------------------------------------------------------------
