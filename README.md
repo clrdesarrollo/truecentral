@@ -172,6 +172,17 @@ Qué hace la suite en el equipo, además de copiar archivos:
   puertos. Los paneles se reconectan solos con su mismo ID y clave: el
   servicio ISUP también escucha el 7661, donde se registraban, y la migración
   de la base los pasa al driver `hikvision-isup`.
+- **Antes de actualizar un servidor que usa la receptora**, ejecute en él
+  `installer\chequeo-isup.ps1` (solo lectura, con un usuario que tenga el
+  permiso de paneles): dice panel por panel si se reconectará solo o qué hay
+  que hacer (clave no guardada, ID guardado como uuid, OTAP, ID repetido, otra
+  receptora), lista los equipos de la receptora que ningún panel usa, y revisa
+  los puertos 7660-7667/7699 y `Isup:PublicAddress`. Deja un informe `.txt` y
+  una tabla `.csv`.
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\chequeo-isup.ps1 -Usuario admin
+  ```
 
 ### Desinstalación
 
