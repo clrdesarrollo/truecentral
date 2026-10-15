@@ -115,6 +115,10 @@ public sealed class WallService
     {
         var device = channel.Device
             ?? throw new InvalidOperationException($"El canal {channel.Id} no tiene dispositivo cargado.");
+        // El decodificador toma el video directo del equipo, y a uno conectado por ISUP solo llega el servidor.
+        if (device.IsupDeviceId is not null)
+            throw new InvalidOperationException(
+                $"'{device.Name}' se conecta al servidor por ISUP: el decodificador del muro no puede tomar su video directamente del equipo.");
         string password = _credentials.Unprotect(device.PasswordCiphertext);
 
         if (string.Equals(device.DriverKey, HikvisionDeviceDriverKey, StringComparison.OrdinalIgnoreCase))

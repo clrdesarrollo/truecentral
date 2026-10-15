@@ -38,6 +38,8 @@ public static class ResourceUsage
             .Select(s => new Target(kind, id, 0, 0, null, s.GroupName)).FirstOrDefaultAsync(ct),
         ResourceKind.Intercom => await db.Intercoms.Where(i => i.Id == id)
             .Select(i => new Target(kind, id, 0, 0, null, null)).FirstOrDefaultAsync(ct),
+        ResourceKind.IoModule => await db.IoModules.Where(m => m.Id == id)
+            .Select(m => new Target(kind, id, 0, 0, null, null)).FirstOrDefaultAsync(ct),
         _ => null,
     };
 
@@ -82,6 +84,7 @@ public static class ResourceUsage
             ResourceKind.Door => "se disparan con eventos de acceso o conexión de cualquier equipo de acceso",
             ResourceKind.Partition or ResourceKind.Zone => "se disparan con eventos o conexión de cualquier panel de alarma",
             ResourceKind.Speaker => "se disparan con la conexión de cualquier parlante",
+            ResourceKind.IoModule => "se disparan con la conexión o las entradas de cualquier módulo de E/S",
             _ => null,
         };
         return new ResourceWorkflowsDto(uses, note is null ? 0 : general, note);
@@ -150,13 +153,26 @@ public static class ResourceUsage
                     return (null, AnyDevice(c, "speaker"));
                 }
                 break;
+
+            case ResourceKind.IoModule:
+                if (triggerType == WorkflowTriggerTypes.DeviceStatus)
+                {
+                    if (Has(c.IoModuleIds, t.Id)) return ("Conexión del módulo", false);
+                    return (null, AnyDevice(c, "io"));
+                }
+                if (triggerType == WorkflowTriggerTypes.IoInput)
+                {
+                    if (IoInputUse(c, t) is { } detail) return (detail, false);
+                    return (null, None(c.IoModuleIds) && None(c.IoInputKeys));
+                }
+                break;
         }
         return (null, false);
     }
 
     /// <summary>Disparador de conexión sin equipos marcados que incluye esta clase de equipo.</summary>
     private static bool AnyDevice(WorkflowConditionsDto c, string deviceKind) =>
-        None(c.DeviceIds) && None(c.AccessDeviceIds) && None(c.SpeakerIds) &&
+        None(c.DeviceIds) && None(c.AccessDeviceIds) && None(c.SpeakerIds) && None(c.IoModuleIds) &&
         (None(c.DeviceKinds) || Has(c.DeviceKinds, deviceKind));
 
     private static bool NoAlarmFilter(WorkflowConditionsDto c) =>
@@ -183,6 +199,15 @@ public static class ResourceUsage
         return null;
     }
 
+    /// <summary>Entradas del módulo que nombra un filtro de entradas de E/S (disparador o condición).</summary>
+    private static string? IoInputUse(WorkflowConditionsDto c, Target t)
+    {
+        if (Has(c.IoModuleIds, t.Id)) return "Cualquier entrada del módulo";
+        var inputs = (c.IoInputKeys ?? []).Where(k => k.StartsWith($"{t.Id}:", StringComparison.Ordinal))
+            .Select(k => "DI" + k[(k.IndexOf(':') + 1)..]).ToList();
+        return inputs.Count == 0 ? null : $"Entradas {string.Join(", ", inputs)}";
+    }
+
     /// <summary>Un nodo de condición del diagrama que consulta al recurso.</summary>
     private static string? ConditionUse(WorkflowConditionsDto c, Target t) => t.Kind switch
     {
@@ -193,6 +218,7 @@ public static class ResourceUsage
         ResourceKind.Partition or ResourceKind.Zone => AlarmMatch(c, t) is { } detail
             ? detail.Replace("Eventos de", "Pregunta por") : null,
         ResourceKind.Speaker when Has(c.SpeakerIds, t.Id) => "Pregunta por el parlante",
+        ResourceKind.IoModule => IoInputUse(c, t) is { } detail ? $"Pregunta por: {detail.ToLowerInvariant()}" : null,
         _ => null,
     };
 
@@ -201,6 +227,13 @@ public static class ResourceUsage
         if (!config.TryGetProperty(name, out var array) || array.ValueKind != JsonValueKind.Array) yield break;
         foreach (var item in array.EnumerateArray())
             if (item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out int value)) yield return value;
+    }
+
+    private static IEnumerable<string> Strings(JsonElement config, string name)
+    {
+        if (!config.TryGetProperty(name, out var array) || array.ValueKind != JsonValueKind.Array) yield break;
+        foreach (var item in array.EnumerateArray())
+            if (item.ValueKind == JsonValueKind.String && item.GetString() is { } value) yield return value;
     }
 
     private static int? Int(JsonElement config, string name) =>
@@ -246,6 +279,24 @@ public static class ResourceUsage
                         "Disarm" => "Desarma " + which,
                         "ClearAlarm" => "Borra la alarma de " + which,
                         _ => "Da una orden a " + which,
+                    };
+                }
+                break;
+
+            case ResourceKind.IoModule:
+                if (type == WorkflowActionTypes.Relay)
+                {
+                    var outputs = Strings(config, "relayKeys").Where(k => k.StartsWith($"{t.Id}:", StringComparison.Ordinal))
+                        .Select(k => "DO" + k[(k.IndexOf(':') + 1)..]).ToList();
+                    if (outputs.Count == 0) break;
+                    string which = string.Join(", ", outputs);
+                    return (Text(config, "command") ?? "") switch
+                    {
+                        "On" => $"Enciende {which}",
+                        "Off" => $"Apaga {which}",
+                        "Toggle" => $"Alterna {which}",
+                        "Blink" => $"Hace parpadear {which}",
+                        _ => $"Da un pulso a {which}",
                     };
                 }
                 break;

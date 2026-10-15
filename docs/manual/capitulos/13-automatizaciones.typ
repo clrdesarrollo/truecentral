@@ -183,7 +183,7 @@ Hay tres formas de agregar un paso:
   [Capturar], [Capturar foto],
   [Avisar], [Enviar correo, Sonar parlante IP, Avisar a los operadores],
   [Integración], [Subir a FTP, Llamar a un servicio (HTTP)],
-  [Equipos], [Orden a una puerta, Armar / desarmar panel, Mover cámara PTZ a preset],
+  [Equipos], [Orden a una puerta, Armar / desarmar panel, Mover cámara PTZ a preset, Operar relé],
 )
 
 === Conectar y eliminar
@@ -271,7 +271,9 @@ textos*.
   [Control de acceso], [Evento de control de acceso],
   [alguien pasa (o lo rechazan) por una puerta, o la puerta informa forzada, mantenida abierta o sabotaje.],
   [Sistema], [Conexión de un equipo],
-  [una cámara o grabador, un terminal de acceso o un parlante IP pierde o recupera la conexión.],
+  [una cámara o grabador, un terminal de acceso, un parlante IP o un módulo de E/S pierde o recupera la conexión.],
+  [Entradas y salidas], [Entrada de módulo de E/S],
+  [una entrada de un módulo de E/S se activa o vuelve a reposo: un pulsador, el lazo de una barrera, un sensor.],
   [Sistema], [Horario programado], [llegan las horas indicadas, los días de la semana marcados.],
   [Sistema], [Llamada externa (HTTP)], [otro sistema llama a la dirección de esta automatización.],
 )
@@ -368,6 +370,12 @@ selección. Sin nada marcado, dispara cualquier equipo.
   no se distinguen mayúsculas ni guiones.
 - *Confianza mínima de la lectura (0–100)*: vacío = sin mínimo.
 
+#nota[La lectura llega con sus fotos: la escena que tomó la cámara y, detrás,
+  el recorte de la patente. Ambas quedan en el aviso, el correo y el FTP de la
+  automatización sin agregar _Capturar foto_. Si la cámara no manda el
+  recorte, el sistema lo corta de la escena con el recuadro de la patente; si
+  no manda ninguna foto, toma una del canal (paso «Foto del evento»).]
+
 #modulo("anpr")[Las fuentes de patentes se activan como se explica en
   #capitulo(<cap-reconocimiento-de-patentes>).]
 
@@ -383,11 +391,23 @@ selección. Sin nada marcado, dispara cualquier equipo.
 
 === Conexión de un equipo
 
-- *Clase de equipo*: Cámaras y grabadores, Terminales de acceso o Parlantes IP.
+- *Clase de equipo*: Cámaras y grabadores, Terminales de acceso, Parlantes IP o
+  Módulos de E/S.
 - *Estado que dispara*: Sin conexión, Credenciales rechazadas o En línea
   (recuperado).
 - *Equipos*: con equipos marcados, solo esos disparan; sin ninguno, cualquiera
   de la clase elegida.
+
+=== Entrada de módulo de E/S
+
+- *Módulos y entradas*: un módulo completo (cualquiera de sus entradas) o solo
+  algunas entradas, con el botón #boton("Elegir entradas…").
+- *Cambio que dispara*: _Se activa_, _Vuelve a reposo_ o, sin nada marcado,
+  ambos. «Activa» ya considera si la entrada se activa al cerrar o al abrir el
+  contacto.
+
+#modulo("io")[Las entradas se nombran en #menu("Dispositivos", "Módulos de E/S");
+  vea #capitulo(<cap-modulos-de-es>).]
 
 === Horario programado
 
@@ -529,26 +549,37 @@ correo»).
 === Avisar a los operadores
 
 Muestra un aviso en pantalla a los operadores conectados, con foto, video en
-vivo y alarma sonora. Cada aviso queda registrado como alerta (vea «Alertas y
-acuse de recibo»).
+vivo y alarma sonora, en las pantallas de alarma de las casetas, o en ambos
+lados. Cada aviso queda registrado como alerta (vea «Alertas y acuse de
+recibo»).
 
 - *Título* y *Mensaje*: por omisión, `{tipo}: {equipo}` y
   `{evento} · {fechahora}`. Además de las marcas del disparador, admiten
   `{ubicacion}` (dónde está el recurso, según Recursos) y `{consignas}` (lo que
   debe hacer el operador con ese recurso).
 - *Importancia*: Crítica, Advertencia o Informativa.
-- *Destinatarios*: los usuarios que reciben el aviso. Sin ninguno marcado,
-  llega a todos los operadores conectados que atienden alertas.
+- *Dónde se muestra*: _Ventana de alarma de los operadores_ (lo de siempre),
+  _Pantallas de alarma de las casetas_ o _Ventana de alarma y pantallas de
+  alarma_. Es un solo aviso: si un guardia lo marca como visto en una pantalla
+  de la caseta, se cierra la ventana de alarma de los operadores, y si un
+  operador lo confirma, la pantalla deja de sonar.
+- *Pantallas de alarma* (con las pantallas): a cuáles va. Sin ninguna marcada,
+  a todas las aprobadas. Si no hay ninguna disponible, o las pantallas no están
+  en la licencia, el aviso sale en la ventana de alarma.
+- *Destinatarios* (con la ventana de alarma): los usuarios que reciben el
+  aviso. Sin ninguno marcado, llega a todos los operadores conectados que
+  atienden alertas.
 - *Mostrar la foto capturada en el aviso*.
 - *Exigir que un operador se dé por enterado*: el aviso queda en pantalla y en
   la lista de alertas hasta que alguien lo confirme; se registra quién y cuándo.
 - *Cámaras del video en vivo de la ventana de alarma*: si no marca ninguna, se
   usan las que capturaron foto en la misma ejecución y, si tampoco hubo fotos,
   las cámaras asociadas al recurso que la disparó (su ficha en Recursos).
-- *Alarma sonora en el equipo del operador*: _(sin sonido)_, _Pitido del
-  sistema del equipo_ o uno de los sonidos de la biblioteca. El botón ▶ lo hace
-  sonar en su navegador.
-- *Repeticiones del sonido*: de 0 a 5. Con 0, suena sin parar hasta que un
+- *Alarma sonora*: _(sin sonido)_, _Pitido del sistema del equipo_ o uno de
+  los sonidos de la biblioteca. El botón ▶ lo hace sonar en su navegador. En
+  las pantallas de alarma suena este sonido (el pitido del sistema usa el tono
+  de la pantalla) y después el recordatorio de las pantallas.
+- *Repeticiones del sonido en el equipo del operador*: de 0 a 5. Con 0, suena sin parar hasta que un
   operador confirme la alerta, la silencie o cierre la ventana. El bucle exige
   _Exigir que un operador se dé por enterado_: sin ella, el aviso es
   informativo, no tiene botón para silenciarlo, y con 0 suena una vez.
@@ -606,6 +637,21 @@ mensaje)_ (*URL* y *Método*).
 - *Cámara PTZ*: solo se ofrecen las cámaras que tienen PTZ.
 - *Preset (1–300)*: el preset debe estar guardado en la propia cámara, desde
   la vista en vivo del cliente o desde su web.
+
+=== Operar relé
+
+- *Relés*: una o varias salidas de los módulos de E/S, con su módulo y su
+  nombre.
+- *Orden*: _Pulso: encender y soltar (barrera, portón)_, _Encender y dejar
+  encendido_, _Apagar_, _Alternar_ o _Parpadear (baliza)_. _Apagar_ también
+  corta un pulso o un parpadeo en curso.
+- *Duración del pulso (segundos)*: de 0,1 a 3600; para la orden de subir de
+  una barrera suele bastar 1.
+- Al parpadear: *Parpadear durante (segundos; 0 = hasta otra orden)* y
+  *Alternar cada (ms)*, desde 100.
+
+Si el módulo no responde o está pausado, la acción falla y el flujo sigue por
+*Si falla*.
 
 === Subir a FTP
 
@@ -673,6 +719,7 @@ Cada disparador agrega las suyas:
   [Evento de control de acceso],
   [`{puerta}`, `{puertanumero}`, `{persona}`, `{personaid}`, `{tarjeta}`, `{credencial}`, `{resultado}`],
   [Conexión de un equipo], [`{equipotipo}`, `{direccion}`, `{modelo}`, `{estado}`],
+  [Entrada de módulo de E/S], [`{modulo}`, `{entrada}`, `{entradanumero}`, `{estado}`, `{direccion}`],
   [Llamada externa], [`{cuerpo}`, `{ip}` y un campo por cada campo del JSON recibido],
 )
 
@@ -758,6 +805,8 @@ que se configura una sola vez.
   [Marque una cámara en la acción.],
   [«Sonar parlante IP»: Elija al menos un parlante o un grupo.],
   [Marque un parlante o escriba el nombre de un grupo.],
+  [«Operar relé»: Elija al menos un relé.],
+  [Marque un relé en la acción.],
   [El bucle hasta detener (0 repeticiones) solo está disponible con un sonido del servidor.],
   [Use un sonido del servidor o ponga 1 o más repeticiones.],
   [«Llamar a un servicio (HTTP)»: La URL debe ser absoluta y empezar con `http://` o `https://`.],

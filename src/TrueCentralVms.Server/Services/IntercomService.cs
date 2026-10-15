@@ -37,6 +37,8 @@ public sealed class IntercomService(
     ScopedHub hub,
     AuditService audit,
     IConfiguration config,
+    Isup.IsupService isup,
+    Isup.IsupHostManager isupHost,
     ILogger<IntercomService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
@@ -86,9 +88,65 @@ public sealed class IntercomService(
         if (_wake.CurrentCount == 0) _wake.Release();
     }
 
+    private int _isupHooked;
+
+    /// <summary>
+    /// Los frentes ISUP avisan su conexión por el servicio ISUP: al conectarse se completa el que se agregó antes de que se
+    /// conectara (modelo, puertas, botón a la central, video) y se sondea de inmediato.
+    /// </summary>
+    private void HookIsup(CancellationToken ct)
+    {
+        if (Interlocked.Exchange(ref _isupHooked, 1) == 1) return;
+        isup.DeviceOnlineChanged += (isupId, online) =>
+        {
+            if (online) _ = Task.Run(() => ProvisionIsupAsync(isupId, ct), ct);
+            foreach (var line in _lines.Values.Where(l => l.Intercom.IsupDeviceId == isupId)) line.NextPoll = DateTime.MinValue;
+        };
+    }
+
+    private async Task ProvisionIsupAsync(string isupId, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);   // que termine el intercambio de registro del equipo
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var intercom = await db.Intercoms.FirstOrDefaultAsync(i => i.IsupDeviceId == isupId, ct);
+            if (intercom is null || intercom.Model is not null) return;
+            var driver = DriverOf(intercom);
+            var conn = ConnectionOf(intercom);
+            var info = await driver.ProbeAsync(conn, ct);
+            Api.IntercomsApi.ApplyProbe(intercom, info);
+            var notes = new List<string>();
+            if (!intercom.CallCenterEnabled)
+            {
+                try { await driver.EnableCallCenterAsync(conn, ct); intercom.CallCenterEnabled = true; notes.Add("botón configurado para llamar a la central"); }
+                catch (DriverException ex) { notes.Add($"no se pudo configurar el botón para llamar a la central: {ex.Message}"); }
+            }
+            if (info.KeyFrameSeconds > 2)
+            {
+                try { await driver.OptimizeVideoAsync(conn, ct); notes.Add("video ajustado a un cuadro completo por segundo"); }
+                catch (DriverException ex) { notes.Add($"no se pudo ajustar el video: {ex.Message}"); }
+            }
+            await db.SaveChangesAsync(ct);
+            await audit.LogSystemAsync("intercom", "intercom-online", "intercom", intercom.Id.ToString(), intercom.Name,
+                $"El frente '{intercom.Name}' se conectó por ISUP (ID {isupId}): {intercom.Model ?? "modelo desconocido"}, " +
+                $"{intercom.DoorCount} puerta(s)" + (notes.Count > 0 ? "; " + string.Join("; ", notes) : "") + ".");
+            var hubContext = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.VmsHub>>();
+            await Microsoft.AspNetCore.SignalR.ClientProxyExtensions.SendAsync(hubContext.Clients.All, VmsHubContract.ConfigChanged, "intercoms", ct);
+            RequestReconcile();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { logger.LogWarning("No se pudo completar el frente ISUP {Id} en su primer contacto: {Error}", isupId, ex.Message); }
+    }
+
     public IntercomConnectionInfo ConnectionOf(Intercom intercom) =>
-        new(intercom.Host, intercom.Port, intercom.HttpPort, intercom.Username, credentials.Unprotect(intercom.PasswordCiphertext),
-            intercom.RtspPort);
+        new(intercom.Host, intercom.Port, intercom.HttpPort, intercom.Username,
+            intercom.PasswordCiphertext.Length == 0 ? "" : credentials.Unprotect(intercom.PasswordCiphertext),
+            intercom.RtspPort, intercom.IsupDeviceId);
+
+    /// <summary>Dónde está el frente, para textos: su dirección, o su ID ISUP.</summary>
+    public static string WhereOf(Intercom intercom) => intercom.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : intercom.Host;
 
     public IIntercomDriver DriverOf(Intercom intercom) =>
         drivers.Find(intercom.DriverKey)?.Create()
@@ -101,7 +159,7 @@ public sealed class IntercomService(
         i.Model, i.SerialNumber, i.FirmwareVersion, i.GroupName, i.Enabled, i.Status, i.LastError, i.LastSeenAt,
         i.ChannelId, i.Channel is { } ch ? (ch.Device is { } d ? $"{d.Name} · {ch.Name}" : ch.Name) : null,
         i.DoorCount, i.CallCenterEnabled, ActiveCallOf(i.Id), i.CreatedAt, i.UpdatedAt,
-        i.LocationId, Auth.LocationPaths.Of(i.LocationId), i.RtspPort);
+        i.LocationId, Auth.LocationPaths.Of(i.LocationId), i.RtspPort, i.IsupDeviceId, i.IsupKeyCiphertext is { Length: > 0 });
 
     public static IntercomCallDto ToDto(IntercomCall c, Intercom? intercom) => new(c.Id, c.IntercomId, c.IntercomName, c.State,
         c.StartedAt, c.AnsweredAt, c.EndedAt, c.AnsweredBy, c.AnsweredByUserId, c.Origin, c.EndReason, c.DoorOpened, c.DoorOpenedBy,
@@ -117,6 +175,7 @@ public sealed class IntercomService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        HookIsup(stoppingToken);
         try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
         catch (OperationCanceledException) { return; }
 
@@ -182,7 +241,7 @@ public sealed class IntercomService(
             if (current is null || current.Host != line.Intercom.Host || current.Port != line.Intercom.Port
                 || current.HttpPort != line.Intercom.HttpPort || current.Username != line.Intercom.Username
                 || !current.PasswordCiphertext.AsSpan().SequenceEqual(line.Intercom.PasswordCiphertext)
-                || current.DriverKey != line.Intercom.DriverKey)
+                || current.DriverKey != line.Intercom.DriverKey || current.IsupDeviceId != line.Intercom.IsupDeviceId)
             {
                 if (_lines.TryRemove(id, out var removed))
                     await ShutdownLineAsync(removed, current is null ? "el frente se deshabilitó o se eliminó" : "cambió la configuración del frente");
@@ -299,6 +358,14 @@ public sealed class IntercomService(
         IntercomLineState? state = null;
         string? error = null;
         bool authFailed = false;
+        // Un frente ISUP desconectado no se consulta: se explica qué configurar en él (y queda sin conexión de inmediato).
+        if (line.Intercom.IsupDeviceId is { } isupId && !isup.IsOnline(isupId))
+        {
+            line.PollFailures = OfflineAfterFailures;
+            await SetStatusAsync(line, IntercomStatus.Offline,
+                await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "frente", ct), ct);
+            return null;
+        }
         try { state = await line.Driver.GetLineStateAsync(line.Connection, ct); }
         catch (DriverException ex)
         {
@@ -347,10 +414,10 @@ public sealed class IntercomService(
         {
             if (status == IntercomStatus.Online && previous != IntercomStatus.Unknown)
                 await audit.LogSystemAsync("intercom", "intercom-online", targetType: "intercom", targetId: intercom.Id.ToString(),
-                    targetName: intercom.Name, detail: $"El frente '{intercom.Name}' ({intercom.Host}) recuperó la conexión.");
+                    targetName: intercom.Name, detail: $"El frente '{intercom.Name}' ({WhereOf(intercom)}) recuperó la conexión.");
             else if (status != IntercomStatus.Online)
                 await audit.LogSystemAsync("intercom", "intercom-offline", targetType: "intercom", targetId: intercom.Id.ToString(),
-                    targetName: intercom.Name, detail: $"El frente '{intercom.Name}' ({intercom.Host}) no responde: {error}", success: false);
+                    targetName: intercom.Name, detail: $"El frente '{intercom.Name}' ({WhereOf(intercom)}) no responde: {error}", success: false);
         }
         await hub.SendAsync(VmsHubContract.IntercomStatusChanged, ToDto(intercom), sc => sc.CanViewIntercom(intercom.Id), ct);
     }

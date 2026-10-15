@@ -49,7 +49,7 @@ también compila (sin el diseño completo), útil para revisar errores:
 3. Incluirlo en `manual.typ`. Si el módulo se vende aparte, envolverlo en
    `#modulo("clave", include "…")` con la clave de `LicenseFeatures` sin el
    prefijo `module_` (video, playback, anpr, alarms, access, videowall,
-   speakers, intercom, automation).
+   speakers, io, alarm_screens, intercom, automation).
 
 ## Componentes
 

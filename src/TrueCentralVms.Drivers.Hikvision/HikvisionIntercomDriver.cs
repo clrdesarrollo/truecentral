@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Xml.Linq;
 using TrueCentralVms.Core.Drivers;
+using TrueCentralVms.Core.Isup;
 using TrueCentralVms.Drivers.Hikvision.Interop;
 
 namespace TrueCentralVms.Drivers.Hikvision;
@@ -12,6 +13,21 @@ public sealed class HikvisionIntercomDriverFactory : IIntercomDriverFactory
     public string DisplayName => "Hikvision (frente de videoportero DS-KB / DS-KD / DS-KV)";
     public int DefaultPort => 8000;
     public int DefaultHttpPort => 80;
+    public IIntercomDriver Create() => new HikvisionIntercomDriver();
+}
+
+/// <summary>
+/// El mismo frente cuando se conecta al servidor por ISUP (detrás de NAT o por 4G): identificación, botones, puerta y órdenes
+/// de llamada por el túnel ISAPI; las llamadas entrantes, por el canal de alarmas de ISUP; la voz por el servidor de voz de ISUP
+/// y el video por el servicio ISUP.
+/// </summary>
+public sealed class HikvisionIsupIntercomDriverFactory : IIntercomDriverFactory
+{
+    public string DriverKey => "hikvision-isup";
+    public string DisplayName => "Hikvision por ISUP (el frente se conecta al servidor)";
+    public int DefaultPort => 0;
+    public int DefaultHttpPort => 0;
+    public bool UsesIsup => true;
     public IIntercomDriver Create() => new HikvisionIntercomDriver();
 }
 
@@ -41,12 +57,18 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
     private const int VoiceFrameBytes = 160;
 
     private static HikvisionIsapiClient Isapi(IntercomConnectionInfo info) =>
-        new(new AlarmConnectionInfo(info.Host, info.HttpPort, false, info.Username, info.Password),
+        new(new AlarmConnectionInfo(info.Host, info.HttpPort, false, info.Username, info.Password, info.IsupId),
             digestOnly: true, deviceNoun: "citófono");
 
     /// <summary>Olvida las conexiones HTTP cacheadas (al editar o borrar el frente).</summary>
     public static void Forget(IntercomConnectionInfo info) =>
-        HikvisionIsapiClient.Forget(new AlarmConnectionInfo(info.Host, info.HttpPort, false, info.Username, info.Password));
+        HikvisionIsapiClient.Forget(new AlarmConnectionInfo(info.Host, info.HttpPort, false, info.Username, info.Password, info.IsupId));
+
+    private static bool IsIsup(IntercomConnectionInfo info, out string isupId)
+    {
+        isupId = info.IsupId ?? "";
+        return isupId.Length > 0;
+    }
 
     private static XElement? Child(XElement parent, string name) =>
         parent.Elements().FirstOrDefault(e => e.Name.LocalName == name);
@@ -103,16 +125,33 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
         }
         catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { /* 1 puerta por defecto */ }
 
-        // El SDK es el que transporta llamadas y voz: validarlo también.
-        string? codec = await Task.Run(() =>
-        {
-            int userId = Login(info);
-            try { return CodecOf(userId); }
-            finally { CHCNetSDK.NET_DVR_Logout(userId); }
-        }, ct);
+        // Por IP el SDK es el que transporta llamadas y voz: validarlo también. Por ISUP no hay SDK: el códec lo dice ISAPI.
+        string? codec = IsIsup(info, out _)
+            ? await IsapiCodecAsync(client, ct)
+            : await Task.Run(() =>
+            {
+                int userId = Login(info);
+                try { return CodecOf(userId); }
+                finally { CHCNetSDK.NET_DVR_Logout(userId); }
+            }, ct);
 
         return new IntercomInfo(model, Value(device, "serialNumber"), Value(device, "firmwareVersion"),
             Value(device, "deviceName"), doors, callCenter, codec, await ReadKeyFrameSecondsAsync(client, ct));
+    }
+
+    /// <summary>Códec del canal de audio bidireccional ("G.711ulaw" → "ulaw"); null si no lo informa o no es G.711.</summary>
+    private static async Task<string?> IsapiCodecAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get, "/ISAPI/System/TwoWayAudio/channels", ct: ct) is not { } xml) return null;
+            string? type = XDocument.Parse(xml).Descendants().FirstOrDefault(e => e.Name.LocalName == "audioCompressionType")?.Value;
+            return type is null ? null
+                : type.Contains("ulaw", StringComparison.OrdinalIgnoreCase) ? "ulaw"
+                : type.Contains("alaw", StringComparison.OrdinalIgnoreCase) ? "alaw"
+                : null;
+        }
+        catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { return null; }
     }
 
     private const string MainStreamPath = "/ISAPI/Streaming/channels/101";
@@ -158,21 +197,28 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
             ?? throw new DriverException("El citófono no aceptó el ajuste de video.");
     }
 
+    /// <summary>Por ISUP, la URL local del servicio ISUP con el video del frente (MediaMTX la publica con FFmpeg).</summary>
     public string BuildRtspUrl(IntercomConnectionInfo info, StreamProfile profile) =>
-        $"rtsp://{Uri.EscapeDataString(info.Username)}:{Uri.EscapeDataString(info.Password)}" +
-        $"@{info.Host}:{info.RtspPort}/Streaming/Channels/{(profile == StreamProfile.Main ? 101 : 102)}";
+        IsIsup(info, out string isupId)
+            ? IsupGateway.Require().LiveSourceUrl(isupId, 1, profile == StreamProfile.Main ? 0 : 1)
+            : $"rtsp://{Uri.EscapeDataString(info.Username)}:{Uri.EscapeDataString(info.Password)}" +
+              $"@{info.Host}:{info.RtspPort}/Streaming/Channels/{(profile == StreamProfile.Main ? 101 : 102)}";
 
     public async Task<byte[]?> CaptureSnapshotAsync(IntercomConnectionInfo info, CancellationToken ct = default)
     {
+        byte[]? jpeg = null;
         try
         {
             using var response = await Isapi(info).OpenStreamAsync(MainStreamPath + "/picture", ct);
-            byte[] jpeg = await response.Content.ReadAsByteArrayAsync(ct);
-            // Un equipo sin foto puede contestar 200 con un XML de error.
-            return jpeg is [0xFF, 0xD8, ..] ? jpeg : null;
+            jpeg = await response.Content.ReadAsByteArrayAsync(ct);
         }
-        catch (DriverException) { return null; }
-        catch (HttpRequestException) { return null; }
+        catch (DriverException) { }
+        catch (HttpRequestException) { }
+        // Un equipo sin foto puede contestar 200 con un XML de error. Por ISUP queda el respaldo de un cuadro del video en vivo.
+        if (jpeg is [0xFF, 0xD8, ..]) return jpeg;
+        return IsIsup(info, out string isupId) && IsupGateway.Current is { } gateway
+            ? await gateway.GrabFrameAsync(isupId, 1, 0, ct)
+            : null;
     }
 
     private static async Task<List<XElement>> ReadKeysAsync(HikvisionIsapiClient client, CancellationToken ct)
@@ -246,7 +292,46 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
     // ------------------------------------------------------------------
 
     public Task<IIntercomCallLink> OpenCallLinkAsync(IntercomConnectionInfo info, Action<IntercomCallSignal> onSignal,
-        CancellationToken ct = default) => Task.Run<IIntercomCallLink>(() =>
+        CancellationToken ct = default)
+    {
+        if (IsIsup(info, out string isupId))
+            return Task.FromResult<IIntercomCallLink>(new IsupCallLink(info, isupId, onSignal));
+        return OpenSdkCallLinkAsync(info, onSignal, ct);
+    }
+
+    /// <summary>
+    /// Enlace de llamadas de un frente ISUP: no hay enlace SDK que abrir; las llamadas llegan como eventos por el canal de
+    /// alarmas de ISUP (mientras el frente esté conectado) y las órdenes salen por ISAPI (callSignal). Vive hasta liberarlo.
+    /// </summary>
+    private sealed class IsupCallLink : IIntercomCallLink
+    {
+        private readonly IntercomConnectionInfo _info;
+        private readonly IDisposable _subscription;
+        private int _disposed;
+
+        public IsupCallLink(IntercomConnectionInfo info, string isupId, Action<IntercomCallSignal> onSignal)
+        {
+            _info = info;
+            _subscription = IsupGateway.Require().SubscribeAlarms(isupId, alarm =>
+            {
+                if (IsupIntercomSignals.ToSignal(alarm) is { } signal) onSignal(signal);
+            });
+        }
+
+        public bool IsAlive => Volatile.Read(ref _disposed) == 0;
+
+        public Task SendAsync(IntercomCommand command, CancellationToken ct = default) =>
+            new HikvisionIntercomDriver().SendCommandAsync(_info, command, ct);
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0) _subscription.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private Task<IIntercomCallLink> OpenSdkCallLinkAsync(IntercomConnectionInfo info, Action<IntercomCallSignal> onSignal,
+        CancellationToken ct) => Task.Run<IIntercomCallLink>(() =>
     {
         int userId = Login(info);
         var link = new CallLink(userId, info.Host, onSignal);
@@ -383,8 +468,14 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
     // Voz
     // ------------------------------------------------------------------
 
-    public Task<IIntercomVoiceSession> OpenVoiceAsync(IntercomConnectionInfo info, Action<ReadOnlyMemory<byte>> onAudio,
-        CancellationToken ct = default) => Task.Run<IIntercomVoiceSession>(() =>
+    public async Task<IIntercomVoiceSession> OpenVoiceAsync(IntercomConnectionInfo info, Action<ReadOnlyMemory<byte>> onAudio,
+        CancellationToken ct = default) =>
+        IsIsup(info, out string isupId)
+            ? await IsupVoiceSession.OpenAsync(isupId, onAudio, broadcast: false, "citófono", ct)
+            : await OpenSdkVoiceAsync(info, onAudio, ct);
+
+    private static Task<IIntercomVoiceSession> OpenSdkVoiceAsync(IntercomConnectionInfo info, Action<ReadOnlyMemory<byte>> onAudio,
+        CancellationToken ct) => Task.Run<IIntercomVoiceSession>(() =>
     {
         int userId = Login(info);
         try

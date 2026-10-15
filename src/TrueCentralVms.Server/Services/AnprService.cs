@@ -205,9 +205,7 @@ public sealed class AnprService(
         }
     }
 
-    private DeviceConnectionInfo ConnectionOf(Device device) => new(
-        device.Host, device.SdkPort, device.Username,
-        device.PasswordCiphertext.Length == 0 ? "" : credentials.Unprotect(device.PasswordCiphertext));
+    private DeviceConnectionInfo ConnectionOf(Device device) => DeviceConnections.Of(device, credentials);
 
     private async Task CloseAsync(int deviceId, Source source)
     {
@@ -260,6 +258,13 @@ public sealed class AnprService(
         var channel = device.Channels.FirstOrDefault(c => c.ChannelNumber == plate.ChannelNumber)
                       ?? device.Channels.OrderBy(c => c.ChannelNumber).FirstOrDefault();
 
+        // Sin recorte de la cámara, se corta de la escena con el recuadro que
+        // ella misma informó (la ficha, la alerta y el correo lo muestran igual).
+        byte[]? plateImage = plate.PlateImage is { Length: > 0 } ? plate.PlateImage
+            : plate.SceneImage is { Length: > 0 } scene && OperatingSystem.IsWindows()
+                ? PlateCutout.FromScene(scene, plate.PlateX, plate.PlateY, plate.PlateWidth, plate.PlateHeight)
+                : null;
+
         var entity = new PlateEvent
         {
             DeviceId = device.Id,
@@ -286,7 +291,7 @@ public sealed class AnprService(
             PlateWidth = plate.PlateWidth,
             PlateHeight = plate.PlateHeight,
             SceneImagePath = store.Save(plate.SceneImage, plate.CapturedAt, "escena"),
-            PlateImagePath = store.Save(plate.PlateImage, plate.CapturedAt, "placa"),
+            PlateImagePath = store.Save(plateImage, plate.CapturedAt, "placa"),
         };
 
         db.PlateEvents.Add(entity);
@@ -298,9 +303,12 @@ public sealed class AnprService(
         logger.LogInformation("Patente {Plate} reconocida en '{Device}' ({Confidence}%).",
             entity.PlateNumber, device.Name, entity.Confidence);
 
-        // Automatizaciones ("patente de la lista → abrir el portón").
+        // Automatizaciones ("patente de la lista → abrir el portón"). Las fotos
+        // de la lectura viajan con el disparo: la alerta, el correo y el FTP
+        // las llevan sin tener que capturar otra del canal.
         scope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>().Publish(
-            Workflows.WorkflowTrigger.FromPlate(entity, device.Name, channel?.Name ?? $"Canal {entity.ChannelNumber}", channel?.Id));
+            Workflows.WorkflowTrigger.FromPlate(entity, device.Name, channel?.Name ?? $"Canal {entity.ChannelNumber}", channel?.Id,
+                plate.SceneImage, plateImage));
     }
 
     /// <summary>Recorta al largo de la columna: un firmware raro no debe reventar el insert.</summary>

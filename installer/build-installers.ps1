@@ -16,6 +16,7 @@
        dist\CLRTrueCentralVMS-Complemento-Setup-<versión>.exe  (lector de huellas)
        dist\CLRTrueCentralVMS-Suite-Setup-<versión>.exe   (incluye los dos anteriores)
        dist\CLRTrueCentralVMS-Migrador-<versión>.zip       (migrador desde HikCentral, sin instalador)
+       dist\truecentral-screen-<versión>-linux-arm64.tar.gz (app de las pantallas de alarma; va en la suite)
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File installer\build-installers.ps1
@@ -75,6 +76,25 @@ function Invoke-Publish([string]$Project, [string]$OutDir) {
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish falló para $Project." }
 }
 
+# App de las pantallas de alarma (Raspberry Pi 4/5, linux-arm64, autocontenida).
+# El paquete va a dist\ (para instalar una Pi nueva con installer\screen\install-screen.sh)
+# y dentro de la suite (screen-packages\, de donde las Pi ya instaladas se actualizan solas).
+function Invoke-PublishScreen([string]$OutDir, [string]$Package) {
+    Write-Host ""
+    Write-Host "== dotnet publish TrueCentralVms.AlarmScreen linux-arm64  (v$script:Version) ==" -ForegroundColor Cyan
+    if (Test-Path $OutDir) { Remove-Item -Recurse -Force $OutDir }
+    dotnet publish (Join-Path $repo 'src\TrueCentralVms.AlarmScreen\TrueCentralVms.AlarmScreen.csproj') -c Release `
+        -r linux-arm64 --self-contained true "-p:Version=$script:Version" -o $OutDir --nologo -v q
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish falló para la app de las pantallas de alarma." }
+    Get-ChildItem $OutDir -Filter '*.pdb' -ErrorAction SilentlyContinue | Remove-Item -Force
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Package) | Out-Null
+    if (Test-Path $Package) { Remove-Item -Force $Package }
+    # tar.exe de Windows (bsdtar): el paquete se abre en la Pi con tar -xzf.
+    & "$env:SystemRoot\System32\tar.exe" -czf $Package -C $OutDir .
+    if ($LASTEXITCODE -ne 0) { throw "No se pudo comprimir el paquete de la app de las pantallas de alarma." }
+    Write-Host ("  {0}  ({1:N1} MB)" -f (Split-Path -Leaf $Package), ((Get-Item $Package).Length / 1MB)) -ForegroundColor DarkGray
+}
+
 function Assert-File([string]$Path, [string]$Hint) {
     if (-not (Test-Path $Path)) { throw "Falta '$Path'. $Hint" }
 }
@@ -93,9 +113,18 @@ if (-not $SkipPublish) {
             if (Test-Path $ruta) { Remove-Item -Recurse -Force $ruta }
         }
         Get-ChildItem (Join-Path $publish 'server') -Filter '*.log' -ErrorAction SilentlyContinue | Remove-Item -Force
+        # Servicio ISUP interno: va en la MISMA carpeta que el servidor (comparte su runtime autocontenido) con el SDK ISUP en
+        # isup\. Se publica aparte y sin limpiar la carpeta: la referencia del servidor lo dejó dependiente del framework.
+        Write-Host ""
+        Write-Host "== dotnet publish src\TrueCentralVms.IsupHost  (v$script:Version) ==" -ForegroundColor Cyan
+        dotnet publish (Join-Path $repo 'src\TrueCentralVms.IsupHost\TrueCentralVms.IsupHost.csproj') -c Release -r win-x64 --self-contained true `
+            "-p:Version=$script:Version" -o (Join-Path $publish 'server') --nologo -v q
+        if ($LASTEXITCODE -ne 0) { throw "dotnet publish falló para TrueCentralVms.IsupHost." }
         # Watchdog: monitor de escritorio del servidor, va dentro de la suite
         # (se instala en {app}\watchdog).
         Invoke-Publish 'src\TrueCentralVms.Watchdog\TrueCentralVms.Watchdog.csproj' (Join-Path $publish 'watchdog')
+        # App de las pantallas de alarma de las casetas (la suite la publica para las Pi).
+        Invoke-PublishScreen (Join-Path $publish 'screen-pi') (Join-Path $dist "truecentral-screen-$Version-linux-arm64.tar.gz")
     }
     if ($buildClient) {
         Invoke-Publish 'src\TrueCentralVms.Client\TrueCentralVms.Client.csproj' (Join-Path $publish 'client')
@@ -119,12 +148,10 @@ if ($buildSuite) {
     Assert-File (Join-Path $publish 'server\wwwroot\index.html') 'El publish del servidor no incluyó el panel web (wwwroot).'
     Assert-File (Join-Path $publish 'watchdog\TrueCentralVms.Watchdog.exe') 'Publique primero (quite -SkipPublish).'
     Assert-File (Join-Path $repo 'tools\postgres\pgsql\bin\pg_ctl.exe') "Copie los binarios oficiales de PostgreSQL x64 (bin\lib\share) en tools\postgres\pgsql. $setupHint"
-    # Receptor de paneles de alarma: OBLIGATORIO. Los paneles AX PRO y AX HYBRID
-    # PRO reportan por ISUP/OTAP contra el, asi que la suite no se entrega sin el.
-    $iprpSetup = Join-Path $repo 'tools\iprp\HikIpReceiverPro-Setup.exe'
-    Assert-File $iprpSetup ("Copie el instalador oficial del Hik IP Receiver Pro (V2.5.0 o superior) como " +
-        "tools\iprp\HikIpReceiverPro-Setup.exe. $setupHint")
-    Write-Host ("  Hik IP Receiver Pro: {0:N0} MB" -f ((Get-Item $iprpSetup).Length / 1MB)) -ForegroundColor DarkGray
+    # Servicio ISUP interno: OBLIGATORIO. Los paneles AX PRO y los equipos detras
+    # de NAT/4G se conectan por ISUP contra el, asi que la suite no se entrega sin el.
+    Assert-File (Join-Path $publish 'server\TrueCentralVms.IsupHost.exe') 'El publish del servidor no incluyó el servicio ISUP interno.'
+    Assert-File (Join-Path $publish 'server\isup\HCISUPCMS.dll') "El publish del servicio ISUP no incluyó el SDK ISUP (native\hikvision-isup). $setupHint"
 
     # PostgreSQL (build MSVC de EDB) no arranca sin el runtime de Visual C++, que
     # NO viene con Windows: en un servidor limpio initdb.exe muere con

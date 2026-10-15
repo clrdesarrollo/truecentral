@@ -8,7 +8,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// de streaming; tiene áreas y zonas y un canal de eventos. La contraseña se
 /// guarda cifrada con AES-256-GCM (ver <see cref="CredentialProtector"/>).
 /// </summary>
-public class AlarmPanel
+public class AlarmPanel : IIsupEquipment
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -20,20 +20,12 @@ public class AlarmPanel
     public string Username { get; set; } = "";
     public byte[] PasswordCiphertext { get; set; } = [];
     /// <summary>
-    /// Identificador del panel dentro de la pasarela cuando el driver no habla
-    /// con el equipo sino con un intermediario (Hik IP Receiver Pro): uuid,
-    /// serie, cuenta o ID ISUP. Null para los drivers directos.
+    /// ID ISUP del equipo cuando se conecta por ISUP (driver hikvision-isup): el equipo se registra contra el servidor y no hace falta
+    /// alcanzarlo por IP (detrás de NAT, 4G o MPLS). Null = conexión directa por IP.
     /// </summary>
-    public string? GatewayDeviceId { get; set; }
-    /// <summary>
-    /// Clave ISUP/OTAP con la que el panel reporta a la receptora, cifrada
-    /// como la contraseña. Es la "intención" del VMS: con ella el servicio
-    /// vuelve a registrar el equipo si desaparece de la receptora. Null si el
-    /// panel se adoptó ya registrado y nadie escribió la clave.
-    /// </summary>
-    public byte[]? GatewayKeyCiphertext { get; set; }
-    /// <summary>"isup" u "otap" (drivers de pasarela).</summary>
-    public string? GatewayProtocol { get; set; }
+    public string? IsupDeviceId { get; set; }
+    /// <summary>Clave ISUP del equipo (la «clave de cifrado» de su menú de plataforma), cifrada como la contraseña.</summary>
+    public byte[]? IsupKeyCiphertext { get; set; }
 
     // Datos obtenidos del panel al validar credenciales.
     public string? Model { get; set; }

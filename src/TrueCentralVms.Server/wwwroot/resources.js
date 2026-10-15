@@ -18,6 +18,7 @@ const RES_KINDS = {
   Fence:     { label: "Cerco",          plural: "Cercos",          icon: "fence" },
   Speaker:   { label: "Parlante",       plural: "Parlantes",       icon: "speaker" },
   Intercom:  { label: "Citófono",       plural: "Citófonos",       icon: "intercom" },
+  IoModule:  { label: "Módulo de E/S",  plural: "Módulos de E/S",  icon: "relay" },
 };
 const RES_KIND_ORDER = Object.keys(RES_KINDS);
 
@@ -44,6 +45,7 @@ const RES_ICONS = {
   fence: '<path d="M6 21V7l2-3 2 3v14M14 21V7l2-3 2 3v14M3 10h18M3 16h18"/>',
   speaker: '<path d="M5 9h3l5-4v14l-5-4H5z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>',
   intercom: '<rect x="6" y="3" width="12" height="18" rx="2"/><circle cx="12" cy="9" r="2"/><path d="M10 15h4M10 18h4"/>',
+  relay: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M7 14h.01M11 10h.01M11 14h.01"/><path d="M15 9.5l3 1.5M15 14h3"/>',
   inbox: '<path d="M3 13h5l1 3h6l1-3h5"/><path d="M5.5 5h13L21 13v6H3v-6z"/>',
   all: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
   caret: '<path d="M9 6l6 6-6 6"/>',
@@ -94,7 +96,7 @@ function resourcesDetachHub() {
   clearInterval(resState.snapTimer);
 }
 
-const RES_TOPICS = new Set(["locations", "devices", "channels", "access-devices", "alarm-panels", "speakers", "intercoms"]);
+const RES_TOPICS = new Set(["locations", "devices", "channels", "access-devices", "alarm-panels", "speakers", "intercoms", "io-modules"]);
 
 function resScheduleReload() {
   clearTimeout(resState.reloadTimer);

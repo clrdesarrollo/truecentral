@@ -70,9 +70,9 @@ de serie, el firmware y la dirección, y la hora de la última lectura («Estado
 leído a las…»). #boton("Actualizar") vuelve a leer el estado del panel en ese
 momento.
 
-Si el panel reporta a través de la receptora, la dirección aparece como
-«Receptora … · panel …»: es la dirección de la receptora seguida del ID del
-panel, no la del panel mismo.
+Si el panel se conecta por ISUP, en lugar de la dirección aparece «ISUP»
+seguido del ID del panel: es el panel el que llama al servidor, así que el
+sistema no usa su dirección de red.
 
 Dos avisos en rojo advierten problemas del propio equipo:
 
@@ -297,9 +297,10 @@ En *Marca / protocolo* se elige cómo se conecta el sistema con el panel:
   [Hikvision AX PRO / AX Hybrid / DS-PHA (ISAPI)], [Conexión directa: el
     servidor se conecta a la dirección IP del panel. El panel tiene que ser
     alcanzable desde el servidor.],
-  [Hikvision IP Receiver Pro (pasarela de paneles)], [El panel reporta a una
-    receptora, normalmente la que se instala junto con el servidor. Es el panel
-    el que llama, así que el servidor no necesita llegar a su dirección.],
+  [Hikvision AX PRO / AX Hybrid (ISUP, el panel se conecta al servidor)], [El
+    panel se conecta al servidor por ISUP con su ID y su clave. Sirve cuando el
+    servidor no llega a la dirección del panel: detrás de un router, por 4G o
+    en otra red.],
 )
 
 === Agregar un panel con conexión directa
@@ -346,80 +347,41 @@ panel está registrado y habilitado en el sistema. El instalador del servidor
 abre los puertos 5090 y 5091 en su firewall. El estado del servicio *Receptor
 de alarmas (SIA DC-09)* se ve en #menu("Sistema", "Servicios").
 
-=== Agregar un panel que reporta a la receptora
+=== Agregar un panel que se conecta por ISUP
 
 + Haga clic en #boton("Agregar panel").
 + Escriba el *Nombre* y elija su *Ubicación*.
-+ En *Marca / protocolo*, elija *Hikvision IP Receiver Pro (pasarela de
-  paneles)*.
-+ Deje marcada la casilla *Usar la receptora instalada en este servidor
-  (recomendado)*. La dirección, el puerto y las credenciales de la receptora
-  los pone el sistema.
-+ Escriba el *ID del panel (ISUP)* y la *Clave del panel*: los mismos que están
-  configurados en el panel para reportar a la receptora (en el AX PRO:
-  Comunicación → ISUP).
-+ Elija el *Protocolo del panel*: *Hikvision ISUP* o *Hikvision OTAP*.
-+ Haga clic en #boton("Probar conexión") y luego en #boton("Guardar").
++ En *Marca / protocolo*, elija *Hikvision AX PRO / AX Hybrid (ISUP, el panel
+  se conecta al servidor)*.
++ Escriba el *ID ISUP del panel* y la *Clave ISUP*. El recuadro de ayuda
+  muestra lo que hay que configurar en el panel (en el AX PRO: Comunicación →
+  ISUP): el protocolo ISUP 5.0, la dirección del servidor, el puerto y ese
+  mismo ID y esa misma clave.
++ Haga clic en #boton("Guardar").
 
-Al guardar, el sistema registra el panel en la receptora y lo mantiene
-registrado: si el equipo desaparece de ella, lo vuelve a registrar solo con la
-clave guardada. El instalador del servidor abre en su firewall los puertos por
-los que los paneles se registran y reportan a la receptora: 7091, 7660 a 7667 y
-8661.
+Si el panel ya está conectado, el sistema lo valida y lee sus áreas y zonas en
+ese momento. Si todavía no se conectó, se guarda igual («Panel guardado: queda
+esperando que se conecte por ISUP.») y se completa solo en su primer contacto.
+Mientras tanto, la columna *Conexión* explica qué falta: los datos que hay que
+escribir en el panel o, si el panel intentó conectarse y fue rechazado, el
+motivo (por ejemplo, que su clave no coincide).
 
-#importante[El ID y la clave solo admiten letras y números, sin símbolos ni
-  espacios, y la clave debe tener de 8 a 32 caracteres: la receptora rechaza
-  cualquier otra. Los campos no dejan escribir símbolos. Si la clave del panel
-  los tiene, cámbiela en el panel y use esa misma aquí.]
+#importante[El ID admite hasta 32 letras, números, guiones y guiones bajos; la
+  clave, hasta 32 caracteres sin espacios. Deben ser exactamente los que tiene
+  configurados el panel.]
 
-Si la casilla de la receptora no aparece, la receptora de este servidor no
-está disponible. Al editar un panel, la clave puede quedar vacía para no
-cambiarla; si el sistema no la tiene guardada, el campo lo indica con «(no
-guardada: escríbala)».
+El instalador del servidor abre en su firewall los puertos del servicio ISUP
+(7660 a 7667). Si el servidor está detrás de un router, esos puertos deben
+llegar al servidor, y la dirección que se anuncia a los equipos se ajusta en
+el servidor (vea #capitulo(<ap-servidor>)). Los equipos conectados y los
+intentos rechazados se ven en #menu("Sistema", "Conexión ISUP") (vea
+#capitulo(<cap-sistema>)).
 
-Mensajes que puede ver en la columna *Conexión* o en el detalle del panel:
-
-- «Registrado en la receptora, pero el panel no reporta: revise en el panel el
-  ID, la clave ISUP/OTAP y que llegue por red a este servidor.»
-- «El equipo no está registrado en la receptora y el sistema no tiene su clave:
-  edite el panel y escriba la clave ISUP/OTAP que tiene configurada para volver
-  a registrarlo.»
-
-=== Usar una receptora de otro equipo
-
-Si el panel reporta a una receptora Hik IP Receiver Pro instalada en otro
-equipo, desmarque *Usar la receptora instalada en este servidor* y complete:
-
-- *Dirección del IP Receiver Pro (IP o hostname)* y *Puerto HTTP*;
-- *Equipo dentro de la pasarela (uuid, serie, cuenta o ID ISUP)*;
-- *Usuario del IP Receiver Pro* y *Contraseña del IP Receiver Pro*: son las
-  credenciales de la receptora, no las del panel.
-
-#boton("Equipos de la receptora…") muestra los equipos registrados en ella:
-#boton("Usar") copia el equipo al formulario y #boton("Quitar") lo saca de la
-receptora. Debajo, *Agregar un panel a la receptora* registra uno nuevo con su
-*ID del equipo (ISUP/OTAP)*, *Clave del equipo*, *Nombre* y *Protocolo*
-(#boton("Agregar a la receptora")).
-
-#nota[En esa receptora debe quedar habilitado Automation Output → Protocol →
-  Private para que lleguen los eventos. El sistema lo deja así solo; si la
-  cuenta usada no tiene permiso para cambiarlo, habilítelo a mano en la
-  receptora.]
-
-=== Equipos de la receptora sin panel
-
-Si en la receptora de este servidor hay equipos que ningún panel del sistema
-usa (por ejemplo, un alta que quedó a medias), la página lo muestra en el
-recuadro *Equipos registrados en la receptora sin panel en el sistema*:
-
-- #boton("Adoptar") abre el formulario de un panel nuevo con ese equipo; la
-  clave es opcional porque ya está registrado.
-- #boton("Quitar") lo saca de la receptora; el panel deja de poder reportar
-  hasta que se registre de nuevo.
-
-El botón #boton("Credencial de la receptora") muestra la dirección, el usuario
-y la contraseña que el sistema generó para la receptora. Solo hace falta para
-un diagnóstico, y la consulta queda en la bitácora.
+#nota[Los paneles que en versiones anteriores reportaban a la receptora Hik IP
+  Receiver Pro pasan solos a este tipo al actualizar, con su mismo ID y su
+  misma clave, y siguen conectándose sin tocarlos. Si de alguno no se pudo
+  deducir el ID, queda con el monitoreo desactivado y un aviso: edítelo y
+  escriba su ID ISUP.]
 
 === Editar, pausar y eliminar un panel
 
@@ -427,9 +389,7 @@ un diagnóstico, y la consulta queda en la bitácora.
   vacías para no cambiarlas.
 - Desmarcar *Monitoreo activo* pausa el panel: el sistema deja de leerlo y de
   recibir sus eventos, y la tabla lo marca *pausado*.
-- #boton("Eliminar") pide confirmación. El historial de eventos se conserva. Si
-  el panel reportaba a la receptora de este servidor, también se quita de
-  ella.
+- #boton("Eliminar") pide confirmación. El historial de eventos se conserva.
 
 #nota[Los paneles de alarma son un módulo de la licencia, que además fija
   cuántos paneles con monitoreo activo admite. Si la licencia no lo incluye o

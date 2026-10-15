@@ -9,6 +9,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Server.Services.Isup;
 using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
@@ -33,7 +34,12 @@ public static class DevicesApi
         d.AnprEnabled, enabledChannelCount, warning,
         // Mismo criterio que ToDto(Channel): sin el equipo en línea no hay señal.
         d.Status == DeviceStatus.Online ? disabledWithSignal : 0,
-        d.LocationId, LocationPaths.Of(d.LocationId));
+        d.LocationId, LocationPaths.Of(d.LocationId), d.IsupDeviceId, d.IsupKeyCiphertext is { Length: > 0 });
+
+    /// <summary>Dónde está el equipo, para textos de bitácora: dirección y puerto, o su ID ISUP.</summary>
+    private static string WhereOf(Device d) => d.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : $"{d.Host}:{d.SdkPort}";
+
+    private static bool UsesIsup(DriverRegistry drivers, string driverKey) => drivers.Find(driverKey)?.UsesIsup == true;
 
     /// <summary>DTO de un equipo con sus canales ya cargados (respuestas de alta/edición/revalidación).</summary>
     private static DeviceDto ToDto(Device d, int trimmedByQuota = 0) =>
@@ -53,18 +59,22 @@ public static class DevicesApi
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
 
-    private static string? ValidateWrite(DeviceWriteDto request, DriverRegistry drivers)
+    /// <param name="isupKeyStored">El equipo ya tiene clave ISUP guardada (en edición, dejarla vacía la conserva).</param>
+    private static string? ValidateWrite(DeviceWriteDto request, DriverRegistry drivers, bool isupKeyStored = false)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
             return "El nombre es obligatorio (máximo 128 caracteres).";
+        if (drivers.Find(request.DriverKey) is not { } factory)
+            return $"Driver desconocido: '{request.DriverKey}'.";
+        // Por ISUP el equipo se conecta solo: no hay dirección, puertos ni credenciales que pedir, sino su ID y su clave.
+        if (factory.UsesIsup)
+            return IsupEquipmentRules.Validate(request.IsupDeviceId, request.IsupKey, isupKeyStored);
         if (string.IsNullOrWhiteSpace(request.Host))
             return "La dirección (IP o hostname) es obligatoria.";
         if (request.SdkPort is < 1 or > 65535 || request.RtspPort is < 1 or > 65535)
             return "Los puertos deben estar entre 1 y 65535.";
         if (string.IsNullOrWhiteSpace(request.Username))
             return "El usuario del dispositivo es obligatorio.";
-        if (drivers.Find(request.DriverKey) is null)
-            return $"Driver desconocido: '{request.DriverKey}'.";
         return null;
     }
 
@@ -88,8 +98,12 @@ public static class DevicesApi
         }
     }
 
-    /// <summary>Aplica los datos del sondeo al dispositivo y sincroniza sus canales.</summary>
-    private static void ApplyProbe(Device device, DeviceProbeInfo info)
+    /// <summary>
+    /// Aplica los datos del sondeo al dispositivo y sincroniza sus canales. Con <paramref name="removeMissing"/> en false no se
+    /// borran los canales que el sondeo no trajo (el que se hace solo al reconectarse un equipo ISUP: por 4G una lista que no
+    /// alcanzó a responder no debe llevarse canales con sus vistas y permisos).
+    /// </summary>
+    internal static void ApplyProbe(Device device, DeviceProbeInfo info, bool removeMissing = true)
     {
         // El tipo lo decide el equipo, no el usuario: se recalcula en cada
         // sondeo según los canales que reporta.
@@ -111,11 +125,21 @@ public static class DevicesApi
         // nombre reportado por el equipo; los que ya no existen se eliminan.
         var byNumber = device.Channels.ToDictionary(c => c.ChannelNumber);
         var seen = new HashSet<int>();
+        var matched = new HashSet<Channel>();
         foreach (var probed in info.Channels)
         {
             seen.Add(probed.ChannelNumber);
-            if (byNumber.TryGetValue(probed.ChannelNumber, out var existing))
+            // Si el equipo pasó de IP a ISUP (o al revés) la numeración interna puede cambiar (en un NVR, el SDK numera las
+            // cámaras IP desde 33 e ISAPI desde 1): el canal se reconoce entonces por su número RTSP y conserva su identidad
+            // (vistas, permisos, automatizaciones).
+            var existing = byNumber.GetValueOrDefault(probed.ChannelNumber);
+            if (existing is null || matched.Contains(existing))
+                existing = device.Channels.FirstOrDefault(c => c.RtspChannel == probed.RtspChannel && !matched.Contains(c) &&
+                                                               !info.Channels.Any(o => o.ChannelNumber == c.ChannelNumber));
+            if (existing is not null)
             {
+                matched.Add(existing);
+                existing.ChannelNumber = probed.ChannelNumber;
                 existing.RtspChannel = probed.RtspChannel;
                 existing.IsOnline = probed.IsOnline;
                 existing.RtspMainUrl = probed.MainStreamUrl;
@@ -145,7 +169,7 @@ public static class DevicesApi
                 });
             }
         }
-        device.Channels.RemoveAll(c => !seen.Contains(c.ChannelNumber));
+        if (removeMissing) device.Channels.RemoveAll(c => !seen.Contains(c.ChannelNumber));
     }
 
     /// <summary>
@@ -155,7 +179,7 @@ public static class DevicesApi
     /// (<see cref="Channel.DisabledByLicense"/>) para habilitarse solos cuando
     /// la licencia tenga cupo. El equipo se agrega igual. Devuelve cuántos.
     /// </summary>
-    private static async Task<int> EnforceChannelQuotaAsync(LicenseService license, VmsDbContext db, Device device, CancellationToken ct)
+    internal static async Task<int> EnforceChannelQuotaAsync(LicenseService license, VmsDbContext db, Device device, CancellationToken ct)
     {
         int quota = license.IsModuleEnabled(LicenseFeatures.ModuleVideo) ? license.Quota(LicenseFeatures.VideoChannels) : 0;
         int elsewhere = await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != device.Id, ct);
@@ -251,7 +275,7 @@ public static class DevicesApi
             return Results.Ok(drivers.All.Select(f => new DriverDto(
                 f.DriverKey, f.DisplayName,
                 f.Capabilities.SupportsSnapshot, f.Capabilities.SupportsDiscovery,
-                f.Capabilities.DefaultSdkPort, f.Capabilities.DefaultRtspPort)));
+                f.Capabilities.DefaultSdkPort, f.Capabilities.DefaultRtspPort, f.UsesIsup)));
         });
 
         // ------------------------------------------------------------------
@@ -278,7 +302,8 @@ public static class DevicesApi
 
         app.MapPost("/api/devices", async (HttpContext ctx, DeviceWriteDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, AuditService audit, LicenseService license, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, AuditService audit, LicenseService license, IsupService isup, IsupHostManager isupHost,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -292,38 +317,60 @@ public static class DevicesApi
                     $"No hay canales de video disponibles en la licencia ({budget.InUse} de {budget.Quota} en uso). " +
                     "Amplíe la licencia o deshabilite canales en otros equipos antes de agregar este.",
                     "device", request.Name?.Trim());
-            if (string.IsNullOrEmpty(request.Password))
-                return Error("La contraseña del dispositivo es obligatoria.");
-            if (await db.Devices.AnyAsync(d => d.Host == request.Host && d.SdkPort == request.SdkPort, ct))
-                return Error("Ya existe un dispositivo con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            bool viaIsup = UsesIsup(drivers, request.DriverKey);
+            string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
+            if (isupId is not null)
+            {
+                if (await db.Devices.AnyAsync(d => d.IsupDeviceId == isupId, ct))
+                    return Error($"Ya existe un equipo de video con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, request.IsupKey, IsupEquipmentRules.Video, null, ct) is { } conflict)
+                    return Error(conflict, StatusCodes.Status409Conflict);
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(request.Password))
+                    return Error("La contraseña del dispositivo es obligatoria.");
+                if (await db.Devices.AnyAsync(d => d.Host == request.Host && d.SdkPort == request.SdkPort, ct))
+                    return Error("Ya existe un dispositivo con esa dirección y puerto.", StatusCodes.Status409Conflict);
+            }
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
-
-            // Validación real contra el equipo: login + datos + canales.
-            var conn = new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, request.Password);
-            var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
-            if (info is null)
-            {
-                await audit.LogAsync(ctx, "devices", "device-created",
-                    targetType: "device", targetName: request.Name?.Trim(),
-                    detail: $"Alta de dispositivo rechazada por el equipo {request.Host}:{request.SdkPort}: {probeError}",
-                    success: false);
-                return Error(probeError!);
-            }
 
             var device = new Device
             {
                 Name = request.Name.Trim(),
                 DriverKey = request.DriverKey,
-                Host = request.Host.Trim(),
-                SdkPort = request.SdkPort,
-                RtspPort = request.RtspPort,
-                Username = request.Username,
-                PasswordCiphertext = protector.Protect(request.Password),
+                Host = viaIsup ? "" : request.Host.Trim(),
+                SdkPort = viaIsup ? 0 : request.SdkPort,
+                RtspPort = viaIsup ? 0 : request.RtspPort,
+                Username = viaIsup ? "" : request.Username,
+                PasswordCiphertext = viaIsup ? [] : protector.Protect(request.Password!),
+                IsupDeviceId = isupId,
+                IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(request.IsupKey, protector) : null,
                 LocationId = locationId,
             };
-            ApplyProbe(device, info);
-            if (ApplyChannelSelection(device, request.EnabledChannels, budget) is { } selectionError)
+
+            // Un equipo ISUP solo se conecta una vez que el servidor lo conoce: se guarda sin canales y se completa
+            // (datos y canales) en su primer contacto. Los demás se validan contra el equipo real: login + datos + canales.
+            string? waiting = isupId is not null && !isup.IsOnline(isupId)
+                ? await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct)
+                : null;
+            if (waiting is null)
+            {
+                var conn = viaIsup ? DeviceConnections.Of(device, protector)
+                    : new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, request.Password!);
+                var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+                if (info is null)
+                {
+                    await audit.LogAsync(ctx, "devices", "device-created",
+                        targetType: "device", targetName: request.Name?.Trim(),
+                        detail: $"Alta de dispositivo rechazada por el equipo {WhereOf(device)}: {probeError}",
+                        success: false);
+                    return Error(probeError!);
+                }
+                ApplyProbe(device, info);
+            }
+            if (waiting is null && ApplyChannelSelection(device, request.EnabledChannels, budget) is { } selectionError)
             {
                 await audit.LogAsync(ctx, "devices", "device-created",
                     targetType: "device", targetName: device.Name,
@@ -334,30 +381,45 @@ public static class DevicesApi
             }
             db.Devices.Add(device);
             await db.SaveChangesAsync(ct);
+            if (viaIsup) isup.InvalidateDirectory();
 
             await audit.LogAsync(ctx, "devices", "device-created",
                 targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
-                detail: $"Agregó el dispositivo '{device.Name}' ({device.DriverKey}, {device.Host}:{device.SdkPort}, " +
-                        $"{device.Channels.Count} canales, {device.Channels.Count(c => c.Enabled)} habilitados" +
+                detail: $"Agregó el dispositivo '{device.Name}' ({device.DriverKey}, {WhereOf(device)}, " +
+                        (waiting is null
+                            ? $"{device.Channels.Count} canales, {device.Channels.Count(c => c.Enabled)} habilitados"
+                            : "a la espera de que se conecte por ISUP para leer sus canales") +
                         (device.LocationId is null ? "" : $", en {EquipmentLocation.Describe(device.LocationId)}") + ").",
-                data: new { device.Host, device.SdkPort, device.RtspPort, device.DriverKey, device.Model, device.SerialNumber, device.LocationId });
+                data: new { device.Host, device.SdkPort, device.RtspPort, device.DriverKey, device.IsupDeviceId, device.Model, device.SerialNumber, device.LocationId });
             EquipmentLocation.Changed(ctx);
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
-            return Results.Ok(ToDto(device));
+            return Results.Ok(waiting is null ? ToDto(device)
+                : ToDto(device) with { Warning = "Guardado. Sus canales se leen cuando se conecte. " + waiting });
         });
 
         app.MapPut("/api/devices/{id:int}", async (HttpContext ctx, int id, DeviceWriteDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
             Services.MediaMtxManager mtx, Services.AnprService anpr, AuditService audit, LicenseService license,
-            CancellationToken ct) =>
+            IsupService isup, IsupHostManager isupHost, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
-            if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
 
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
-            if (await db.Devices.AnyAsync(d => d.Id != id && d.Host == request.Host && d.SdkPort == request.SdkPort, ct))
+            if (ValidateWrite(request, drivers, device.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
+            bool viaIsup = UsesIsup(drivers, request.DriverKey);
+            string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
+            string? isupKey = !viaIsup ? null
+                : IsupEquipmentRules.EffectiveKey(request.IsupKey, device.IsupKeyCiphertext, protector);
+            if (isupId is not null)
+            {
+                if (await db.Devices.AnyAsync(d => d.Id != id && d.IsupDeviceId == isupId, ct))
+                    return Error($"Ya existe otro equipo de video con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
+                if (await IsupEquipmentRules.KeyConflictAsync(db, protector, isupId, isupKey, IsupEquipmentRules.Video, id, ct) is { } conflict)
+                    return Error(conflict, StatusCodes.Status409Conflict);
+            }
+            else if (await db.Devices.AnyAsync(d => d.Id != id && d.Host == request.Host && d.SdkPort == request.SdkPort, ct))
                 return Error("Ya existe otro dispositivo con esa dirección y puerto.", StatusCodes.Status409Conflict);
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, device.LocationId, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
@@ -365,36 +427,56 @@ public static class DevicesApi
             int? previousLocation = device.LocationId;
             device.LocationId = locationId;
 
-            string password = string.IsNullOrEmpty(request.Password)
-                ? protector.Unprotect(device.PasswordCiphertext)
-                : request.Password;
+            string password = viaIsup ? ""
+                : !string.IsNullOrEmpty(request.Password) ? request.Password
+                : device.PasswordCiphertext.Length > 0 ? protector.Unprotect(device.PasswordCiphertext)
+                : "";
+            if (!viaIsup && password.Length == 0)
+                return Error("La contraseña del dispositivo es obligatoria.");
 
             // Si cambió algo que afecta la conexión, se revalida contra el equipo.
-            bool connectionChanged =
-                device.Host != request.Host.Trim() ||
-                device.SdkPort != request.SdkPort ||
-                device.Username != request.Username ||
-                device.DriverKey != request.DriverKey ||
-                !string.IsNullOrEmpty(request.Password);
+            bool connectionChanged = device.DriverKey != request.DriverKey || (viaIsup
+                ? device.IsupDeviceId != isupId || !string.IsNullOrEmpty(request.IsupKey)
+                : device.IsupDeviceId is not null ||
+                  device.Host != request.Host.Trim() ||
+                  device.SdkPort != request.SdkPort ||
+                  device.Username != request.Username ||
+                  !string.IsNullOrEmpty(request.Password));
             int trimmed = 0;
+            string? waiting = null;
             if (connectionChanged)
             {
-                var conn = new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, password);
-                var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
-                if (info is null)
-                    return Error(probeError!);
-                ApplyProbe(device, info);
-                trimmed = await EnforceChannelQuotaAsync(license, db, device, ct);
+                if (viaIsup && !isup.IsOnline(isupId!))
+                {
+                    // Todavía no se conecta con estos datos: conserva sus canales y se completa en su próximo contacto
+                    // (sin modelo = pendiente de revalidar).
+                    waiting = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId!, "equipo", ct);
+                    device.Model = null;
+                    device.Status = DeviceStatus.Offline;
+                }
+                // Con el mismo ID ISUP y conectado, cambiar solo la clave no requiere volver a leer el equipo.
+                else if (!viaIsup || device.IsupDeviceId != isupId || device.DriverKey != request.DriverKey)
+                {
+                    var conn = new DeviceConnectionInfo(viaIsup ? "" : request.Host.Trim(), viaIsup ? 0 : request.SdkPort,
+                        viaIsup ? "" : request.Username, password, isupId);
+                    var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+                    if (info is null)
+                        return Error(probeError!);
+                    ApplyProbe(device, info);
+                    trimmed = await EnforceChannelQuotaAsync(license, db, device, ct);
+                }
             }
 
             var changes = new List<string>();
             if (device.Name != request.Name.Trim()) changes.Add($"nombre '{device.Name}' → '{request.Name.Trim()}'");
-            if (device.Host != request.Host.Trim() || device.SdkPort != request.SdkPort)
-                changes.Add($"dirección {device.Host}:{device.SdkPort} → {request.Host.Trim()}:{request.SdkPort}");
-            if (device.RtspPort != request.RtspPort) changes.Add($"puerto RTSP {device.RtspPort} → {request.RtspPort}");
-            if (device.Username != request.Username) changes.Add($"usuario del equipo '{device.Username}' → '{request.Username}'");
+            string whereBefore = WhereOf(device), whereAfter = viaIsup ? $"ISUP {isupId}" : $"{request.Host.Trim()}:{request.SdkPort}";
+            if (whereBefore != whereAfter) changes.Add($"conexión {whereBefore} → {whereAfter}");
+            if (!viaIsup && device.RtspPort != request.RtspPort) changes.Add($"puerto RTSP {device.RtspPort} → {request.RtspPort}");
+            if (!viaIsup && device.Username != request.Username) changes.Add($"usuario del equipo '{device.Username}' → '{request.Username}'");
             if (device.DriverKey != request.DriverKey) changes.Add($"driver {device.DriverKey} → {request.DriverKey}");
-            if (!string.IsNullOrEmpty(request.Password)) changes.Add("contraseña del equipo cambiada");
+            if (!viaIsup && !string.IsNullOrEmpty(request.Password)) changes.Add("contraseña del equipo cambiada");
+            if (viaIsup && !string.IsNullOrEmpty(request.IsupKey)) changes.Add("clave ISUP cambiada");
+            bool isupChanged = device.IsupDeviceId != isupId || (viaIsup && !string.IsNullOrEmpty(request.IsupKey));
             if (locationId != previousLocation)
                 changes.Add(EquipmentLocation.Change(previousLocation, locationId));
             // Los canales que estaban con el equipo lo siguen; los ubicados aparte se quedan.
@@ -402,13 +484,16 @@ public static class DevicesApi
 
             device.Name = request.Name.Trim();
             device.DriverKey = request.DriverKey;
-            device.Host = request.Host.Trim();
-            device.SdkPort = request.SdkPort;
-            device.RtspPort = request.RtspPort;
-            device.Username = request.Username;
-            device.PasswordCiphertext = protector.Protect(password);
+            device.Host = viaIsup ? "" : request.Host.Trim();
+            device.SdkPort = viaIsup ? 0 : request.SdkPort;
+            device.RtspPort = viaIsup ? 0 : request.RtspPort;
+            device.Username = viaIsup ? "" : request.Username;
+            device.PasswordCiphertext = viaIsup ? [] : protector.Protect(password);
+            device.IsupDeviceId = isupId;
+            device.IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(isupKey, protector) : null;
             device.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
+            if (isupChanged) isup.InvalidateDirectory();
 
             await audit.LogAsync(ctx, "devices", "device-updated",
                 targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
@@ -429,12 +514,13 @@ public static class DevicesApi
 
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
-            return Results.Ok(ToDto(device, trimmed));
+            return Results.Ok(waiting is null ? ToDto(device, trimmed)
+                : ToDto(device, trimmed) with { Warning = "Guardado. Se revalida cuando se conecte con estos datos. " + waiting });
         });
 
         app.MapDelete("/api/devices/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             IHubContext<VmsHub> hub, Services.MediaMtxManager mtx, Services.WallService walls,
-            Services.AnprService anpr, AuditService audit, CancellationToken ct) =>
+            Services.AnprService anpr, AuditService audit, IsupService isup, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var device = await db.Devices.FindAsync([id], ct);
@@ -452,9 +538,10 @@ public static class DevicesApi
 
             db.Devices.Remove(device); // canales caen por cascada
             await db.SaveChangesAsync(ct);
+            if (device.IsupDeviceId is not null) isup.InvalidateDirectory();
             await audit.LogAsync(ctx, "devices", "device-deleted",
                 targetType: "device", targetId: id.ToString(), targetName: device.Name,
-                detail: $"Eliminó el dispositivo '{device.Name}' ({device.Host}:{device.SdkPort}) y todos sus canales.");
+                detail: $"Eliminó el dispositivo '{device.Name}' ({WhereOf(device)}) y todos sus canales.");
             EquipmentLocation.Changed(ctx);
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
@@ -467,14 +554,17 @@ public static class DevicesApi
         // ------------------------------------------------------------------
         app.MapPost("/api/devices/{id:int}/revalidate", async (HttpContext ctx, int id, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub,
-            Services.MediaMtxManager mtx, AuditService audit, LicenseService license, CancellationToken ct) =>
+            Services.MediaMtxManager mtx, AuditService audit, LicenseService license, IsupService isup, IsupHostManager isupHost,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
+            // Por ISUP solo se puede revalidar con el equipo conectado: si no, se explica qué configurar en él.
+            if (device.IsupDeviceId is { } isupId && !isup.IsOnline(isupId))
+                return Error(await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct));
 
-            var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                protector.Unprotect(device.PasswordCiphertext));
+            var conn = DeviceConnections.Of(device, protector);
             var (info, probeError) = await ProbeAsync(drivers, device.DriverKey, conn, ct);
             if (info is null)
             {
@@ -503,25 +593,49 @@ public static class DevicesApi
         // ------------------------------------------------------------------
         app.MapPost("/api/devices/probe", async (HttpContext ctx, DeviceWriteDto request, VmsDbContext db,
             DriverRegistry drivers, CredentialProtector protector, AuditService audit, LicenseService license,
-            int? deviceId, CancellationToken ct) =>
+            IsupService isup, IsupHostManager isupHost, int? deviceId, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
-            if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
+            var existing = deviceId is int existingId ? await db.Devices.FindAsync([existingId], ct) : null;
+            if (ValidateWrite(request, drivers, existing?.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
 
-            string? password = request.Password;
-            if (string.IsNullOrEmpty(password) && deviceId is int existingId &&
-                await db.Devices.FindAsync([existingId], ct) is { } existing)
-                password = protector.Unprotect(existing.PasswordCiphertext);
-            if (string.IsNullOrEmpty(password))
-                return Error("La contraseña del dispositivo es obligatoria.");
+            DeviceConnectionInfo conn;
+            string where;
+            if (UsesIsup(drivers, request.DriverKey))
+            {
+                // Por ISUP no hay nada que "probar" desde aquí: el equipo tiene que estar conectado.
+                string isupId = request.IsupDeviceId!.Trim();
+                where = $"ISUP {isupId}";
+                if (!isup.IsOnline(isupId))
+                {
+                    var status = await isup.GetHostStatusAsync(ct);
+                    string message = status?.Rejections.Any(r => r.DeviceId == isupId && r.Reason.Contains("no está dado de alta", StringComparison.Ordinal)) == true
+                        ? $"El equipo ya está intentando conectarse por ISUP con el ID {isupId}: guárdelo y el servidor lo aceptará (sus canales se leen al conectarse)."
+                        : await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct);
+                    await audit.LogAsync(ctx, "devices", "device-probed",
+                        targetType: "device", targetName: request.Name?.Trim(),
+                        detail: $"Probó la conexión con {where} ({request.DriverKey}): no está conectado.", success: false);
+                    return Results.Ok(new DeviceProbeResultDto(false, message, null, null, null, null, 0, 0, []));
+                }
+                conn = new DeviceConnectionInfo("", 0, "", "", isupId);
+            }
+            else
+            {
+                string? password = request.Password;
+                if (string.IsNullOrEmpty(password) && existing is { PasswordCiphertext.Length: > 0 })
+                    password = protector.Unprotect(existing.PasswordCiphertext);
+                if (string.IsNullOrEmpty(password))
+                    return Error("La contraseña del dispositivo es obligatoria.");
+                conn = new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, password);
+                where = $"{request.Host.Trim()}:{request.SdkPort}";
+            }
 
-            var conn = new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, password);
             var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
             await audit.LogAsync(ctx, "devices", "device-probed",
                 targetType: "device", targetName: request.Name?.Trim(),
                 detail: info is null
-                    ? $"Probó la conexión con {request.Host.Trim()}:{request.SdkPort} ({request.DriverKey}): {probeError}"
-                    : $"Probó la conexión con {request.Host.Trim()}:{request.SdkPort} ({request.DriverKey}): correcta.",
+                    ? $"Probó la conexión con {where} ({request.DriverKey}): {probeError}"
+                    : $"Probó la conexión con {where} ({request.DriverKey}): correcta.",
                 success: info is not null);
             if (info is null)
                 return Results.Ok(new DeviceProbeResultDto(false, probeError, null, null, null, null, 0, 0, []));
@@ -676,8 +790,7 @@ public static class DevicesApi
             if (factory is null)
                 return Error("Driver no disponible.");
 
-            var conn = new DeviceConnectionInfo(channel.Device.Host, channel.Device.SdkPort,
-                channel.Device.Username, protector.Unprotect(channel.Device.PasswordCiphertext));
+            var conn = DeviceConnections.Of(channel.Device, protector);
             bool ok;
             try
             {
@@ -725,8 +838,7 @@ public static class DevicesApi
             if (factory is null)
                 return Error("Driver no disponible.");
 
-            var conn = new DeviceConnectionInfo(channel.Device.Host, channel.Device.SdkPort,
-                channel.Device.Username, protector.Unprotect(channel.Device.PasswordCiphertext));
+            var conn = DeviceConnections.Of(channel.Device, protector);
             bool ok;
             try
             {
@@ -789,8 +901,7 @@ public static class DevicesApi
             byte[]? jpeg;
             try
             {
-                var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                    protector.Unprotect(device.PasswordCiphertext));
+                var conn = DeviceConnections.Of(device, protector);
                 jpeg = await factory.Create().CaptureSnapshotAsync(conn, channelNumber, ct);
             }
             finally

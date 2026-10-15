@@ -302,20 +302,14 @@ public sealed partial class AlarmPanelItem : ObservableObject
     /// <summary>Dirección de red tal cual, sin decir de quién es.</summary>
     private string Address => Dto.UseHttps ? $"https://{Dto.Host}:{Dto.Port}" : $"{Dto.Host}:{Dto.Port}";
 
-    /// <summary>El panel llega a través de una receptora (pasarela) y no directo.</summary>
-    public bool ViaReceiver => !string.IsNullOrEmpty(Dto.DeviceId);
+    /// <summary>El panel se conecta al servidor por ISUP (no se lo alcanza por IP).</summary>
+    public bool ViaIsup => !string.IsNullOrEmpty(Dto.IsupDeviceId);
 
-    /// <summary>
-    /// Dirección que se muestra. Con una receptora de por medio, ESA dirección
-    /// es la de la receptora, no la del panel: el panel reporta hacia ella y
-    /// el sistema nunca ve su IP. Se dice con todas las letras para que nadie
-    /// la confunda con la del equipo.
-    /// </summary>
-    public string Host => ViaReceiver ? $"Receptora {Address}  ·  panel {Dto.DeviceId}" : Address;
+    /// <summary>Dirección que se muestra: la del panel, o su ID ISUP si es el panel el que se conecta al servidor.</summary>
+    public string Host => ViaIsup ? $"ISUP {Dto.IsupDeviceId}" : Address;
 
-    public string HostTooltip => ViaReceiver
-        ? $"El panel «{Dto.DeviceId}» reporta a la receptora {Address}. Esa es la dirección de la receptora: " +
-          "la del panel no la conoce el sistema, porque es el panel el que llama."
+    public string HostTooltip => ViaIsup
+        ? $"El panel se conecta al servidor por ISUP con el ID «{Dto.IsupDeviceId}»: el sistema no usa su IP."
         : $"Dirección del panel: {Address}";
     public string Model => Dto.Model ?? "—";
     public string Detail => string.Join("  ·  ", new[] { Dto.Model, Dto.SerialNumber, Dto.FirmwareVersion }.Where(s => !string.IsNullOrWhiteSpace(s))!);
@@ -581,7 +575,7 @@ public sealed class AlarmEventItem(AlarmEventDto dto)
     /// <summary>
     /// Quién originó el evento y qué significa el código con que lo reportó el
     /// panel, ya interpretado: los paneles Hikvision ponen como "usuario" el
-    /// canal por el que llegó la orden (ISUP/OTAP = receptora, ISAPI = VMS
+    /// canal por el que llegó la orden (ISUP/OTAP = plataforma, ISAPI = VMS
     /// directo, Hik-Connect = app) y el código es Contact-ID (calificador +
     /// evento) o SIA (E/R + evento).
     /// </summary>
@@ -604,7 +598,7 @@ public sealed class AlarmEventItem(AlarmEventDto dto)
     private static string DescribePanelUser(string? user) => user?.Trim().ToUpperInvariant() switch
     {
         null or "" => "Informado por el panel",
-        "ISUP" or "OTAP" or "EHOME" => $"Orden remota por {user!.Trim()} (receptora / VMS)",
+        "ISUP" or "OTAP" or "EHOME" => $"Orden remota por {user!.Trim()} (VMS u otra plataforma)",
         "ISAPI" => "Orden remota por ISAPI (VMS)",
         "HIK-CONNECT" or "HIKCONNECT" or "CLOUD" => "Orden desde la app (Hik-Connect)",
         "KEYPAD" or "KEYFOB" => $"Orden desde {user!.Trim().ToLowerInvariant()} (teclado/llavero)",

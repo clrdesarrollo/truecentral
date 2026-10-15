@@ -142,6 +142,14 @@ public static class ResourceHistory
                                          || (a.TargetType == "resource" && a.TargetId == key));
                 break;
             }
+            case ResourceKind.IoModule:
+            {
+                if (!await db.IoModules.AnyAsync(m => m.Id == id, ct)) return null;
+                string moduleId = id.ToString();
+                audit = audit.Where(a => (a.TargetType == "io-module" && a.TargetId == moduleId)
+                                         || (a.TargetType == "resource" && a.TargetId == key));
+                break;
+            }
             case ResourceKind.Intercom:
             {
                 if (!await db.Intercoms.AnyAsync(i => i.Id == id, ct)) return null;

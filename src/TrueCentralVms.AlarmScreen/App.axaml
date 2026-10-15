@@ -1,0 +1,54 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TrueCentralVms.AlarmScreen.App"
+             RequestedThemeVariant="Dark">
+
+  <Application.Styles>
+    <FluentTheme />
+
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="#1976D2" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Padding" Value="22,14" />
+      <Setter Property="CornerRadius" Value="6" />
+      <!-- El rótulo va centrado. Por omisión el contenido de un botón se alinea a la izquierda, y
+           como estos van estirados a todo el ancho del panel, el texto quedaba pegado al borde
+           izquierdo de una barra ancha: no se leía como un botón sino como un título. -->
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.primary:disabled">
+      <Setter Property="Background" Value="#37474F" />
+      <Setter Property="Foreground" Value="#90A4AE" />
+    </Style>
+    <Style Selector="Button.ghost">
+      <Setter Property="Background" Value="#263238" />
+      <Setter Property="Foreground" Value="#ECEFF1" />
+      <Setter Property="Padding" Value="18,12" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <!-- La X del detalle: discreta, para que no compita con el botón de acuse -->
+    <Style Selector="Button.cerrar">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="#78909C" />
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="Padding" Value="12,6" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button.cerrar:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#263238" />
+      <Setter Property="TextElement.Foreground" Value="#ECEFF1" />
+    </Style>
+    <!-- Mientras la alarma siga pendiente la X se ve apagada: está, pero no se puede usar -->
+    <Style Selector="Button.cerrar:disabled">
+      <Setter Property="Foreground" Value="#37474F" />
+    </Style>
+    <Style Selector="Button.cerrar:disabled /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="TextElement.Foreground" Value="#37474F" />
+    </Style>
+  </Application.Styles>
+
+</Application>

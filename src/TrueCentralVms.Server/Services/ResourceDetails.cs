@@ -48,6 +48,7 @@ public static class ResourceDetails
             ResourceKind.Fence => await FenceAsync(db, id, ct),
             ResourceKind.Speaker => await SpeakerAsync(db, id, ct),
             ResourceKind.Intercom => await IntercomAsync(db, id, ct),
+            ResourceKind.IoModule => await IoModuleAsync(db, id, ct),
             _ => null,
         };
         if (part is null) return null;
@@ -115,7 +116,7 @@ public static class ResourceDetails
         if (d.AnprEnabled) Add(facts, "Patentes (ANPR)", "El equipo es fuente de patentes");
         return new Part(
             new ResourceSourceDto("devices", d.Id, d.Name, d.Model, d.SerialNumber, d.FirmwareVersion,
-                Address(d.Host, d.SdkPort), OnlineText(d.Status), d.LastSeenAt),
+                d.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : Address(d.Host, d.SdkPort), OnlineText(d.Status), d.LastSeenAt),
             facts, CanRename: true, RenameNote: null, FixedCameras: [],
             SnapshotPath: $"/api/devices/{d.Id}/snapshot/{c.ChannelNumber}");
     }
@@ -167,7 +168,7 @@ public static class ResourceDetails
 
     private static ResourceSourceDto PanelSource(AlarmPanel p) =>
         new("alarm-panels", p.Id, p.Name, p.Model, p.SerialNumber, p.FirmwareVersion,
-            Address(p.Host, p.Port, p.UseHttps) + (p.GatewayDeviceId is { } g ? $" · equipo {g} en la receptora" : ""),
+            p.IsupDeviceId is { } isupId ? $"ISUP {isupId} (el panel se conecta al servidor)" : Address(p.Host, p.Port, p.UseHttps),
             OnlineText(p.Status, p.Enabled), p.LastSeenAt);
 
     private static async Task<Part?> PartitionAsync(VmsDbContext db, int id, CancellationToken ct)
@@ -281,5 +282,24 @@ public static class ResourceDetails
             new ResourceSourceDto("intercoms", i.Id, i.Name, i.Model, i.SerialNumber, i.FirmwareVersion,
                 Address(i.Host, i.Port), OnlineText(i.Status, i.Enabled), i.LastSeenAt),
             facts, CanRename: true, RenameNote: null, FixedCameras: fixedCameras);
+    }
+
+    private static async Task<Part?> IoModuleAsync(VmsDbContext db, int id, CancellationToken ct)
+    {
+        var m = await db.IoModules.AsNoTracking().Include(x => x.Points).FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (m is null) return null;
+        var facts = new List<ResourceFactDto>();
+        static string Names(IEnumerable<IoPoint> points) =>
+            string.Join(", ", points.OrderBy(p => p.Number).Select(p => p.Name == p.Code ? p.Code : $"{p.Code} {p.Name}"));
+        var inputs = m.Points.Where(p => p.Kind == IoPointKind.Input).ToList();
+        var outputs = m.Points.Where(p => p.Kind == IoPointKind.Output).ToList();
+        Add(facts, "Entradas", inputs.Count == 0 ? "Ninguna" : Names(inputs));
+        Add(facts, "Salidas (relés)", outputs.Count == 0 ? "Ninguna" : Names(outputs));
+        if (m.ReportedModel is { } reported && reported != m.Model)
+            Add(facts, "Modelo que informa el equipo", reported);
+        return new Part(
+            new ResourceSourceDto("io-modules", m.Id, m.Name, m.Model, null, null,
+                Address(m.Host, m.Port), OnlineText(m.Status, m.Enabled), m.LastSeenAt),
+            facts, CanRename: true, RenameNote: null, FixedCameras: []);
     }
 }

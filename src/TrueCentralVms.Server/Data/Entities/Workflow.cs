@@ -178,11 +178,25 @@ public class WorkflowAlert
     /// <summary>Nombres de los destinatarios, para el registro ("admin, guardia"); null = todos.</summary>
     public string? Recipients { get; set; }
 
+    /// <summary>Se muestra en la ventana de alarma del cliente de escritorio (lo de siempre).</summary>
+    public bool ShowPopup { get; set; } = true;
+    /// <summary>Se muestra en las pantallas de alarma de las casetas.</summary>
+    public bool ShowOnScreens { get; set; }
+    /// <summary>
+    /// Pantallas a las que va, como ",1,4," (para buscar ",id,"); null = a
+    /// todas las pantallas aprobadas. Solo cuenta con <see cref="ShowOnScreens"/>.
+    /// </summary>
+    public string? ScreenIds { get; set; }
+    /// <summary>Nombres de esas pantallas al momento del aviso, para el registro; null = todas.</summary>
+    public string? Screens { get; set; }
+
     public DateTime? AcknowledgedAt { get; set; }
     public int? AcknowledgedByUserId { get; set; }
     public string? AcknowledgedBy { get; set; }
-    /// <summary>"client" (escritorio) o "web" (panel).</summary>
+    /// <summary>"client" (escritorio), "web" (panel) o "screen" (pantalla de alarma).</summary>
     public string? AcknowledgedFrom { get; set; }
+    /// <summary>Pantalla que la marcó como vista (si se confirmó en una pantalla).</summary>
+    public int? AcknowledgedScreenId { get; set; }
     public string? AcknowledgedIp { get; set; }
 }
 

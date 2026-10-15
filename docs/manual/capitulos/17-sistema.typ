@@ -121,6 +121,7 @@ los botones. La tabla se actualiza cada 3 segundos.
   table.header[Servicio][Qué hace],
   [Base de datos (PostgreSQL embebido)], [Guarda usuarios, dispositivos, eventos y la bitácora. Es esencial: solo se puede reiniciar.],
   [Media server (MediaMTX)], [Entrega el video: toma una sola conexión por cámara y la comparte entre todos los que la miran.],
+  [Conexión ISUP], [Recibe a los equipos Hikvision que se conectan al servidor por ISUP (paneles AX PRO, equipos detrás de un router o por 4G): su registro, eventos, video y voz.],
   [Monitor de dispositivos], [Revisa cada equipo de video y publica si está en línea o sin conexión.],
   [Contabilidad de sesiones], [Mantiene al día la lista de sesiones de video y cierra en la bitácora las que terminaron.],
   [Paneles de alarma], [Estado y eventos de cada panel de alarma habilitado.],
@@ -130,6 +131,8 @@ los botones. La tabla se actualiza cada 3 segundos.
   [Historial de accesos], [Trae de cada equipo quién pasó por cada puerta.],
   [Hora de los equipos], [Revisa la hora de los equipos y los pone en hora cuando se desfasan.],
   [Parlantes IP], [Estado de los parlantes, reproducción y voz en vivo.],
+  [Módulos de E/S], [Conexión con los módulos de entradas y salidas, lectura de sus entradas y órdenes a sus relés.],
+  [Pantallas de alarma], [Autodiscovery de las pantallas de las casetas y vigilancia de las que se desconectan.],
   [Citofonía], [Llamadas de los frentes de citofonía y conversaciones de los operadores.],
   [Reconocimiento de patentes], [Recibe las lecturas de patentes de los equipos marcados como fuente.],
   [Automatizaciones], [Ejecuta las acciones configuradas cuando ocurre un evento.],
@@ -186,6 +189,33 @@ _Sistema_.
 El botón solo funciona con el servidor instalado como servicio de Windows; si
 corre como consola, está deshabilitado.
 
+== Conexión ISUP
+
+Los equipos Hikvision que el servidor no alcanza por su dirección (detrás de un
+router, por 4G o en otra red) se conectan ellos al servidor por ISUP, con un
+ID y una clave que se escriben en el equipo y en su formulario del sistema.
+Sirve para paneles de alarma, equipos de acceso, cámaras y grabadores,
+parlantes IP y frentes de citofonía: en cada formulario se elige la marca
+«… por ISUP» y se escriben el ID y la clave.
+
+Abra #menu("Sistema", "Conexión ISUP") para ver el estado del servicio:
+
+- *Puertos*: los que el servicio abre hacia los equipos y si lo logró. Un
+  puerto en rojo suele estar ocupado por otro programa.
+- *Equipos*: los equipos del sistema que se conectan por ISUP, con su estado,
+  la dirección desde la que se conectaron, el protocolo, desde cuándo están
+  conectados y si mantienen abierto su enlace de alarmas.
+  #boton("Reconectar") pide al equipo que vuelva a conectarse (útil después
+  de cambiar su configuración).
+- *Intentos rechazados*: equipos que intentaron conectarse y fueron
+  rechazados, con el motivo: un ID que el sistema no tiene, o una clave que no
+  coincide. Sirve para dar de alta un equipo nuevo o corregir su clave.
+
+#requiere("Servicios del servidor")
+
+Las conexiones, desconexiones y rechazos de cada equipo quedan en la bitácora,
+en la categoría «Conexión ISUP».
+
 == Licencia
 
 Abra #menu("Sistema", "Licencia"). Todos los usuarios ven el estado de la
@@ -236,6 +266,8 @@ habilitan solos cuando vuelve a haber cupo.
   [Muro de video], [muros],
   [Decodificadores de muro], [decodificadores],
   [Parlantes IP], [parlantes],
+  [Módulos de E/S], [módulos],
+  [Pantallas de alarma], [pantallas aprobadas],
   [Citofonía], [frentes],
   [Automatizaciones], [reglas],
   [Usuarios del sistema], [usuarios],

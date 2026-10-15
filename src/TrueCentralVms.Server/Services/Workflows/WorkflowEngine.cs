@@ -406,15 +406,25 @@ public sealed class WorkflowEngine : BackgroundService
         // un filtro de cámaras no bloquea un evento de terminal de acceso si
         // además se marcaron terminales (una automatización "cualquier equipo
         // de estos" con equipos de varias clases).
-        bool anyDeviceFilter = Has(conditions.DeviceIds) || Has(conditions.AccessDeviceIds) || Has(conditions.SpeakerIds);
+        // Las entradas sueltas de un módulo de E/S cuentan como un equipo más:
+        // "el módulo A completo o la entrada 2 del módulo B".
+        bool anyDeviceFilter = Has(conditions.DeviceIds) || Has(conditions.AccessDeviceIds) || Has(conditions.SpeakerIds) ||
+                               Has(conditions.IoModuleIds) || Has(conditions.IoInputKeys);
         if (anyDeviceFilter)
         {
             bool listed =
                 (trigger.DeviceId is { } d && Has(conditions.DeviceIds) && conditions.DeviceIds!.Contains(d)) ||
                 (trigger.AccessDeviceId is { } a && Has(conditions.AccessDeviceIds) && conditions.AccessDeviceIds!.Contains(a)) ||
-                (trigger.SpeakerId is { } s && Has(conditions.SpeakerIds) && conditions.SpeakerIds!.Contains(s));
+                (trigger.SpeakerId is { } s && Has(conditions.SpeakerIds) && conditions.SpeakerIds!.Contains(s)) ||
+                (trigger.IoModuleId is { } m && Has(conditions.IoModuleIds) && conditions.IoModuleIds!.Contains(m)) ||
+                (trigger.IoModuleId is { } mi && trigger.IoInput is { } input && Has(conditions.IoInputKeys)
+                 && conditions.IoInputKeys!.Contains($"{mi}:{input}"));
             if (!listed) return false;
         }
+        if (Has(conditions.IoInputStates) &&
+            (trigger.IoActive is not { } active ||
+             !conditions.IoInputStates!.Any(s => string.Equals(s, active ? "Active" : "Inactive", StringComparison.OrdinalIgnoreCase))))
+            return false;
 
         // --- Video ---
         if (Has(conditions.VideoEventKinds) && (trigger.VideoKind is null || !conditions.VideoEventKinds!.Contains(trigger.VideoKind.Value)))
@@ -742,8 +752,17 @@ public sealed class WorkflowEngine : BackgroundService
             .FirstOrDefault(d => conditions.DoorNumbers is not { Count: > 0 } || conditions.DoorNumbers.Contains(d.Number))
             ?? accessDevice?.Doors.OrderBy(d => d.Number).FirstOrDefault();
 
+        // Módulo de E/S: la primera entrada elegida o, si no, el primer módulo marcado.
+        var inputKey = conditions.IoInputKeys?.Select(k => k.Split(':')).FirstOrDefault(p => p.Length == 2);
+        int? ioId = inputKey is { } key && int.TryParse(key[0], out int keyModule) ? keyModule
+            : conditions.IoModuleIds is { Count: > 0 } ? conditions.IoModuleIds[0] : null;
+        var ioModule = await db.IoModules.AsNoTracking().Include(m => m.Points)
+            .Where(m => ioId == null || m.Id == ioId).OrderBy(m => m.Id).FirstOrDefaultAsync(ct);
+        if (ioModule is not null && inputKey is { } chosen && int.TryParse(chosen[1], out int inputNumber))
+            ioModule.Points = ioModule.Points.Where(p => p.Kind != IoPointKind.Input || p.Number == inputNumber).ToList();
+
         return await ExecuteWorkflowAsync(workflow,
-            WorkflowTrigger.Sample(workflow, panel, device, channel, accessDevice, door), startedBy, ct);
+            WorkflowTrigger.Sample(workflow, panel, device, channel, accessDevice, door, ioModule), startedBy, ct);
     }
 
     /// <summary>Lo que se acumula mientras se recorre el diagrama de una ejecución.</summary>
@@ -764,16 +783,28 @@ public sealed class WorkflowEngine : BackgroundService
         public int TimeoutSeconds;
     }
 
+    /// <summary>Guarda una foto que llegó con el evento y la deja disponible para las acciones, detrás de las anteriores.</summary>
+    private void AddEventPhoto(RunState state, byte[] image, string suffix)
+    {
+        var trigger = state.Trigger;
+        if (_store.Save(image, trigger.At, suffix) is not { } relative) return;
+        state.Files.Add(new WorkflowFile(relative, _store.FullPath(relative)!,
+            $"{WorkflowStore.Sanitize(suffix)}-{trigger.At:yyyyMMdd-HHmmss}.jpg"));
+        if (trigger.ChannelId is { } channelId && !state.Channels.Contains(channelId)) state.Channels.Add(channelId);
+    }
+
     /// <summary>
     /// Evento de cámara SIN foto (p. ej. un DVR/NVR que no reenvía la captura de
-    /// la cámara IP): se toma una del canal apenas llega, para que la alerta y
-    /// el correo no queden sin imagen. Se omite si la automatización ya tiene
-    /// su propia acción "capturar foto" (ella decide qué cámaras y cuántas).
+    /// la cámara IP, o una cámara ANPR configurada sin fotos): se toma una del
+    /// canal apenas llega, para que la alerta y el correo no queden sin imagen.
+    /// Se omite si la automatización ya tiene su propia acción "capturar foto"
+    /// (ella decide qué cámaras y cuántas).
     /// </summary>
     private async Task CaptureEventPhotoAsync(RunState state)
     {
         var trigger = state.Trigger;
-        if (trigger.Type != WorkflowTriggerTypes.VideoEvent || trigger.ChannelId is not { } channelId) return;
+        if (trigger.Type is not (WorkflowTriggerTypes.VideoEvent or WorkflowTriggerTypes.PlateRecognized) ||
+            trigger.ChannelId is not { } channelId) return;
         if (state.ActionsByNode.Count == 0 ||
             state.ActionsByNode.Values.Any(a => string.Equals(a.Type, WorkflowActionTypes.Snapshot, StringComparison.OrdinalIgnoreCase)))
             return;
@@ -834,8 +865,7 @@ public sealed class WorkflowEngine : BackgroundService
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(8));
-            var connection = new Core.Drivers.DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                _credentials.Unprotect(device.PasswordCiphertext));
+            var connection = DeviceConnections.Of(device, _credentials);
             var overlay = await factory.Create().GetEventOverlayAsync(connection,
                 channel.RtspChannel > 0 ? channel.RtspChannel : channel.ChannelNumber, kind, trigger.RuleId, timeout.Token);
             return overlay is null ? trigger : trigger with { Overlay = overlay };
@@ -876,25 +906,21 @@ public sealed class WorkflowEngine : BackgroundService
             TimeoutSeconds = Math.Clamp(_config.GetValue("Workflows:ActionTimeoutSeconds", 120), 5, 900),
         };
 
-        // La foto que trajo el propio evento (analíticas con captura) queda
-        // disponible como si la hubiera tomado la acción "capturar foto".
+        // La foto que trajo el propio evento (analíticas con captura, lecturas
+        // de patente) queda disponible como si la hubiera tomado la acción
+        // "capturar foto". De una patente van la escena y, detrás, el recorte.
+        string camera = trigger.Fields.TryGetValue("camara", out var cam) && cam.Length > 0 ? cam : "evento";
         if (trigger.Image is { Length: > 0 } image)
         {
             // Se marca dónde fue la detección (línea/región y objeto).
             if (trigger.Overlay is { } overlay && OperatingSystem.IsWindows())
                 image = EventPhotoAnnotator.Annotate(image, overlay) ?? image;
-            string suffix = trigger.Fields.TryGetValue("camara", out var cam) && cam.Length > 0 ? cam : "evento";
-            if (_store.Save(image, trigger.At, suffix) is { } relative)
-            {
-                state.Files.Add(new WorkflowFile(relative, _store.FullPath(relative)!,
-                    $"{WorkflowStore.Sanitize(suffix)}-{trigger.At:yyyyMMdd-HHmmss}.jpg"));
-                if (trigger.ChannelId is { } channelId) state.Channels.Add(channelId);
-            }
+            AddEventPhoto(state, image, camera);
         }
-        else
-        {
+        if (trigger.PlateImage is { Length: > 0 } plateImage)
+            AddEventPhoto(state, plateImage, trigger.Plate is { Length: > 0 } plate ? $"patente-{plate}" : "patente");
+        if (state.Files.Count == 0)
             await CaptureEventPhotoAsync(state);
-        }
         int automaticSteps = state.Steps.Count;
 
         try

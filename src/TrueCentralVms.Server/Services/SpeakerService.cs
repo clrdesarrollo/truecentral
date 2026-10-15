@@ -36,6 +36,8 @@ public sealed class SpeakerService(
     AuditService audit,
     WorkflowStore store,
     IConfiguration config,
+    Isup.IsupService isup,
+    Isup.IsupHostManager isupHost,
     ILogger<SpeakerService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
@@ -64,7 +66,11 @@ public sealed class SpeakerService(
     }
 
     public SpeakerConnectionInfo ConnectionOf(Speaker speaker) =>
-        new(speaker.Host, speaker.Port, speaker.UseHttps, speaker.Username, credentials.Unprotect(speaker.PasswordCiphertext));
+        new(speaker.Host, speaker.Port, speaker.UseHttps, speaker.Username,
+            speaker.PasswordCiphertext.Length == 0 ? "" : credentials.Unprotect(speaker.PasswordCiphertext), speaker.IsupDeviceId);
+
+    /// <summary>Dónde está el parlante, para textos: su dirección, o su ID ISUP.</summary>
+    public static string WhereOf(Speaker speaker) => speaker.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : speaker.Host;
 
     public ISpeakerDriver DriverOf(Speaker speaker) =>
         drivers.Find(speaker.DriverKey)?.Create()
@@ -73,7 +79,7 @@ public sealed class SpeakerService(
     public SpeakerDto ToDto(Speaker s) => new(s.Id, s.Name, s.DriverKey, s.Host, s.Port, s.UseHttps, s.Username,
         s.Model, s.SerialNumber, s.FirmwareVersion, s.GroupName, s.Enabled, s.Status, s.LastError, s.LastSeenAt, s.Volume,
         s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio, BusyOf(s.Id), s.CreatedAt, s.UpdatedAt,
-        s.LocationId, Auth.LocationPaths.Of(s.LocationId));
+        s.LocationId, Auth.LocationPaths.Of(s.LocationId), s.IsupDeviceId, s.IsupKeyCiphertext is { Length: > 0 });
 
     // ------------------------------------------------------------------
     // Sondeo de estado
@@ -82,6 +88,12 @@ public sealed class SpeakerService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stopping = stoppingToken;
+        // Un parlante ISUP que se conecta: si se agregó antes de conectarse, se completa (modelo y capacidades) y se sondea ya.
+        isup.DeviceOnlineChanged += (isupId, online) =>
+        {
+            if (online) _ = Task.Run(() => ProvisionIsupAsync(isupId, stoppingToken), stoppingToken);
+            else RequestReconcile();
+        };
         // Dar tiempo a que la API y el hub estén arriba antes del primer sondeo.
         try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
         catch (OperationCanceledException) { return; }
@@ -135,18 +147,18 @@ public sealed class SpeakerService(
             if (result.Status == SpeakerStatus.Online && previous != SpeakerStatus.Unknown)
                 await audit.LogSystemAsync("speakers", "speaker-online",
                     targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
-                    detail: $"El parlante '{speaker.Name}' ({speaker.Host}) recuperó la conexión.");
+                    detail: $"El parlante '{speaker.Name}' ({WhereOf(speaker)}) recuperó la conexión.");
             else if (result.Status != SpeakerStatus.Online)
                 await audit.LogSystemAsync("speakers", "speaker-offline",
                     targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
-                    detail: $"El parlante '{speaker.Name}' ({speaker.Host}) no responde: {result.Error}", success: false);
+                    detail: $"El parlante '{speaker.Name}' ({WhereOf(speaker)}) no responde: {result.Error}", success: false);
             await hub.SendAsync(VmsHubContract.SpeakerStatusChanged, ToDto(speaker), sc => sc.CanViewSpeaker(speaker.Id), ct);
 
             // Automatizaciones ("parlante sin conexión → avisar"). Resuelto al
             // vuelo: el motor contiene la acción de parlantes, que usa este servicio.
             if (previous != SpeakerStatus.Unknown || result.Status != SpeakerStatus.Online)
                 writeScope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>().Publish(
-                    Workflows.WorkflowTrigger.FromDeviceStatus("speaker", speaker.Id, speaker.Name, speaker.Host, speaker.Model,
+                    Workflows.WorkflowTrigger.FromDeviceStatus("speaker", speaker.Id, speaker.Name, WhereOf(speaker), speaker.Model,
                         result.Status.ToString(), result.Error));
         }
         await writeDb.SaveChangesAsync(ct);
@@ -154,6 +166,9 @@ public sealed class SpeakerService(
 
     private async Task<(SpeakerStatus Status, string? Error, int? Volume)> PollOneAsync(Speaker speaker, CancellationToken ct)
     {
+        // Por ISUP no se sondea un equipo desconectado: se explica qué configurar en él.
+        if (speaker.IsupDeviceId is { } isupId && !isup.IsOnline(isupId))
+            return (SpeakerStatus.Offline, await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "parlante", ct), null);
         try
         {
             int? volume = await DriverOf(speaker).GetVolumeAsync(ConnectionOf(speaker), ct);
@@ -168,6 +183,35 @@ public sealed class SpeakerService(
         {
             return (SpeakerStatus.Offline, ex.Message, null);
         }
+    }
+
+    /// <summary>
+    /// Primer contacto de un parlante ISUP agregado antes de conectarse (sin modelo): se leen su identificación y capacidades como
+    /// en el alta. Después se sondea de inmediato.
+    /// </summary>
+    private async Task ProvisionIsupAsync(string isupId, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);   // que termine el intercambio de registro del equipo
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.IsupDeviceId == isupId, ct);
+            if (speaker is null) return;
+            if (speaker.Model is null)
+            {
+                var info = await DriverOf(speaker).ProbeAsync(ConnectionOf(speaker), ct);
+                Api.SpeakersApi.ApplyProbe(speaker, info);
+                await db.SaveChangesAsync(ct);
+                await audit.LogSystemAsync("speakers", "speaker-online", "speaker", speaker.Id.ToString(), speaker.Name,
+                    $"El parlante '{speaker.Name}' se conectó por ISUP (ID {isupId}): {speaker.Model ?? "modelo desconocido"}.");
+                var hubContext = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.VmsHub>>();
+                await Microsoft.AspNetCore.SignalR.ClientProxyExtensions.SendAsync(hubContext.Clients.All, VmsHubContract.ConfigChanged, "speakers", ct);
+            }
+            RequestReconcile();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { logger.LogWarning("No se pudo completar el parlante ISUP {Id} en su primer contacto: {Error}", isupId, ex.Message); }
     }
 
     /// <summary>Marca el estado en línea tras una orden que sí llegó al equipo (evita esperar el sondeo).</summary>

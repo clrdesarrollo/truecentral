@@ -794,6 +794,18 @@ puertas aparecen solas en el monitoreo y en los niveles de acceso.
   la licencia para agregar más._ Pausar las puertas que no se usan libera
   cupo (ver _La página del equipo_).]
 
+=== Agregar un equipo que se conecta por ISUP
+
+Un terminal Hikvision que el servidor no alcanza por su dirección (detrás de un
+router, por 4G) se conecta él al servidor por ISUP. Elija la marca _Hikvision
+DS-K por ISUP (el equipo se conecta al servidor)_ y escriba el *ID ISUP del
+equipo* y su *Clave ISUP*; el recuadro de ayuda muestra lo que hay que
+configurar en el terminal (protocolo ISUP 5.0, la dirección del servidor y el
+puerto). Se puede guardar antes de que el equipo se conecte: queda «esperando
+que se conecte por ISUP» y sus puertas se leen en su primer contacto. Las
+personas, credenciales, rostros, horarios y eventos funcionan igual que por
+IP. Vea #menu("Sistema", "Conexión ISUP") en #capitulo(<cap-sistema>).
+
 == La lista de equipos
 
 #requiere("Equipos de acceso")

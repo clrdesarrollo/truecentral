@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Drivers.Dahua.Interop;
 
@@ -26,6 +27,11 @@ public static class DahuaDiagnostics
 /// La sesión se vigila con una consulta liviana cada 30 s: si el equipo deja
 /// de contestar, la suscripción se da por caída y el servicio de patentes la
 /// rehace sola.
+///
+/// El recuadro de la patente viene en coordenadas del VIDEO, pero la foto
+/// lleva además la franja negra con el texto (fecha, patente…) que la cámara
+/// le agrega arriba o abajo: se lee de la configuración y el recuadro se lleva
+/// a la foto (<see cref="ReadOsdBand"/>).
 /// </summary>
 internal sealed class DahuaAnpr : IPlateSubscription
 {
@@ -37,6 +43,8 @@ internal sealed class DahuaAnpr : IPlateSubscription
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(30);
     /// <summary>Una misma lectura llega a veces en varias fotos seguidas: se entrega una vez.</summary>
     private static readonly TimeSpan DuplicateWindow = TimeSpan.FromSeconds(3);
+    /// <summary>Cada cuántas consultas de sesión se vuelve a leer la franja del texto (20 × 30 s = 10 min).</summary>
+    private const int OsdBandRefreshChecks = 20;
 
     private readonly DeviceConnectionInfo _info;
     private readonly Action<PlateRecognition> _onPlate;
@@ -50,6 +58,12 @@ internal sealed class DahuaAnpr : IPlateSubscription
     private int _described;
     private string _lastPlate = "";
     private DateTime _lastPlateAt;
+    private int _checks;
+    /// <summary>Franja del texto de la foto (null = sin franja o equipo que no la informa). La escribe el temporizador y la lee el hilo del SDK.</summary>
+    private volatile OsdBand? _band;
+
+    /// <summary>Franja negra del texto que la cámara agrega a la foto: alto en píxeles y si va arriba o abajo.</summary>
+    private sealed record OsdBand(int Height, bool Top);
 
     public bool IsAlive => _alive;
 
@@ -80,6 +94,7 @@ internal sealed class DahuaAnpr : IPlateSubscription
     private void Start()
     {
         (_loginId, _) = DahuaDeviceDriver.Login(_info); // lanza DriverException con el motivo
+        ReadOsdBand();
         // Canal 0: las ITC tienen uno solo. bNeedPicFile = true para recibir las fotos.
         _handle = NetSdk.CLIENT_RealLoadPictureEx(_loginId, 0, NetSdk.EventIvsAll, true, _callback, IntPtr.Zero, IntPtr.Zero);
         if (_handle == 0)
@@ -98,6 +113,8 @@ internal sealed class DahuaAnpr : IPlateSubscription
         if (NetSdk.CLIENT_GetDeviceType(_loginId, ref input, ref output, 5000))
         {
             _failedChecks = 0;
+            // La franja se puede cambiar en la web de la cámara sin cortar la sesión.
+            if (++_checks % OsdBandRefreshChecks == 0) ReadOsdBand();
             return;
         }
         if (++_failedChecks >= 2)
@@ -105,6 +122,88 @@ internal sealed class DahuaAnpr : IPlateSubscription
             _alive = false;
             Diagnostic?.Invoke($"Dahua ANPR {_info.Host}: el equipo dejó de responder; se volverá a suscribir.");
         }
+    }
+
+    /// <summary>
+    /// Lee la franja del texto de la foto: TrafficSnapshot → OSD.OSDBlackRegion
+    /// ({ "Height": 64, "OSDPosition": "TOP" } en la ITC413, cuya foto de
+    /// 2688×1584 es el video de 2688×1520 más esa franja). Sin esa
+    /// configuración (cámara que no es ITC, o firmware que no la tiene) se
+    /// asume que no hay franja. Si la consulta falla se conserva lo último leído.
+    /// </summary>
+    private void ReadOsdBand()
+    {
+        var buffer = new byte[512 * 1024];
+        if (!NetSdk.CLIENT_GetNewDevConfig(_loginId, "TrafficSnapshot", 0, buffer, (uint)buffer.Length, out _, 5000, IntPtr.Zero))
+            return;
+        OsdBand? band = null;
+        try
+        {
+            int end = Array.IndexOf(buffer, (byte)0);
+            using var json = JsonDocument.Parse(buffer.AsMemory(0, end < 0 ? buffer.Length : end));
+            if (json.RootElement.TryGetProperty("params", out var parameters) &&
+                parameters.TryGetProperty("table", out var table))
+            {
+                // Con canal concreto llega el objeto; algunos firmwares mandan la lista por canal.
+                if (table.ValueKind == JsonValueKind.Array && table.GetArrayLength() > 0) table = table[0];
+                if (table.ValueKind == JsonValueKind.Object &&
+                    table.TryGetProperty("OSD", out var osd) && osd.TryGetProperty("OSDBlackRegion", out var region) &&
+                    region.TryGetProperty("Height", out var height) && height.TryGetInt32(out int pixels) && pixels > 0 &&
+                    region.TryGetProperty("OSDPosition", out var position))
+                {
+                    bool? top = position.ToString().Trim().ToUpperInvariant() switch
+                    {
+                        "TOP" or "1" => true,
+                        "BOTTOM" or "2" => false,
+                        _ => null,
+                    };
+                    if (top is { } isTop) band = new OsdBand(pixels, isTop);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+        if (band != _band)
+            Diagnostic?.Invoke(band is null
+                ? $"Dahua ANPR {_info.Host}: la foto no trae franja de texto; el recuadro de la patente se usa tal cual."
+                : $"Dahua ANPR {_info.Host}: la foto trae una franja de texto de {band.Height} px {(band.Top ? "arriba" : "abajo")}; el recuadro de la patente se corrige.");
+        _band = band;
+    }
+
+    /// <summary>
+    /// Lleva el recuadro de la patente (normalizado sobre el video) a la foto,
+    /// que mide lo mismo más la franja del texto.
+    /// </summary>
+    private static PlateRecognition FitToPhoto(PlateRecognition plate, OsdBand band, int photoHeight)
+    {
+        // Una franja de más de un cuarto de la foto no es la del texto: mejor no tocar.
+        if (plate.PlateHeight <= 0 || photoHeight <= 0 || band.Height * 4 > photoHeight) return plate;
+        double video = photoHeight - band.Height;
+        double offset = band.Top ? band.Height : 0;
+        return plate with
+        {
+            PlateY = (offset + plate.PlateY * video) / photoHeight,
+            PlateHeight = plate.PlateHeight * video / photoHeight,
+        };
+    }
+
+    /// <summary>Alto de un JPEG leído de su marcador SOF, sin decodificarlo; 0 si no se encuentra.</summary>
+    private static int JpegHeight(byte[] jpeg)
+    {
+        int i = 2;
+        while (i + 8 < jpeg.Length)
+        {
+            if (jpeg[i] != 0xFF) { i++; continue; }
+            byte marker = jpeg[i + 1];
+            if (marker == 0xFF) { i++; continue; }                              // relleno
+            if (marker is >= 0xC0 and <= 0xCF and not (0xC4 or 0xC8 or 0xCC))
+                return (jpeg[i + 5] << 8) | jpeg[i + 6];                        // FF Cx, largo, precisión, ALTO, ancho
+            if (marker is 0x01 or (>= 0xD0 and <= 0xD9)) { i += 2; continue; }  // marcadores sin largo
+            i += 2 + ((jpeg[i + 2] << 8) | jpeg[i + 3]);
+        }
+        return 0;
     }
 
     // ------------------------------------------------------------------
@@ -150,6 +249,8 @@ internal sealed class DahuaAnpr : IPlateSubscription
             }
 
             var result = plate.Value.Plate with { SceneImage = scene, PlateImage = crop };
+            if (_band is { } band && scene is not null)
+                result = FitToPhoto(result, band, JpegHeight(scene));
             if (Interlocked.Increment(ref _described) <= DiagnosticEvents)
                 Diagnostic?.Invoke(
                     $"Dahua ANPR {_info.Host}: evento 0x{alarmType:X} ({plate.Value.Name}) secuencia {sequence}: " +

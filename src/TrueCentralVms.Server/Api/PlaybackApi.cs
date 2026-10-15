@@ -54,8 +54,7 @@ public static class PlaybackApi
                     targetType: "channel", targetId: $"{deviceId}/{channelNumber}",
                     targetName: $"{device.Name} · {channel.Name}",
                     detail: $"Buscó grabaciones de '{device.Name}' canal {channelNumber} para el {day:dd-MM-yyyy}.");
-            var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                protector.Unprotect(device.PasswordCiphertext));
+            var conn = DeviceConnections.Of(device, protector);
             try
             {
                 var segments = await driver.QueryRecordingsAsync(conn, channelNumber, day, day.AddDays(1), ct);
@@ -92,8 +91,7 @@ public static class PlaybackApi
                     statusCode: StatusCodes.Status422UnprocessableEntity);
 
             var from = start ?? DateTime.Now.Date.AddHours(14);
-            var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                protector.Unprotect(device.PasswordCiphertext));
+            var conn = DeviceConnections.Of(device, protector);
             string? source;
             try
             {
@@ -105,6 +103,9 @@ public static class PlaybackApi
             }
             if (source is null)
                 return Results.Json(new { error = "Este equipo no soporta reproducción remota." },
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+            if (Core.Isup.IsupGateway.IsMediaSource(source))
+                return Results.Json(new { error = "El equipo se conecta por ISUP: su reproducción no es RTSP y esta medición no aplica." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
 
             var result = await RtspRateProbe.MeasureAsync(source, scale ?? 1, rateControlOff ?? false,
@@ -137,8 +138,7 @@ public static class PlaybackApi
             if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
                 return Results.Ok(Array.Empty<int>());
 
-            var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                protector.Unprotect(device.PasswordCiphertext));
+            var conn = DeviceConnections.Of(device, protector);
             try
             {
                 // El calendario usa el índice RTSP del canal (es el que arma el track).
@@ -186,8 +186,7 @@ public static class PlaybackApi
                 return Results.Json(new { error = "El driver del equipo no está disponible." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
 
-            var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                protector.Unprotect(device.PasswordCiphertext));
+            var conn = DeviceConnections.Of(device, protector);
             string? source;
             try
             {
@@ -215,6 +214,10 @@ public static class PlaybackApi
             // publica él mismo en la ruta.
             double speed = request.Speed;
             bool accelerated = speed > 0 && Math.Abs(speed - 1) > 0.01;
+            // Por ISUP el equipo entrega la grabación por su conexión con el servidor, sin la cabecera Scale del RTSP.
+            if (accelerated && Core.Isup.IsupGateway.IsMediaSource(source))
+                return Results.Json(new { error = "Los equipos conectados por ISUP se reproducen solo a velocidad normal (1×)." },
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
             if (accelerated)
             {
                 if (!await mtx.AddPublishPathAsync(path, ct))
@@ -313,8 +316,7 @@ public static class PlaybackApi
                 return Results.Json(new { error = "El driver del equipo no está disponible." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
 
-            var conn = new DeviceConnectionInfo(device.Host, device.SdkPort, device.Username,
-                protector.Unprotect(device.PasswordCiphertext));
+            var conn = DeviceConnections.Of(device, protector);
             // La exportación puede ser lo primero que se le pide al equipo desde
             // que arrancó el servidor (sin línea de tiempo consultada): el
             // driver obtiene la URL por su cuenta si la necesita.
@@ -351,8 +353,16 @@ public static class PlaybackApi
                 // -nostdin: el hijo hereda la consola del servidor y
                 // FFmpeg leería de ahí las teclas de control.
                 "-hide_banner", "-loglevel", "error", "-nostdin",
-                "-rtsp_transport", "tcp",
-                "-i", source,
+            };
+            if (Core.Isup.IsupGateway.IsMediaSource(source))
+                // Equipo ISUP: MPEG-PS del servicio ISUP, sin dosificar a tiempo real (la exportación va tan rápido como
+                // lo entregue el equipo).
+                arguments.AddRange(["-fflags", "+genpts", "-probesize", "400000", "-analyzeduration", "1000000",
+                    "-f", "mpeg", "-i", source + "&pace=0"]);
+            else
+                arguments.AddRange(["-rtsp_transport", "tcp", "-i", source]);
+            arguments.AddRange(
+            [
                 "-t", ((int)(end - start).TotalSeconds).ToString(),
                 "-map", "0:v:0", "-map", "0:a:0?",
                 "-c:v", "copy",
@@ -364,9 +374,10 @@ public static class PlaybackApi
                 // del tramo, que es lo que sirve como evidencia.
                 "-map_metadata", "-1",
                 "-metadata", $"title={device.Name} · {channel.Name} — {start:dd-MM-yyyy HH:mm:ss}",
-                "-metadata", $"comment=Exportado por CLR TrueCentral VMS · {device.Name} ({device.Host}) " +
+                "-metadata", $"comment=Exportado por CLR TrueCentral VMS · {device.Name} " +
+                             $"({(device.IsupDeviceId is { } isupId ? "ISUP " + isupId : device.Host)}) " +
                              $"canal {channel.ChannelNumber} · {start:dd-MM-yyyy HH:mm:ss} a {end:HH:mm:ss}",
-            };
+            ]);
             if (fmt == "mp4")
                 arguments.AddRange(["-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4"]);
             else

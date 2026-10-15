@@ -19,11 +19,11 @@ const WFE_NODE_WIDTH = 220;
 const WFE_ICONS = {
   trigger: "⚡", condition: "❓", delay: "⏱", end: "⏹",
   snapshot: "📷", email: "✉️", ftp: "📤", http: "🌐", speaker: "🔊", notify: "🔔",
-  door: "🚪", panel: "🛡️", "ptz-preset": "🎯",
+  door: "🚪", panel: "🛡️", "ptz-preset": "🎯", relay: "🎛️",
 };
 const WFE_TRIGGER_ICONS = {
   "alarm-event": "🚨", "panel-status": "📡", "device-status": "🔌", "video-event": "🎥",
-  "plate-recognized": "🚗", "access-event": "🪪", schedule: "🕒", webhook: "🔗",
+  "plate-recognized": "🚗", "access-event": "🪪", schedule: "🕒", webhook: "🔗", "io-input": "🔘",
 };
 
 /// Tipos de evento que traen número de línea/región (reglas de la analítica de la cámara).
@@ -80,7 +80,8 @@ const WFE_VIDEO_KINDS = [
   ["VideoException", "Anomalía de video"], ["AudioException", "Anomalía de audio"],
   ["AlarmInput", "Entrada de alarma (contacto)"], ["DeviceFault", "Falla del equipo"], ["Other", "Otro"],
 ];
-const WFE_DEVICE_KINDS = [["video", "Cámaras y grabadores"], ["access", "Terminales de acceso"], ["speaker", "Parlantes IP"]];
+const WFE_DEVICE_KINDS = [["video", "Cámaras y grabadores"], ["access", "Terminales de acceso"], ["speaker", "Parlantes IP"], ["io", "Módulos de E/S"]];
+const WFE_IO_STATES = [["Active", "Se activa"], ["Inactive", "Vuelve a reposo"]];
 const WFE_DEVICE_STATUSES = [["Offline", "Sin conexión"], ["AuthFailed", "Credenciales rechazadas"], ["Online", "En línea (recuperado)"]];
 const WFE_ACCESS_KINDS = [["Granted", "Acceso concedido"], ["Denied", "Acceso denegado"], ["Alarm", "Alarma de puerta (forzada, mantenida abierta, sabotaje)"],
   ["DoorOpen", "Puerta abierta"], ["DoorClose", "Puerta cerrada"], ["Other", "Otro"]];
@@ -109,11 +110,12 @@ async function renderWorkflowEditor() {
     return;
   }
 
-  let catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, workflow = null;
+  let catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules, workflow = null;
   try {
-    [catalog, cameras, devices, doors, panels, speakers, audio, accessDevices] = await Promise.all([
+    [catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules] = await Promise.all([
       wfCatalog(), wfCameras(), Api.get("/api/workflows/devices"), Api.get("/api/workflows/doors"),
       Api.get("/api/alarms/panels"), wfSpeakers(), Api.get("/api/workflows/audio"), Api.get("/api/access/devices"),
+      Api.get("/api/workflows/io-modules"),
     ]);
     if (id) workflow = await Api.get(`/api/workflows/${id}`);
   } catch (err) {
@@ -121,7 +123,7 @@ async function renderWorkflowEditor() {
     return;
   }
 
-  const lists = { catalog, cameras, devices, doors, panels, speakers, audio, accessDevices };
+  const lists = { catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules };
   wfEd = {
     id, lists, readOnly,
     name: workflow?.name ?? "",
@@ -415,7 +417,12 @@ function wfeSubtitle(node) {
     }
     case "notify": {
       const who = (c.userIds || []).map((id) => (L.catalog?.users || []).find((u) => u.id === id)?.username || id);
-      return `${c.title || "aviso"} → ${who.length ? who.join(", ") : "todos los operadores"}`;
+      const operators = who.length ? who.join(", ") : "todos los operadores";
+      const screens = (c.screenIds || []).map((id) => (L.catalog?.screens || []).find((x) => x.id === id)?.name || id);
+      const onScreens = `pantallas: ${screens.length ? screens.join(", ") : "todas"}`;
+      const where = c.destination === "screens" ? onScreens
+        : c.destination === "both" ? `${operators} y ${onScreens}` : operators;
+      return `${c.title || "aviso"} → ${where}`;
     }
     case "door": {
       const verbs = { Open: "Abrir", Close: "Cerrar", RemainOpen: "Mantener abierta", RemainLocked: "Bloquear" };
@@ -431,6 +438,15 @@ function wfeSubtitle(node) {
     case "ptz-preset": {
       const cam = L.cameras.find((x) => x.channelId === c.channelId);
       return cam ? `${cam.channelName} → preset ${c.preset || 1}` : "elija la cámara";
+    }
+    case "relay": {
+      const names = (c.relayKeys || []).map((key) => {
+        const [mid, n] = key.split(":");
+        return L.ioModules.find((m) => String(m.id) === mid)?.outputs.find((o) => String(o.number) === n)?.name || `DO${n}`;
+      });
+      const what = { On: "Encender", Off: "Apagar", Toggle: "Alternar",
+        Blink: `Parpadear${c.blinkSeconds ? ` ${c.blinkSeconds} s` : ""}` }[c.command] || `Pulso ${c.seconds ?? 1} s`;
+      return `${what}: ${names.length ? names.join(", ") : "sin relés"}`;
     }
     default: return "";
   }
@@ -1042,6 +1058,12 @@ function wfeConditionsForm(container, node, isTrigger) {
         </div>`);
         break;
 
+      case "io-input":
+        sources("Un módulo completo (cualquiera de sus entradas) o solo algunas entradas. Las entradas se nombran en Dispositivos → Módulos de E/S.");
+        field("Cambio que dispara", wfeCheckList(WFE_IO_STATES, c.ioInputStates, "iostate"),
+          "Nada marcado = ambos. «Activa» ya considera la lógica de cada entrada (activa al cerrar o al abrir el contacto).");
+        break;
+
       case "schedule":
         if (isTrigger)
           field("Horas en que se ejecuta", `<input id="wfe-times" value="${esc((c.scheduleTimes || []).join(", "))}" placeholder="07:30, 22:00">`,
@@ -1200,6 +1222,9 @@ function wfeConditionsForm(container, node, isTrigger) {
           textContains: $("#wfe-text", container)?.value.trim() || null,
         });
         break;
+      case "io-input":
+        next.ioInputStates = marked("iostate");
+        break;
       case "schedule":
         if (isTrigger) next.scheduleTimes = strings("wfe-times");
         break;
@@ -1225,16 +1250,18 @@ function wfeConditionsForm(container, node, isTrigger) {
 const WFE_SOURCE_FIELDS = {
   "alarm-event": { title: "Paneles, zonas y áreas", fields: ["panelIds", "zoneKeys", "areaKeys"], any: "Cualquier panel, zona o área", button: "Elegir paneles y zonas…" },
   "panel-status": { title: "Paneles", fields: ["panelIds"], any: "Cualquier panel", button: "Elegir paneles…" },
-  "device-status": { title: "Equipos", fields: ["deviceIds", "accessDeviceIds", "speakerIds"], any: "Cualquier equipo de la clase marcada", button: "Elegir equipos…" },
+  "device-status": { title: "Equipos", fields: ["deviceIds", "accessDeviceIds", "speakerIds", "ioModuleIds"], any: "Cualquier equipo de la clase marcada", button: "Elegir equipos…" },
   "video-event": { title: "Cámaras", fields: ["deviceIds", "channelIds"], any: "Cualquier cámara", button: "Elegir cámaras…" },
   "plate-recognized": { title: "Cámaras ANPR", fields: ["deviceIds"], any: "Cualquier cámara con reconocimiento de patentes", button: "Elegir cámaras…" },
   "access-event": { title: "Terminales y puertas", fields: ["accessDeviceIds", "doorNumbers"], any: "Cualquier terminal o puerta", button: "Elegir terminales y puertas…" },
+  "io-input": { title: "Módulos y entradas", fields: ["ioModuleIds", "ioInputKeys"], any: "Cualquier entrada de cualquier módulo", button: "Elegir entradas…" },
 };
 /// Nombre de cada campo para las chips y el resumen: [singular, plural].
 const WFE_SOURCE_WORDS = {
   panelIds: ["panel", "paneles"], zoneKeys: ["zona", "zonas"], areaKeys: ["área", "áreas"],
   deviceIds: ["equipo", "equipos"], channelIds: ["cámara", "cámaras"], accessDeviceIds: ["terminal", "terminales"],
   speakerIds: ["parlante", "parlantes"], doorNumbers: ["puerta", "puertas"],
+  ioModuleIds: ["módulo", "módulos"], ioInputKeys: ["entrada", "entradas"],
 };
 
 const wfeSourceKey = (field, value) => `${field}|${value}`;
@@ -1262,6 +1289,7 @@ function wfeSourceTree(triggerType) {
         group("Cámaras y grabadores", L.devices.map((d) => leaf("deviceIds", d.id, d.name))),
         group("Terminales de acceso", L.accessDevices.map((d) => leaf("accessDeviceIds", d.id, d.name))),
         group("Parlantes IP", L.speakers.map((s) => leaf("speakerIds", s.id, s.name))),
+        group("Módulos de E/S", L.ioModules.map((m) => leaf("ioModuleIds", m.id, m.name))),
       ].filter((g) => g.children.length > 0);
     case "video-event":
       return L.devices.map((d) => ({
@@ -1271,6 +1299,11 @@ function wfeSourceTree(triggerType) {
     case "plate-recognized":
       return L.devices.filter((d) => d.supportsAnpr).map((d) =>
         leaf("deviceIds", d.id, d.name, d.anprEnabled ? "" : "no está marcada como fuente de patentes"));
+    case "io-input":
+      return L.ioModules.map((m) => ({
+        field: "ioModuleIds", value: m.id, label: m.name, hint: "cualquiera de sus entradas",
+        children: m.inputs.map((p) => leaf("ioInputKeys", `${m.id}:${p.number}`, p.name === p.code ? p.code : `${p.code} · ${p.name}`)),
+      }));
     case "access-event":
       return L.accessDevices.map((d) => ({
         field: "accessDeviceIds", value: d.id, label: d.name, hint: "todas sus puertas",
@@ -1459,6 +1492,9 @@ function wfeConditionsSummary(c, triggerType) {
   push(count(c.deviceIds, "equipo", "equipos"));
   push(count(c.accessDeviceIds, "terminal", "terminales"));
   push(count(c.speakerIds, "parlante", "parlantes"));
+  push(count(c.ioModuleIds, "módulo", "módulos"));
+  push(count(c.ioInputKeys, "entrada", "entradas"));
+  if (c.ioInputStates?.length) push(names(c.ioInputStates, WFE_IO_STATES));
   if (c.videoEventKinds?.length) push(names(c.videoEventKinds, WFE_VIDEO_KINDS));
   push(count(c.channelIds, "cámara", "cámaras"));
   if (c.ruleIds?.length) {

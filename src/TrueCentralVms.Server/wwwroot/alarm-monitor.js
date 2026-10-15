@@ -85,7 +85,7 @@ function alarmMonDescribePanelUser(user) {
   const u = (user ?? "").trim();
   switch (u.toUpperCase()) {
     case "": return "Informado por el panel";
-    case "ISUP": case "OTAP": case "EHOME": return `Orden remota por ${u} (receptora / VMS)`;
+    case "ISUP": case "OTAP": case "EHOME": return `Orden remota por ${u} (VMS u otra plataforma)`;
     case "ISAPI": return "Orden remota por ISAPI (VMS)";
     case "HIK-CONNECT": case "HIKCONNECT": case "CLOUD": return "Orden desde la app (Hik-Connect)";
     case "KEYPAD": case "KEYFOB": return `Orden desde ${u.toLowerCase()} (teclado/llavero)`;

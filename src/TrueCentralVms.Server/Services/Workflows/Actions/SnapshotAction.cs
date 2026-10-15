@@ -138,8 +138,7 @@ public sealed class SnapshotAction(
             await Throttle.WaitAsync(ct);
             try
             {
-                var connection = new DeviceConnectionInfo(channel.Device.Host, channel.Device.SdkPort,
-                    channel.Device.Username, credentials.Unprotect(channel.Device.PasswordCiphertext));
+                var connection = DeviceConnections.Of(channel.Device, credentials);
                 return (await factory.Create().CaptureSnapshotAsync(connection, channel.ChannelNumber, ct), null);
             }
             finally { Throttle.Release(); }

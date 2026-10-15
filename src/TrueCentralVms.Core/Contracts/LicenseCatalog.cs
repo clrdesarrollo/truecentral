@@ -57,7 +57,7 @@ public sealed record LicensePackageDefinition(
 public static class LicenseCatalog
 {
     /// <summary>Versión del catálogo: subirla con cualquier cambio de este archivo.</summary>
-    public const int Version = 1;
+    public const int Version = 3;
 
     /// <summary>Formato del JSON exportado (lo valida el servidor de licencias).</summary>
     public const int SchemaVersion = 1;
@@ -65,7 +65,7 @@ public static class LicenseCatalog
     // Identidad del producto: el servidor de licencias la actualiza en cada importación.
     public const string ProductName = "CLRobotics TrueCentral VMS";
     public const string ProductDescription =
-        "Plataforma de video, alarmas, control de acceso, muro de video, parlantes IP y citofonía";
+        "Plataforma de video, alarmas, control de acceso, muro de video, parlantes IP, citofonía, módulos de E/S y pantallas de alarma";
 
     // Valores INICIALES: solo se usan al crear el producto en el servidor de
     // licencias; después se ajustan en su web (política y texto comercial).
@@ -78,7 +78,7 @@ public static class LicenseCatalog
         "de este certificado (activación en línea).\n" +
         "3. Si el servidor no tiene salida a internet, genere ahí la \"solicitud de activación\" " +
         "(.req), envíela a soporte@clrobotics.cl y luego importe el archivo .lic que recibirá.\n\n" +
-        "Las expansiones (canales, decodificadores, paneles, parlantes, frentes de citofonía) " +
+        "Las expansiones (canales, decodificadores, paneles, parlantes, frentes de citofonía, módulos de E/S, pantallas de alarma) " +
         "se suman automáticamente a esta licencia: no requieren activación aparte.";
 
     /// <summary>Características, en el orden del certificado y del backoffice.</summary>
@@ -109,6 +109,12 @@ public static class LicenseCatalog
         Bool(LicenseFeatures.ModuleIntercom, "Módulo de citofonía", "Citofonía", false),
         Int(LicenseFeatures.IntercomDevices, "Frentes de citofonía", "Citofonía", 0, "Frentes"),
 
+        Bool(LicenseFeatures.ModuleIo, "Módulo de entradas y salidas (relés)", "Entradas y salidas", false),
+        Int(LicenseFeatures.IoModules, "Módulos de E/S", "Entradas y salidas", 0, "Módulos"),
+
+        Bool(LicenseFeatures.ModuleAlarmScreens, "Módulo de pantallas de alarma (casetas)", "Pantallas de alarma", false),
+        Int(LicenseFeatures.AlarmScreens, "Pantallas de alarma", "Pantallas de alarma", 0, "Pantallas"),
+
         Bool(LicenseFeatures.ModuleAutomation, "Módulo de automatizaciones", "Automatización", false),
         Int(LicenseFeatures.AutomationRules, "Automatizaciones", "Automatización", 0, "Reglas"),
     ];
@@ -126,6 +132,8 @@ public static class LicenseCatalog
             (LicenseFeatures.ModuleVideowall, true), (LicenseFeatures.Videowalls, 1), (LicenseFeatures.VideowallDecoders, 4),
             (LicenseFeatures.ModuleSpeakers, true), (LicenseFeatures.SpeakerChannels, 8),
             (LicenseFeatures.ModuleIntercom, true), (LicenseFeatures.IntercomDevices, 4),
+            (LicenseFeatures.ModuleIo, true), (LicenseFeatures.IoModules, 4),
+            (LicenseFeatures.ModuleAlarmScreens, true), (LicenseFeatures.AlarmScreens, 4),
             (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 50)),
         Base("enterprise", "Enterprise",
             (LicenseFeatures.MaxUsers, 200), (LicenseFeatures.MaxClientSessions, 50),
@@ -136,6 +144,8 @@ public static class LicenseCatalog
             (LicenseFeatures.ModuleVideowall, true), (LicenseFeatures.Videowalls, 8), (LicenseFeatures.VideowallDecoders, 32),
             (LicenseFeatures.ModuleSpeakers, true), (LicenseFeatures.SpeakerChannels, 64),
             (LicenseFeatures.ModuleIntercom, true), (LicenseFeatures.IntercomDevices, 64),
+            (LicenseFeatures.ModuleIo, true), (LicenseFeatures.IoModules, 32),
+            (LicenseFeatures.ModuleAlarmScreens, true), (LicenseFeatures.AlarmScreens, 32),
             (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 500)),
 
         // Expansiones: lo que SUMAN a la licencia base. Una que habilita un
@@ -157,6 +167,10 @@ public static class LicenseCatalog
             (LicenseFeatures.ModuleSpeakers, true), (LicenseFeatures.SpeakerChannels, 4)),
         Addon("addon_intercom_4", "Expansión 4 frentes de citofonía",
             (LicenseFeatures.ModuleIntercom, true), (LicenseFeatures.IntercomDevices, 4)),
+        Addon("addon_io_2", "Expansión 2 módulos de E/S",
+            (LicenseFeatures.ModuleIo, true), (LicenseFeatures.IoModules, 2)),
+        Addon("addon_alarm_screens_2", "Expansión 2 pantallas de alarma",
+            (LicenseFeatures.ModuleAlarmScreens, true), (LicenseFeatures.AlarmScreens, 2)),
         Addon("addon_automation_25", "Expansión 25 automatizaciones",
             (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 25)),
         Addon("addon_clients_5", "Expansión 5 clientes simultáneos", (LicenseFeatures.MaxClientSessions, 5)),

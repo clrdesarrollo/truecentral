@@ -100,7 +100,7 @@ async function renderSpeakers() {
             <tr data-id="${s.id}">
               <td>${esc(s.name)}${s.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${locationLineHtml(s.location)}</td>
               <td class="muted">${esc(s.groupName ?? "—")}</td>
-              <td class="muted">${s.useHttps ? "https://" : ""}${esc(s.host)}:${s.port}</td>
+              <td class="muted">${s.isupDeviceId ? isupAddressHtml(s.isupDeviceId) : `${s.useHttps ? "https://" : ""}${esc(s.host)}:${s.port}`}</td>
               <td>${esc(s.model ?? "—")}<div class="muted" style="font-size:11px">${esc(s.serialNumber ?? "")}</div></td>
               <td class="muted">${esc(s.firmwareVersion ?? "—")}</td>
               <td>${speakerCapsTags(s)}</td>
@@ -571,27 +571,30 @@ async function speakerModal(speaker) {
           ${drivers.map((dr) => `<option value="${esc(dr.key)}" ${driver0?.key === dr.key ? "selected" : ""}>${esc(dr.displayName)}</option>`).join("")}
         </select>
       </div>
-      <div class="form-grid">
-        <div class="field">
-          <label>Dirección (IP o hostname)</label>
-          <input id="sp-host" required value="${esc(speaker?.host ?? "")}" placeholder="192.168.1.73">
+      <div id="sp-ip-box">
+        <div class="form-grid">
+          <div class="field">
+            <label>Dirección (IP o hostname)</label>
+            <input id="sp-host" required value="${esc(speaker?.isupDeviceId ? "" : speaker?.host ?? "")}" placeholder="192.168.1.73">
+          </div>
+          <div class="field">
+            <label>Puerto HTTP</label>
+            <input id="sp-port" type="number" min="1" max="65535" required value="${speaker?.isupDeviceId ? 80 : speaker?.port ?? driver0?.defaultPort ?? 80}">
+          </div>
         </div>
-        <div class="field">
-          <label>Puerto HTTP</label>
-          <input id="sp-port" type="number" min="1" max="65535" required value="${speaker?.port ?? driver0?.defaultPort ?? 80}">
+        <div class="form-grid">
+          <div class="field">
+            <label>Usuario del parlante</label>
+            <input id="sp-username" required value="${esc(speaker?.isupDeviceId ? "admin" : speaker?.username ?? "admin")}" placeholder="admin">
+          </div>
+          <div class="field">
+            <label>Contraseña${isNew || speaker?.isupDeviceId ? "" : " (vacío = no cambiar)"}</label>
+            <input id="sp-password" type="password" autocomplete="new-password" ${isNew || speaker?.isupDeviceId ? "required" : ""}>
+          </div>
         </div>
+        <label class="checkbox-row"><input type="checkbox" id="sp-https" ${(speaker ? speaker.useHttps : driver0?.defaultHttps) ? "checked" : ""}> Usar HTTPS (certificado autofirmado aceptado)</label>
       </div>
-      <div class="form-grid">
-        <div class="field">
-          <label>Usuario del parlante</label>
-          <input id="sp-username" required value="${esc(speaker?.username ?? "admin")}" placeholder="admin">
-        </div>
-        <div class="field">
-          <label>Contraseña${isNew ? "" : " (vacío = no cambiar)"}</label>
-          <input id="sp-password" type="password" autocomplete="new-password" ${isNew ? "required" : ""}>
-        </div>
-      </div>
-      <label class="checkbox-row"><input type="checkbox" id="sp-https" ${(speaker ? speaker.useHttps : driver0?.defaultHttps) ? "checked" : ""}> Usar HTTPS (certificado autofirmado aceptado)</label>
+      <div id="sp-isup-wrap">${isupFieldsHtml("sp", speaker, isNew, "parlante")}</div>
       <label class="checkbox-row"><input type="checkbox" id="sp-enabled" ${speaker ? (speaker.enabled ? "checked" : "") : "checked"}> Activo (sondeo de estado, disponible para operadores y automatizaciones)</label>
       <div class="info-box" style="margin-top:10px">Use un usuario <b>local</b> del parlante (normalmente <b>admin</b>). El grupo permite elegir varios parlantes de una vez en las automatizaciones; los sonidos del servidor suenan sincronizados en todos los elegidos.</div>
       <div id="sp-probe-result"></div>
@@ -603,23 +606,43 @@ async function speakerModal(speaker) {
     </form>`);
 
   $("#sp-cancel").addEventListener("click", closeModal);
+  // Por IP se piden dirección y credenciales; por ISUP, el ID y la clave. Lo que no corresponde se oculta y deja de ser obligatorio.
+  const toggleIsup = (dr) => {
+    const isup = !!dr?.usesIsup;
+    $("#sp-ip-box").hidden = isup;
+    $("#sp-isup-wrap").hidden = !isup;
+    for (const el of $$("#sp-ip-box input")) {
+      if (isup) { if (el.required) el.dataset.req = "1"; el.required = false; }
+      else if (el.dataset.req) el.required = true;
+    }
+  };
+  wireIsupFields("sp", "parlante");
+  toggleIsup(driver0);
   $("#sp-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#sp-driver").value);
-    if (dr && isNew) { $("#sp-port").value = dr.defaultPort; $("#sp-https").checked = dr.defaultHttps; }
+    if (dr && isNew && !dr.usesIsup) { $("#sp-port").value = dr.defaultPort; $("#sp-https").checked = dr.defaultHttps; }
+    toggleIsup(dr);
   });
 
-  const readForm = () => ({
-    name: $("#sp-name").value.trim() || "(sin nombre)",
-    driverKey: $("#sp-driver").value,
-    host: $("#sp-host").value.trim(),
-    port: Number($("#sp-port").value),
-    useHttps: $("#sp-https").checked,
-    username: $("#sp-username").value.trim(),
-    password: $("#sp-password").value || null,
-    enabled: $("#sp-enabled").checked,
-    groupName: $("#sp-group").value.trim() || null,
-    locationId: locationFieldValue("sp-location"),
-  });
+  const readForm = () => {
+    const common = {
+      name: $("#sp-name").value.trim() || "(sin nombre)",
+      driverKey: $("#sp-driver").value,
+      enabled: $("#sp-enabled").checked,
+      groupName: $("#sp-group").value.trim() || null,
+      locationId: locationFieldValue("sp-location"),
+    };
+    if (!$("#sp-isup-wrap").hidden)
+      return { ...common, host: "", port: 0, useHttps: false, username: "", password: null, ...readIsupFields("sp") };
+    return {
+      ...common,
+      host: $("#sp-host").value.trim(),
+      port: Number($("#sp-port").value),
+      useHttps: $("#sp-https").checked,
+      username: $("#sp-username").value.trim(),
+      password: $("#sp-password").value || null,
+    };
+  };
 
   $("#sp-probe").addEventListener("click", async () => {
     const errorBox = $("#sp-modal-error");
@@ -666,10 +689,12 @@ async function speakerModal(speaker) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
-      if (isNew) await Api.post("/api/speakers", body);
-      else await Api.put(`/api/speakers/${speaker.id}`, body);
+      const saved = isNew ? await Api.post("/api/speakers", body) : await Api.put(`/api/speakers/${speaker.id}`, body);
       closeModal();
-      toast(isNew ? "Parlante agregado y validado." : "Parlante actualizado.");
+      // Por ISUP el parlante puede no haberse conectado todavía: se guarda igual y se completa en su primer contacto.
+      if (saved?.isupDeviceId && saved.status !== "Online")
+        toast(`Parlante guardado: queda esperando que se conecte por ISUP. ${saved.lastError ?? ""}`, false, { warning: true });
+      else toast(isNew ? "Parlante agregado y validado." : "Parlante actualizado.");
       renderSpeakers();
     } catch (err) {
       errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;

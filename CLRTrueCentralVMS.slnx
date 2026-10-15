@@ -1,11 +1,14 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/TrueCentralVms.AlarmScreen/TrueCentralVms.AlarmScreen.csproj" />
     <Project Path="src/TrueCentralVms.Client/TrueCentralVms.Client.csproj" />
     <Project Path="src/TrueCentralVms.Core/TrueCentralVms.Core.csproj" />
+    <Project Path="src/TrueCentralVms.Drivers.Adam/TrueCentralVms.Drivers.Adam.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.Dahua/TrueCentralVms.Drivers.Dahua.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.Hikvision/TrueCentralVms.Drivers.Hikvision.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.Onvif/TrueCentralVms.Drivers.Onvif.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.ZkTeco/TrueCentralVms.Drivers.ZkTeco.csproj" />
+    <Project Path="src/TrueCentralVms.IsupHost/TrueCentralVms.IsupHost.csproj" />
     <Project Path="src/TrueCentralVms.Migrator/TrueCentralVms.Migrator.csproj" />
     <Project Path="src/TrueCentralVms.Server/TrueCentralVms.Server.csproj" />
     <Project Path="src/TrueCentralVms.Watchdog/TrueCentralVms.Watchdog.csproj" />

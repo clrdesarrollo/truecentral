@@ -34,6 +34,7 @@ ni se borran desde esta página.
   [Cerco], [Cada panel de cerco eléctrico.],
   [Parlante], [Cada parlante IP.],
   [Citófono], [Cada frente de citofonía.],
+  [Módulo de E/S], [Cada módulo de entradas y salidas (con todos sus relés y entradas).],
 )
 
 Cada recurso está en *una sola* ubicación, o en *Por ubicar* si nadie lo ha
@@ -164,7 +165,7 @@ ubicar* les quita la ubicación.
 
 == Ubicación de cada equipo y herencia
 
-#requiere("Fuentes de video", "Paneles de alarma", "Paneles de cerco", "Equipos de acceso", "Parlantes IP", "Citofonía")
+#requiere("Fuentes de video", "Paneles de alarma", "Paneles de cerco", "Equipos de acceso", "Parlantes IP", "Citofonía", "Módulos de E/S")
 
 Los formularios para agregar o editar un equipo en _Dispositivos_ (fuentes de
 video, paneles de alarma, paneles de cerco, control de acceso, parlantes IP y

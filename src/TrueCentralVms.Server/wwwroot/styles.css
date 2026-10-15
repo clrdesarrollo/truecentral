@@ -2174,3 +2174,51 @@ body.live-aux .sidebar, body.live-aux .topbar, body.live-aux #license-banner { d
 .rl-scope-name, .rl-scope-loc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rl-scope-hint { margin-top: 8px; }
 @media (max-width: 1100px) { .rl-scope-pick { grid-template-columns: 1fr; } }
+
+/* --- Módulos de E/S (relés y entradas) ----------------------------------- */
+.io-cards { display: grid; gap: 14px; margin-bottom: 16px; }
+.io-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.io-card-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.io-card-title { flex: 1 1 220px; min-width: 0; }
+.io-card-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12.5px; }
+.io-error { font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.io-card-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 18px; margin-top: 12px; }
+.io-section-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.io-inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+.io-input, .io-output { display: flex; align-items: center; gap: 7px; background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 9px; font-size: 12.5px; min-width: 0; }
+.io-outputs { display: grid; gap: 6px; }
+.io-output { justify-content: space-between; flex-wrap: wrap; }
+.io-output-head { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1 1 200px; }
+.io-output-actions { display: flex; align-items: center; gap: 6px; }
+.io-output-actions .btn { padding: 4px 9px; font-size: 12px; }
+.io-seconds { width: 64px; padding: 4px 6px; font: inherit; font-size: 12px; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.io-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.io-code { color: var(--muted); font-size: 11px; font-family: ui-monospace, Consolas, monospace; }
+.io-state { color: var(--muted); font-size: 11.5px; margin-left: auto; padding-left: 6px; white-space: nowrap; }
+.io-state.on { color: var(--ok); }
+.io-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--border); }
+.io-dot.on { background: var(--ok); box-shadow: 0 0 6px rgba(34,197,94,.6); }
+.io-dot.off { background: #3A4757; }
+.io-dot.unknown { background: transparent; border: 1px dashed var(--muted); }
+.io-watchdog { margin-top: 4px; }
+.io-points { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 8px; background: var(--panel-2); }
+.io-points-title { font-size: 12px; font-weight: 600; margin: 6px 0 4px; }
+.io-point-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) minmax(0, 220px); gap: 8px; align-items: center; margin: 4px 0; }
+.io-point-row input, .io-point-row select { width: 100%; padding: 6px 9px; font: inherit; font-size: 12.5px; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px; outline: none; }
+.io-point-row input:focus, .io-point-row select:focus { border-color: var(--accent); }
+.io-points-hint { margin-top: 8px; font-size: 12.5px; }
+@media (max-width: 900px) { .io-card-body { grid-template-columns: 1fr; } }
+
+/* --- Pantallas de alarma de las casetas ---------------------------------- */
+.scr-license { margin: -4px 0 14px; font-size: 12.5px; }
+.scr-section-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 16px 0 8px; }
+.scr-pending-list { display: grid; gap: 10px; margin-bottom: 8px; }
+.scr-pending { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; background: var(--panel);
+  border: 1px solid var(--warn); border-radius: var(--radius); padding: 12px 16px; }
+.scr-pending-info { flex: 1 1 220px; min-width: 0; }
+.scr-code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 30px; font-weight: 700; letter-spacing: .18em;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; width: fit-content; }
+.wf-dest-hint { font-size: 11.5px; margin-top: 3px; }

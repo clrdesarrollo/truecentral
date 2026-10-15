@@ -83,6 +83,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<LicenseService>())
 builder.Services.AddSingleton<IDeviceDriverFactory, HikvisionDeviceDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaDeviceDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Onvif.OnvifDeviceDriverFactory>();
+builder.Services.AddSingleton<IDeviceDriverFactory, HikvisionIsupDeviceDriverFactory>();
 builder.Services.AddSingleton<DriverRegistry>();
 builder.Services.AddSingleton<DeviceStatusMonitor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceStatusMonitor>());
@@ -107,11 +108,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprService>());
 // de estado y el canal de eventos de cada panel habilitado. Para otra marca
 // basta con implementar IAlarmPanelDriverFactory y agregarla aquí.
 builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionAlarmPanelDriverFactory>();
-builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionIpReceiverDriverFactory>();
-// Receptora de paneles instalada junto al servidor: el servidor la activa solo
-// (contraseña generada y guardada cifrada) para que sea un servicio interno
-// que el operador no ve ni administra.
-builder.Services.AddSingleton<LocalIpReceiverService>();
+builder.Services.AddSingleton<IAlarmPanelDriverFactory, HikvisionIsupAlarmPanelDriverFactory>();
 builder.Services.AddSingleton<AlarmDriverRegistry>();
 builder.Services.AddSingleton<AlarmPanelService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmPanelService>());
@@ -120,6 +117,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmPanelService>
 // Tres marcas, tres transportes: ISAPI (HTTP) en Hikvision, CGI (HTTP) en
 // Dahua y el protocolo propio del SDK (TCP 4370) en ZKTeco.
 builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionAccessDriverFactory>();
+builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionIsupAccessDriverFactory>();
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaAccessDriverFactory>();
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.ZkTeco.ZkTecoAccessDriverFactory>();
 builder.Services.AddSingleton<AccessDriverRegistry>();
@@ -142,11 +140,19 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceClockService
 // Parlantes IP: drivers, registro y servicio (sondeo de estado, reproducción sincronizada, voz en vivo).
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFactory>();
+builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionIsupSpeakerDriverFactory>();
 builder.Services.AddSingleton<SpeakerDriverRegistry>();
 builder.Services.AddSingleton<SpeakerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>());
+// Módulos de E/S: drivers, registro y servicio (una conexión por módulo, sondeo
+// de entradas y órdenes a los relés).
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Adam.AdamIoDriverFactory>();
+builder.Services.AddSingleton<IoModuleDriverRegistry>();
+builder.Services.AddSingleton<IoModuleService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IoModuleService>());
 // Citofonía: frentes de videoportero (enlace de llamadas por SDK, voz bidireccional y apertura de puerta).
 builder.Services.AddSingleton<IIntercomDriverFactory, HikvisionIntercomDriverFactory>();
+builder.Services.AddSingleton<IIntercomDriverFactory, HikvisionIsupIntercomDriverFactory>();
 builder.Services.AddSingleton<IntercomDriverRegistry>();
 builder.Services.AddSingleton<IntercomService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IntercomService>());
@@ -181,6 +187,13 @@ builder.Services.AddSingleton<IWorkflowActionExecutor, NotifyAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, DoorAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, PanelAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, TrueCentralVms.Server.Services.Workflows.Actions.PtzPresetAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, RelayAction>();
+// Pantallas de alarma de las casetas (Raspberry Pi): emparejamiento, hub propio,
+// entrega de los avisos de las automatizaciones y acuse sincronizado con la
+// ventana de alarma de los operadores. Va antes del motor: la acción de aviso
+// la usa para difundir a las pantallas.
+builder.Services.AddSingleton<AlarmScreenService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmScreenService>());
 builder.Services.AddSingleton<WorkflowEngine>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkflowEngine>());
 // Eventos de analítica de las cámaras (movimiento, cruce de línea, intrusión...):
@@ -195,6 +208,15 @@ builder.Services.AddSingleton<StreamTokenService>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Rtsp.PlaybackRelayManager>();
 builder.Services.AddSingleton<MediaMtxManager>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MediaMtxManager>());
+
+// ISUP propio: un proceso interno (TrueCentralVms.IsupHost.exe) con el SDK ISUP de Hikvision, al que se registran los equipos
+// que el servidor no alcanza por IP (paneles AX PRO, equipos detrás de NAT/4G/MPLS). El servicio es su cliente y el transporte
+// que usan los drivers "hikvision-isup" (IsupGateway.Current, que queda publicado al construirse el servicio, antes de que
+// arranque cualquier servicio de fondo).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Isup.IsupHostManager>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Isup.IsupHostManager>());
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Isup.IsupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Isup.IsupService>());
 builder.Services.AddSingleton<SessionAccounting>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionAccounting>());
 
@@ -252,32 +274,6 @@ using (var scope = app.Services.CreateScope())
             "Sistema sin inicializar: abra http://localhost:5090 EN ESTA MÁQUINA para crear el primer administrador.");
 }
 
-// La receptora local se activa en segundo plano: si no está instalada o tarda
-// en levantar, el servidor arranca igual y lo deja anotado en el registro. Se
-// reintenta un rato porque la receptora arranca sus propios servicios (nginx,
-// su PostgreSQL) y puede tardar más que este servidor.
-_ = Task.Run(async () =>
-{
-    var stopping = app.Lifetime.ApplicationStopping;
-    using var scope = app.Services.CreateScope();
-    var receiver = scope.ServiceProvider.GetRequiredService<LocalIpReceiverService>();
-    // La receptora crea su propia base en el primer arranque y puede tardar
-    // bastante más que este servidor; también puede reinstalarse por fuera. Por
-    // eso se insiste mientras el servicio viva: cada minuto la primera hora y
-    // cada diez minutos después, hasta que quede lista o se sepa que no se
-    // puede (activada por otro). Así la activación nunca depende de que alguien
-    // reinicie el servicio en el momento justo.
-    for (int attempt = 1; !stopping.IsCancellationRequested; attempt++)
-    {
-        var state = await receiver.EnsureActivatedAsync(stopping);
-        if (state.Final)
-            break;
-        var wait = attempt <= 60 ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(10);
-        try { await Task.Delay(wait, stopping); }
-        catch (OperationCanceledException) { break; }
-    }
-});
-
 app.UseCors();
 // WebSocket propio (fuera de SignalR) para la voz del operador hacia los parlantes.
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(15) });
@@ -323,6 +319,32 @@ app.Use(async (context, next) =>
         return;
     }
 
+    await next();
+});
+
+// ---------------------------------------------------------------------------
+// Credencial de las pantallas de alarma (X-Screen-Token o ?access_token= en su
+// hub). Va aparte de la de los usuarios: una pantalla no tiene sesión. Su hub
+// responde 401 a una credencial desconocida (la pantalla vuelve a emparejarse)
+// y 403 a la de una pantalla deshabilitada (la conserva y espera), ANTES de
+// abrir la conexión.
+// ---------------------------------------------------------------------------
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+    bool screenHub = path.StartsWithSegments(AlarmScreenProtocol.HubPath);
+    if (screenHub || path.StartsWithSegments("/api/screen"))
+    {
+        var (screen, disabled) = await context.RequestServices.GetRequiredService<AlarmScreenService>()
+            .ResolveAsync(AlarmScreenService.TokenOf(context), context.RequestAborted);
+        if (screen is not null) context.Items[AlarmScreenService.ItemKey] = screen;
+        else if (disabled) context.Items[AlarmScreenService.DisabledItemKey] = true;
+        if (screenHub && screen is null)
+        {
+            context.Response.StatusCode = disabled ? StatusCodes.Status403Forbidden : StatusCodes.Status401Unauthorized;
+            return;
+        }
+    }
     await next();
 });
 
@@ -373,8 +395,10 @@ app.MapResourcesApi();
 app.MapAnprApi();
 app.MapAuditApi();
 app.MapAlarmsApi();
+app.MapIsupApi();
 app.MapCercoApi();
 app.MapSpeakersApi();
+app.MapIoModulesApi();
 app.MapIntercomsApi();
 app.MapAccessApi();
 app.MapAccessSettingsApi();
@@ -382,8 +406,10 @@ app.MapAccessCatalogApi();
 app.MapAccessRecordsApi();
 app.MapDeviceMaintenanceApi();
 app.MapWorkflowsApi();
+app.MapAlarmScreensApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);
+app.MapHub<AlarmScreenHub>(AlarmScreenProtocol.HubPath);
 
 // La SPA del panel se sirve para cualquier ruta no-API (hash router).
 app.MapFallbackToFile("index.html");

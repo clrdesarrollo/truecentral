@@ -27,7 +27,7 @@ const ROLE_SCOPE_KINDS = [
   ["VideoDevice", "Equipo de video"], ["Camera", "Cámara"],
   ["AccessDevice", "Equipo de acceso"], ["Door", "Puerta"],
   ["AlarmPanel", "Panel de alarma"], ["Partition", "Área de alarma"], ["Zone", "Zona"],
-  ["Fence", "Cerco"], ["Speaker", "Parlante"], ["Intercom", "Citófono"],
+  ["Fence", "Cerco"], ["Speaker", "Parlante"], ["Intercom", "Citófono"], ["IoModule", "Módulo de E/S"],
 ];
 const roleKindLabel = (k) => ROLE_SCOPE_KINDS.find(([key]) => key === k)?.[1] ?? k;
 const ROLE_SCOPE_MAX_RESULTS = 200;
