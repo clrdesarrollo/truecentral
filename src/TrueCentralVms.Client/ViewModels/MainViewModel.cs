@@ -351,10 +351,16 @@ public partial class MainViewModel : ObservableObject
             if (position >= 0) _pendingAlerts[position] = alert;
             // Confirmada (aquí o en otro puesto): la alarma sonora se calla.
             _alertSound.Stop();
-            Views.AlertWindow.Update(alert);
+            // Marcada como vista en una pantalla de alarma de caseta: ya está
+            // atendida allá, así que sale de la ventana (que se cierra si no
+            // queda otra pendiente). Confirmada por otro operador, se refleja.
+            if (alert.AcknowledgedFrom == "screen") Views.AlertWindow.Remove(alert.Id);
+            else Views.AlertWindow.Update(alert);
             _pendingAlerts.RemoveAll(a => a.Id == alert.Id);
             ShowPendingCount();
-            StatusMessage = $"Alerta «{alert.Title}» confirmada por {alert.AcknowledgedBy}.";
+            StatusMessage = alert.AcknowledgedFrom == "screen"
+                ? $"Alerta «{alert.Title}» marcada como vista en la pantalla «{alert.AcknowledgedBy}»."
+                : $"Alerta «{alert.Title}» confirmada por {alert.AcknowledgedBy}.";
         });
 
     private void ShowPendingCount()
@@ -385,7 +391,9 @@ public partial class MainViewModel : ObservableObject
         try
         {
             if (await _api.GetAlertsAsync(pendingOnly: true, take: 20) is not { } list) return;
-            foreach (var alert in list.Items.OrderBy(a => a.RaisedAt))
+            // Las que van solo a las pantallas de alarma de las casetas no abren
+            // la ventana de alarma (siguen en el centro de eventos).
+            foreach (var alert in list.Items.Where(a => a.ShowPopup).OrderBy(a => a.RaisedAt))
                 QueueAlert(alert);
         }
         catch (Exception)

@@ -29,7 +29,7 @@ if (-not $typst) { throw 'No se encontró typst. Instálelo con: winget install 
 
 if ($RevisarReferencias) {
     # Claves de LicenseFeatures sin "module_". La última edición no trae ninguno.
-    $todos = 'video', 'playback', 'anpr', 'alarms', 'access', 'videowall', 'speakers', 'intercom', 'automation'
+    $todos = 'video', 'playback', 'anpr', 'alarms', 'access', 'videowall', 'speakers', 'io', 'alarm_screens', 'intercom', 'automation'
     $ediciones = @($todos | ForEach-Object { $sin = $_; ,@($todos | Where-Object { $_ -ne $sin }) }) + ,@('ninguno')
     $temporal = Join-Path ([IO.Path]::GetTempPath()) 'manual-referencias.pdf'
     $fallas = 0

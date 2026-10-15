@@ -16,6 +16,7 @@
        dist\CLRTrueCentralVMS-Complemento-Setup-<versión>.exe  (lector de huellas)
        dist\CLRTrueCentralVMS-Suite-Setup-<versión>.exe   (incluye los dos anteriores)
        dist\CLRTrueCentralVMS-Migrador-<versión>.zip       (migrador desde HikCentral, sin instalador)
+       dist\truecentral-screen-<versión>-linux-arm64.tar.gz (app de las pantallas de alarma; va en la suite)
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File installer\build-installers.ps1
@@ -75,6 +76,25 @@ function Invoke-Publish([string]$Project, [string]$OutDir) {
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish falló para $Project." }
 }
 
+# App de las pantallas de alarma (Raspberry Pi 4/5, linux-arm64, autocontenida).
+# El paquete va a dist\ (para instalar una Pi nueva con installer\screen\install-screen.sh)
+# y dentro de la suite (screen-packages\, de donde las Pi ya instaladas se actualizan solas).
+function Invoke-PublishScreen([string]$OutDir, [string]$Package) {
+    Write-Host ""
+    Write-Host "== dotnet publish TrueCentralVms.AlarmScreen linux-arm64  (v$script:Version) ==" -ForegroundColor Cyan
+    if (Test-Path $OutDir) { Remove-Item -Recurse -Force $OutDir }
+    dotnet publish (Join-Path $repo 'src\TrueCentralVms.AlarmScreen\TrueCentralVms.AlarmScreen.csproj') -c Release `
+        -r linux-arm64 --self-contained true "-p:Version=$script:Version" -o $OutDir --nologo -v q
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish falló para la app de las pantallas de alarma." }
+    Get-ChildItem $OutDir -Filter '*.pdb' -ErrorAction SilentlyContinue | Remove-Item -Force
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Package) | Out-Null
+    if (Test-Path $Package) { Remove-Item -Force $Package }
+    # tar.exe de Windows (bsdtar): el paquete se abre en la Pi con tar -xzf.
+    & "$env:SystemRoot\System32\tar.exe" -czf $Package -C $OutDir .
+    if ($LASTEXITCODE -ne 0) { throw "No se pudo comprimir el paquete de la app de las pantallas de alarma." }
+    Write-Host ("  {0}  ({1:N1} MB)" -f (Split-Path -Leaf $Package), ((Get-Item $Package).Length / 1MB)) -ForegroundColor DarkGray
+}
+
 function Assert-File([string]$Path, [string]$Hint) {
     if (-not (Test-Path $Path)) { throw "Falta '$Path'. $Hint" }
 }
@@ -96,6 +116,8 @@ if (-not $SkipPublish) {
         # Watchdog: monitor de escritorio del servidor, va dentro de la suite
         # (se instala en {app}\watchdog).
         Invoke-Publish 'src\TrueCentralVms.Watchdog\TrueCentralVms.Watchdog.csproj' (Join-Path $publish 'watchdog')
+        # App de las pantallas de alarma de las casetas (la suite la publica para las Pi).
+        Invoke-PublishScreen (Join-Path $publish 'screen-pi') (Join-Path $dist "truecentral-screen-$Version-linux-arm64.tar.gz")
     }
     if ($buildClient) {
         Invoke-Publish 'src\TrueCentralVms.Client\TrueCentralVms.Client.csproj' (Join-Path $publish 'client')

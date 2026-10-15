@@ -1,0 +1,68 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TrueCentralVms.AlarmScreen.ViewModels"
+             x:Class="TrueCentralVms.AlarmScreen.Views.AlarmListView"
+             x:DataType="vm:MainViewModel">
+
+  <UserControl.Styles>
+    <!-- El recuadro azul de la alarma elegida no es un borde dibujado aparte: es el fondo del
+         elemento de la lista asomando por detrás de la tarjeta. Su grosor es, entonces, el
+         relleno del elemento más el margen de la tarjeta, y con el relleno que trae el tema
+         (12 px) sumado al margen sobraban más de quince por lado: se leía como un marco enorme
+         con una tarjeta chica adentro. Con el relleno en 4 queda un filo.
+         La separación entre tarjetas se hace con el margen y no con el relleno, porque el margen
+         va por fuera del recuadro y no lo engorda. El radio es el de la tarjeta más el filo, que
+         es lo que hace que las dos curvas se vean concéntricas. -->
+    <Style Selector="ListBoxItem">
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="Margin" Value="0,4" />
+      <Setter Property="CornerRadius" Value="12" />
+    </Style>
+  </UserControl.Styles>
+
+  <!-- La lista de alarmas. Vive en su propio control para poder colocarla como columna
+       (monitor apaisado) o como fila (monitor en pie) sin duplicar el XAML. -->
+  <ListBox x:Name="Lista" Background="Transparent" Padding="10"
+           ItemsSource="{Binding Alarms}" SelectedItem="{Binding Selected}"
+           SelectionChanged="OnSelectionChanged">
+    <ListBox.ItemTemplate>
+      <DataTemplate x:DataType="vm:AlarmCardViewModel">
+        <!-- Sin margen propio: la separación entre tarjetas la pone el margen del elemento de la
+             lista. Aquí adentro engordaría el recuadro de la selección. -->
+        <Border Background="{Binding CardBackground}"
+                CornerRadius="8" Padding="0" ClipToBounds="True">
+          <!-- La atenuación de lo ya atendido va en el contenido y no en el recuadro. Puesta en el
+               recuadro, el fondo de la tarjeta quedaba traslúcido y el azul de la selección se
+               transparentaba por toda la tarjeta: elegir una alarma vista la pintaba entera de
+               azul en vez de rodearla con un filo. -->
+          <Grid ColumnDefinitions="Auto,*" Opacity="{Binding CardOpacity}">
+            <Rectangle Grid.Column="0" Fill="{Binding PriorityBrush}" Width="{Binding PriorityBarWidth}" />
+            <StackPanel Grid.Column="1" Margin="14,12" Spacing="4">
+              <!-- Con elipsis y no cortado a secas: los nombres largos que manda el VMS no entran
+                   en la columna, y un texto que termina a mitad de letra se lee como un error de
+                   la pantalla en vez de como un nombre que sigue. -->
+              <TextBlock Text="{Binding Title}" FontSize="17" FontWeight="SemiBold"
+                         Foreground="{Binding TitleBrush}" TextWrapping="Wrap" MaxLines="2"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding SourceName}" FontSize="13" Foreground="#90A4AE"
+                         TextTrimming="CharacterEllipsis" />
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock Text="{Binding TimeText}" FontSize="12" Foreground="#78909C" />
+                <TextBlock Text="{Binding PriorityText}" FontSize="12" FontWeight="Bold"
+                           Foreground="{Binding PriorityBrush}" />
+                <!-- Estado explícito en las dos direcciones: lo pendiente no se distingue solo
+                     por la ausencia de una marca, que es lo que se pasa por alto -->
+                <Border Background="#B71C1C" CornerRadius="8" Padding="8,1"
+                        IsVisible="{Binding IsPending}">
+                  <TextBlock Text="SIN VER" FontSize="11" FontWeight="Bold" Foreground="White" />
+                </Border>
+                <TextBlock Text="✓ vista" FontSize="12" Foreground="#66BB6A"
+                           IsVisible="{Binding Acknowledged}" />
+              </StackPanel>
+            </StackPanel>
+          </Grid>
+        </Border>
+      </DataTemplate>
+    </ListBox.ItemTemplate>
+  </ListBox>
+</UserControl>

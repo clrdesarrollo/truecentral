@@ -122,6 +122,12 @@ public static class ResourcesApi
                         intercom.UpdatedAt = now;
                         topics.Add("intercoms");
                         break;
+                    case ResourceKind.IoModule:
+                        var ioModule = await db.IoModules.FirstAsync(m => m.Id == id, ct);
+                        ioModule.Name = name;
+                        ioModule.UpdatedAt = now;
+                        topics.Add("io-modules");
+                        break;
                 }
             }
 

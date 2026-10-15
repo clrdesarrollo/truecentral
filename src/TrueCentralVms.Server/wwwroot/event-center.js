@@ -45,9 +45,21 @@ function evcAckState(a) {
   return ["Informativa", "operator"];
 }
 
+/** Desde dónde se confirmó: cliente de escritorio, panel web o una pantalla de alarma de caseta. */
+const EVC_ACK_FROM = { client: ["cliente", "el cliente de escritorio"], web: ["panel web", "el panel web"],
+  screen: ["pantalla de alarma", "una pantalla de alarma de caseta"] };
+const evcAckFrom = (a, long) => (EVC_ACK_FROM[a.acknowledgedFrom] ?? EVC_ACK_FROM.web)[long ? 1 : 0];
+
+/** Dónde se mostró el aviso: la ventana de alarma, las pantallas de las casetas o ambas. */
+function evcShownAt(a) {
+  const screens = a.showOnScreens ? `pantallas de alarma: ${a.screens ? a.screens : "todas"}` : "";
+  if (a.showPopup === false) return screens || "—";
+  return screens ? `ventana de alarma y ${screens}` : "ventana de alarma de los operadores";
+}
+
 function evcAckLine(a) {
   if (a.acknowledgedAt) {
-    return `${a.acknowledgedBy} · ${wfDate(a.acknowledgedAt)} · a los ${a.responseSeconds ?? "?"} s · ${a.acknowledgedFrom === "client" ? "cliente" : "panel web"}`;
+    return `${a.acknowledgedBy} · ${wfDate(a.acknowledgedAt)} · a los ${a.responseSeconds ?? "?"} s · ${evcAckFrom(a, false)}`;
   }
   return a.requiresAck ? "Nadie se ha dado por enterado" : "No requiere confirmación";
 }
@@ -178,7 +190,8 @@ async function loadEventCenter() {
   data.items.forEach((a) => evcKnownIds.add(a.id));
   if (fresh.length && evcState.page === 1) {
     evcSelectedId = fresh[0].id;
-    const loud = fresh.find((a) => a.sound);
+    // Lo que va solo a las pantallas de las casetas suena allá, no en este puesto.
+    const loud = fresh.find((a) => a.sound && a.showPopup !== false);
     if (loud && evcSoundEnabled()) evcPlaySound(loud);
     toast(`Nueva alerta: ${fresh[0].title}`, fresh[0].severity !== "Info");
   }
@@ -280,7 +293,7 @@ function renderEvcDetail(a) {
   const critical = a.severity !== "Info";
   const [ackState, ackCls] = evcAckState(a);
   const ackDetail = a.acknowledgedAt
-    ? `Por ${esc(a.acknowledgedBy)} el ${wfDate(a.acknowledgedAt)} (${a.responseSeconds ?? wfAgo(a.raisedAt, a.acknowledgedAt)} s después de emitida), desde ${a.acknowledgedFrom === "client" ? "el cliente de escritorio" : "el panel web"}.`
+    ? `Por ${esc(a.acknowledgedBy)} el ${wfDate(a.acknowledgedAt)} (${a.responseSeconds ?? wfAgo(a.raisedAt, a.acknowledgedAt)} s después de emitida), desde ${evcAckFrom(a, true)}.`
     : a.requiresAck ? "Nadie se ha dado por enterado todavía." : "Este aviso no exige confirmación.";
   const sound = a.sound
     ? (a.sound === EVC_SYSTEM_SOUND ? "Pitido del sistema" : a.sound) + (a.soundRepeat > 1 ? ` (×${a.soundRepeat})` : a.soundRepeat === 0 ? " (hasta confirmar)" : "")
@@ -308,7 +321,8 @@ function renderEvcDetail(a) {
           <dt>Hora del evento</dt><dd>${wfDate(a.raisedAt)}</dd>
           <dt>Ejecución</dt><dd>${a.runId ? `N° ${a.runId}` : "—"}</dd>
           <dt>Alarma sonora</dt><dd>${esc(sound)}</dd>
-          <dt>Dirigida a</dt><dd>${a.recipients ? esc(a.recipients) : "todos los operadores"}</dd>
+          ${a.showPopup === false ? "" : `<dt>Dirigida a</dt><dd>${a.recipients ? esc(a.recipients) : "todos los operadores"}</dd>`}
+          <dt>Se mostró en</dt><dd>${esc(evcShownAt(a))}</dd>
         </dl>
         <div class="evc-section">Descripción</div>
         <div class="evc-box message">${esc(a.message || "—")}</div>

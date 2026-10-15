@@ -16,7 +16,7 @@ public static class WorkflowTriggerTypes
     public const string AlarmEvent = "alarm-event";
     /// <summary>Cambio de conexión del servidor con un panel de alarma.</summary>
     public const string PanelStatus = "panel-status";
-    /// <summary>Un equipo (cámara/grabador, terminal de acceso o parlante) perdió o recuperó la conexión.</summary>
+    /// <summary>Un equipo (cámara/grabador, terminal de acceso, parlante o módulo de E/S) perdió o recuperó la conexión.</summary>
     public const string DeviceStatus = "device-status";
     /// <summary>Analítica o alarma de una cámara/grabador: movimiento, cruce de línea, intrusión, pérdida de video...</summary>
     public const string VideoEvent = "video-event";
@@ -28,9 +28,11 @@ public static class WorkflowTriggerTypes
     public const string Schedule = "schedule";
     /// <summary>Llamada HTTP de otro sistema (webhook con clave propia).</summary>
     public const string Webhook = "webhook";
+    /// <summary>Una entrada de un módulo de E/S se activó o volvió a reposo (pulsador, lazo detector, sensor).</summary>
+    public const string IoInput = "io-input";
 
     public static readonly string[] All =
-        [AlarmEvent, PanelStatus, DeviceStatus, VideoEvent, PlateRecognized, AccessEvent, Schedule, Webhook];
+        [AlarmEvent, PanelStatus, DeviceStatus, VideoEvent, PlateRecognized, AccessEvent, Schedule, Webhook, IoInput];
 }
 
 /// <summary>Acciones disponibles. La clave se guarda en la base.</summary>
@@ -54,8 +56,10 @@ public static class WorkflowActionTypes
     public const string Panel = "panel";
     /// <summary>Mover una cámara PTZ a un preset.</summary>
     public const string PtzPreset = "ptz-preset";
+    /// <summary>Operar salidas (relés) de un módulo de E/S: pulso, encender, apagar, alternar o parpadear.</summary>
+    public const string Relay = "relay";
 
-    public static readonly string[] All = [Snapshot, Email, Ftp, Http, Speaker, Notify, Door, Panel, PtzPreset];
+    public static readonly string[] All = [Snapshot, Email, Ftp, Http, Speaker, Notify, Door, Panel, PtzPreset, Relay];
 }
 
 /// <summary>Tipos de nodo del diagrama de una automatización.</summary>
@@ -200,7 +204,7 @@ public sealed record WorkflowConditionsDto(
     IReadOnlyList<WorkflowTimeBandDto>? TimeBands = null,
 
     // --- Conexión de equipos (disparador device-status) ---
-    /// <summary>Clase de equipo: "video" (cámara/grabador), "access" (terminal de acceso), "speaker" (parlante). Vacío = todas.</summary>
+    /// <summary>Clase de equipo: "video" (cámara/grabador), "access" (terminal de acceso), "speaker" (parlante), "io" (módulo de E/S). Vacío = todas.</summary>
     IReadOnlyList<string>? DeviceKinds = null,
     /// <summary>Cámaras/grabadores (Ids de Devices). También filtra patentes y eventos de video.</summary>
     IReadOnlyList<int>? DeviceIds = null,
@@ -208,6 +212,8 @@ public sealed record WorkflowConditionsDto(
     IReadOnlyList<int>? AccessDeviceIds = null,
     /// <summary>Parlantes IP (Ids de Speakers).</summary>
     IReadOnlyList<int>? SpeakerIds = null,
+    /// <summary>Módulos de E/S completos (Ids de IoModules): su conexión o cualquiera de sus entradas.</summary>
+    IReadOnlyList<int>? IoModuleIds = null,
     /// <summary>Estados de conexión que disparan: "Online" | "Offline" | "AuthFailed".</summary>
     IReadOnlyList<string>? DeviceStatuses = null,
 
@@ -253,7 +259,13 @@ public sealed record WorkflowConditionsDto(
 
     // --- Llamada externa (disparador webhook) ---
     /// <summary>Clave secreta de la URL: POST /api/workflows/hook/{clave}.</summary>
-    string? HookKey = null);
+    string? HookKey = null,
+
+    // --- Entradas de módulos de E/S (disparador io-input) ---
+    /// <summary>Entradas sueltas ("módulo:número", desde 0). Se suman a <see cref="IoModuleIds"/>: dispara cualquiera de las dos.</summary>
+    IReadOnlyList<string>? IoInputKeys = null,
+    /// <summary>Cambio que dispara: "Active" (se activó) | "Inactive" (volvió a reposo). Vacío = ambos.</summary>
+    IReadOnlyList<string>? IoInputStates = null);
 
 /// <summary>
 /// Franja horaria semanal: días de la semana (0 = domingo; vacío = todos) y
@@ -436,7 +448,11 @@ public sealed record WorkflowCatalogDto(
     /// <summary>El servidor tiene FFmpeg (necesario para convertir sonidos de parlante).</summary>
     bool FfmpegAvailable,
     /// <summary>Usuarios del sistema, para elegir los destinatarios de un aviso.</summary>
-    IReadOnlyList<WorkflowUserDto>? Users = null);
+    IReadOnlyList<WorkflowUserDto>? Users = null,
+    /// <summary>Pantallas de alarma emparejadas, para elegir dónde se muestra un aviso.</summary>
+    IReadOnlyList<AlarmScreenOptionDto>? Screens = null,
+    /// <summary>La licencia incluye las pantallas de alarma (si no, los avisos van solo a la ventana).</summary>
+    bool ScreensLicensed = false);
 
 /// <summary>Usuario elegible como destinatario de un aviso.</summary>
 public sealed record WorkflowUserDto(int Id, string Username, string Role, bool Enabled);
@@ -550,7 +566,13 @@ public sealed record WorkflowAlertDto(
     /// <summary>Ubicación del recurso al momento del aviso.</summary>
     string? LocationPath = null,
     /// <summary>Consignas de la ficha del recurso al momento del aviso (lo que se le indicó al operador).</summary>
-    string? Instructions = null)
+    string? Instructions = null,
+    /// <summary>Se muestra en la ventana de alarma del cliente de escritorio.</summary>
+    bool ShowPopup = true,
+    /// <summary>Se muestra en las pantallas de alarma de las casetas.</summary>
+    bool ShowOnScreens = false,
+    /// <summary>Pantallas a las que se envió ("Caseta norte, Portería"); null = a todas.</summary>
+    string? Screens = null)
 {
     public bool Pending => RequiresAck && AcknowledgedAt is null;
 }

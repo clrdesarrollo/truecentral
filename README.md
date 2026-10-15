@@ -43,6 +43,7 @@ HikCentral / SmartPSS / iVMS-4200).
 | MediaMTX del **cliente** (solo al proyectar la pantalla al muro) | **8554** | 0.0.0.0, TCP |
 | Receptor de paneles de cerco (WebSocket) | **5092** | 0.0.0.0, TCP |
 | Descarga de firmware OTA de paneles de cerco | **5093** | 0.0.0.0, TCP (solo tokens de un uso) |
+| Autodiscovery de las pantallas de alarma | **5094** | 0.0.0.0, UDP (responde la URL del servidor) |
 
 El 8554 lo abre el propio puesto de operación mientras transmite su pantalla
 al muro (lo consume el decodificador); el resto del tiempo no escucha nada.
@@ -56,10 +57,12 @@ CLRTrueCentralVMS.slnx
 src\TrueCentralVms.Core\               contratos: DTOs, IDeviceDriver, hub SignalR
 src\TrueCentralVms.Server\             servidor + panel web (wwwroot)
 src\TrueCentralVms.Client\             cliente de escritorio WPF (FlyleafLib)
+src\TrueCentralVms.AlarmScreen\        pantalla de alarma de las casetas (Avalonia, Raspberry Pi linux-arm64)
 src\TrueCentralVms.Watchdog\           monitor de escritorio del servidor
 src\TrueCentralVms.Drivers.Hikvision\  interop HCNetSDK 6.1.9.48
 src\TrueCentralVms.Drivers.Dahua\      interop propio contra dhnetsdk.h (x64)
 src\TrueCentralVms.Drivers.Onvif\      SOAP manual (WS-UsernameToken)
+src\TrueCentralVms.Drivers.Adam\       Modbus TCP propio para los ADAM-6000 (sin DLL de Advantech)
 native\hikvision\ · native\dahua\      DLLs de los SDK (git-ignored)
 tools\postgres\ · tools\mediamtx\      binarios embebidos (git-ignored)
 tools\ffmpeg-flyleaf\                  FFmpeg compartido para FlyleafLib (git-ignored)
@@ -672,6 +675,72 @@ inventario (o todo un grupo) y puede reproducir un sonido del servidor, un
 audio de la biblioteca del equipo o un texto leído en voz alta con las marcas
 `{zona}`, `{panel}`, etc. Todo queda en la bitácora (categoría *Parlantes IP*):
 quién habló, cuánto tiempo, qué se reprodujo y en qué equipos.
+
+## Módulos de E/S (relés y entradas)
+
+Módulos de entradas y salidas digitales Advantech **ADAM-6050, 6051, 6052, 6055,
+6060 y 6066** por Modbus TCP (puerto 502), con un cliente Modbus propio
+(`src\TrueCentralVms.Drivers.Adam`, nacido de la demo `adamdemo`). Sus relés mueven
+barreras, portones y balizas; sus entradas leen pulsadores, lazos y sensores.
+
+- **Dispositivos → Módulos de E/S** (`#/io-modules`, permiso *Módulos de E/S* para
+  configurar, *Operar relés* para operar): alta con **Probar conexión** (el modelo se
+  lee del registro 40211; se puede forzar a mano para dar de alta un módulo apagado),
+  nombre de cada entrada y relé, y la lógica de cada entrada (*activa al cerrar* o *al
+  abrir el contacto*: en contacto seco el ADAM lee 1 abierto). Una tarjeta por módulo
+  con el estado vivo (hub `IoModuleChanged`) y **Pulso / Encender / Apagar** por relé.
+- **Una sola conexión por módulo**, la del servidor (`IoModuleService`): sondea las
+  entradas cada 250 ms (configurable 100–5000) y da las órdenes por la misma conexión.
+  Los pulsos y parpadeos los temporiza el servidor; al detenerse (o al pausar o
+  borrar el módulo) suelta los relés que estaban en uno. Si el proceso muere de golpe
+  el relé queda como esté: configurar el **watchdog FSV** del propio ADAM.
+- **Automatizaciones**: acción **Operar relé** (pulso con segundos, encender, apagar,
+  alternar, parpadear; varios relés de varios módulos) y disparador **Entrada de
+  módulo de E/S** (se activa / vuelve a reposo, por módulo completo o entrada
+  suelta). «Conexión de un equipo» incluye la clase *Módulos de E/S*.
+- Es un **recurso** (Recursos y ubicaciones, alcance del rol, ficha e historial):
+  el alcance se mide por módulo. Supervisor: servicio *Módulos de E/S*. Licencia:
+  `module_io` + cupo `io_modules` (catálogo v2). Bitácora: categoría *Módulos de E/S*.
+
+## Pantallas de alarma (casetas)
+
+Monitores en las casetas de guardia, cada uno con una **Raspberry Pi 4/5**, que
+muestran los avisos de las automatizaciones con sonido, foto y las consignas del
+recurso, y dejan **marcarlos como vistos**. Se conectan DIRECTO al servidor: no hay
+servidor intermedio ni conexión con HikCentral (reemplazan a `clrAlarmCenter` y al
+servidor de `clrAlarmCenterServer`, de donde se portó la app de la Pi).
+
+- **App** `src\TrueCentralVms.AlarmScreen` (Avalonia, kiosco): autodiscovery UDP
+  5094, emparejamiento con código de 6 dígitos, hub propio `/hubs/screens` con
+  credencial de pantalla (`X-Screen-Token`; el servidor guarda solo su SHA-256),
+  resincronización al reconectar, sonidos de la biblioteca de automatizaciones
+  cacheados por hash, volumen/salida de audio/disposición por equipo, reinicio
+  desde el panel. Contratos en `Core\Contracts\AlarmScreenDtos.cs`.
+- **Panel**: Dispositivos → **Pantallas de alarma** (`#/alarm-screens`, permiso
+  *Pantallas de alarma* `screens.configure`): aprobar/rechazar por código, editar,
+  reiniciar el equipo, deshabilitar (conserva la credencial: el hub responde 403),
+  reiniciar emparejamiento (descarta la credencial: 401 → la Pi pide código nuevo),
+  quitar, y **Sonidos y ajustes** comunes (sonidos, recordatorio, resincronización).
+- **Automatizaciones**: la acción *Avisar a los operadores* tiene **Dónde se
+  muestra** (`destination`: `popup` | `screens` | `both`) y **Pantallas**
+  (`screenIds`, vacío = todas). Es UNA sola alerta (`WorkflowAlert` con
+  `ShowPopup`/`ShowOnScreens`/`ScreenIds`): la primera confirmación gana, venga de
+  una pantalla (`AcknowledgedFrom = "screen"`, `AcknowledgedScreenId`) o de un
+  operador. Marcarla en una pantalla avisa por `WorkflowAlertAcknowledged` y el
+  cliente de escritorio la **saca de la ventana de alarma** (se cierra si no queda
+  otra); confirmarla en TrueCentral difunde `AlarmAcknowledged` a las pantallas.
+  Sin licencia o sin pantallas aprobadas, el aviso cae a la ventana de alarma.
+- **Servicio** `AlarmScreenService` (supervisado, *Pantallas de alarma*):
+  conexiones, entrega (`AlarmScreenDeliveries`: cuándo le llegó a cada pantalla),
+  acuse, autodiscovery y caídas (> 60 s → bitácora `screen-offline`).
+- **Instalación de la Pi**: `installer\screen\install-screen.sh` con el paquete
+  `truecentral-screen-<versión>-linux-arm64.tar.gz` que genera
+  `build-installers.ps1` (en `dist\` y dentro de la suite, en `screen-packages\`).
+  Cada Pi se actualiza sola de noche (`truecentral-screen-update.sh`, verifica el
+  SHA-256 y vuelve a la versión anterior si la nueva no levanta).
+- **Licencia**: `module_alarm_screens` + cupo `alarm_screens` (pantallas
+  aprobadas; catálogo v3). Bitácora: categoría *Pantallas de alarma*, y la alerta
+  confirmada en una pantalla con origen `screen`.
 
 ## Control de acceso
 

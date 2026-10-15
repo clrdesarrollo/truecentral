@@ -1471,6 +1471,108 @@ interfaz de la Vista en vivo del cliente de escritorio, en el navegador.
   integrado de la app no abre ventanas emergentes ni pasa a pantalla completa), ni el acceso
   desde otro equipo de la red.
 
+## Módulos de E/S (Advantech ADAM-6000) — 2026-10-14
+
+Pedido: una cámara ANPR debe levantar la barrera de los funcionarios con un relé de un
+ADAM-6066 (192.168.10.90), idealmente desde una automatización. La librería Modbus ya
+estaba hecha y probada en `..\adamdemo` (demo WPF + simulador).
+
+- **Driver** `TrueCentralVms.Drivers.Adam`: copia de `AdamIo` con `DriverException`;
+  `ModbusException` hereda de ella. Cambio respecto de la demo: el pulso y el parpadeo
+  **vuelven en cuanto la salida quedó energizada** y el resto corre aparte (antes
+  esperaban todo el pulso); si después no se puede soltar la salida se avisa por
+  `OutputEffectFailed` (bitácora `io/output-effect-failed`).
+- **Contrato** `Core/Drivers/IIoModuleDriver.cs`: `ProbeAsync` (conecta, lee el modelo
+  y una lectura completa) y `Open` → `IIoModuleSession` (sondeo + órdenes por la misma
+  conexión, eventos de estado, canal y conexión).
+- **Datos**: `IoModules` (recurso con `LocationId`, `Model` efectivo, `ModelKey` forzado,
+  `ReportedModel`) e `IoPoints` (una fila por DI/DO con nombre e `Inverted`, por omisión
+  true: activa al cerrar a GND). Migración `IoModules`: tablas, `IoModuleId` en el arco
+  exclusivo de `ResourceProfiles` (CHECK actualizado) y `io.operate` al rol Operador.
+- **Servicio** `IoModuleService` (supervisado): una sesión por módulo habilitado, repaso
+  cada 30 s o al guardar; los avisos de los monitores se procesan en orden por un canal;
+  conexión → estado, bitácora y `device-status` "io"; entrada que cambia →
+  `WorkflowTrigger.FromIoInput`; al detenerse cierra las sesiones (suelta pulsos).
+- **API** `/api/io/...`; la orden a una salida exige `io.operate` y `CanOperateIoModule`
+  (fuera de alcance → 403 auditado). La respuesta de la orden NO trae el estado: el que
+  había al responder llegaba después del aviso del hub y lo pisaba; el estado vivo va
+  solo por el hub. OJO: el hub serializa los enums como números (`io-modules.js`
+  normaliza con `ioNormalize`, igual que el monitoreo de acceso).
+- **Automatizaciones**: acción `relay` (`relayKeys` "módulo:salida", `seconds` del pulso,
+  `blinkSeconds`/`intervalMs` del parpadeo: claves distintas porque el editor aplica los
+  valores por omisión por clave) y disparador `io-input` (`IoModuleIds` + `IoInputKeys`
+  en OR, `IoInputStates`).
+- **Licencia** (catálogo v2): `module_io` + `io_modules`; Professional 4, Enterprise 32,
+  prueba 2, expansión `addon_io_2`. Falta importarlo en el servidor de licencias.
+- **Probado** con el simulador de `adamdemo` (ADAM-6066 en 127.0.0.1:1502) y un servidor
+  aislado: alta, prueba, pulso manual, automatización patente → pulso, entrada → relé,
+  caída y vuelta del módulo, alcance por rol, detener el servicio suelta un parpadeo y la
+  página web con el estado en vivo. NO probado contra el ADAM real.
+- Pendiente: vista en el cliente de escritorio (hoy solo el panel web opera los relés a
+  mano) y el padrón de vehículos ligado a personas (propuesta aparte).
+
+## Pantallas de alarma de las casetas (ex clrAlarm) — 2026-10-14
+
+Pedido: `clrAlarmCenter` (app autónoma) y `clrAlarmCenterServer` (servidor + Raspberry Pi)
+consumían los eventos de HikCentral. Ahora deben integrarse con TrueCentral, y cada
+automatización debe poder elegir si su alarma sale en la ventana de alarma (popup), en las
+pantallas de las casetas o en ambas; si el guardia la acepta en la caseta, la ventana del
+operador se cierra. Decisiones del usuario: **solo la app de la Raspberry, conectada directo a
+TrueCentral** (el servidor clrAlarm y la conexión con HikCentral dejan de ser necesarios),
+acuse en ambos sentidos, configuración en TrueCentral y **licenciado como expansión**.
+
+- **App** `src\TrueCentralVms.AlarmScreen`: copia adaptada de `ClrAlarm.Client` (Avalonia
+  11.3.2, mismas lecciones: Tmds.DBus 0.21.3, foto decodificada solo la seleccionada, salida
+  de audio por nombre, kiosco). Cambios: contratos de TrueCentral (`AlarmScreenDtos.cs`, ids
+  `long`), rutas `/api/screen/*`, hub `/hubs/screens`, autodiscovery UDP **5094** con sonda
+  `TCVMS_SCREEN_DISCOVER`, configuración en `~/.config/TrueCentralPantalla`, detalle y aviso
+  a pantalla completa con mensaje, ubicación y **consignas** («QUÉ HACER»), versión = la del
+  producto (`VERSION`), 403 = deshabilitada (conserva la credencial y espera).
+- **Servidor**: `AlarmScreens` (MachineId único, estado pending/approved/rejected/disabled,
+  código de 6 dígitos, hash de la credencial, volumen/disposición/salida), `AlarmScreenSettings`
+  (fila única: sonidos, recordatorio, ventana de resincronización, nombre de la instalación) y
+  `AlarmScreenDeliveries` (constancia de entrega por pantalla). `WorkflowAlert` suma
+  `ShowPopup` (true para las existentes: lo pone la migración, NO `HasDefaultValue`, que con
+  bool haría que EF omita el false), `ShowOnScreens`, `ScreenIds` (",1,4,"), `Screens` y
+  `AcknowledgedScreenId`. Migración `AlarmScreens`.
+- **Middleware**: en `/hubs/screens` y `/api/screen` se resuelve la credencial
+  (`X-Screen-Token` o `?access_token=`); el hub responde 401 (credencial desconocida → la Pi
+  vuelve a emparejarse) o 403 (pantalla deshabilitada) ANTES de abrir la conexión.
+- **Acuse**: primera confirmación gana con `ExecuteUpdate … where AcknowledgedAt == null`.
+  Pantalla → `WorkflowAlertAcknowledged` a los operadores que la recibieron
+  (`WorkflowsApi.ReceivesAlert`) + `AlarmAcknowledged` a las pantallas; operador → el endpoint
+  de siempre difunde además a las pantallas. El cliente de escritorio, con
+  `AcknowledgedFrom == "screen"`, saca la alerta de `AlertWindow` (`Remove`) y la cierra si no
+  queda otra; con otro operador sigue como antes (la muestra confirmada). Las alertas solo de
+  pantallas no abren la ventana al iniciar sesión (`LoadPendingAlertsAsync` filtra
+  `ShowPopup`) ni suenan en el centro de eventos web.
+- **Respaldo**: sin licencia, sin pantallas aprobadas o con las elegidas deshabilitadas, el
+  aviso cae a la ventana de alarma (lo dice el detalle del paso).
+- **Licencia** (catálogo **v3**, la v2 es la de E/S): `module_alarm_screens` + `alarm_screens`
+  (pantallas aprobadas); Professional 4, Enterprise 32, prueba 2, expansión
+  `addon_alarm_screens_2`. Falta importar el catálogo en el servidor de licencias.
+- **Permiso** `screens.configure` (*Pantallas de alarma*, grupo Configuración; plantilla
+  Técnico). La pantalla no tiene usuario: lo que hace queda en la bitácora con el actor
+  «pantalla <nombre>» y origen `screen`.
+- **Instalador**: `build-installers.ps1` publica la app linux-arm64 autocontenida y la comprime
+  (`dist\truecentral-screen-<v>-linux-arm64.tar.gz`, ~40 MB); `suite.iss` la deja en
+  `{app}\screen-packages` (el servidor sirve la más nueva). La regla UDP del servidor ya es por
+  programa (cubre el 5094). Scripts de la Pi en `installer\screen\` (`*.sh` con `eol=lf`).
+- **Seguridad** (mismo commit aparte): SignalR.Client 10.0.13 en el cliente y la pantalla
+  (CVE-2026-70159) y `System.Security.Cryptography.Pkcs` 10.0.13 fijado en el servidor
+  (CVE-2026-84008, lo arrastraban MimeKit y PDFsharp). Ambos avisos son del 2026-10-13.
+- **Probado** con un servidor aislado (6831/26831/9831/10831, UDP 5094): arnés de 61
+  verificaciones (dos pantallas simuladas + operador por los dos hubs: emparejamiento,
+  cupo de licencia, ambas/solo pantallas/solo ventana, acuse en los dos sentidos, «Todas
+  vistas», deshabilitar 403, reiniciar emparejamiento 401, bitácora) y con las apps reales:
+  la pantalla de Windows encontró el servidor por UDP, se aprobó desde la página web, mostró
+  el aviso y al marcarlo la ventana de alarma del cliente de escritorio se cerró; confirmar
+  en el cliente calló la pantalla. NO probado en una Raspberry Pi real ni el script de
+  instalación (solo `bash -n`).
+- Pendiente / propuesto: filtrar por ubicación (una pantalla que solo vea los avisos de los
+  recursos de su ubicación), sonido de prueba desde el panel, retiro de `clrAlarmCenter` y
+  `clrAlarmCenterServer` una vez migradas las casetas.
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

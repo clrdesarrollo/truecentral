@@ -1,6 +1,6 @@
 # Capturas pendientes
 
-Las 28 capturas que faltan en el manual. Cada una está en su capítulo como
+Las 30 capturas que faltan en el manual. Cada una está en su capítulo como
 `#captura-pendiente("…")`. Al tomarla, se reemplaza por
 `#captura("archivo.png", marcas: (…), pie: […])` y se borra de esta lista.
 
@@ -64,6 +64,18 @@ Reglas:
 |---|---|---|
 | `cliente-vista-en-vivo-parlantes.png` | Panel PARLANTES con dos parlantes marcados | Marcar todos · casillas · Volumen · micrófono, Probar y nivel · Mantener para hablar · Detener · tono · sonido del servidor · biblioteca · texto a voz · estado |
 | `web-parlantes.png` | Tabla y formulario tras Probar conexión | Reproducir en varios… · Agregar parlante · Volumen · Biblioteca · resultado |
+
+## Módulos de E/S
+
+| Archivo | Pantalla y estado | Marcas |
+|---|---|---|
+| `web-modulos-es.png` | Dispositivos › Módulos de E/S con un módulo en línea, una entrada activa y un relé encendido | Nombre y ubicación · estado de conexión · entradas · relés · segundos del pulso · Pulso / Encender / Apagar |
+
+## Pantallas de alarma
+
+| Archivo | Pantalla y estado | Marcas |
+|---|---|---|
+| `pi-pantalla-alarma.png` | La app de la pantalla (Raspberry Pi) con avisos en la lista, uno pendiente seleccionado con foto y consignas | Nombre de la pantalla · conexión · SIN VER · QUÉ HACER · MARCAR COMO VISTA · TODAS VISTAS |
 
 ## 11 · Muro de video
 

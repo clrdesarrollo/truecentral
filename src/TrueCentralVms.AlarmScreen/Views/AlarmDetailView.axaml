@@ -1,0 +1,125 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TrueCentralVms.AlarmScreen.ViewModels"
+             x:Class="TrueCentralVms.AlarmScreen.Views.AlarmDetailView"
+             x:DataType="vm:MainViewModel">
+
+  <UserControl.Styles>
+    <!-- Resaltado mientras la alarma siga sin marcar. Late en lugar de quedarse fijo, porque un
+         borde estático se vuelve parte del decorado a los dos minutos; y nunca baja del todo,
+         para que se note que sigue pendiente aun en el punto más tenue.
+         Se anima la opacidad de un marco superpuesto y no el color del borde del detalle: la
+         opacidad es un double y se interpola igual en cualquier plataforma. -->
+    <Style Selector="Border#Destello.activo">
+      <Style.Animations>
+        <Animation Duration="0:0:0.9" IterationCount="INFINITE" PlaybackDirection="Alternate">
+          <KeyFrame Cue="0%">
+            <Setter Property="Opacity" Value="0.25" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="Opacity" Value="1" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+  </UserControl.Styles>
+
+  <!-- El detalle de la alarma seleccionada, con su foto y el botón de acuse. -->
+  <Panel>
+    <!-- Menos relleno abajo que arriba: el botón de acuse baja hasta casi el borde del panel y
+         esos píxeles se los queda la foto, que en los monitores de 800x600 es la parte que peor
+         anda de altura. Abajo no hace falta el mismo aire que arriba, porque el botón ya trae
+         el suyo propio. -->
+    <Border Background="#161E26" CornerRadius="10" Padding="24,24,24,12">
+      <Panel>
+
+      <!-- Sin nada seleccionado la pantalla queda en espera: se lee de un vistazo desde lejos -->
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12"
+                  IsVisible="{Binding Selected, Converter={x:Static ObjectConverters.IsNull}}">
+        <TextBlock Text="✓" FontSize="64" Foreground="#2E7D46" HorizontalAlignment="Center" />
+        <TextBlock Text="Sin alarmas pendientes" FontSize="26" FontWeight="SemiBold"
+                   Foreground="#78909C" HorizontalAlignment="Center" />
+        <TextBlock Text="Esperando nuevos eventos" FontSize="16"
+                   Foreground="#546E7A" HorizontalAlignment="Center" />
+      </StackPanel>
+
+      <Grid RowDefinitions="Auto,*,Auto"
+            IsVisible="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}">
+
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+          <StackPanel Grid.Column="0" Spacing="8" DataContext="{Binding Selected}" x:DataType="vm:AlarmCardViewModel">
+            <Border Background="{Binding PriorityBrush}" CornerRadius="4" Padding="12,4" HorizontalAlignment="Left">
+              <TextBlock Text="{Binding PriorityText}" Foreground="White" FontWeight="Bold" FontSize="13" />
+            </Border>
+            <!-- Mismo cuerpo que el nombre del terminal en el encabezado: a 34 el título se comía
+                 dos o tres líneas con los nombres largos que manda el VMS, y esa altura se la
+                 quitaba a la foto, que es lo que el guardia mira de lejos. -->
+            <TextBlock Text="{Binding Title}" FontSize="24" FontWeight="Bold" Foreground="#FFFFFF"
+                       TextWrapping="Wrap" />
+            <TextBlock Text="{Binding SourceName}" FontSize="20" Foreground="#B0BEC5" TextWrapping="Wrap" MaxLines="2" />
+            <TextBlock Text="{Binding Message}" FontSize="16" Foreground="#B0BEC5" TextWrapping="Wrap" MaxLines="2"
+                       IsVisible="{Binding HasMessage}" />
+            <!-- Consignas de la ficha del recurso (Recursos en TrueCentral): qué tiene que hacer el
+                 guardia. Con tope de líneas: la altura que se lleven se la quitan a la foto. -->
+            <Border Background="#1F2A33" BorderBrush="#42A5F5" BorderThickness="1" CornerRadius="6"
+                    Padding="12,8" IsVisible="{Binding HasInstructions}">
+              <StackPanel Spacing="2">
+                <TextBlock Text="QUÉ HACER" FontSize="11" FontWeight="Bold" Foreground="#64B5F6" />
+                <TextBlock Text="{Binding Instructions}" FontSize="15" Foreground="#ECEFF1" TextWrapping="Wrap"
+                           MaxLines="4" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </Border>
+            <StackPanel Orientation="Horizontal" Spacing="18">
+              <TextBlock Text="{Binding DateText}" FontSize="14" Foreground="#78909C" />
+              <TextBlock Text="{Binding OriginText}" FontSize="14" Foreground="#78909C" />
+            </StackPanel>
+            <TextBlock Text="{Binding AckText}" FontSize="14" Foreground="#66BB6A" />
+          </StackPanel>
+
+          <!-- Solo se habilita con la alarma ya marcada: una pendiente no se puede sacar de la
+               vista sin atenderla, que es la forma más fácil de que se pierda -->
+          <Button Grid.Column="1" Classes="cerrar" Content="✕" VerticalAlignment="Top"
+                  Command="{Binding ClearSelectionCommand}"
+                  IsEnabled="{Binding Selected.Acknowledged}"
+                  ToolTip.Tip="Cerrar el detalle. Disponible una vez marcada como vista." />
+        </Grid>
+
+        <!-- doble clic sobre la foto para verla a pantalla completa. El aire de abajo es menor que
+             el de arriba: contra el botón alcanza con separarlos, mientras que arriba hay texto
+             pegado y necesita más respiro. -->
+        <Border Grid.Row="1" Margin="0,14,0,10" Background="#0E1418" CornerRadius="8" ClipToBounds="True"
+                DoubleTapped="OnPhotoDoubleTapped" Cursor="Hand">
+          <Panel>
+            <TextBlock Text="Esta alarma no trae imagen"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       FontSize="15" Foreground="#455A64"
+                       IsVisible="{Binding Selected.Photo, Converter={x:Static ObjectConverters.IsNull}}" />
+            <Image Source="{Binding Selected.Photo}" Stretch="Uniform" />
+
+            <!-- Superpuesto en la esquina y semitransparente: no tapa la escena, pero es un blanco
+                 de dedo de verdad. Reemplaza al aviso de «doble clic», que en la pantalla táctil de
+                 la ubicación no funcionaba: el doble toque se pierde o llega como dos toques sueltos. -->
+            <Button Content="AMPLIAR" Margin="12"
+                    HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    MinHeight="48" MinWidth="120" FontSize="15" FontWeight="Bold"
+                    Background="#CC1976D2" Foreground="White" CornerRadius="8" Padding="18,10"
+                    Command="{Binding OpenPhotoCommand}"
+                    IsVisible="{Binding Selected.Photo, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          </Panel>
+        </Border>
+
+        <Button Grid.Row="2" Classes="primary" HorizontalAlignment="Stretch" FontSize="20"
+                Content="MARCAR COMO VISTA"
+                Command="{Binding AcknowledgeCommand}" CommandParameter="{Binding Selected}"
+                IsEnabled="{Binding !Selected.Acknowledged}" />
+      </Grid>
+
+      </Panel>
+    </Border>
+
+    <!-- Marco del resaltado: encima de todo, sin capturar clics para no tapar el botón de acuse -->
+    <Border x:Name="Destello" CornerRadius="10" BorderThickness="4" BorderBrush="#42A5F5"
+            Opacity="0" IsHitTestVisible="False"
+            Classes.activo="{Binding IsHighlighting}" />
+  </Panel>
+</UserControl>

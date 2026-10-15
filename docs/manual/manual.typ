@@ -26,6 +26,8 @@
 #modulo("access", include "capitulos/08-control-de-acceso.typ")
 #modulo("intercom", include "capitulos/09-citofonia.typ")
 #modulo("speakers", include "capitulos/10-parlantes-ip.typ")
+#modulo("io", include "capitulos/10b-modulos-de-es.typ")
+#modulo("alarm_screens", include "capitulos/10c-pantallas-de-alarma.typ")
 #modulo("videowall", include "capitulos/11-muro-de-video.typ")
 #modulo("anpr", include "capitulos/12-reconocimiento-de-patentes.typ")
 #modulo("automation", include "capitulos/13-automatizaciones.typ")

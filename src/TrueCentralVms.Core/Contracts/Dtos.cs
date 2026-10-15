@@ -70,6 +70,7 @@ public sealed record UserScopeDto(bool Restricted, bool ViewOutsideScope, IReadO
 /// <param name="Zones">Zonas de alarma como "panel/número" (anular / restituir).</param>
 /// <param name="WholePanels">Paneles cuyas áreas puede operar todas: las órdenes de "todo el panel".</param>
 /// <param name="Doors">Puertas de control de acceso, por id.</param>
+/// <param name="IoModules">Módulos de entradas y salidas (operar sus relés), por id.</param>
 public sealed record OperableDto(
     bool All,
     IReadOnlyList<int> Locations,
@@ -80,7 +81,8 @@ public sealed record OperableDto(
     IReadOnlyList<int> Doors,
     IReadOnlyList<int> Fences,
     IReadOnlyList<int> Speakers,
-    IReadOnlyList<int> Intercoms);
+    IReadOnlyList<int> Intercoms,
+    IReadOnlyList<int>? IoModules = null);
 
 // ---------------------------------------------------------------------------
 // Salud del sistema
@@ -178,8 +180,18 @@ public static class VmsHubContract
     /// <summary>Alguien se dio por enterado de una alerta; el resto puede bajarla (payload: WorkflowAlertDto).</summary>
     public const string WorkflowAlertAcknowledged = nameof(WorkflowAlertAcknowledged);
 
+    /// <summary>
+    /// Cambió algo de las pantallas de alarma: una pidió emparejarse, se
+    /// conectó o se cayó (sin payload: el panel relee la lista). Solo a quien
+    /// configura pantallas.
+    /// </summary>
+    public const string AlarmScreensChanged = nameof(AlarmScreensChanged);
+
     /// <summary>Un parlante IP cambió de estado de conexión (payload: SpeakerDto).</summary>
     public const string SpeakerStatusChanged = nameof(SpeakerStatusChanged);
+
+    /// <summary>Un módulo de E/S cambió de conexión o de estado de sus entradas y salidas (payload: IoModuleDto).</summary>
+    public const string IoModuleChanged = nameof(IoModuleChanged);
 
     /// <summary>Un equipo de control de acceso cambió de estado de conexión (payload: AccessDeviceDto).</summary>
     public const string AccessDeviceStatusChanged = nameof(AccessDeviceStatusChanged);

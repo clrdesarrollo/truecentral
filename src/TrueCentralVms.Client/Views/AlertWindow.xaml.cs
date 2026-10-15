@@ -132,6 +132,37 @@ public partial class AlertWindow : Window
         else window.RenderPager();
     }
 
+    /// <summary>
+    /// Saca una alerta de la ventana (la marcaron como vista en una pantalla de
+    /// alarma de una caseta: ya está atendida allá y dejarla aquí invita a
+    /// confirmar algo resuelto). Si no queda ninguna pendiente, la ventana se
+    /// cierra; si quedan, pasa a la siguiente pendiente.
+    /// </summary>
+    public static void Remove(long alertId)
+    {
+        if (_current is not { } window) return;
+        int position = window._alerts.FindIndex(a => a.Id == alertId);
+        if (position < 0) return;
+        bool wasShown = position == window._index;
+        window._alerts.RemoveAt(position);
+        int next = window._alerts.FindIndex(a => a.Pending);
+        if (next < 0)
+        {
+            window.Close();
+            return;
+        }
+        if (wasShown)
+        {
+            window._index = next;
+            _ = window.RenderAsync();
+        }
+        else
+        {
+            if (position < window._index) window._index--;
+            window.RenderPager();
+        }
+    }
+
     /// <summary>Cierra la ventana si ya no queda ninguna alerta sin confirmar.</summary>
     public static void CloseIfDone()
     {
@@ -370,7 +401,12 @@ public partial class AlertWindow : Window
             AckStateText.Foreground = (Brush)FindResource("OkBrush");
             AckDetailText.Text = $"Por {alert.AcknowledgedBy} el {at.ToLocalTime():dd-MM-yyyy HH:mm:ss} " +
                                  $"({alert.ResponseSeconds} s después de emitida), desde " +
-                                 (alert.AcknowledgedFrom == "client" ? "el cliente de escritorio." : "el panel web.");
+                                 alert.AcknowledgedFrom switch
+                                 {
+                                     "client" => "el cliente de escritorio.",
+                                     "screen" => "una pantalla de alarma de caseta.",
+                                     _ => "el panel web.",
+                                 };
             AckButton.Visibility = Visibility.Collapsed;
             AckHint.Text = "Esta alerta ya tiene acuse de recibo; el registro no se modifica.";
         }

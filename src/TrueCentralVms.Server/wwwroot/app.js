@@ -298,14 +298,14 @@ async function onPermissionsChanged() {
 // separados por espacio = todos tienen que poder operarse) y se deshabilitan
 // solos, con la explicación en su tooltip, aunque el módulo los vuelva a dibujar.
 // Tipos: location, channel, area y zone ("panel/número"), panel (todo el panel),
-// door, fence, speaker, intercom. Mientras no se haya leído no se bloquea nada:
+// door, fence, speaker, intercom, io (módulo de E/S). Mientras no se haya leído no se bloquea nada:
 // el servidor valida igual.
 // ---------------------------------------------------------------------------
 const OP_DENIED = "Fuera de su alcance: puede verlo, pero no operarlo.";
-const OP_TOPICS = new Set(["scope", "locations", "devices", "channels", "alarm-panels", "access-devices", "speakers", "intercoms"]);
+const OP_TOPICS = new Set(["scope", "locations", "devices", "channels", "alarm-panels", "access-devices", "speakers", "intercoms", "io-modules"]);
 const OP_KINDS = {
   location: "locations", channel: "channels", area: "areas", zone: "zones", panel: "wholePanels",
-  door: "doors", fence: "fences", speaker: "speakers", intercom: "intercoms",
+  door: "doors", fence: "fences", speaker: "speakers", intercom: "intercoms", io: "ioModules",
 };
 const Operable = {
   all: true,
@@ -1968,7 +1968,7 @@ function userModal(user, scopeCtx = { locations: [], unassigned: 0, roles: [] })
 let auditCatalog = null;           // catálogo de categorías/acciones (se pide una vez)
 const auditState = { page: 1 };    // filtros vigentes entre búsquedas
 
-const AUDIT_ORIGINS = { web: "Panel web", client: "Cliente", server: "Servidor" };
+const AUDIT_ORIGINS = { web: "Panel web", client: "Cliente", server: "Servidor", screen: "Pantalla de alarma" };
 
 function formatDateTime(iso) {
   if (!iso) return "—";
@@ -2187,6 +2187,8 @@ const routes = {
   "#/access-schedules": renderAccessSchedules,
   "#/access-events": renderAccessEvents,
   "#/speakers": renderSpeakers,
+  "#/io-modules": renderIoModules,
+  "#/alarm-screens": renderAlarmScreens,
   "#/intercoms": renderIntercoms,
   "#/device-maintenance": renderDeviceMaintenance,
   "#/workflows": renderWorkflows,
@@ -2301,6 +2303,8 @@ function leaveCurrentPage() {
   if (typeof accessDetachHub === "function") accessDetachHub(); // ídem el monitoreo de puertas
   if (typeof resourcesDetachHub === "function") resourcesDetachHub(); // ídem la página Recursos
   if (typeof rolesDetachHub === "function") rolesDetachHub(); // ídem la página Roles
+  if (typeof ioModulesDetachHub === "function") ioModulesDetachHub(); // ídem los módulos de E/S
+  if (typeof alarmScreensDetachHub === "function") alarmScreensDetachHub(); // ídem las pantallas de alarma
   clearInterval(eventCenterTimer); // ídem el del centro de eventos
   evcStopSound();                // y su alarma sonora no sigue en otra página
   clearInterval(videowallTimer); // ídem el del puesto de videowall

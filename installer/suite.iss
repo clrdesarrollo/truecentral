@@ -98,6 +98,16 @@
   #pragma warning "No existe " + AgentSetup + ": la suite se compila SIN el complemento de enrolamiento (compile primero complemento.iss)."
 #endif
 
+; App de las pantallas de alarma de las casetas (Raspberry Pi, linux-arm64): la
+; suite la deja en screen-packages\, de donde cada pantalla se actualiza sola
+; (installer\screen\truecentral-screen-update.sh). build-installers.ps1 la genera.
+#define ScreenPackage "..\dist\truecentral-screen-" + AppVersion + "-linux-arm64.tar.gz"
+#if FileExists(ScreenPackage)
+  #define HasScreenPackage
+#else
+  #pragma warning "No existe " + ScreenPackage + ": la suite se compila SIN la app de las pantallas de alarma."
+#endif
+
 #ifndef ClientSetupName
   #define ClientSetupName "CLRTrueCentralVMS-Client-Setup-" + AppVersion + ".exe"
 #endif
@@ -168,6 +178,8 @@ Type: filesandordirs; Name: "{app}\watchdog"
 Type: files; Name: "{app}\client-setup\CLRTrueCentralVMS-Client-Setup-*.exe"
 ; Complemento de enrolamiento de versiones anteriores (se publica el nuevo).
 Type: files; Name: "{app}\webcontrol\CLRTrueCentralVMS-Complemento-Setup-*.exe"
+; App de las pantallas de alarma de versiones anteriores (se publica la nueva).
+Type: files; Name: "{app}\screen-packages\truecentral-screen-*-linux-arm64.tar.gz"
 
 [Files]
 ; Servidor publicado (self-contained). Se excluyen los restos de desarrollo
@@ -201,6 +213,12 @@ Source: "{#ClientSetup}"; DestDir: "{app}\client-setup"; Flags: ignoreversion
 ; tenga instalado — es la carpeta que mira /api/webcontrol/info.
 #ifdef HasAgent
 Source: "{#AgentSetup}"; DestDir: "{app}\webcontrol"; Flags: ignoreversion
+#endif
+
+; App de las pantallas de alarma: el servidor la ofrece a las Raspberry Pi de las
+; casetas (GET /api/screen/client/version), que la instalan solas cada noche.
+#ifdef HasScreenPackage
+Source: "{#ScreenPackage}"; DestDir: "{app}\screen-packages"; Flags: ignoreversion
 #endif
 
 ; Receptor de paneles de alarma: se ejecuta y se borra (no queda ocupando
@@ -534,7 +552,8 @@ begin
   RunHidden(SysTool('netsh.exe'),
     'advfirewall firewall add rule name="CLR TrueCentral VMS Server" dir=in action=allow protocol=TCP localport={#WebPort},{#ArcPort},{#CercoPort},{#CercoFwPort} profile=any');
   // Respuestas del descubrimiento de equipos: SADP (UDP 37020), WS-Discovery
-  // (UDP 3702), Dahua (UDP 37810) y ZKTeco (UDP 4370, control de acceso).
+  // (UDP 3702), Dahua (UDP 37810) y ZKTeco (UDP 4370, control de acceso), y el
+  // autodiscovery de las pantallas de alarma de las casetas (UDP 5094).
   // La regla va POR PROGRAMA, no por puerto: alcanza para cualquier familia
   // que se agregue despues sin tocar el firewall.
   RunHidden(SysTool('netsh.exe'),

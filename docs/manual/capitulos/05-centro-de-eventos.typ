@@ -76,6 +76,14 @@ El sistema registra su usuario, la hora y si confirmó desde el cliente o desde
 el panel web. La ventana pasa a la siguiente alerta pendiente y se cierra cuando
 no queda ninguna.
 
+#modulo("alarm_screens")[Si la alerta también se mostró en las pantallas de
+  alarma de las casetas (#capitulo(<cap-pantallas-de-alarma>)) y un guardia la
+  marca como vista allá, sale sola de la ventana, que se cierra si no queda
+  otra pendiente. El acuse queda a nombre de la pantalla, desde _una pantalla
+  de alarma de caseta_. Y al revés: al confirmarla aquí, la pantalla de la
+  caseta deja de sonar. Las alertas que van solo a las pantallas no abren esta
+  ventana, pero aparecen en el Centro de eventos.]
+
 #importante[Cerrar la ventana con #boton("Cerrar") o con la ✕ no confirma nada:
   la alerta sigue pendiente hasta que alguien se dé por enterado. Lo que sí hace
   es callar la alarma sonora.]

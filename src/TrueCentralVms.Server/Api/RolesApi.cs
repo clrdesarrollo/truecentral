@@ -272,6 +272,9 @@ public static class RolesApi
             foreach (var x in (await db.Intercoms.AsNoTracking().Select(x => new { x.Id, x.Name, x.LocationId }).ToListAsync(ct))
                          .Where(x => caller.CanOperateIntercom(x.Id)).OrderBy(x => x.Name))
                 list.Add(new(ScopeKinds.Intercom, x.Id, x.Name, null, x.LocationId, Path(x.LocationId)));
+            foreach (var x in (await db.IoModules.AsNoTracking().Select(x => new { x.Id, x.Name, x.LocationId }).ToListAsync(ct))
+                         .Where(x => caller.CanOperateIoModule(x.Id)).OrderBy(x => x.Name))
+                list.Add(new(ScopeKinds.IoModule, x.Id, x.Name, null, x.LocationId, Path(x.LocationId)));
             return Results.Ok(list);
         });
 

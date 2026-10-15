@@ -145,6 +145,12 @@ builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFac
 builder.Services.AddSingleton<SpeakerDriverRegistry>();
 builder.Services.AddSingleton<SpeakerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>());
+// Módulos de E/S: drivers, registro y servicio (una conexión por módulo, sondeo
+// de entradas y órdenes a los relés).
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Adam.AdamIoDriverFactory>();
+builder.Services.AddSingleton<IoModuleDriverRegistry>();
+builder.Services.AddSingleton<IoModuleService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IoModuleService>());
 // Citofonía: frentes de videoportero (enlace de llamadas por SDK, voz bidireccional y apertura de puerta).
 builder.Services.AddSingleton<IIntercomDriverFactory, HikvisionIntercomDriverFactory>();
 builder.Services.AddSingleton<IntercomDriverRegistry>();
@@ -181,6 +187,13 @@ builder.Services.AddSingleton<IWorkflowActionExecutor, NotifyAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, DoorAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, PanelAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, TrueCentralVms.Server.Services.Workflows.Actions.PtzPresetAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, RelayAction>();
+// Pantallas de alarma de las casetas (Raspberry Pi): emparejamiento, hub propio,
+// entrega de los avisos de las automatizaciones y acuse sincronizado con la
+// ventana de alarma de los operadores. Va antes del motor: la acción de aviso
+// la usa para difundir a las pantallas.
+builder.Services.AddSingleton<AlarmScreenService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmScreenService>());
 builder.Services.AddSingleton<WorkflowEngine>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkflowEngine>());
 // Eventos de analítica de las cámaras (movimiento, cruce de línea, intrusión...):
@@ -326,6 +339,32 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// ---------------------------------------------------------------------------
+// Credencial de las pantallas de alarma (X-Screen-Token o ?access_token= en su
+// hub). Va aparte de la de los usuarios: una pantalla no tiene sesión. Su hub
+// responde 401 a una credencial desconocida (la pantalla vuelve a emparejarse)
+// y 403 a la de una pantalla deshabilitada (la conserva y espera), ANTES de
+// abrir la conexión.
+// ---------------------------------------------------------------------------
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+    bool screenHub = path.StartsWithSegments(AlarmScreenProtocol.HubPath);
+    if (screenHub || path.StartsWithSegments("/api/screen"))
+    {
+        var (screen, disabled) = await context.RequestServices.GetRequiredService<AlarmScreenService>()
+            .ResolveAsync(AlarmScreenService.TokenOf(context), context.RequestAborted);
+        if (screen is not null) context.Items[AlarmScreenService.ItemKey] = screen;
+        else if (disabled) context.Items[AlarmScreenService.DisabledItemKey] = true;
+        if (screenHub && screen is null)
+        {
+            context.Response.StatusCode = disabled ? StatusCodes.Status403Forbidden : StatusCodes.Status401Unauthorized;
+            return;
+        }
+    }
+    await next();
+});
+
 // Modo restringido por licencia (vencida, revocada, prueba terminada, gracia
 // agotada): se rechazan con 402 las escrituras y las solicitudes de video.
 // Las lecturas, el login y la propia API de licencia siguen disponibles para
@@ -375,6 +414,7 @@ app.MapAuditApi();
 app.MapAlarmsApi();
 app.MapCercoApi();
 app.MapSpeakersApi();
+app.MapIoModulesApi();
 app.MapIntercomsApi();
 app.MapAccessApi();
 app.MapAccessSettingsApi();
@@ -382,8 +422,10 @@ app.MapAccessCatalogApi();
 app.MapAccessRecordsApi();
 app.MapDeviceMaintenanceApi();
 app.MapWorkflowsApi();
+app.MapAlarmScreensApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);
+app.MapHub<AlarmScreenHub>(AlarmScreenProtocol.HubPath);
 
 // La SPA del panel se sirve para cualquier ruta no-API (hash router).
 app.MapFallbackToFile("index.html");

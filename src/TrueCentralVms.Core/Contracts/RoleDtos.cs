@@ -63,6 +63,7 @@ public static class ScopeKinds
     public const string Fence = nameof(ResourceKind.Fence);
     public const string Speaker = nameof(ResourceKind.Speaker);
     public const string Intercom = nameof(ResourceKind.Intercom);
+    public const string IoModule = nameof(ResourceKind.IoModule);
     /// <summary>Equipo de video (DVR, NVR, cámara): todos sus canales.</summary>
     public const string VideoDevice = "VideoDevice";
     /// <summary>Equipo de control de acceso: todas sus puertas.</summary>
@@ -82,6 +83,7 @@ public static class ScopeKinds
         [Fence] = "Cerco",
         [Speaker] = "Parlante",
         [Intercom] = "Citófono",
+        [IoModule] = "Módulo de E/S",
     };
 
     public static bool IsValid(string? kind) => kind is not null && Labels.ContainsKey(kind);

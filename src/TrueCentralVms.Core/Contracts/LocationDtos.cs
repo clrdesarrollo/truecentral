@@ -29,6 +29,8 @@ public enum ResourceKind
     Speaker,
     /// <summary>Frente de citofonía (Intercoms).</summary>
     Intercom,
+    /// <summary>Módulo de entradas y salidas: relés de barreras, portones, balizas (IoModules).</summary>
+    IoModule,
 }
 
 /// <summary>Estado resumido de un recurso: el color del punto en las listas.</summary>
