@@ -156,6 +156,15 @@ internal static class NetSdk
     public static extern bool CLIENT_GetSoftwareVersion(long lLoginID,
         ref NET_IN_GET_SOFTWAREVERSION_INFO pstInParam, ref NET_OUT_GET_SOFTWAREVERSION_INFO pstOutParam, int nWaitTime);
 
+    /// <summary>
+    /// Configuración del equipo por nombre (dhconfigsdk.h, p. ej. "TrafficSnapshot"):
+    /// deja en szOutBuffer el JSON del protocolo, terminado en NUL, que se lee
+    /// directo sin pasar por CLIENT_ParseData.
+    /// </summary>
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Ansi)]
+    public static extern bool CLIENT_GetNewDevConfig(long lLoginID, string szCommand, int nChannelID,
+        byte[] szOutBuffer, uint dwOutBufferSize, out int error, int waittime, IntPtr pReserved);
+
     /// <summary>Nombres de canales: buffer con ranuras ANSI de 32 bytes por canal.</summary>
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
     public static extern bool CLIENT_QueryChannelName(long lLoginID,

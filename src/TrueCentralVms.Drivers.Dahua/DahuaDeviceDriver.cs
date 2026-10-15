@@ -210,6 +210,9 @@ public sealed class DahuaDeviceDriver : IDeviceDriver
 
     internal static (long LoginId, NetSdk.NET_DEVICEINFO_Ex Info) Login(DeviceConnectionInfo info)
     {
+        // Sin CLIENT_Init el login falla con nError 0. Las patentes inician
+        // sesión apenas arranca el servidor, antes que cualquier otro uso del SDK.
+        DahuaSdk.EnsureInitialized();
         var input = new NetSdk.NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY
         {
             szIP = info.Host,
