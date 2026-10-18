@@ -12,6 +12,42 @@ async function getSpeakerDrivers() {
 
 let speakersTimer = null;
 
+/** TrueCentral Speaker: Raspberry Pi o PC con Windows con el agente instalado, que se conecta solo al servidor. */
+function isAgentSpeaker(s) { return s?.driverKey === "truecentral-agent"; }
+
+function speakerAddressHtml(s) {
+  if (s.isupDeviceId) return isupAddressHtml(s.isupDeviceId);
+  if (isAgentSpeaker(s)) {
+    if (!s.agentId) return s.enrollmentExpiresAt
+      ? `<span class="tag operator" title="Hay un código vigente hasta ${esc(new Date(s.enrollmentExpiresAt).toLocaleTimeString())}">por enrolar</span>`
+      : `<span class="tag operator">sin enrolar</span>`;
+    return `<span title="TrueCentral Speaker: el equipo se conecta al servidor">agente</span> · ${esc(s.host || "—")}`;
+  }
+  return `${s.useHttps ? "https://" : ""}${esc(s.host)}:${s.port}`;
+}
+
+/** Genera un código de enrolamiento y lo muestra (una sola vez) con las instrucciones para el equipo. */
+async function speakerEnrollModal(speaker) {
+  let r;
+  try { r = await Api.post(`/api/speakers/${speaker.id}/agent/enrollment`, {}); }
+  catch (err) { toast(err.error, true); return; }
+  const server = `${location.protocol}//${location.host}`;
+  openModal(`
+    <h3>Enrolar «${esc(speaker.name)}»</h3>
+    <p>Escriba este código en el TrueCentral Speaker (Raspberry Pi o PC con Windows). Vence a las
+      <b>${esc(new Date(r.expiresAt).toLocaleTimeString())}</b> y sirve una sola vez.</p>
+    <div style="font:600 34px/1.2 monospace;letter-spacing:4px;text-align:center;padding:14px;border:1px dashed var(--border);border-radius:8px;margin:10px 0">${esc(r.code)}</div>
+    <div class="info-box">
+      <b>Desde la página del equipo:</b> abra <code>http://&lt;ip-del-equipo&gt;:8088</code>, ingrese el servidor
+      <code>${esc(server)}</code> y el código.<br>
+      <b>Por consola (SSH en la Pi):</b><br>
+      <code>sudo truecentral-speaker enroll --server ${esc(server)} --code ${esc(r.code)}</code>
+      ${speaker.agentId ? `<br><br>Este parlante ya tiene un equipo enrolado: seguirá funcionando hasta que otro equipo use este código y lo reemplace.` : ""}
+    </div>
+    <div class="modal-actions"><button class="btn" type="button" id="sp-enroll-close">Listo</button></div>`);
+  $("#sp-enroll-close").addEventListener("click", () => { closeModal(); renderSpeakers(); });
+}
+
 function speakerStatusTag(speaker) {
   switch (speaker.status) {
     case "Online": return `<span class="tag on">En línea</span>`;
@@ -100,7 +136,7 @@ async function renderSpeakers() {
             <tr data-id="${s.id}">
               <td>${esc(s.name)}${s.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${locationLineHtml(s.location)}</td>
               <td class="muted">${esc(s.groupName ?? "—")}</td>
-              <td class="muted">${s.isupDeviceId ? isupAddressHtml(s.isupDeviceId) : `${s.useHttps ? "https://" : ""}${esc(s.host)}:${s.port}`}</td>
+              <td class="muted">${speakerAddressHtml(s)}</td>
               <td>${esc(s.model ?? "—")}<div class="muted" style="font-size:11px">${esc(s.serialNumber ?? "")}</div></td>
               <td class="muted">${esc(s.firmwareVersion ?? "—")}</td>
               <td>${speakerCapsTags(s)}</td>
@@ -111,6 +147,9 @@ async function renderSpeakers() {
                 <button class="btn ghost btn-play" data-op="speaker:${s.id}" title="Reproducir un sonido, un audio del equipo o un texto">Reproducir</button>
                 <button class="btn ghost btn-stop" data-op="speaker:${s.id}" title="Detener lo que esté sonando">Detener</button>
                 ${s.supportsLibrary ? `<button class="btn ghost btn-library" title="Audios guardados en el propio parlante">Biblioteca</button>` : ""}
+                ${isAgentSpeaker(s) && s.agentId ? `<button class="btn ghost btn-tone" title="Tono de prueba de 3 s en el altavoz">Tono</button>` : ""}
+                ${isAdmin && isAgentSpeaker(s) ? `<button class="btn ghost btn-enroll" title="Generar un código para enrolar (o reemplazar) el equipo">${s.agentId ? "Reemplazar equipo…" : "Enrolar…"}</button>` : ""}
+                ${isAdmin && isAgentSpeaker(s) && (s.agentId || s.enrollmentExpiresAt) ? `<button class="btn ghost btn-revoke" title="El equipo deja de poder conectarse hasta enrolarlo otra vez">Revocar</button>` : ""}
                 ${isAdmin ? `<button class="btn ghost btn-edit">Editar</button>
                 <button class="btn danger btn-delete">Eliminar</button>` : ""}
               </div></td>
@@ -137,6 +176,20 @@ async function renderSpeakers() {
     try {
       await Api.delete(`/api/speakers/${speaker.id}`);
       toast("Parlante eliminado.");
+      renderSpeakers();
+    } catch (err) { toast(err.error, true); }
+  }));
+  $$("#view .btn-enroll").forEach((b) => b.addEventListener("click", (e) => speakerEnrollModal(byRow(e))));
+  $$("#view .btn-tone").forEach((b) => b.addEventListener("click", async (e) => {
+    try { toast((await Api.post(`/api/speakers/${byRow(e).id}/test-tone`, {})).message); }
+    catch (err) { toast(err.error, true); }
+  }));
+  $$("#view .btn-revoke").forEach((b) => b.addEventListener("click", async (e) => {
+    const speaker = byRow(e);
+    if (!confirm(`¿Revocar el equipo de "${speaker.name}"? Dejará de poder conectarse hasta enrolarlo con un código nuevo.`)) return;
+    try {
+      await Api.delete(`/api/speakers/${speaker.id}/agent`);
+      toast("Equipo revocado.");
       renderSpeakers();
     } catch (err) { toast(err.error, true); }
   }));
@@ -575,17 +628,17 @@ async function speakerModal(speaker) {
         <div class="form-grid">
           <div class="field">
             <label>Dirección (IP o hostname)</label>
-            <input id="sp-host" required value="${esc(speaker?.isupDeviceId ? "" : speaker?.host ?? "")}" placeholder="192.168.1.73">
+            <input id="sp-host" required value="${esc(speaker?.isupDeviceId || isAgentSpeaker(speaker) ? "" : speaker?.host ?? "")}" placeholder="192.168.1.73">
           </div>
           <div class="field">
             <label>Puerto HTTP</label>
-            <input id="sp-port" type="number" min="1" max="65535" required value="${speaker?.isupDeviceId ? 80 : speaker?.port ?? driver0?.defaultPort ?? 80}">
+            <input id="sp-port" type="number" min="1" max="65535" required value="${speaker?.isupDeviceId || isAgentSpeaker(speaker) ? 80 : speaker?.port || driver0?.defaultPort || 80}">
           </div>
         </div>
         <div class="form-grid">
           <div class="field">
             <label>Usuario del parlante</label>
-            <input id="sp-username" required value="${esc(speaker?.isupDeviceId ? "admin" : speaker?.username ?? "admin")}" placeholder="admin">
+            <input id="sp-username" required value="${esc(speaker?.isupDeviceId || isAgentSpeaker(speaker) ? "admin" : speaker?.username ?? "admin")}" placeholder="admin">
           </div>
           <div class="field">
             <label>Contraseña${isNew || speaker?.isupDeviceId ? "" : " (vacío = no cambiar)"}</label>
@@ -595,8 +648,13 @@ async function speakerModal(speaker) {
         <label class="checkbox-row"><input type="checkbox" id="sp-https" ${(speaker ? speaker.useHttps : driver0?.defaultHttps) ? "checked" : ""}> Usar HTTPS (certificado autofirmado aceptado)</label>
       </div>
       <div id="sp-isup-wrap">${isupFieldsHtml("sp", speaker, isNew, "parlante")}</div>
+      <div id="sp-agent-box" class="info-box" hidden>
+        <b>TrueCentral Speaker</b>: una Raspberry Pi o un PC con Windows con el agente instalado. No se pide dirección ni
+        clave: ${isNew ? "al guardar se genera un <b>código de enrolamiento</b> que se escribe en el equipo" : "el equipo se conecta solo al servidor; para cambiarlo use <b>Reemplazar equipo…</b>"}.
+        Funciona detrás de NAT o 4G, porque es el equipo el que llama al servidor.
+      </div>
       <label class="checkbox-row"><input type="checkbox" id="sp-enabled" ${speaker ? (speaker.enabled ? "checked" : "") : "checked"}> Activo (sondeo de estado, disponible para operadores y automatizaciones)</label>
-      <div class="info-box" style="margin-top:10px">Use un usuario <b>local</b> del parlante (normalmente <b>admin</b>). El grupo permite elegir varios parlantes de una vez en las automatizaciones; los sonidos del servidor suenan sincronizados en todos los elegidos.</div>
+      <div class="info-box" id="sp-local-user-hint" style="margin-top:10px">Use un usuario <b>local</b> del parlante (normalmente <b>admin</b>). El grupo permite elegir varios parlantes de una vez en las automatizaciones; los sonidos del servidor suenan sincronizados en todos los elegidos.</div>
       <div id="sp-probe-result"></div>
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="sp-cancel">Cancelar</button>
@@ -607,12 +665,18 @@ async function speakerModal(speaker) {
 
   $("#sp-cancel").addEventListener("click", closeModal);
   // Por IP se piden dirección y credenciales; por ISUP, el ID y la clave. Lo que no corresponde se oculta y deja de ser obligatorio.
+  // Un TrueCentral Speaker no pide nada de conexión: se enrola con un código.
   const toggleIsup = (dr) => {
     const isup = !!dr?.usesIsup;
-    $("#sp-ip-box").hidden = isup;
+    const agent = !!dr?.usesAgent;
+    $("#sp-ip-box").hidden = isup || agent;
     $("#sp-isup-wrap").hidden = !isup;
-    for (const el of $$("#sp-ip-box input")) {
-      if (isup) { if (el.required) el.dataset.req = "1"; el.required = false; }
+    $("#sp-agent-box").hidden = !agent;
+    $("#sp-local-user-hint").hidden = agent;
+    $("#sp-probe").hidden = agent && isNew;
+    for (const el of $$("#sp-ip-box input, #sp-isup-wrap input")) {
+      const hide = el.closest("[hidden]") != null;
+      if (hide) { if (el.required) el.dataset.req = "1"; el.required = false; }
       else if (el.dataset.req) el.required = true;
     }
   };
@@ -620,7 +684,7 @@ async function speakerModal(speaker) {
   toggleIsup(driver0);
   $("#sp-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#sp-driver").value);
-    if (dr && isNew && !dr.usesIsup) { $("#sp-port").value = dr.defaultPort; $("#sp-https").checked = dr.defaultHttps; }
+    if (dr && isNew && !dr.usesIsup && !dr.usesAgent) { $("#sp-port").value = dr.defaultPort; $("#sp-https").checked = dr.defaultHttps; }
     toggleIsup(dr);
   });
 
@@ -632,6 +696,8 @@ async function speakerModal(speaker) {
       groupName: $("#sp-group").value.trim() || null,
       locationId: locationFieldValue("sp-location"),
     };
+    if (!$("#sp-agent-box").hidden)
+      return { ...common, host: "", port: 0, useHttps: false, username: "", password: null };
     if (!$("#sp-isup-wrap").hidden)
       return { ...common, host: "", port: 0, useHttps: false, username: "", password: null, ...readIsupFields("sp") };
     return {
@@ -691,6 +757,8 @@ async function speakerModal(speaker) {
       const body = readForm();
       const saved = isNew ? await Api.post("/api/speakers", body) : await Api.put(`/api/speakers/${speaker.id}`, body);
       closeModal();
+      // Un TrueCentral Speaker nuevo queda esperando su equipo: se muestra al tiro el código para enrolarlo.
+      if (isNew && isAgentSpeaker(saved)) { await speakerEnrollModal(saved); return; }
       // Por ISUP el parlante puede no haberse conectado todavía: se guarda igual y se completa en su primer contacto.
       if (saved?.isupDeviceId && saved.status !== "Online")
         toast(`Parlante guardado: queda esperando que se conecte por ISUP. ${saved.lastError ?? ""}`, false, { warning: true });

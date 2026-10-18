@@ -26,6 +26,16 @@ public class Speaker : ILocatable, IIsupEquipment
     public string? IsupDeviceId { get; set; }
     /// <summary>Clave ISUP del equipo (la «clave de cifrado» de su menú de plataforma), cifrada como la contraseña.</summary>
     public byte[]? IsupKeyCiphertext { get; set; }
+    /// <summary>
+    /// Agente «TrueCentral Speaker» (driver truecentral-agent): id del equipo (32 hex) que se enroló con el código. Null = aún
+    /// sin enrolar. El agente abre él la conexión al servidor; <see cref="Host"/> solo guarda, como dato, desde dónde se conectó.
+    /// </summary>
+    public string? AgentId { get; set; }
+    /// <summary>SHA-256 del token que se le entregó al agente al enrolarse (el token nunca se guarda).</summary>
+    public string? AgentTokenHash { get; set; }
+    /// <summary>SHA-256 del código de enrolamiento vigente (de un solo uso).</summary>
+    public string? EnrollmentCodeHash { get; set; }
+    public DateTime? EnrollmentExpiresAt { get; set; }
     /// <summary>Grupo lógico (sector) para elegir varios parlantes de una vez; libre.</summary>
     public string? GroupName { get; set; }
 

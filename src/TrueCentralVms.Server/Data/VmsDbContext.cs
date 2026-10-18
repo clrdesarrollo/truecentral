@@ -281,10 +281,18 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(s => s.FirmwareVersion).HasMaxLength(64);
             e.Property(s => s.LastError).HasMaxLength(512);
             e.Property(s => s.Status).HasConversion<string>().HasMaxLength(16);
-            e.HasIndex(s => new { s.Host, s.Port }).IsUnique().HasFilter("\"IsupDeviceId\" IS NULL");
+            // Los agentes TrueCentral Speaker no se alcanzan por IP (Host es solo informativo: varios pueden salir por el mismo NAT).
+            e.HasIndex(s => new { s.Host, s.Port }).IsUnique()
+                .HasFilter("\"IsupDeviceId\" IS NULL AND \"DriverKey\" <> 'truecentral-agent'");
             e.Property(s => s.IsupDeviceId).HasMaxLength(32);
             // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
             e.HasIndex(s => s.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
+            e.Property(s => s.AgentId).HasMaxLength(32);
+            e.Property(s => s.AgentTokenHash).HasMaxLength(64);
+            e.Property(s => s.EnrollmentCodeHash).HasMaxLength(64);
+            e.HasIndex(s => s.AgentId).IsUnique().HasFilter("\"AgentId\" IS NOT NULL");
+            e.HasIndex(s => s.AgentTokenHash).HasFilter("\"AgentTokenHash\" IS NOT NULL");
+            e.HasIndex(s => s.EnrollmentCodeHash).HasFilter("\"EnrollmentCodeHash\" IS NOT NULL");
         });
 
         // Módulos de entradas y salidas: una fila por módulo y una por cada

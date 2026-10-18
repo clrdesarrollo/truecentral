@@ -11,6 +11,7 @@ using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
 using TrueCentralVms.Server.Services.Isup;
+using TrueCentralVms.Server.Services.SpeakerAgents;
 using TrueCentralVms.Server.Services.Workflows;
 using TrueCentralVms.Core.Domain;
 
@@ -52,6 +53,8 @@ public static class SpeakersApi
             return "El grupo no puede superar los 64 caracteres.";
         if (drivers.Find(request.DriverKey) is not { } factory)
             return $"Driver desconocido: '{request.DriverKey}'.";
+        // Un TrueCentral Speaker se enrola con un código y se conecta él: no hay dirección ni credenciales que pedir.
+        if (factory.UsesAgent) return null;
         // Por ISUP el parlante se conecta solo: se piden su ID y su clave, no dirección ni credenciales.
         if (factory.UsesIsup)
             return IsupEquipmentRules.Validate(request.IsupDeviceId, request.IsupKey, isupKeyStored);
@@ -66,8 +69,27 @@ public static class SpeakersApi
 
     private static bool UsesIsup(SpeakerDriverRegistry drivers, string driverKey) => drivers.Find(driverKey)?.UsesIsup == true;
 
-    /// <summary>Dónde está el parlante, para la bitácora: dirección y puerto, o su ID ISUP.</summary>
-    private static string WhereOf(Speaker s) => s.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : $"{s.Host}:{s.Port}";
+    private static bool UsesAgent(SpeakerDriverRegistry drivers, string driverKey) => drivers.Find(driverKey)?.UsesAgent == true;
+
+    private const string AwaitingEnrollment = "Esperando enrolamiento: genere un código y escríbalo en el TrueCentral Speaker.";
+
+    /// <summary>Dónde está el parlante, para la bitácora: dirección y puerto, su ID ISUP o, si es un agente, desde dónde se conectó.</summary>
+    private static string WhereOf(Speaker s) =>
+        s.IsupDeviceId is not null || s.DriverKey == SpeakerAgentProtocol.DriverKey ? SpeakerService.WhereOf(s) : $"{s.Host}:{s.Port}";
+
+    /// <summary>
+    /// Olvida el equipo enrolado (token, código e id). Devuelve el id que tenía: la conexión se corta DESPUÉS de guardar,
+    /// porque la desconexión dispara un sondeo que si lee la base antes vería todavía el equipo enrolado.
+    /// </summary>
+    private static string? ForgetAgent(Speaker speaker)
+    {
+        string? agentId = speaker.AgentId;
+        speaker.AgentId = null;
+        speaker.AgentTokenHash = null;
+        speaker.EnrollmentCodeHash = null;
+        speaker.EnrollmentExpiresAt = null;
+        return agentId;
+    }
 
     private static async Task<(SpeakerInfo? Info, int LibraryCount, string? Error)> ProbeAsync(SpeakerDriverRegistry drivers,
         string driverKey, SpeakerConnectionInfo conn, CancellationToken ct)
@@ -132,7 +154,7 @@ public static class SpeakersApi
         app.MapGet("/api/speakers/drivers", (HttpContext ctx, SpeakerDriverRegistry drivers) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            return Results.Ok(drivers.All.Select(f => new SpeakerDriverDto(f.DriverKey, f.DisplayName, f.DefaultPort, f.DefaultHttps, f.UsesIsup)));
+            return Results.Ok(drivers.All.Select(f => new SpeakerDriverDto(f.DriverKey, f.DisplayName, f.DefaultPort, f.DefaultHttps, f.UsesIsup, f.UsesAgent)));
         });
 
         app.MapGet("/api/speakers/tts-languages", (HttpContext ctx) =>
@@ -175,13 +197,15 @@ public static class SpeakersApi
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             bool viaIsup = UsesIsup(drivers, request.DriverKey);
-            if (!viaIsup && string.IsNullOrEmpty(request.Password)) return Error("La contraseña del parlante es obligatoria.");
+            bool viaAgent = UsesAgent(drivers, request.DriverKey);
+            if (!viaIsup && !viaAgent && string.IsNullOrEmpty(request.Password)) return Error("La contraseña del parlante es obligatoria.");
             if (license.Deny(LicenseFeatures.ModuleSpeakers, request.Enabled ? LicenseFeatures.SpeakerChannels : null,
                     await db.Speakers.CountAsync(s => s.Enabled, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "speaker", request.Name?.Trim());
-            string host = viaIsup ? "" : request.Host.Trim();
+            string host = viaIsup || viaAgent ? "" : request.Host.Trim();
             string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
-            if (isupId is not null)
+            if (viaAgent) { /* sin dirección: lo identifica el equipo que se enrole */ }
+            else if (isupId is not null)
             {
                 if (await db.Speakers.AnyAsync(s => s.IsupDeviceId == isupId, ct))
                     return Error($"Ya existe un parlante con el ID ISUP {isupId}.", StatusCodes.Status409Conflict);
@@ -198,10 +222,10 @@ public static class SpeakersApi
                 Name = request.Name.Trim(),
                 DriverKey = request.DriverKey,
                 Host = host,
-                Port = viaIsup ? 0 : request.Port,
-                UseHttps = !viaIsup && request.UseHttps,
-                Username = viaIsup ? "" : request.Username,
-                PasswordCiphertext = viaIsup ? [] : protector.Protect(request.Password!),
+                Port = viaIsup || viaAgent ? 0 : request.Port,
+                UseHttps = !viaIsup && !viaAgent && request.UseHttps,
+                Username = viaIsup || viaAgent ? "" : request.Username,
+                PasswordCiphertext = viaIsup || viaAgent ? [] : protector.Protect(request.Password!),
                 IsupDeviceId = isupId,
                 IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(request.IsupKey, protector) : null,
                 GroupName = GroupOf(request),
@@ -211,7 +235,14 @@ public static class SpeakersApi
 
             // Por ISUP el parlante solo se conecta una vez que el servidor lo conoce: se guarda y se completa en su primer contacto.
             int libraryCount = 0;
-            if (isupId is not null && !isup.IsOnline(isupId))
+            if (viaAgent)
+            {
+                // Se completa (modelo, versión) cuando el equipo se enrole con el código.
+                speaker.Status = SpeakerStatus.Offline;
+                speaker.LastError = AwaitingEnrollment;
+                speaker.SupportsLiveAudio = true;
+            }
+            else if (isupId is not null && !isup.IsOnline(isupId))
             {
                 speaker.Status = SpeakerStatus.Offline;
                 speaker.LastError = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "parlante", ct);
@@ -235,7 +266,8 @@ public static class SpeakersApi
             await audit.LogAsync(ctx, "speakers", "speaker-created",
                 targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
                 detail: $"Agregó el parlante '{speaker.Name}' ({speaker.DriverKey}, {WhereOf(speaker)}, " +
-                        (speaker.Model is null && viaIsup ? "a la espera de que se conecte por ISUP" : speaker.Model ?? "modelo desconocido") +
+                        (viaAgent ? "TrueCentral Speaker"
+                            : speaker.Model is null && viaIsup ? "a la espera de que se conecte por ISUP" : speaker.Model ?? "modelo desconocido") +
                         (speaker.GroupName is null ? "" : $", grupo '{speaker.GroupName}'") +
                         (speaker.LocationId is null ? "" : $", en {EquipmentLocation.Describe(speaker.LocationId)}") +
                         $", biblioteca: {libraryCount} audios).",
@@ -248,13 +280,19 @@ public static class SpeakersApi
 
         app.MapPut("/api/speakers/{id:int}", async (HttpContext ctx, int id, SpeakerWriteDto request, VmsDbContext db, LicenseService license,
             SpeakerDriverRegistry drivers, CredentialProtector protector, IHubContext<VmsHub> hub, SpeakerService service,
-            AuditService audit, IsupService isup, IsupHostManager isupHost, CancellationToken ct) =>
+            AuditService audit, IsupService isup, IsupHostManager isupHost, SpeakerAgentHub agents, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.Id == id, ct);
             if (speaker is null) return Results.NotFound();
             if (ValidateWrite(request, drivers, speaker.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
             bool viaIsup = UsesIsup(drivers, request.DriverKey);
+            bool viaAgent = UsesAgent(drivers, request.DriverKey);
+            bool wasAgent = speaker.DriverKey == SpeakerAgentProtocol.DriverKey;
+            if (viaAgent && wasAgent)
+                return await UpdateAgentSpeakerAsync(ctx, speaker, request, db, license, hub, service, audit, ct);
+            if (viaAgent)
+                return Error("Un parlante existente no se puede convertir en TrueCentral Speaker: agréguelo como parlante nuevo.");
             string host = viaIsup ? "" : request.Host.Trim();
             int port = viaIsup ? 0 : request.Port;
             string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
@@ -316,6 +354,12 @@ public static class SpeakersApi
                 changes.Add(EquipmentLocation.Change(previousLocation, locationId));
             if (speaker.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
 
+            string? revokedAgent = null;
+            if (wasAgent)
+            {
+                changes.Add("deja de ser TrueCentral Speaker (se revocó el equipo enrolado)");
+                revokedAgent = ForgetAgent(speaker);
+            }
             speaker.Name = request.Name.Trim();
             speaker.DriverKey = request.DriverKey;
             speaker.Host = host;
@@ -335,6 +379,7 @@ public static class SpeakersApi
             speaker.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             if (isupChanged) isup.InvalidateDirectory();
+            await agents.DisconnectAsync(revokedAgent, SpeakerAgentProtocol.CloseCodes.Revoked, "El parlante se cambió a otro tipo de equipo.");
 
             await audit.LogAsync(ctx, "speakers", "speaker-updated",
                 targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
@@ -346,7 +391,7 @@ public static class SpeakersApi
         });
 
         app.MapDelete("/api/speakers/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, IHubContext<VmsHub> hub,
-            SpeakerService service, AuditService audit, IsupService isup, CancellationToken ct) =>
+            SpeakerService service, AuditService audit, IsupService isup, SpeakerAgentHub agents, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             var speaker = await db.Speakers.FindAsync([id], ct);
@@ -356,6 +401,7 @@ public static class SpeakersApi
             HikvisionSpeakerDriver.Forget(service.ConnectionOf(speaker));
             db.Speakers.Remove(speaker);
             await db.SaveChangesAsync(ct);
+            await agents.DisconnectAsync(speaker.AgentId, SpeakerAgentProtocol.CloseCodes.Revoked, "El parlante se eliminó de TrueCentral.");
             if (speaker.IsupDeviceId is not null) isup.InvalidateDirectory();
             await audit.LogAsync(ctx, "speakers", "speaker-deleted",
                 targetType: "speaker", targetId: id.ToString(), targetName: speaker.Name,
@@ -367,7 +413,8 @@ public static class SpeakersApi
 
         // Probar conexión (sin persistir). Con ?speakerId= reutiliza la clave guardada.
         app.MapPost("/api/speakers/probe", async (HttpContext ctx, SpeakerWriteDto request, VmsDbContext db, SpeakerDriverRegistry drivers,
-            CredentialProtector protector, AuditService audit, IsupService isup, IsupHostManager isupHost, int? speakerId, CancellationToken ct) =>
+            CredentialProtector protector, AuditService audit, IsupService isup, IsupHostManager isupHost, SpeakerAgentHub agents, int? speakerId,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             var existing = speakerId is int existingId ? await db.Speakers.FindAsync([existingId], ct) : null;
@@ -375,7 +422,17 @@ public static class SpeakersApi
 
             SpeakerConnectionInfo conn;
             string where;
-            if (UsesIsup(drivers, request.DriverKey))
+            if (UsesAgent(drivers, request.DriverKey))
+            {
+                // Un agente solo se puede "probar" una vez enrolado y conectado.
+                if (existing?.AgentId is not { } agentId || !agents.IsOnline(agentId))
+                    return Results.Ok(new SpeakerProbeResultDto(false, existing?.AgentId is null
+                        ? AwaitingEnrollment
+                        : "El TrueCentral Speaker no está conectado al servidor ahora.", null, null, null, false, false, false, null, 0));
+                conn = new SpeakerConnectionInfo("", 0, false, "", "", null, agentId);
+                where = $"agente en {existing.Host}";
+            }
+            else if (UsesIsup(drivers, request.DriverKey))
             {
                 // Por ISUP no hay nada que "probar" desde aquí: el parlante tiene que estar conectado.
                 string isupId = request.IsupDeviceId!.Trim();
@@ -754,6 +811,132 @@ public static class SpeakersApi
             }
             catch (Exception ex) { log.LogDebug(ex, "No se pudo cerrar limpiamente el WebSocket de voz."); }
             return Results.Empty;
+        });
+    }
+
+    /// <summary>
+    /// Edición de un TrueCentral Speaker: solo nombre, grupo, ubicación y activo. La conexión no se edita (la define el
+    /// equipo al enrolarse; para cambiarlo se genera otro código).
+    /// </summary>
+    private static async Task<IResult> UpdateAgentSpeakerAsync(HttpContext ctx, Speaker speaker, SpeakerWriteDto request, VmsDbContext db,
+        LicenseService license, IHubContext<VmsHub> hub, SpeakerService service, AuditService audit, CancellationToken ct)
+    {
+        var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, speaker.LocationId, ct);
+        if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
+        int? previousLocation = speaker.LocationId;
+
+        var changes = new List<string>();
+        if (speaker.Name != request.Name.Trim()) changes.Add($"nombre '{speaker.Name}' → '{request.Name.Trim()}'");
+        if (speaker.GroupName != GroupOf(request)) changes.Add($"grupo '{speaker.GroupName}' → '{GroupOf(request)}'");
+        if (locationId != previousLocation) changes.Add(EquipmentLocation.Change(previousLocation, locationId));
+        if (speaker.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
+
+        if (!speaker.Enabled && request.Enabled
+            && license.Deny(LicenseFeatures.ModuleSpeakers, LicenseFeatures.SpeakerChannels,
+                await db.Speakers.CountAsync(s => s.Enabled && s.Id != speaker.Id, ct)) is { } denied)
+            return await license.DenyAsync(ctx, denied, "speaker", speaker.Name);
+        speaker.Name = request.Name.Trim();
+        speaker.GroupName = GroupOf(request);
+        speaker.LocationId = locationId;
+        speaker.Enabled = request.Enabled;
+        speaker.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        await audit.LogAsync(ctx, "speakers", "speaker-updated",
+            targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
+            detail: $"Modificó el parlante '{speaker.Name}': " + (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
+        if (locationId != previousLocation) await EquipmentLocation.MovedAsync(ctx, ct);
+        service.RequestReconcile();
+        await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", cancellationToken: ct);
+        return Results.Ok(service.ToDto(speaker));
+    }
+
+    // ------------------------------------------------------------------
+    // TrueCentral Speaker (agente en Raspberry Pi / Windows)
+    // ------------------------------------------------------------------
+
+    public static void MapSpeakerAgentsApi(this WebApplication app)
+    {
+        // WebSocket del agente. Sin sesión de usuario: el agente se identifica con su token o se enrola con el código.
+        app.Map(SpeakerAgentProtocol.ConnectPath, async (HttpContext ctx, SpeakerAgentHub agents) =>
+        {
+            if (!ctx.WebSockets.IsWebSocketRequest) return Error("Este recurso solo acepta WebSocket.", StatusCodes.Status400BadRequest);
+            await agents.HandleAsync(ctx);
+            return Results.Empty;
+        });
+
+        // Genera un código de enrolamiento de un solo uso (15 min). Si el parlante ya tenía un equipo, este sigue
+        // funcionando hasta que otro se enrole con el código nuevo (así se reemplaza un equipo dañado).
+        app.MapPost("/api/speakers/{id:int}/agent/enrollment", async (HttpContext ctx, int id, VmsDbContext db, SpeakerService service,
+            IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
+            var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.Id == id, ct);
+            if (speaker is null) return Results.NotFound();
+            if (speaker.DriverKey != SpeakerAgentProtocol.DriverKey) return Error("Este parlante no es un TrueCentral Speaker.");
+            string code = SpeakerAgentHub.NewEnrollmentCode();
+            speaker.EnrollmentCodeHash = SpeakerAgentHub.HashSecret(code);
+            speaker.EnrollmentExpiresAt = DateTime.UtcNow + SpeakerAgentHub.EnrollmentLifetime;
+            speaker.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await audit.LogAsync(ctx, "speakers", "agent-enrollment-created", targetType: "speaker", targetId: speaker.Id.ToString(),
+                targetName: speaker.Name,
+                detail: $"Generó un código de enrolamiento para el TrueCentral Speaker '{speaker.Name}' (vence en " +
+                        $"{SpeakerAgentHub.EnrollmentLifetime.TotalMinutes:0} min" +
+                        (speaker.AgentId is null ? ")." : "; el equipo actual sigue enrolado hasta que otro use el código)."));
+            await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", cancellationToken: ct);
+            return Results.Ok(new SpeakerEnrollmentDto(speaker.Id, SpeakerAgentHub.FormatCode(code), speaker.EnrollmentExpiresAt.Value));
+        });
+
+        // Revoca el equipo enrolado (y el código pendiente): se corta su conexión y deberá enrolarse de nuevo.
+        app.MapDelete("/api/speakers/{id:int}/agent", async (HttpContext ctx, int id, VmsDbContext db, SpeakerService service,
+            SpeakerAgentHub agents, IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
+            var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.Id == id, ct);
+            if (speaker is null) return Results.NotFound();
+            if (speaker.DriverKey != SpeakerAgentProtocol.DriverKey) return Error("Este parlante no es un TrueCentral Speaker.");
+            if (service.BusyOf(id) is { } busy)
+                return Error($"El parlante está en uso ({busy}); deténgalo antes de revocarlo.", StatusCodes.Status409Conflict);
+            string where = WhereOf(speaker);
+            bool hadAgent = speaker.AgentId is not null;
+            string? revokedAgent = ForgetAgent(speaker);
+            speaker.Status = SpeakerStatus.Offline;
+            speaker.LastError = AwaitingEnrollment;
+            speaker.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await agents.DisconnectAsync(revokedAgent, SpeakerAgentProtocol.CloseCodes.Revoked, "Un administrador revocó este equipo en TrueCentral.");
+            await audit.LogAsync(ctx, "speakers", "agent-revoked", targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
+                detail: hadAgent
+                    ? $"Revocó el TrueCentral Speaker '{speaker.Name}' ({where}): el equipo ya no puede conectarse hasta enrolarlo de nuevo."
+                    : $"Anuló el código de enrolamiento pendiente del TrueCentral Speaker '{speaker.Name}'.");
+            await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", cancellationToken: ct);
+            return Results.Ok(service.ToDto(speaker));
+        });
+
+        // Tono de prueba del altavoz (solo los TrueCentral Speaker lo exponen).
+        app.MapPost("/api/speakers/{id:int}/test-tone", async (HttpContext ctx, int id, VmsDbContext db, SpeakerService service,
+            AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.SpeakersPlay, out var session) is { } failure) return failure;
+            if (await SpeakersOutOfScopeAsync(ctx, session, [id], "probar el altavoz de") is { } outOfScope) return outOfScope;
+            var speaker = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
+            if (speaker is null) return Results.NotFound();
+            if (service.DriverOf(speaker) is not AgentSpeakerDriver driver) return Error("Este parlante no tiene tono de prueba.");
+            if (service.BusyOf(id) is { } busy) return Error($"El parlante está ocupado ({busy}).", StatusCodes.Status409Conflict);
+            try
+            {
+                await driver.TestToneAsync(service.ConnectionOf(speaker), 3, ct);
+                await audit.LogAsync(ctx, "speakers", "test-tone", targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
+                    detail: $"Hizo sonar el tono de prueba en '{speaker.Name}'.");
+                return Results.Ok(new { message = "Tono de prueba enviado (3 s)." });
+            }
+            catch (DriverException ex)
+            {
+                await audit.LogAsync(ctx, "speakers", "test-tone", targetType: "speaker", targetId: speaker.Id.ToString(), targetName: speaker.Name,
+                    detail: $"No se pudo hacer sonar el tono de prueba en '{speaker.Name}': {ex.Message}", success: false);
+                return Error(ex.Message);
+            }
         });
     }
 }

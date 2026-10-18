@@ -44,7 +44,13 @@ public sealed record SpeakerDto(
     /// <summary>ID ISUP si el parlante se conecta al servidor por ISUP (entonces Host y puerto no aplican).</summary>
     string? IsupDeviceId = null,
     /// <summary>Hay clave ISUP guardada (la clave nunca viaja).</summary>
-    bool HasIsupKey = false);
+    bool HasIsupKey = false,
+    /// <summary>Solo agentes «TrueCentral Speaker»: id del equipo enrolado (null = aún sin enrolar).</summary>
+    string? AgentId = null,
+    /// <summary>Solo agentes: vencimiento del código de enrolamiento vigente (null = no hay uno pendiente).</summary>
+    DateTime? EnrollmentExpiresAt = null,
+    /// <summary>Solo agentes: el equipo tiene el WebSocket abierto ahora.</summary>
+    bool AgentConnected = false);
 
 public sealed record SpeakerWriteDto(
     string Name,
@@ -78,7 +84,7 @@ public sealed record SpeakerProbeResultDto(
     int? Volume,
     int LibraryCount);
 
-public sealed record SpeakerDriverDto(string Key, string DisplayName, int DefaultPort, bool DefaultHttps, bool UsesIsup = false);
+public sealed record SpeakerDriverDto(string Key, string DisplayName, int DefaultPort, bool DefaultHttps, bool UsesIsup = false, bool UsesAgent = false);
 
 /// <summary>Audio guardado en la biblioteca del propio parlante.</summary>
 public sealed record SpeakerAudioItemDto(

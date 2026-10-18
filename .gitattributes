@@ -12,6 +12,8 @@
 
 # Scripts de la Raspberry Pi (pantallas de alarma): con CRLF bash no los ejecuta
 *.sh    text eol=lf
+# Unidades de systemd (TrueCentral Speaker): igual, se copian tal cual a la Pi
+*.service text eol=lf
 
 # Binarios: sin conversión
 *.dll   binary

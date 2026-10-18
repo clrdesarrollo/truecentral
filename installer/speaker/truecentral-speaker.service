@@ -1,0 +1,24 @@
+[Unit]
+Description=TrueCentral Speaker (parlante IP de TrueCentral)
+Wants=network-online.target sound.target
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+User=truecentral-speaker
+Group=truecentral-speaker
+SupplementaryGroups=audio
+Environment=TRUECENTRAL_SPEAKER_DATA=/var/lib/truecentral-speaker
+Environment=DOTNET_gcServer=0
+ExecStart=/opt/truecentral-speaker/truecentral-speaker
+Restart=always
+RestartSec=3
+# Endurecimiento: solo escribe en su carpeta de datos.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/truecentral-speaker
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

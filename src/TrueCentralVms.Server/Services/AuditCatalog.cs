@@ -238,6 +238,11 @@ public static class AuditCatalog
             new("tts-created", "Audio de texto a voz creado"),
             new("speaker-offline", "Parlante sin conexión"),
             new("speaker-online", "Parlante recuperó conexión"),
+            new("agent-enrollment-created", "Código de enrolamiento de TrueCentral Speaker generado"),
+            new("agent-enrolled", "TrueCentral Speaker enrolado"),
+            new("agent-enroll-failed", "Enrolamiento o conexión de TrueCentral Speaker rechazado"),
+            new("agent-revoked", "TrueCentral Speaker revocado"),
+            new("test-tone", "Tono de prueba en parlante"),
         ]),
         new("io", "Módulos de E/S",
         [

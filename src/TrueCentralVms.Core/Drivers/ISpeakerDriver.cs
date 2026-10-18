@@ -2,9 +2,11 @@ namespace TrueCentralVms.Core.Drivers;
 
 /// <summary>
 /// Datos de conexión a un parlante IP (API HTTP del fabricante). Con <paramref name="IsupId"/> el parlante se conecta él al
-/// servidor por ISUP: dirección y credenciales no se usan.
+/// servidor por ISUP: dirección y credenciales no se usan. Con <paramref name="AgentId"/> es un agente «TrueCentral Speaker»
+/// conectado al servidor por su WebSocket: tampoco se usan.
 /// </summary>
-public sealed record SpeakerConnectionInfo(string Host, int Port, bool UseHttps, string Username, string Password, string? IsupId = null);
+public sealed record SpeakerConnectionInfo(string Host, int Port, bool UseHttps, string Username, string Password, string? IsupId = null,
+    string? AgentId = null);
 
 /// <summary>Qué sabe hacer el parlante, leído de sus capacidades al validarlo.</summary>
 public sealed record SpeakerCapabilities(
@@ -106,6 +108,9 @@ public interface ISpeakerDriverFactory
 
     /// <summary>El parlante se conecta al servidor por ISUP (el alta pide su ID y clave, no dirección ni credenciales).</summary>
     bool UsesIsup => false;
+
+    /// <summary>El parlante es un agente «TrueCentral Speaker»: se enrola con un código y se conecta él al servidor.</summary>
+    bool UsesAgent => false;
 
     ISpeakerDriver Create();
 }

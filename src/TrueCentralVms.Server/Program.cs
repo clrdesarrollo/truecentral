@@ -141,6 +141,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceClockService
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionIsupSpeakerDriverFactory>();
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.SpeakerAgents.SpeakerAgentHub>();
+builder.Services.AddSingleton<ISpeakerDriverFactory, TrueCentralVms.Server.Services.SpeakerAgents.AgentSpeakerDriverFactory>();
 builder.Services.AddSingleton<SpeakerDriverRegistry>();
 builder.Services.AddSingleton<SpeakerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>());
@@ -398,6 +400,7 @@ app.MapAlarmsApi();
 app.MapIsupApi();
 app.MapCercoApi();
 app.MapSpeakersApi();
+app.MapSpeakerAgentsApi();
 app.MapIoModulesApi();
 app.MapIntercomsApi();
 app.MapAccessApi();

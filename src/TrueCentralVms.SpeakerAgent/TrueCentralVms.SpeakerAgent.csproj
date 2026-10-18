@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    TrueCentral Speaker: convierte una Raspberry Pi (Raspberry Pi OS de 64 bits) o un PC con Windows en
+    un parlante IP de TrueCentral. Corre como servicio (systemd / servicio de Windows), abre un WebSocket
+    hacia el servidor y reproduce el audio en vivo que este le manda. Trae una página local de puesta en
+    marcha en el puerto 8088. Diseño: docs/diseno/parlante-truecentral.md.
+
+      Windows:       dotnet publish -c Release -r win-x64 (autocontenido)
+      Raspberry Pi:  dotnet publish -c Release -r linux-arm64 (autocontenido)   (ver installer/speaker/README.md)
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TrueCentralVms.SpeakerAgent</RootNamespace>
+    <AssemblyName>truecentral-speaker</AssemblyName>
+    <RollForward>LatestMajor</RollForward>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Punteros para pasar el búfer a libasound sin copiarlo. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Sin libicu en la Pi: el agente no formatea nada dependiente de la cultura. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.11" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
+    <!-- Salida de audio en Windows (waveOut). En Linux se usa ALSA directo (libasound). -->
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+    <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Solo los contratos (protocolo del agente y G.711). -->
+    <ProjectReference Include="..\TrueCentralVms.Core\TrueCentralVms.Core.csproj" />
+  </ItemGroup>
+
+</Project>

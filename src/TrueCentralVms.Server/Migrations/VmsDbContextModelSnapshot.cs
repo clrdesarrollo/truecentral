@@ -2662,6 +2662,14 @@ namespace TrueCentralVms.Server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AgentId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("AgentTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2672,6 +2680,13 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("EnrollmentCodeHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("EnrollmentExpiresAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("FirmwareVersion")
                         .HasMaxLength(64)
@@ -2753,6 +2768,16 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AgentId")
+                        .IsUnique()
+                        .HasFilter("\"AgentId\" IS NOT NULL");
+
+                    b.HasIndex("AgentTokenHash")
+                        .HasFilter("\"AgentTokenHash\" IS NOT NULL");
+
+                    b.HasIndex("EnrollmentCodeHash")
+                        .HasFilter("\"EnrollmentCodeHash\" IS NOT NULL");
+
                     b.HasIndex("IsupDeviceId")
                         .IsUnique()
                         .HasFilter("\"IsupDeviceId\" IS NOT NULL");
@@ -2761,7 +2786,7 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.HasIndex("Host", "Port")
                         .IsUnique()
-                        .HasFilter("\"IsupDeviceId\" IS NULL");
+                        .HasFilter("\"IsupDeviceId\" IS NULL AND \"DriverKey\" <> 'truecentral-agent'");
 
                     b.ToTable("Speakers");
                 });

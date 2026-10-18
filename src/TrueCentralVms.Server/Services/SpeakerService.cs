@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
@@ -38,6 +39,7 @@ public sealed class SpeakerService(
     IConfiguration config,
     Isup.IsupService isup,
     Isup.IsupHostManager isupHost,
+    SpeakerAgents.SpeakerAgentHub agents,
     ILogger<SpeakerService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
@@ -67,10 +69,14 @@ public sealed class SpeakerService(
 
     public SpeakerConnectionInfo ConnectionOf(Speaker speaker) =>
         new(speaker.Host, speaker.Port, speaker.UseHttps, speaker.Username,
-            speaker.PasswordCiphertext.Length == 0 ? "" : credentials.Unprotect(speaker.PasswordCiphertext), speaker.IsupDeviceId);
+            speaker.PasswordCiphertext.Length == 0 ? "" : credentials.Unprotect(speaker.PasswordCiphertext), speaker.IsupDeviceId,
+            speaker.DriverKey == SpeakerAgentProtocol.DriverKey ? speaker.AgentId : null);
 
-    /// <summary>Dónde está el parlante, para textos: su dirección, o su ID ISUP.</summary>
-    public static string WhereOf(Speaker speaker) => speaker.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : speaker.Host;
+    /// <summary>Dónde está el parlante, para textos: su dirección, su ID ISUP o, si es un agente, desde dónde se conectó.</summary>
+    public static string WhereOf(Speaker speaker) =>
+        speaker.IsupDeviceId is { } isupId ? $"ISUP {isupId}"
+        : speaker.DriverKey == SpeakerAgentProtocol.DriverKey ? (speaker.AgentId is null ? "agente sin enrolar" : $"agente en {speaker.Host}")
+        : speaker.Host;
 
     public ISpeakerDriver DriverOf(Speaker speaker) =>
         drivers.Find(speaker.DriverKey)?.Create()
@@ -79,7 +85,10 @@ public sealed class SpeakerService(
     public SpeakerDto ToDto(Speaker s) => new(s.Id, s.Name, s.DriverKey, s.Host, s.Port, s.UseHttps, s.Username,
         s.Model, s.SerialNumber, s.FirmwareVersion, s.GroupName, s.Enabled, s.Status, s.LastError, s.LastSeenAt, s.Volume,
         s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio, BusyOf(s.Id), s.CreatedAt, s.UpdatedAt,
-        s.LocationId, Auth.LocationPaths.Of(s.LocationId), s.IsupDeviceId, s.IsupKeyCiphertext is { Length: > 0 });
+        s.LocationId, Auth.LocationPaths.Of(s.LocationId), s.IsupDeviceId, s.IsupKeyCiphertext is { Length: > 0 },
+        AgentId: s.AgentId,
+        EnrollmentExpiresAt: s.EnrollmentCodeHash is not null && s.EnrollmentExpiresAt > DateTime.UtcNow ? s.EnrollmentExpiresAt : null,
+        AgentConnected: agents.IsOnline(s.AgentId));
 
     // ------------------------------------------------------------------
     // Sondeo de estado
@@ -93,6 +102,17 @@ public sealed class SpeakerService(
         {
             if (online) _ = Task.Run(() => ProvisionIsupAsync(isupId, stoppingToken), stoppingToken);
             else RequestReconcile();
+        };
+        // Un TrueCentral Speaker que se conecta: se lee su identificación (versión del agente, hardware) y queda en línea al tiro.
+        agents.AgentOnlineChanged += (agentId, online) =>
+        {
+            if (online) _ = Task.Run(() => ProvisionAgentAsync(agentId, stoppingToken), stoppingToken);
+            else RequestReconcile();
+        };
+        agents.AgentEvent += (agentId, name, data) =>
+        {
+            if (name == SpeakerAgentProtocol.Events.VolumeChanged && data?.Deserialize<AgentVolumeArgs>(SpeakerAgentProtocol.Json) is { } volume)
+                _ = Task.Run(() => RecordAgentVolumeAsync(agentId, volume.Volume, stoppingToken), stoppingToken);
         };
         // Dar tiempo a que la API y el hub estén arriba antes del primer sondeo.
         try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
@@ -212,6 +232,56 @@ public sealed class SpeakerService(
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { logger.LogWarning("No se pudo completar el parlante ISUP {Id} en su primer contacto: {Error}", isupId, ex.Message); }
+    }
+
+    /// <summary>Conexión (o reconexión) de un agente: identificación al día y en línea sin esperar el sondeo.</summary>
+    private async Task ProvisionAgentAsync(string agentId, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.AgentId == agentId, ct);
+            if (speaker is null) return;
+            var previous = speaker.Status;
+            string? previousModel = speaker.Model, previousFirmware = speaker.FirmwareVersion;
+            var info = await DriverOf(speaker).ProbeAsync(ConnectionOf(speaker), ct);
+            Api.SpeakersApi.ApplyProbe(speaker, info);
+            speaker.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            if (previous != SpeakerStatus.Online)
+                await audit.LogSystemAsync("speakers", "speaker-online", "speaker", speaker.Id.ToString(), speaker.Name,
+                    $"El TrueCentral Speaker '{speaker.Name}' se conectó desde {speaker.Host} ({speaker.Model}, versión {speaker.FirmwareVersion}).");
+            await hub.SendAsync(VmsHubContract.SpeakerStatusChanged, ToDto(speaker), sc => sc.CanViewSpeaker(speaker.Id), ct);
+            if (previousModel != speaker.Model || previousFirmware != speaker.FirmwareVersion)
+            {
+                var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<Hubs.VmsHub>>();
+                await hubContext.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", ct);
+            }
+            if (previous == SpeakerStatus.Offline || previous == SpeakerStatus.AuthFailed)
+                scope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>().Publish(
+                    Workflows.WorkflowTrigger.FromDeviceStatus("speaker", speaker.Id, speaker.Name, WhereOf(speaker), speaker.Model,
+                        SpeakerStatus.Online.ToString(), null));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { logger.LogWarning("No se pudo leer la identificación del TrueCentral Speaker {Id}: {Error}", agentId, ex.Message); }
+    }
+
+    /// <summary>El volumen se cambió en el propio equipo (su página local): se refleja en la web y el cliente.</summary>
+    private async Task RecordAgentVolumeAsync(string agentId, int volume, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.AgentId == agentId, ct);
+            if (speaker is null || speaker.Volume == volume) return;
+            speaker.Volume = volume;
+            await db.SaveChangesAsync(ct);
+            await hub.SendAsync(VmsHubContract.SpeakerStatusChanged, ToDto(speaker), sc => sc.CanViewSpeaker(speaker.Id), ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { logger.LogDebug(ex, "No se pudo registrar el volumen informado por un TrueCentral Speaker."); }
     }
 
     /// <summary>Marca el estado en línea tras una orden que sí llegó al equipo (evita esperar el sondeo).</summary>
