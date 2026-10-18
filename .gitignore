@@ -55,4 +55,8 @@ build/publish/
 # Salidas temporales de publicación y del migrador, y base de pruebas del launch server-dev
 /build/tmp-publish/
 /build/pgdata-dev/
+# Estado del licenciamiento de esa misma instancia de desarrollo
+/build/license/
+# Datos del IsupHost cuando el servidor corre desde el código (isup-options.json, sdklog)
+src/TrueCentralVms.Server/isup/
 **/build/tmp-migrador/
