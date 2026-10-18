@@ -155,7 +155,8 @@ internal sealed class Cliente : IDisposable
     public void Ingresar()
     {
         var ventana = EsperarVentana(TituloIngreso, 10000);
-        Escribir(Buscar(ventana, new JsonObject { ["id"] = "ServerBox" }), _demo.Servidor);
+        // El servidor llega del client.json que escribe Abrir(); en el ingreso
+        // queda tras el engranaje (protocolo, dirección y puerto).
         Escribir(Buscar(ventana, new JsonObject { ["id"] = "UserBox" }), _demo.Usuario);
         var mostrar = Buscar(ventana, new JsonObject { ["id"] = "ShowPasswordToggle" });
         if (((TogglePattern)mostrar.GetCurrentPattern(TogglePattern.Pattern)).Current.ToggleState != ToggleState.On)

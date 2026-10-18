@@ -8,7 +8,7 @@
         { "accion": "escribir", "ventana": "Iniciar sesión", "id": "UserBox", "texto": "jperez" }
       ],
       "marcas": [
-        { "ventana": "Iniciar sesión", "id": "ServerBox", "en": "izq-fuera", "etiqueta": "Servidor" },
+        { "ventana": "Iniciar sesión", "id": "ServerSettingsToggle", "en": "arriba", "etiqueta": "Servidor: protocolo, dirección y puerto" },
         { "ventana": "Iniciar sesión", "id": "UserBox", "en": "izq-fuera", "etiqueta": "Usuario (▾ muestra los recientes)" },
         { "ventana": "Iniciar sesión", "id": "PasswordBox", "en": "izq-fuera", "etiqueta": "Contraseña (el ojo la muestra)" },
         { "ventana": "Iniciar sesión", "id": "RememberCheck", "en": "izq-fuera", "etiqueta": "Recordar contraseña e inicio automático" },

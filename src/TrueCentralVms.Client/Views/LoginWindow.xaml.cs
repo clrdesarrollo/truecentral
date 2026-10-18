@@ -27,7 +27,7 @@ public partial class LoginWindow : Window
             ErrorText.Text = notice;
             ErrorText.Visibility = Visibility.Visible;
         }
-        ServerBox.Text = _settings.ServerUrl;
+        ShowServer(_settings.ServerUrl);
         UserBox.Text = _settings.Username;
         RememberCheck.IsChecked = _settings.RememberPassword;
         AutoLoginCheck.IsChecked = _settings.AutoLogin;
@@ -58,7 +58,7 @@ public partial class LoginWindow : Window
     private void OnPickAccount(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: SavedAccount account }) return;
-        ServerBox.Text = account.ServerUrl;
+        ShowServer(account.ServerUrl);
         UserBox.Text = account.Username;
         SetPassword(CredentialVault.Unprotect(account.ProtectedPassword) ?? "");
         UsersToggle.IsChecked = false;
@@ -73,6 +73,115 @@ public partial class LoginWindow : Window
         if (_settings.Accounts.Count == 0)
             UsersToggle.IsChecked = false;
         e.Handled = true; // que el clic no seleccione la cuenta que se está borrando
+    }
+
+    // ------------------------------------------------------------------
+    // Servidor (tras el engranaje): protocolo, dirección y puerto. Lo que se
+    // guarda sigue siendo una sola URL, igual que antes, para que las cuentas
+    // y contraseñas recordadas sigan calzando con su servidor.
+    // ------------------------------------------------------------------
+    private const int DefaultServerPort = 5090;
+    private bool _fillingServer;
+
+    /// <summary>Reparte una URL guardada en protocolo, dirección y puerto.</summary>
+    private void ShowServer(string? url)
+    {
+        _fillingServer = true;
+        try
+        {
+            if (TryParseServer(url, out string scheme, out string host, out int port))
+            {
+                ProtocolBox.SelectedIndex = scheme == Uri.UriSchemeHttps ? 1 : 0;
+                HostBox.Text = host;
+                PortBox.Text = port.ToString();
+            }
+            else
+            {
+                ProtocolBox.SelectedIndex = 0;
+                HostBox.Text = url?.Trim() ?? "";
+                PortBox.Text = DefaultServerPort.ToString();
+            }
+        }
+        finally
+        {
+            _fillingServer = false;
+        }
+        UpdateServerSummary();
+    }
+
+    private void OnServerPartChanged(object sender, RoutedEventArgs e)
+    {
+        // Durante InitializeComponent la lista dispara antes de que existan los demás campos.
+        if (_fillingServer || HostBox is null || PortBox is null || ServerSummary is null) return;
+        // Pegaron la dirección completa (http://…:5090): se reparte en sus partes.
+        if (ReferenceEquals(sender, HostBox) && HostBox.Text.Contains("://") &&
+            TryParseServer(HostBox.Text, out _, out _, out _))
+        {
+            string pasted = HostBox.Text;
+            Dispatcher.BeginInvoke(() =>
+            {
+                ShowServer(pasted);
+                HostBox.CaretIndex = HostBox.Text.Length;
+            });
+            return;
+        }
+        UpdateServerSummary();
+    }
+
+    private void UpdateServerSummary() =>
+        ServerSummary.Text = TryComposeServerUrl(out string url, out _) ? url : "Servidor sin configurar";
+
+    /// <summary>"http://host:puerto" → sus partes. Sin protocolo se asume http; sin
+    /// puerto, el del protocolo (80/443), como hacía el campo único de antes.</summary>
+    private static bool TryParseServer(string? url, out string scheme, out string host, out int port)
+    {
+        scheme = Uri.UriSchemeHttp;
+        host = "";
+        port = DefaultServerPort;
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        string text = url.Trim();
+        if (!text.Contains("://")) text = "http://" + text;
+        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) || uri.Host.Length == 0)
+            return false;
+        scheme = uri.Scheme;
+        host = uri.Host;
+        port = uri.Port;
+        return true;
+    }
+
+    /// <summary>
+    /// Arma la URL con las tres partes. El puerto se omite si es el propio del
+    /// protocolo (80 con http, 443 con https): así queda idéntica a la que se
+    /// guardaba antes y las cuentas recordadas siguen encontrándose.
+    /// </summary>
+    private bool TryComposeServerUrl(out string url, out string error)
+    {
+        url = "";
+        string scheme = ProtocolBox.SelectedIndex == 1 ? Uri.UriSchemeHttps : Uri.UriSchemeHttp;
+        string host = HostBox.Text.Trim().TrimEnd('/');
+        if (host.Length == 0)
+        {
+            error = "Indique la dirección IP o el nombre del servidor.";
+            return false;
+        }
+        if (!int.TryParse(PortBox.Text.Trim(), out int port) || port is < 1 or > 65535)
+        {
+            error = "El puerto del servidor debe ser un número entre 1 y 65535.";
+            return false;
+        }
+        // IPv6 sin corchetes (fe80::1) → [fe80::1]
+        if (host.Contains(':') && !host.StartsWith('[')) host = $"[{host}]";
+        bool defaultPort = (scheme == Uri.UriSchemeHttp && port == 80) || (scheme == Uri.UriSchemeHttps && port == 443);
+        string candidate = defaultPort ? $"{scheme}://{host}" : $"{scheme}://{host}:{port}";
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri) || uri.AbsolutePath != "/" || uri.Host.Length == 0)
+        {
+            error = "La dirección del servidor no es válida: escriba solo la IP o el nombre (sin rutas ni espacios).";
+            return false;
+        }
+        url = candidate;
+        error = "";
+        return true;
     }
 
     // ------------------------------------------------------------------
@@ -120,6 +229,13 @@ public partial class LoginWindow : Window
     /// <summary>Botón "Cerrar" del formulario (ventana sin marco de Windows).</summary>
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
+    /// <summary>Arrastre de la ventana sin marco: un clic sostenido sobre la
+    /// tarjeta (los campos y botones se quedan con su propio clic).</summary>
+    private void OnDragWindow(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) DragMove();
+    }
+
     // ------------------------------------------------------------------
     // Inicio de sesión
     // ------------------------------------------------------------------
@@ -132,10 +248,14 @@ public partial class LoginWindow : Window
         LoginButton.Content = "Conectando…";
         try
         {
-            string serverUrl = ServerBox.Text.Trim();
-            if (!serverUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-                !serverUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                serverUrl = "http://" + serverUrl;
+            if (!TryComposeServerUrl(out string serverUrl, out string serverError))
+            {
+                ErrorText.Text = serverError;
+                ErrorText.Visibility = Visibility.Visible;
+                ServerSettingsToggle.IsChecked = true;
+                HostBox.Focus();
+                return;
+            }
             string username = UserBox.Text.Trim();
             string password = CurrentPassword();
 
@@ -161,6 +281,9 @@ public partial class LoginWindow : Window
         {
             ErrorText.Text = ex.Message;
             ErrorText.Visibility = Visibility.Visible;
+            // Sin respuesta del servidor (no un usuario o clave errados): lo
+            // más probable es la dirección, así que se muestra para revisarla.
+            if (ex.StatusCode is null) ServerSettingsToggle.IsChecked = true;
         }
         finally
         {

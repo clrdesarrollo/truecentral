@@ -1,39 +1,119 @@
 <Window x:Class="TrueCentralVms.Client.Views.LoginWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
         Title="CLR TrueCentral VMS — Iniciar sesión"
         Width="420" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
-        WindowStyle="None"
-        Icon="/Assets/logo.png"
-        Background="{StaticResource BgBrush}">
-    <!-- Sin marco estándar de Windows: la franja superior (CaptionHeight)
-         permite arrastrar la ventana y el botón "Cerrar" del formulario la cierra. -->
-    <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="52" ResizeBorderThickness="0"
-                      GlassFrameThickness="0,0,0,1" CornerRadius="0"
-                      UseAeroCaptionButtons="False"/>
-    </WindowChrome.WindowChrome>
-    <Grid>
-    <Border Background="{StaticResource PanelBrush}" Margin="18,22,18,18" CornerRadius="10"
+        WindowStyle="None" AllowsTransparency="True"
+        Icon="/TrueCentralVms.Client;component/Assets/logo.png"
+        Background="Transparent"
+        MouseLeftButtonDown="OnDragWindow">
+    <Window.Resources>
+        <!-- Engranaje de la cabecera: muestra u oculta la sección del servidor -->
+        <Style x:Key="ServerSettingsToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Width="32" Height="32" CornerRadius="6" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1">
+                            <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="15"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <!-- Ventana transparente: solo se ve la tarjeta redondeada (sin el
+         cuadrado de fondo). Sin marco de Windows, se arrastra desde cualquier
+         zona libre de la tarjeta y el botón "Cerrar" del formulario la cierra.
+         El margen deja lugar a la sombra. -->
+    <Grid Margin="18,14,18,22">
+    <!-- Sombra en una capa aparte: con el efecto sobre la tarjeta misma, todo
+         su contenido se dibujaría a través de él. -->
+    <Border Background="{StaticResource PanelBrush}" CornerRadius="10">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="22" ShadowDepth="4" Direction="270" Opacity="0.55" Color="#000000"/>
+        </Border.Effect>
+    </Border>
+    <Border Background="{StaticResource PanelBrush}" CornerRadius="10"
             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="24">
         <StackPanel>
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
-                <Image Source="/Assets/logo.png" Width="40" Height="40" VerticalAlignment="Center"
+            <!-- Cabecera: marca, a qué servidor se conecta y el engranaje -->
+            <DockPanel Margin="0,0,0,18">
+                <ToggleButton x:Name="ServerSettingsToggle" DockPanel.Dock="Right" VerticalAlignment="Top"
+                              Style="{StaticResource ServerSettingsToggleStyle}"
+                              ToolTip="Servidor: protocolo, dirección y puerto"/>
+                <Image DockPanel.Dock="Left" Source="/TrueCentralVms.Client;component/Assets/logo.png"
+                       Width="40" Height="40" VerticalAlignment="Center"
                        RenderOptions.BitmapScalingMode="HighQuality"/>
-                <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                <StackPanel Margin="12,0,8,0" VerticalAlignment="Center">
                     <TextBlock FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}">
                         CLR TrueCentral <Run Foreground="{StaticResource AccentBrush}">VMS</Run>
                     </TextBlock>
                     <TextBlock Text="Cliente de monitoreo" FontSize="11" Foreground="{StaticResource MutedBrush}"/>
+                    <!-- Servidor al que se va a conectar (el detalle está tras el engranaje) -->
+                    <TextBlock x:Name="ServerSummary" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"
+                               FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource DimTextBrush}"/>
                 </StackPanel>
-            </StackPanel>
+            </DockPanel>
 
             <TextBlock x:Name="ErrorText" Foreground="#FCA5A5" TextWrapping="Wrap"
                        Margin="0,0,0,12" Visibility="Collapsed"/>
 
-            <TextBlock Text="Servidor" Style="{StaticResource FieldLabel}"/>
-            <TextBox x:Name="ServerBox" Style="{StaticResource DarkTextBox}" Margin="0,0,0,12"/>
+            <!-- Servidor: oculto tras el engranaje (casi nunca cambia). Se abre
+                 solo si la dirección no es válida o el servidor no responde. -->
+            <Border x:Name="ServerPanel" Background="{StaticResource BgBrush}" BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="12,10,12,12" Margin="0,0,0,16"
+                    Visibility="{Binding IsChecked, ElementName=ServerSettingsToggle,
+                                 Converter={x:Static vm:BoolToVisibility.Instance}}">
+                <StackPanel>
+                    <TextBlock Text="SERVIDOR" FontSize="10.5" FontWeight="SemiBold"
+                               Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="88"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="76"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Column="0" Text="Protocolo" Style="{StaticResource FieldLabel}"/>
+                        <TextBlock Grid.Column="2" Text="Dirección (IP o nombre)" Style="{StaticResource FieldLabel}"/>
+                        <TextBlock Grid.Column="4" Text="Puerto" Style="{StaticResource FieldLabel}"/>
+                        <ComboBox x:Name="ProtocolBox" Grid.Row="1" Grid.Column="0" Style="{StaticResource DarkComboBox}"
+                                  SelectedIndex="0" SelectionChanged="OnServerPartChanged"
+                                  ToolTip="https solo si el servidor tiene un certificado instalado">
+                            <ComboBoxItem Content="http"/>
+                            <ComboBoxItem Content="https"/>
+                        </ComboBox>
+                        <TextBox x:Name="HostBox" Grid.Row="1" Grid.Column="2" Style="{StaticResource DarkTextBox}"
+                                 TextChanged="OnServerPartChanged"
+                                 ToolTip="IP o nombre del servidor; también puede pegar la dirección completa (http://…:5090)"/>
+                        <TextBox x:Name="PortBox" Grid.Row="1" Grid.Column="4" Style="{StaticResource DarkTextBox}"
+                                 TextChanged="OnServerPartChanged" MaxLength="5"
+                                 ToolTip="Puerto del servidor (por defecto 5090)"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
 
             <TextBlock Text="Usuario" Style="{StaticResource FieldLabel}"/>
             <Grid Margin="0,0,0,12">
@@ -87,12 +167,12 @@
                               Checked="OnShowPassword" Unchecked="OnHidePassword"/>
             </Grid>
 
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+            <StackPanel Margin="0,2,0,16">
                 <CheckBox x:Name="RememberCheck" Content="Recordar contraseña"
-                          Foreground="{StaticResource TextBrush}" FontSize="12"
+                          Style="{StaticResource DarkCheckBox}"
                           Unchecked="OnRememberUnchecked"/>
-                <CheckBox x:Name="AutoLoginCheck" Content="Inicio de sesión automático" Margin="18,0,0,0"
-                          Foreground="{StaticResource TextBrush}" FontSize="12"
+                <CheckBox x:Name="AutoLoginCheck" Content="Inicio de sesión automático" Margin="0,10,0,0"
+                          Style="{StaticResource DarkCheckBox}"
                           Checked="OnAutoLoginChecked"/>
             </StackPanel>
 
