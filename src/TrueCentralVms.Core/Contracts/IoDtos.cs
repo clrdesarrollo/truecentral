@@ -63,7 +63,9 @@ public sealed record IoModuleDto(
     /// <summary>Ubicación en el árbol de Recursos (null = por ubicar).</summary>
     int? LocationId = null,
     /// <summary>Ruta legible de esa ubicación ("Casa matriz › Acceso vehicular").</summary>
-    string? Location = null);
+    string? Location = null,
+    /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
+    bool DisabledByLicense = false);
 
 /// <summary>Nombre (y lógica, en las entradas) de una entrada o salida al guardar el módulo.</summary>
 public sealed record IoPointWriteDto(IoPointKind Kind, int Number, string? Name, bool Inverted = true);

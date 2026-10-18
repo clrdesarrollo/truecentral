@@ -74,6 +74,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AuditRetentionServ
 // archivo .lic firmado (verificación sin conexión) + heartbeat en línea con
 // período de gracia. Módulos y cupos por canal salen de la licencia; sin
 // licencia rige el período de prueba (Licensing:TrialDays).
+builder.Services.AddSingleton<LicenseQuotaReconciler>();
 builder.Services.AddSingleton<LicenseService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LicenseService>());
 

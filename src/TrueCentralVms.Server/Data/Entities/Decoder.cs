@@ -17,6 +17,13 @@ public class Decoder
     public string Username { get; set; } = "";
     public byte[] PasswordCiphertext { get; set; } = [];
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Apagado por el cupo (o el módulo) de la licencia, no por decisión del
+    /// administrador. Cuando vuelve a haber cupo el servidor lo enciende solo
+    /// (LicenseQuotaReconciler); cualquier cambio manual de <see cref="Enabled"/>
+    /// limpia la marca (VmsDbContext.SaveChanges).
+    /// </summary>
+    public bool DisabledByLicense { get; set; }
     public string? Model { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

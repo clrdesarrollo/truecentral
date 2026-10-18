@@ -33,6 +33,13 @@ public class IoModule : ILocatable
 
     /// <summary>El servidor mantiene la conexión y lo ofrece a operadores y automatizaciones.</summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Apagado por el cupo (o el módulo) de la licencia, no por decisión del
+    /// administrador. Cuando vuelve a haber cupo el servidor lo enciende solo
+    /// (LicenseQuotaReconciler); cualquier cambio manual de <see cref="Enabled"/>
+    /// limpia la marca (VmsDbContext.SaveChanges).
+    /// </summary>
+    public bool DisabledByLicense { get; set; }
 
     public IoModuleStatus Status { get; set; } = IoModuleStatus.Unknown;
     public string? LastError { get; set; }

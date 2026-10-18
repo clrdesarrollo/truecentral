@@ -11,7 +11,7 @@ public static class WorkflowMapper
         WorkflowJson.Conditions(workflow.ConditionsJson), workflow.CooldownSeconds,
         workflow.LastRunAt, workflow.RunCount, workflow.CreatedAt, workflow.CreatedBy,
         workflow.Actions.OrderBy(a => a.Order).Select(ToDto).ToList(),
-        WorkflowGraph.ToDto(workflow));
+        WorkflowGraph.ToDto(workflow), DisabledByLicense: workflow.DisabledByLicense);
 
     public static WorkflowActionDto ToDto(WorkflowAction action) => new(
         action.Id, action.Order, action.Type, action.Enabled, action.ContinueOnError, action.DelaySeconds,

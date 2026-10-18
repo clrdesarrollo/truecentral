@@ -40,7 +40,9 @@ public sealed record SetupAdminRequest(string Username, string Password);
 public sealed record UserDto(int Id, string Username, string Role, bool Enabled, DateTime CreatedAt, DateTime PasswordChangedAt,
     bool RestrictToLocations = false, bool ViewOutsideScope = false, IReadOnlyList<int>? LocationIds = null,
     IReadOnlyList<int>? RoleIds = null, IReadOnlyList<string>? RoleNames = null, bool Editable = true,
-    bool IsSuperAdmin = false, string? EffectiveScope = null);
+    bool IsSuperAdmin = false, string? EffectiveScope = null,
+    /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
+    bool DisabledByLicense = false);
 
 /// <summary>
 /// Alta/edición de usuario. En edición, Password null o vacía = no cambiar; los

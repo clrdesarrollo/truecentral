@@ -16,6 +16,13 @@ public class Workflow
 
     /// <summary>Pausada = el motor la ignora (no borra el historial).</summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Apagado por el cupo (o el módulo) de la licencia, no por decisión del
+    /// administrador. Cuando vuelve a haber cupo el servidor lo enciende solo
+    /// (LicenseQuotaReconciler); cualquier cambio manual de <see cref="Enabled"/>
+    /// limpia la marca (VmsDbContext.SaveChanges).
+    /// </summary>
+    public bool DisabledByLicense { get; set; }
 
     /// <summary>Clave estable del disparador (ver <see cref="WorkflowTriggerTypes"/>).</summary>
     public string TriggerType { get; set; } = WorkflowTriggerTypes.AlarmEvent;

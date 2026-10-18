@@ -145,7 +145,7 @@ public static class AnprApi
             return Results.Ok(devices.Where(d => scope.CanViewDevice(d.Id)).Select(d => new AnprSourceDto(
                 d.Id, d.Name, d.DriverKey, d.Host, d.Status,
                 d.AnprEnabled, anpr.IsLive(d.Id), anpr.LastErrorOf(d.Id), anpr.LastEventAtOf(d.Id),
-                counts.GetValueOrDefault(d.Id))));
+                counts.GetValueOrDefault(d.Id), DisabledByLicense: d.AnprDisabledByLicense)));
         });
 
         app.MapPut("/api/anpr/sources/{deviceId:int}", async (HttpContext ctx, VmsDbContext db, DriverRegistry drivers, LicenseService license,

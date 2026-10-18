@@ -122,7 +122,7 @@ async function renderAccessDevices() {
         <tbody>
           ${devices.map((d) => `
             <tr data-id="${d.id}">
-              <td><a href="#/access/device?id=${d.id}" class="acd-link" title="Abrir la página del equipo">${esc(d.name)}</a>${d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</td>
+              <td><a href="#/access/device?id=${d.id}" class="acd-link" title="Abrir la página del equipo">${esc(d.name)}</a>${d.disabledByLicense ? licenseWaitTag(d) : d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</td>
               <td class="muted">${d.location ? esc(d.location) : `<span class="loc-line none">Por ubicar</span>`}</td>
               <td class="muted">${esc(accessBrandOf(d.driverKey))}</td>
               <td>${esc(ACCESS_KIND_LABELS[d.kind] ?? d.kind)}</td>
@@ -524,7 +524,7 @@ function acdDrawPage() {
     <div class="acd-back"><a class="btn ghost small" href="#/access">← Volver a la lista</a></div>
     <div class="acd-head">
       <div class="acd-title">
-        <h3>${esc(d.name)}${d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</h3>
+        <h3>${esc(d.name)}${d.disabledByLicense ? licenseWaitTag(d) : d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</h3>
         <div class="muted">${meta}</div>
         <div class="acd-tags">${accessCapsTags(d)} ${d.doors.length
           ? `<span class="tag operator" title="${esc(d.doors.map((x) => `${x.number}. ${x.name}`).join(" · "))}">${d.doors.length} puerta(s)</span>` : ""}</div>

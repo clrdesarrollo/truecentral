@@ -84,6 +84,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<SmtpSettings> SmtpSettings => Set<SmtpSettings>();
     /// <summary>Cómo debe estar el reloj de los equipos: fila única (Id = 1).</summary>
     public DbSet<DeviceClockPolicy> DeviceClockPolicies => Set<DeviceClockPolicy>();
+    /// <summary>Datos internos opacos por nombre (copia del estado de licencia).</summary>
+    public DbSet<SystemBlob> SystemBlobs => Set<SystemBlob>();
 
     // Muro de video
     public DbSet<Decoder> Decoders => Set<Decoder>();
@@ -102,6 +104,53 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     /// <summary>Fichas de recursos (descripción, consignas y cámaras asociadas).</summary>
     public DbSet<ResourceProfile> ResourceProfiles => Set<ResourceProfile>();
     public DbSet<ResourceProfileCamera> ResourceProfileCameras => Set<ResourceProfileCamera>();
+
+    // -------------------------------------------------------------------
+    // Marca "apagado por la licencia": un cambio manual del habilitado la
+    // limpia (si el administrador lo enciende o lo apaga, ya es decisión suya
+    // y el servidor no debe volver a encenderlo solo). El reconciliador de
+    // cupos cambia las dos cosas a la vez, así que su marca se respeta.
+    // -------------------------------------------------------------------
+    private static readonly (Type Type, string Flag, string Mark)[] LicenseMarks =
+    [
+        (typeof(AlarmPanel), nameof(AlarmPanel.Enabled), nameof(AlarmPanel.DisabledByLicense)),
+        (typeof(CercoPanel), nameof(CercoPanel.Enabled), nameof(CercoPanel.DisabledByLicense)),
+        (typeof(AccessDevice), nameof(AccessDevice.Enabled), nameof(AccessDevice.DisabledByLicense)),
+        (typeof(Decoder), nameof(Decoder.Enabled), nameof(Decoder.DisabledByLicense)),
+        (typeof(Speaker), nameof(Speaker.Enabled), nameof(Speaker.DisabledByLicense)),
+        (typeof(Intercom), nameof(Intercom.Enabled), nameof(Intercom.DisabledByLicense)),
+        (typeof(IoModule), nameof(IoModule.Enabled), nameof(IoModule.DisabledByLicense)),
+        (typeof(Workflow), nameof(Workflow.Enabled), nameof(Workflow.DisabledByLicense)),
+        (typeof(User), nameof(User.Enabled), nameof(User.DisabledByLicense)),
+        (typeof(Device), nameof(Device.AnprEnabled), nameof(Device.AnprDisabledByLicense)),
+    ];
+
+    private void ClearLicenseMarksOnManualChange()
+    {
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.State != EntityState.Modified) continue;
+            foreach (var (type, flag, mark) in LicenseMarks)
+            {
+                if (entry.Metadata.ClrType != type) continue;
+                var markProp = entry.Property(mark);
+                if (entry.Property(flag).IsModified && !markProp.IsModified && markProp.CurrentValue is true)
+                    markProp.CurrentValue = false;
+            }
+        }
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ClearLicenseMarksOnManualChange();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        ClearLicenseMarksOnManualChange();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -769,6 +818,12 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(p => p.TimeZoneId).HasMaxLength(128);
             e.Property(p => p.Mode).HasConversion<string>().HasMaxLength(16);
             e.Property(p => p.NtpServer).HasMaxLength(255);
+        });
+
+        modelBuilder.Entity<SystemBlob>(e =>
+        {
+            e.Property(b => b.Name).HasMaxLength(64);
+            e.HasIndex(b => b.Name).IsUnique();
         });
 
         // -------------------------------------------------------------------

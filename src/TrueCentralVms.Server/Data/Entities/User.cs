@@ -15,6 +15,13 @@ public class User
     public string Role { get; set; } = Core.Domain.Roles.Operator;
     public bool Enabled { get; set; } = true;
     /// <summary>
+    /// Apagado por el cupo (o el módulo) de la licencia, no por decisión del
+    /// administrador. Cuando vuelve a haber cupo el servidor lo enciende solo
+    /// (LicenseQuotaReconciler); cualquier cambio manual de <see cref="Enabled"/>
+    /// limpia la marca (VmsDbContext.SaveChanges).
+    /// </summary>
+    public bool DisabledByLicense { get; set; }
+    /// <summary>
     /// Superadministrador: el administrador que se crea al activar la plataforma.
     /// Ve y opera todo sin importar sus roles ni su alcance, solo él modifica su
     /// usuario (nombre y contraseña), no se deshabilita y no se elimina.

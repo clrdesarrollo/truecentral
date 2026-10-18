@@ -142,7 +142,9 @@ public sealed record CercoPanelDto(
     /// <summary>El panel ya se enroló (tiene PSK). Si no, espera el código de enrolamiento.</summary>
     bool Enrolled = false,
     /// <summary>Ubicación en el árbol de Recursos (null = por ubicar).</summary>
-    int? LocationId = null);
+    int? LocationId = null,
+    /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
+    bool DisabledByLicense = false);
 
 /// <summary>
 /// Credenciales generadas por el servidor al crear o rotar la clave de un panel.

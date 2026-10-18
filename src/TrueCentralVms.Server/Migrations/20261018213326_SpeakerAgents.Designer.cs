@@ -77,6 +77,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("DriverKey")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -850,6 +853,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("DriverKey")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -1337,6 +1343,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(48)
                         .HasColumnType("character varying(48)");
 
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
@@ -1618,6 +1627,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("DriverKey")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -1673,6 +1685,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("AnprDisabledByLicense")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("AnprEnabled")
                         .HasColumnType("boolean");
@@ -1820,6 +1835,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
 
                     b.Property<int>("DoorCount")
                         .HasColumnType("integer");
@@ -1989,6 +2007,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("DriverKey")
                         .IsRequired()
@@ -2676,6 +2697,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("DriverKey")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -2856,6 +2880,34 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("StreamSessions");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.SystemBlob", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Data")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("SystemBlobs");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.User", b =>
                 {
                     b.Property<int>("Id")
@@ -2866,6 +2918,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
@@ -3190,6 +3245,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
+
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");

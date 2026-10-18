@@ -89,5 +89,13 @@ public static class ScopeKinds
     public static bool IsValid(string? kind) => kind is not null && Labels.ContainsKey(kind);
 }
 
-/// <summary>Lo que puede hacer la sesión: la interfaz oculta lo demás (el servidor valida igual).</summary>
-public sealed record MyPermissionsDto(bool IsAdmin, IReadOnlyList<string> Permissions, IReadOnlyList<string> Roles);
+/// <summary>
+/// Lo que puede hacer la sesión: la interfaz oculta lo demás (el servidor valida igual).
+/// <paramref name="LicensedModules"/> son los módulos (<see cref="LicenseFeatures"/>)
+/// que incluye la licencia: lo de un módulo fuera de ella se oculta aunque los
+/// roles lo permitan, también al administrador. null = servidor anterior a esto (no se oculta nada).
+/// <paramref name="LicenseOperational"/> = false: licencia no vigente; la interfaz deja solo lo
+/// necesario para regularizarla (usuarios, auditoría, servicios y la propia licencia).
+/// </summary>
+public sealed record MyPermissionsDto(bool IsAdmin, IReadOnlyList<string> Permissions, IReadOnlyList<string> Roles,
+    IReadOnlyList<string>? LicensedModules = null, bool LicenseOperational = true);

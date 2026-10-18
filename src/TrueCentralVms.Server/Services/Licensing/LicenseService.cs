@@ -31,11 +31,37 @@ namespace TrueCentralVms.Server.Services.Licensing;
 /// Modo restringido: la API rechaza con 402 toda escritura que no sea
 /// administrar la licencia (ver el middleware en Program.cs) y las altas que
 /// dependen de cupos. Nada se borra: al regularizar la licencia todo vuelve.
+///
+/// Blindaje del estado local (lo que no viene firmado en el .lic: inicio de la
+/// prueba, última revalidación, revocación recibida, hora más alta vista):
+/// <list type="bullet">
+/// <item>Tres copias cifradas y autenticadas (<see cref="LicenseStateStore"/>:
+/// archivo, registro, base de datos). Al arrancar se combinan quedándose con
+/// lo más restrictivo, y se reescriben las tres: borrar o editar una no sirve.</item>
+/// <item>Marca de prueba en el registro que sobrevive a la desinstalación.</item>
+/// <item>Si no queda ninguna copia, la prueba empezó a más tardar con el primer
+/// evento de la bitácora: borrar el estado no regala otra prueba.</item>
+/// <item>Reloj: se compara contra la mayor de la hora más alta vista y la fecha
+/// firmada del .lic más nuevo aceptado (con tolerancia de
+/// <see cref="ClockTolerance"/>). Una revalidación en línea, que trae la hora
+/// del servidor de licencias firmada, demuestra que el reloj está bien.</item>
+/// <item>No se acepta un .lic más antiguo que el último aceptado, ni el mismo
+/// archivo después de que el servidor lo invalidó.</item>
+/// </list>
 /// </summary>
 public sealed class LicenseService : BackgroundService
 {
     private const string LicenseFileName = "license.lic";
-    private const string StateFileName = "state.json";
+
+    /// <summary>
+    /// Cuánto puede estar el reloj ANTES de la referencia sin considerarlo un
+    /// retroceso: cubre ajustes de NTP y una zona horaria mal puesta y
+    /// corregida. No se acumula (la referencia es siempre la más alta vista).
+    /// </summary>
+    public static readonly TimeSpan ClockTolerance = TimeSpan.FromHours(12);
+
+    /// <summary>Holgura al comparar fechas de generación de archivos (redondeos del servidor).</summary>
+    private static readonly TimeSpan GeneratedSlack = TimeSpan.FromMinutes(1);
 
     private static readonly JsonSerializerOptions StateJson = new(JsonSerializerDefaults.Web)
     {
@@ -53,16 +79,23 @@ public sealed class LicenseService : BackgroundService
     private readonly TimeSpan _checkInterval;
     private readonly string _publicKey;
 
-    private PersistedState _state = new();
+    private readonly LicenseStateStore _store;
+    private readonly LicenseQuotaReconciler _quotas;
+    private PersistedLicenseState _state = new();
     private LicensePayload? _payload;
     private string? _licenseFileJson;
     private LicenseSnapshot _snapshot;
     private LicenseState? _lastAuditedState;
+    /// <summary>El .lic del disco fue reemplazado por uno más antiguo que el aceptado: restringido.</summary>
+    private string? _tamperMessage;
+    /// <summary>Qué se reconstruyó al arrancar (para la bitácora); null si las copias estaban bien.</summary>
+    private string? _startupNote;
 
     public LicenseService(IConfiguration config, IHostEnvironment env, EmbeddedPostgres postgres,
         IServiceScopeFactory scopes, AuditService audit, IHubContext<VmsHub> hub, TokenService tokens,
-        ILogger<LicenseService> logger)
+        LicenseQuotaReconciler quotas, ILogger<LicenseService> logger)
     {
+        _quotas = quotas;
         _scopes = scopes;
         _audit = audit;
         _hub = hub;
@@ -72,7 +105,12 @@ public sealed class LicenseService : BackgroundService
         Directory = Path.Combine(Path.GetDirectoryName(postgres.DataDirectory) ?? postgres.DataDirectory, "license");
         System.IO.Directory.CreateDirectory(Directory);
 
-        _trialDays = Math.Max(0, config.GetValue<int?>("Licensing:TrialDays") ?? 30);
+#if DEBUG
+        _trialDays = Math.Max(0, config.GetValue<int?>("Licensing:TrialDays") ?? LicensingConstants.TrialDays);
+#else
+        _trialDays = LicensingConstants.TrialDays;
+#endif
+        _store = new LicenseStateStore(Directory, scopes, logger);
         _checkInterval = TimeSpan.FromMinutes(Math.Clamp(config.GetValue<int?>("Licensing:HeartbeatCheckMinutes") ?? 60, 1, 24 * 60));
         Server = new LicenseServerClient(config["Licensing:ServerUrl"], config["Licensing:ApiKey"], logger);
 
@@ -133,6 +171,16 @@ public sealed class LicenseService : BackgroundService
     public bool IsModuleEnabled(string moduleKey) => Snapshot.Operational && Snapshot.Features.IsEnabled(moduleKey);
 
     /// <summary>
+    /// Módulos que incluye la licencia (o la prueba), para que la interfaz oculte
+    /// los demás. Sin licencia vigente (vencida, revocada, prueba terminada) no
+    /// hay ninguno: la interfaz deja solo lo necesario para regularizarla.
+    /// </summary>
+    public IReadOnlyList<string> LicensedModules() => Snapshot.Operational ? LicensedModules(Snapshot) : [];
+
+    private static IReadOnlyList<string> LicensedModules(LicenseSnapshot s) =>
+        LicenseFeatures.Modules.Select(m => m.ModuleKey!).Distinct().Where(s.Features.IsEnabled).ToList();
+
+    /// <summary>
     /// true si la solicitud debe rechazarse en modo restringido: escrituras
     /// de la API (POST/PUT/DELETE/PATCH) salvo las rutas que permiten
     /// entrar, administrar la licencia y controlar los servicios, más el
@@ -186,10 +234,12 @@ public sealed class LicenseService : BackgroundService
             [LicenseFeatures.VideoChannels] = await db.Channels.CountAsync(c => c.Enabled, ct),
             [LicenseFeatures.AnprChannels] = await db.Devices.CountAsync(d => d.AnprEnabled, ct),
             [LicenseFeatures.AlarmPanels] = await db.AlarmPanels.CountAsync(p => p.Enabled, ct),
+            [LicenseFeatures.FencePanels] = await db.CercoPanels.CountAsync(p => p.Enabled, ct),
             [LicenseFeatures.AccessDoors] = await db.AccessDoors.CountAsync(d => d.Enabled && d.AccessDevice!.Enabled, ct),
             [LicenseFeatures.Videowalls] = await db.Walls.CountAsync(ct),
             [LicenseFeatures.VideowallDecoders] = await db.Decoders.CountAsync(d => d.Enabled, ct),
             [LicenseFeatures.SpeakerChannels] = await db.Speakers.CountAsync(s => s.Enabled, ct),
+            [LicenseFeatures.IntercomDevices] = await db.Intercoms.CountAsync(i => i.Enabled, ct),
             [LicenseFeatures.IoModules] = await db.IoModules.CountAsync(m => m.Enabled, ct),
             [LicenseFeatures.AlarmScreens] = await db.AlarmScreens.CountAsync(s => s.Status == AlarmScreenStatus.Approved, ct),
             [LicenseFeatures.AutomationRules] = await db.Workflows.CountAsync(w => w.Enabled, ct),
@@ -270,12 +320,16 @@ public sealed class LicenseService : BackgroundService
                 $"El archivo de licencia está vinculado a otro equipo ({hw}); este servidor es {HardwareIdentifier}. Genere la solicitud de activación desde este equipo.");
         if (payload.ExpiresAtUtc is { } expires && expires <= DateTime.UtcNow)
             return LicenseOperationResult.Fail($"La licencia {payload.LicenseKey} venció el {expires:yyyy-MM-dd}.");
+        if (RejectOlder(payload) is { } older)
+            return LicenseOperationResult.Fail(older);
 
         await _lock.WaitAsync(ct);
         try
         {
             _payload = payload;
             _licenseFileJson = licenseFileJson;
+            _tamperMessage = null;
+            AcceptGenerated(payload, DateTime.UtcNow);
             _state.ActivationCode = activationCode ?? payload.LicenseKey;
             _state.LastValidatedUtc = payload.GeneratedAtUtc ?? DateTime.UtcNow;
             _state.LastHeartbeatError = null;
@@ -295,7 +349,54 @@ public sealed class LicenseService : BackgroundService
         _logger.LogInformation("Licencia {Key} {How} ({Mode}).", payload.LicenseKey, how, payload.Validation?.Mode);
         await _hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "license", cancellationToken: ct);
         await RestoreChannelsDisabledByLicenseAsync(ct);
+        await _quotas.ReconcileAsync(Snapshot, ct);
         return LicenseOperationResult.Ok($"Licencia {payload.LicenseKey} {how}.");
+    }
+
+    /// <summary>
+    /// Motivo para no aceptar un .lic (válido y firmado) por ser más antiguo
+    /// que el último aceptado en este equipo, o por ser el mismo que el
+    /// servidor de licencias ya invalidó; null si se puede aceptar.
+    /// </summary>
+    private string? RejectOlder(LicensePayload payload)
+    {
+        var generated = payload.GeneratedAtUtc;
+        if (_state.HighestLicenseGeneratedUtc is { } highest && (generated is null || generated < highest - GeneratedSlack))
+            return $"Este archivo de licencia es anterior al último aceptado en este equipo (generado el " +
+                   $"{(generated is { } g ? g.ToString("yyyy-MM-dd HH:mm") : "—")} UTC; el último es del {highest:yyyy-MM-dd HH:mm} UTC). " +
+                   "Pida a soporte un archivo actualizado.";
+        if (_state.RejectedLicenseKey == payload.LicenseKey && _state.RejectedAtUtc is { } rejected
+            && (generated is null || generated <= rejected))
+            return $"El servidor de licencias invalidó la licencia {payload.LicenseKey} el {rejected:yyyy-MM-dd}: " +
+                   "este archivo es anterior a eso. Pida a soporte uno emitido después.";
+        return null;
+    }
+
+    /// <summary>
+    /// Registra un .lic recién aceptado (bajo el lock): sube la fecha de
+    /// generación más nueva, olvida una invalidación anterior de esa misma
+    /// licencia y, si el servidor lo acaba de firmar, usa su hora para dar por
+    /// bueno el reloj de este equipo.
+    /// </summary>
+    private void AcceptGenerated(LicensePayload payload, DateTime now)
+    {
+        if (payload.GeneratedAtUtc is not { } generated) return;
+        if (_state.HighestLicenseGeneratedUtc is null || generated > _state.HighestLicenseGeneratedUtc)
+            _state.HighestLicenseGeneratedUtc = generated;
+        if (_state.RejectedLicenseKey == payload.LicenseKey && _state.RejectedAtUtc is { } rejected && generated > rejected)
+        {
+            _state.RejectedLicenseKey = null;
+            _state.RejectedAtUtc = null;
+        }
+        // Firmado hace instantes por el servidor de licencias con su propia
+        // hora: si coincide con el reloj de este equipo, el reloj está bien
+        // (aunque haya quedado una referencia "del futuro" de un reloj que
+        // estuvo adelantado y ya se corrigió).
+        if ((now - generated).Duration() <= ClockTolerance && _state.LastSeenClockUtc > now)
+        {
+            _logger.LogInformation("Licencia: la hora firmada por el servidor de licencias confirma el reloj de este equipo.");
+            _state.LastSeenClockUtc = now;
+        }
     }
 
     /// <summary>Archivo de solicitud (.req) para activar un equipo sin internet desde el backoffice de CLRobotics.</summary>
@@ -327,7 +428,48 @@ public sealed class LicenseService : BackgroundService
             return LicenseOperationResult.Fail("El servidor de licencias no está configurado; importe el .lic actualizado que le entregue soporte.");
         var outcome = await HeartbeatAsync(ct);
         await RestoreChannelsDisabledByLicenseAsync(ct);
+        await _quotas.ReconcileAsync(Snapshot, ct);
         return outcome;
+    }
+
+    /// <summary>
+    /// El cliente ingresa el código de una expansión que compró. La expansión
+    /// ya está ligada a la licencia base en el servidor de licencias y llega en
+    /// el archivo de la base: aquí se confirma que es de ESTA licencia y está
+    /// vigente, y se revalida para traerla en el acto. Sin conexión con el
+    /// servidor de licencias se explica cómo cargarla (.req → .lic).
+    /// </summary>
+    public async Task<LicenseOperationResult> AddAddonAsync(string addonCode, CancellationToken ct)
+    {
+        string code = NormalizeCode(addonCode);
+        if (code.Length == 0)
+            return LicenseOperationResult.Fail("Ingrese el código de la expansión.");
+        if (_payload is not { } payload)
+            return LicenseOperationResult.Fail("Primero active la licencia base: las expansiones se suman a ella.");
+        if (string.Equals(code, payload.LicenseKey, StringComparison.OrdinalIgnoreCase))
+            return LicenseOperationResult.Fail("Ese es el código de la licencia base, no de una expansión.");
+        if (payload.Addons.FirstOrDefault(a => string.Equals(a.LicenseKey, code, StringComparison.OrdinalIgnoreCase)) is { } included)
+            return LicenseOperationResult.Ok($"La expansión {included.LicenseKey} ya está incluida en la licencia: {SummarizeAddon(included)}.");
+        if (!Server.IsConfigured)
+            return LicenseOperationResult.Fail(
+                $"Este servidor no está conectado al servidor de licencias. Para cargar la expansión {code}: genere la solicitud " +
+                "de activación (.req) en esta pantalla, envíela a soporte y luego importe el archivo .lic actualizado de la " +
+                "licencia base, que ya la incluye.");
+
+        string baseCode = _state.ActivationCode ?? payload.LicenseKey;
+        var check = await Server.CheckAddonAsync(code, baseCode, ct);
+        if (!check.Reachable)
+            return LicenseOperationResult.Fail(check.Message);
+        if (!check.Success || check.Valid != true)
+            return LicenseOperationResult.Fail(check.Message.Length > 0 ? check.Message : "El servidor de licencias no reconoce esa expansión.");
+
+        var refresh = await RefreshAsync(ct);
+        if (!refresh.Success)
+            return LicenseOperationResult.Fail($"La expansión {code} es válida, pero no se pudo revalidar la licencia: {refresh.Message}");
+        bool arrived = _payload?.Addons.Any(a => string.Equals(a.LicenseKey, code, StringComparison.OrdinalIgnoreCase)) == true;
+        return arrived
+            ? LicenseOperationResult.Ok($"Expansión {code} aplicada: {check.Summary ?? "cupos actualizados"}.")
+            : LicenseOperationResult.Fail($"La expansión {code} es válida, pero el archivo de licencia todavía no la trae. Intente «Revalidar ahora» en unos minutos.");
     }
 
     /// <summary>
@@ -384,6 +526,14 @@ public sealed class LicenseService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await AuditStateAsync("arranque");
+        // Lo que el arranque tuvo que reparar del estado local queda en la bitácora:
+        // copias borradas o editadas son, como mínimo, algo que revisar.
+        if (_startupNote is { } note)
+            await _audit.LogSystemAsync("license", "license-state-rebuilt", targetType: "license",
+                targetId: _payload?.LicenseKey, detail: note);
+        if (_tamperMessage is { } tamper)
+            await _audit.LogSystemAsync("license", "license-file-tampered", targetType: "license",
+                targetId: _payload?.LicenseKey, detail: tamper, success: false);
         try { await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken); }
         catch (OperationCanceledException) { return; }
 
@@ -429,10 +579,14 @@ public sealed class LicenseService : BackgroundService
             await HeartbeatAsync(ct);
 
         var after = Snapshot;
+        // La revalidación en línea puede traer un .lic con otros módulos (una
+        // expansión nueva) sin cambiar el estado: la interfaz también se entera.
+        bool modulesChanged = !LicensedModules(before).SequenceEqual(LicensedModules(after));
+        if (after.State != before.State || modulesChanged)
+            await _hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "license", cancellationToken: ct);
         if (after.State != before.State)
         {
             await AuditStateAsync("cambio de estado");
-            await _hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "license", cancellationToken: ct);
         }
         else if (after.State is LicenseState.Trial or LicenseState.GracePeriod && after.DaysRemaining is <= 7
                  && _audit.ShouldLog("license-warning", TimeSpan.FromHours(24)))
@@ -441,6 +595,7 @@ public sealed class LicenseService : BackgroundService
                 targetId: after.Payload?.LicenseKey, detail: after.Warning);
         }
         await RestoreChannelsDisabledByLicenseAsync(ct);
+        await _quotas.ReconcileAsync(Snapshot, ct);
     }
 
     /// <summary>
@@ -530,6 +685,9 @@ public sealed class LicenseService : BackgroundService
                 _state.ServerRejectionStatus = result.Status ?? "INVALID";
                 _state.ServerRejectionMessage = result.Message;
                 _state.ServerRejectionAtUtc = DateTime.UtcNow;
+                // Memoria que sobrevive a desactivar: el mismo archivo no vuelve a entrar.
+                _state.RejectedLicenseKey = payload.LicenseKey;
+                _state.RejectedAtUtc = DateTime.UtcNow;
                 _state.LastHeartbeatError = null;
                 Save();
                 Refresh(DateTime.UtcNow);
@@ -543,21 +701,26 @@ public sealed class LicenseService : BackgroundService
             if (result.LicenseFileJson is { } fresh)
             {
                 var verification = LicenseFileVerifier.Verify(fresh, _publicKey);
-                if (verification.Ok)
+                // Un archivo "fresco" más antiguo que el aceptado no se toma
+                // (servidor restaurado de un respaldo, o respuesta repetida).
+                string? older = verification.Ok ? RejectOlder(verification.Payload!) : null;
+                if (verification.Ok && older is null)
                 {
                     _payload = verification.Payload;
                     _licenseFileJson = fresh;
+                    _tamperMessage = null;
                     File.WriteAllText(Path.Combine(Directory, LicenseFileName), fresh);
+                    AcceptGenerated(verification.Payload!, DateTime.UtcNow);
                     _state.LastValidatedUtc = verification.Payload!.GeneratedAtUtc ?? DateTime.UtcNow;
                 }
                 else
                 {
                     // Firma inválida en un archivo "fresco": servidor o clave
                     // equivocados. Se conserva el archivo anterior.
-                    _state.LastHeartbeatError = verification.Error;
+                    _state.LastHeartbeatError = verification.Error ?? older;
                     Save();
                     Refresh(DateTime.UtcNow);
-                    return LicenseOperationResult.Fail(verification.Error!);
+                    return LicenseOperationResult.Fail((verification.Error ?? older)!);
                 }
             }
             else
@@ -605,9 +768,27 @@ public sealed class LicenseService : BackgroundService
 
     private LicenseSnapshot Refresh(DateTime now)
     {
+        var before = Volatile.Read(ref _snapshot);
         var snapshot = Evaluate(now);
         Volatile.Write(ref _snapshot, snapshot);
+        // La licencia dejó de estar vigente: los clientes de escritorio salen
+        // (el login ya no los deja volver a entrar, ver AuthApi). Pasa una sola
+        // vez, en la transición; el panel web sigue para poder regularizarla.
+        if (before is { Operational: true } && !snapshot.Operational)
+            DisconnectDesktopClients(snapshot);
         return snapshot;
+    }
+
+    private void DisconnectDesktopClients(LicenseSnapshot snapshot)
+    {
+        int closed = _tokens.RevokeDesktopSessions("licencia no vigente");
+        if (closed == 0) return;
+        _logger.LogWarning("Licencia no vigente: se cerraron {Count} sesión(es) de cliente de escritorio.", closed);
+        // Sin esperar: Refresh es sincrónico y la bitácora nunca lanza.
+        _ = _audit.LogSystemAsync("license", "license-clients-disconnected", targetType: "license",
+            targetId: snapshot.Payload?.LicenseKey,
+            detail: $"Se cerraron {closed} sesión(es) de cliente de escritorio porque la licencia dejó de estar vigente: {snapshot.Message}",
+            data: new { sessions = closed }, success: false);
     }
 
     private LicenseSnapshot Evaluate(DateTime now)
@@ -622,14 +803,17 @@ public sealed class LicenseService : BackgroundService
 
         if (payload.HardwareId is { Length: > 0 } hw && !string.Equals(hw, HardwareIdentifier, StringComparison.OrdinalIgnoreCase))
             return Restricted(payload, features, mode, $"El archivo de licencia pertenece a otro equipo ({hw}).", expires);
+        if (_tamperMessage is { } tamper)
+            return Restricted(payload, features, mode, tamper, expires);
+        // El reloj antes que el vencimiento: con el reloj atrasado, una licencia
+        // vencida parecería vigente.
+        if (ClockRolledBack(now))
+            return Restricted(payload, features, mode, ClockMessage(), expires);
         if (expires is { } exp && exp <= now)
             return Restricted(payload, features, mode, $"La licencia {payload.LicenseKey} venció el {exp:yyyy-MM-dd}. Renuévela para seguir operando.", expires);
         if (_state.ServerRejectionStatus is { } rejection)
             return Restricted(payload, features, mode,
                 $"El servidor de licencias invalidó la licencia ({RejectionLabel(rejection)}): {_state.ServerRejectionMessage}", expires);
-        if (ClockRolledBack(now))
-            return Restricted(payload, features, mode,
-                $"El reloj del servidor retrocedió (última hora conocida {_state.LastSeenClockUtc:yyyy-MM-dd HH:mm} UTC). Corrija la hora del sistema.", expires);
 
         int? daysToExpiry = expires is { } e2 ? Math.Max(0, (int)Math.Ceiling((e2 - now).TotalDays)) : null;
         string? expiryWarning = daysToExpiry is <= 30
@@ -680,9 +864,9 @@ public sealed class LicenseService : BackgroundService
         }
         var trialEnds = _state.TrialStartedUtc.Value.AddDays(_trialDays);
         if (ClockRolledBack(now))
-            return new LicenseSnapshot(LicenseState.Restricted, false, "TRIAL",
-                $"El reloj del servidor retrocedió (última hora conocida {_state.LastSeenClockUtc:yyyy-MM-dd HH:mm} UTC). Corrija la hora del sistema.",
-                null, null, LicenseFeatureSet.Empty, null, null, null, trialEnds, 0);
+            return new LicenseSnapshot(LicenseState.Restricted, false, "TRIAL", ClockMessage(),
+                "Sistema en modo restringido por licencia: " + ClockMessage(),
+                null, LicenseFeatureSet.Empty, null, null, null, trialEnds, 0);
         if (now >= trialEnds)
             return new LicenseSnapshot(LicenseState.Unlicensed, false, "TRIAL",
                 $"El período de prueba terminó el {trialEnds:yyyy-MM-dd}. Active el sistema con su código de activación o importe el archivo .lic.",
@@ -696,10 +880,31 @@ public sealed class LicenseService : BackgroundService
             null, new LicenseFeatureSet(LicensingConstants.TrialFeatures), null, null, null, trialEnds, days);
     }
 
-    /// <summary>true si el reloj del sistema está más de un día ANTES de la
-    /// última hora vista (estado recién creado = sin referencia, no cuenta).</summary>
-    private bool ClockRolledBack(DateTime now) =>
-        _state.LastSeenClockUtc > DateTime.UnixEpoch && now < _state.LastSeenClockUtc.AddDays(-1);
+    /// <summary>
+    /// Hora mínima creíble: la mayor entre la hora más alta que vio este
+    /// equipo y las fechas FIRMADAS por el servidor de licencias (el .lic más
+    /// nuevo aceptado y el instalado). Estado recién creado = sin referencia.
+    /// </summary>
+    private DateTime ClockFloor()
+    {
+        var floor = _state.LastSeenClockUtc;
+        if (_state.HighestLicenseGeneratedUtc is { } highest && highest > floor) floor = highest;
+        if (_payload?.GeneratedAtUtc is { } generated && generated > floor) floor = generated;
+        return floor;
+    }
+
+    /// <summary>true si el reloj del sistema está más de <see cref="ClockTolerance"/> antes de <see cref="ClockFloor"/>.</summary>
+    private bool ClockRolledBack(DateTime now)
+    {
+        var floor = ClockFloor();
+        return floor > DateTime.UnixEpoch && now < floor - ClockTolerance;
+    }
+
+    private string ClockMessage() =>
+        $"El reloj del servidor está atrasado: este equipo ya registró actividad o licencias del {ClockFloor():yyyy-MM-dd HH:mm} UTC. " +
+        "Corrija la fecha y hora del sistema" + (_payload is { IsOffline: false } && Server.IsConfigured
+            ? " (si ya está bien, use «Revalidar ahora»: la hora del servidor de licencias lo confirma)."
+            : ".");
 
     private static LicenseSnapshot Restricted(LicensePayload payload, LicenseFeatureSet features, string mode, string message,
         DateTime? expires, DateTime? lastValidated = null, DateTime? nextValidation = null, DateTime? graceEnds = null) =>
@@ -727,19 +932,65 @@ public sealed class LicenseService : BackgroundService
     // Persistencia
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// Arma el estado combinando las copias válidas (ver <see cref="LicenseStateStore"/>):
+    /// lo de la licencia sale de la más nueva; el inicio de la prueba es el más
+    /// antiguo de todas, la hora más alta vista la mayor, y una invalidación
+    /// recibida no se pierde. Después reescribe las tres copias (repara las que
+    /// faltaban o se editaron).
+    /// </summary>
     private void Load()
     {
-        string statePath = Path.Combine(Directory, StateFileName);
-        try
+        var copies = _store.ReadStates();
+        var marker = _store.ReadMarker();
+        bool migrated = false;
+        PersistedLicenseState state;
+        if (copies.Count > 0)
         {
-            if (File.Exists(statePath))
-                _state = JsonSerializer.Deserialize<PersistedState>(File.ReadAllText(statePath), StateJson) ?? new PersistedState();
+            state = copies.MaxBy(c => c.State.Revision).State;
+            foreach (var (_, copy) in copies) Absorb(state, copy);
         }
-        catch (Exception ex)
+        else if (marker is null && _store.ReadLegacy() is { } legacy)
         {
-            _logger.LogWarning(ex, "No se pudo leer el estado de licenciamiento; se parte de cero.");
-            _state = new PersistedState();
+            // Primera vez después de actualizar desde una versión con state.json
+            // en claro. Solo si no hay marca: si la hay, el sistema ya pasó por
+            // esta versión y un state.json nuevo sería un intento de volver atrás.
+            state = legacy;
+            migrated = true;
         }
+        else
+        {
+            state = new PersistedLicenseState();
+        }
+
+        if (marker is not null)
+        {
+            state.TrialStartedUtc = LicenseStateStore.Earliest(state.TrialStartedUtc, marker.TrialStartedUtc);
+            if (marker.LastSeenClockUtc > state.LastSeenClockUtc) state.LastSeenClockUtc = marker.LastSeenClockUtc;
+        }
+
+        // La bitácora: la prueba empezó, a más tardar, con el primer evento
+        // registrado. Y si no quedó ninguna copia del estado, la hora más alta
+        // vista es, al menos, la del último evento.
+        var (firstEvent, lastEvent) = AuditRange();
+        if (firstEvent is { } first)
+            state.TrialStartedUtc = LicenseStateStore.Earliest(state.TrialStartedUtc, first);
+        if (copies.Count == 0 && !migrated && lastEvent is { } last && last > state.LastSeenClockUtc)
+            state.LastSeenClockUtc = last;
+
+        var sources = copies.Select(c => c.Source).ToList();
+        if (migrated)
+            _startupNote = "Estado de licencia migrado al formato cifrado (archivo, registro y base de datos).";
+        else if (copies.Count == 0 && (marker is not null || firstEvent is not null))
+            _startupNote = "No se encontró ninguna copia del estado de licencia: se reconstruyó desde la marca de prueba y la bitácora " +
+                           $"(prueba iniciada el {state.TrialStartedUtc:yyyy-MM-dd}).";
+        else if (copies.Count is > 0 and < 3)
+            _startupNote = $"Faltaban copias del estado de licencia; se restauraron desde: {string.Join(", ", sources)}.";
+        if (_startupNote is not null) _logger.LogWarning("Licencia: {Note}", _startupNote);
+
+        _state = state;
+        Save();
+        if (migrated) _store.DeleteLegacy();
 
         string licensePath = Path.Combine(Directory, LicenseFileName);
         if (!File.Exists(licensePath)) return;
@@ -751,6 +1002,21 @@ public sealed class LicenseService : BackgroundService
             {
                 _payload = verification.Payload;
                 _licenseFileJson = json;
+                // Alguien cambió el .lic del disco por uno más antiguo (o por
+                // el que el servidor ya invalidó): no se le da por bueno.
+                if (RejectOlder(verification.Payload!) is { } older)
+                {
+                    _tamperMessage = "El archivo de licencia del disco fue reemplazado por uno no válido para este equipo. " + older;
+                    _logger.LogError("Licencia: {Message}", _tamperMessage);
+                }
+                else
+                {
+                    if (verification.Payload!.GeneratedAtUtc is { } generated
+                        && (_state.HighestLicenseGeneratedUtc is null || generated > _state.HighestLicenseGeneratedUtc))
+                        _state.HighestLicenseGeneratedUtc = generated;  // instalaciones anteriores a este registro
+                    _state.ActivationCode ??= verification.Payload.LicenseKey;  // estado reconstruido sin el código
+                    Save();
+                }
             }
             else
             {
@@ -763,11 +1029,46 @@ public sealed class LicenseService : BackgroundService
         }
     }
 
+    /// <summary>Suma a <paramref name="target"/> lo más restrictivo de otra copia válida.</summary>
+    private static void Absorb(PersistedLicenseState target, PersistedLicenseState other)
+    {
+        target.TrialStartedUtc = LicenseStateStore.Earliest(target.TrialStartedUtc, other.TrialStartedUtc);
+        if (other.LastSeenClockUtc > target.LastSeenClockUtc) target.LastSeenClockUtc = other.LastSeenClockUtc;
+        if (other.HighestLicenseGeneratedUtc > (target.HighestLicenseGeneratedUtc ?? DateTime.MinValue))
+            target.HighestLicenseGeneratedUtc = other.HighestLicenseGeneratedUtc;
+        if (other.RejectedAtUtc > (target.RejectedAtUtc ?? DateTime.MinValue))
+        {
+            target.RejectedLicenseKey = other.RejectedLicenseKey;
+            target.RejectedAtUtc = other.RejectedAtUtc;
+        }
+    }
+
+    /// <summary>Fecha del primer y del último evento de la bitácora (null si no hay o no se pudo leer).</summary>
+    private (DateTime? First, DateTime? Last) AuditRange()
+    {
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var first = db.AuditEvents.Min(e => (DateTime?)e.Timestamp);
+            var last = db.AuditEvents.Max(e => (DateTime?)e.Timestamp);
+            return (first, last);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "No se pudo leer la bitácora para el estado de licencia.");
+            return (null, null);
+        }
+    }
+
+    /// <summary>Guarda el estado en sus tres copias (y la marca de prueba). Nunca lanza.</summary>
     private void Save()
     {
         try
         {
-            File.WriteAllText(Path.Combine(Directory, StateFileName), JsonSerializer.Serialize(_state, StateJson));
+            _state.Revision++;
+            _store.Write(_state);
+            _store.WriteInstallerHint(_state.ActivationCode ?? _payload?.LicenseKey);
         }
         catch (Exception ex)
         {
@@ -788,18 +1089,6 @@ public sealed class LicenseService : BackgroundService
         return os.Length > 255 ? os[..255] : os;
     }
 
-    private sealed class PersistedState
-    {
-        public DateTime? TrialStartedUtc { get; set; }
-        public string? ActivationCode { get; set; }
-        public DateTime? LastValidatedUtc { get; set; }
-        public DateTime? LastHeartbeatAttemptUtc { get; set; }
-        public string? LastHeartbeatError { get; set; }
-        public string? ServerRejectionStatus { get; set; }
-        public string? ServerRejectionMessage { get; set; }
-        public DateTime? ServerRejectionAtUtc { get; set; }
-        public DateTime LastSeenClockUtc { get; set; }
-    }
 }
 
 /// <summary>Foto inmutable del estado de licenciamiento.</summary>

@@ -30,6 +30,23 @@ public static class LicensingConstants
     public const int ActivationRequestSchema = 1;
 
     /// <summary>
+    /// Días del período de prueba incorporado. En Release es fijo (no se lee
+    /// de appsettings, donde cualquiera podría alargarlo); solo DEBUG admite
+    /// <c>Licensing:TrialDays</c> para probar.
+    /// </summary>
+    public const int TrialDays = 30;
+
+    /// <summary>
+    /// Secreto del que se deriva (junto con el identificador del equipo) la
+    /// llave AES-GCM que cifra y autentica el estado local del licenciamiento
+    /// (ver <see cref="LicenseStateVault"/>). No es una clave de firma: solo
+    /// hace que el estado no se pueda leer ni editar con un editor de texto, ni
+    /// traerse de otro equipo. Cambiarlo invalida el estado guardado de todas
+    /// las instalaciones (se reconstruye desde la bitácora, ver LicenseService).
+    /// </summary>
+    internal const string StateSealSecret = "ouWGjQdEF9jmhSYLTaSqKlhrrXwhE/VwnIUf7zRyH6M=";
+
+    /// <summary>
     /// Cupos del período de prueba incorporado: todos los módulos disponibles
     /// con cupos chicos, para evaluar el producto completo antes de comprar.
     /// </summary>
@@ -44,6 +61,8 @@ public static class LicensingConstants
         [LicenseFeatures.AnprChannels] = 2,
         [LicenseFeatures.ModuleAlarms] = true,
         [LicenseFeatures.AlarmPanels] = 2,
+        [LicenseFeatures.ModuleFence] = true,
+        [LicenseFeatures.FencePanels] = 2,
         [LicenseFeatures.ModuleAccess] = true,
         [LicenseFeatures.AccessDoors] = 4,
         [LicenseFeatures.ModuleVideowall] = true,

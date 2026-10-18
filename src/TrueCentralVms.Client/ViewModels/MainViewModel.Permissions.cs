@@ -1,28 +1,30 @@
 using System.Windows;
 using TrueCentralVms.Client.Services;
+using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Client.ViewModels;
 
 /// <summary>
-/// Módulos según los roles del usuario: el riel y el inicio muestran solo los
-/// que sus permisos admiten. Si un administrador le cambia los roles con la
-/// sesión abierta, el servidor avisa ("permissions") y los módulos que ya no le
-/// corresponden se cierran.
+/// Módulos según los roles del usuario y la licencia del servidor: el riel y el
+/// inicio muestran solo los que sus permisos admiten y la licencia incluye. Si
+/// un administrador le cambia los roles con la sesión abierta, o cambia la
+/// licencia, el servidor avisa ("permissions" / "license") y los módulos que ya
+/// no corresponden se cierran.
 /// </summary>
 public partial class MainViewModel
 {
     private static PermissionScope Perms => PermissionScope.Current;
 
-    public bool CanLiveView => Perms.Has(Permissions.LiveView);
-    public bool CanPlayback => Perms.Has(Permissions.PlaybackView);
-    public bool CanWall => Perms.Has(Permissions.WallOperate);
-    public bool CanAlarms => Perms.Has(Permissions.AlarmsMonitor);
-    public bool CanCerco => Perms.Has(Permissions.CercoMonitor);
-    public bool CanIntercom => Perms.Has(Permissions.IntercomAnswer);
+    public bool CanLiveView => Perms.Has(Permissions.LiveView) && Perms.IsLicensed(LicenseFeatures.ModuleVideo);
+    public bool CanPlayback => Perms.Has(Permissions.PlaybackView) && Perms.IsLicensed(LicenseFeatures.ModulePlayback);
+    public bool CanWall => Perms.Has(Permissions.WallOperate) && Perms.IsLicensed(LicenseFeatures.ModuleVideowall);
+    public bool CanAlarms => Perms.Has(Permissions.AlarmsMonitor) && Perms.IsLicensed(LicenseFeatures.ModuleAlarms);
+    public bool CanCerco => Perms.Has(Permissions.CercoMonitor) && Perms.IsLicensed(LicenseFeatures.ModuleFence);
+    public bool CanIntercom => Perms.Has(Permissions.IntercomAnswer) && Perms.IsLicensed(LicenseFeatures.ModuleIntercom);
     public bool CanEvents => Perms.Has(Permissions.EventsAttend);
-    public bool CanLpr => Perms.Has(Permissions.AnprView);
-    public bool CanDownloads => Perms.Has(Permissions.PlaybackExport);
+    public bool CanLpr => Perms.Has(Permissions.AnprView) && Perms.IsLicensed(LicenseFeatures.ModuleAnpr);
+    public bool CanDownloads => Perms.Has(Permissions.PlaybackExport) && Perms.IsLicensed(LicenseFeatures.ModulePlayback);
 
     // Acciones dentro de los módulos (además, el recurso tiene que estar en su alcance).
     public bool CanPtz => Perms.Has(Permissions.LivePtz);

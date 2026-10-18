@@ -363,7 +363,9 @@ public sealed record WorkflowDto(
     string CreatedBy,
     IReadOnlyList<WorkflowActionDto> Actions,
     /// <summary>El diagrama completo (siempre presente: las automatizaciones antiguas se convierten a una línea recta).</summary>
-    WorkflowGraphDto Graph);
+    WorkflowGraphDto Graph,
+    /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
+    bool DisabledByLicense = false);
 
 /// <summary>
 /// Alta/edición. Si viene <paramref name="Graph"/>, las acciones salen de sus

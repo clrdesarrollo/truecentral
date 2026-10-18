@@ -171,6 +171,24 @@ public sealed class TokenService : IDisposable
         return closed;
     }
 
+    /// <summary>
+    /// Cierra TODAS las sesiones de cliente de escritorio y corta su canal en
+    /// tiempo real (la licencia dejó de estar vigente). El cliente intenta
+    /// renovar en el acto, el login lo rechaza con el motivo y vuelve al
+    /// ingreso mostrándolo. Las sesiones del panel web siguen. Devuelve cuántas cerró.
+    /// </summary>
+    public int RevokeDesktopSessions(string reason)
+    {
+        int closed = 0;
+        foreach (var pair in _sessions.Where(p => p.Value.ClientId is not null).ToList())
+        {
+            if (!_sessions.TryRemove(pair.Key, out _)) continue;
+            _connections.AbortToken(pair.Key, reason);
+            closed++;
+        }
+        return closed;
+    }
+
     /// <summary>El equipo de ese cliente fue liberado hace menos de un minuto (no puede entrar todavía).</summary>
     public bool IsSeatReleased(string? clientId)
     {

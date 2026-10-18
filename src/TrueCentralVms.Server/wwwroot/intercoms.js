@@ -77,7 +77,7 @@ async function renderIntercoms() {
         <tbody>
           ${intercoms.map((i) => `
             <tr data-id="${i.id}">
-              <td>${esc(i.name)}${i.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${locationLineHtml(i.location)}</td>
+              <td>${esc(i.name)}${i.disabledByLicense ? licenseWaitTag(i) : i.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${locationLineHtml(i.location)}</td>
               <td class="muted">${esc(i.groupName ?? "—")}</td>
               <td class="muted">${i.isupDeviceId ? isupAddressHtml(i.isupDeviceId) : `${esc(i.host)}:${i.port} · HTTP ${i.httpPort}`}</td>
               <td>${esc(i.model ?? "—")}<div class="muted" style="font-size:11px">${esc(i.firmwareVersion ?? "")}</div></td>

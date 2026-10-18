@@ -1000,7 +1000,7 @@ public static class AlarmMapper
             p.Zones.Count(z => z.AreaNumber == a.Number), a.ExitDelaySeconds)).ToList(),
         p.Zones.OrderBy(z => z.Number).Select(ToDto).ToList(),
         p.IsupKeyCiphertext is { Length: > 0 },
-        p.LocationId, Auth.LocationPaths.Of(p.LocationId));
+        p.LocationId, Auth.LocationPaths.Of(p.LocationId), DisabledByLicense: p.DisabledByLicense);
 
     public static AlarmZoneDto ToDto(AlarmZone z) => new(
         z.Number, z.AreaNumber, z.Name, z.ZoneType, z.DetectorType, z.Status,

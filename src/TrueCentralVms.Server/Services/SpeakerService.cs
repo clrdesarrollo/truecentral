@@ -85,7 +85,7 @@ public sealed class SpeakerService(
     public SpeakerDto ToDto(Speaker s) => new(s.Id, s.Name, s.DriverKey, s.Host, s.Port, s.UseHttps, s.Username,
         s.Model, s.SerialNumber, s.FirmwareVersion, s.GroupName, s.Enabled, s.Status, s.LastError, s.LastSeenAt, s.Volume,
         s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio, BusyOf(s.Id), s.CreatedAt, s.UpdatedAt,
-        s.LocationId, Auth.LocationPaths.Of(s.LocationId), s.IsupDeviceId, s.IsupKeyCiphertext is { Length: > 0 },
+        s.LocationId, Auth.LocationPaths.Of(s.LocationId), s.IsupDeviceId, s.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: s.DisabledByLicense,
         AgentId: s.AgentId,
         EnrollmentExpiresAt: s.EnrollmentCodeHash is not null && s.EnrollmentExpiresAt > DateTime.UtcNow ? s.EnrollmentExpiresAt : null,
         AgentConnected: agents.IsOnline(s.AgentId));

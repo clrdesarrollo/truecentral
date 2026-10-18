@@ -87,7 +87,7 @@ async function renderAlarmPanels() {
         <tbody>
           ${panels.map((p) => `
             <tr data-id="${p.id}">
-              <td>${esc(p.name)}${p.enabled ? "" : ` <span class="tag operator" title="Monitoreo desactivado">pausado</span>`}${locationLineHtml(p.location)}</td>
+              <td>${esc(p.name)}${p.disabledByLicense ? licenseWaitTag(p) : p.enabled ? "" : ` <span class="tag operator" title="Monitoreo desactivado">pausado</span>`}${locationLineHtml(p.location)}</td>
               <td class="muted" title="${esc(alarmAddressHint(p))}">${alarmAddress(p)}</td>
               <td>${esc(p.model ?? "—")}</td>
               <td class="muted">${esc(p.serialNumber ?? "—")}</td>

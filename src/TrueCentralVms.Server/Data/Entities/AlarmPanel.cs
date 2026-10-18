@@ -34,6 +34,13 @@ public class AlarmPanel : IIsupEquipment
 
     /// <summary>El servidor mantiene el sondeo y el canal de eventos abiertos.</summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Apagado por el cupo (o el módulo) de la licencia, no por decisión del
+    /// administrador. Cuando vuelve a haber cupo el servidor lo enciende solo
+    /// (LicenseQuotaReconciler); cualquier cambio manual de <see cref="Enabled"/>
+    /// limpia la marca (VmsDbContext.SaveChanges).
+    /// </summary>
+    public bool DisabledByLicense { get; set; }
 
     /// <summary>Sabotaje del chasis del panel (tapa abierta), informado por el equipo.</summary>
     public bool PanelTamper { get; set; }

@@ -52,7 +52,9 @@ public sealed record AnprSourceDto(
     bool Live,
     string? LastError,
     DateTime? LastEventAt,
-    int EventCount);
+    int EventCount,
+    /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
+    bool DisabledByLicense = false);
 
 /// <summary>Encender o apagar un equipo como fuente de patentes.</summary>
 public sealed record AnprSourceWriteDto(bool Enabled);

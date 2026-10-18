@@ -159,7 +159,7 @@ public sealed class IntercomService(
         i.Model, i.SerialNumber, i.FirmwareVersion, i.GroupName, i.Enabled, i.Status, i.LastError, i.LastSeenAt,
         i.ChannelId, i.Channel is { } ch ? (ch.Device is { } d ? $"{d.Name} · {ch.Name}" : ch.Name) : null,
         i.DoorCount, i.CallCenterEnabled, ActiveCallOf(i.Id), i.CreatedAt, i.UpdatedAt,
-        i.LocationId, Auth.LocationPaths.Of(i.LocationId), i.RtspPort, i.IsupDeviceId, i.IsupKeyCiphertext is { Length: > 0 });
+        i.LocationId, Auth.LocationPaths.Of(i.LocationId), i.RtspPort, i.IsupDeviceId, i.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: i.DisabledByLicense);
 
     public static IntercomCallDto ToDto(IntercomCall c, Intercom? intercom) => new(c.Id, c.IntercomId, c.IntercomName, c.State,
         c.StartedAt, c.AnsweredAt, c.EndedAt, c.AnsweredBy, c.AnsweredByUserId, c.Origin, c.EndReason, c.DoorOpened, c.DoorOpenedBy,

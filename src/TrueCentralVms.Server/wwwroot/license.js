@@ -94,15 +94,19 @@ async function renderLicense() {
     ? `<div class="${s.operational ? "warn-box" : "error-box"}">${esc(s.warning)}</div>`
     : (s.message ? `<div class="info-box">${esc(s.message)}</div>` : "");
 
-  const addons = s.addons.length
-    ? `<div class="toolbar"><h3>Expansiones incluidas</h3></div>
-       <div class="table-scroll"><table class="grid">
-         <thead><tr><th>Código</th><th>Pack</th><th>Aporta</th><th>Vence</th></tr></thead>
-         <tbody>${s.addons.map((a) => `<tr>
-           <td><code>${esc(a.licenseKey)}</code></td><td>${esc(a.package || "—")}</td>
-           <td>${esc(a.summary)}</td><td>${a.expiresAt ? licenseDate(a.expiresAt) : "Perpetua"}</td></tr>`).join("")}</tbody>
-       </table></div>`
-    : "";
+  // Siempre a la vista (aunque no haya ninguna): así se entiende que las
+  // expansiones existen y cómo se suman.
+  const addons = `<div class="toolbar"><h3>Expansiones incluidas</h3></div>
+    ${s.addons.length
+      ? `<div class="table-scroll"><table class="grid">
+           <thead><tr><th>Código</th><th>Pack</th><th>Aporta</th><th>Vence</th></tr></thead>
+           <tbody>${s.addons.map((a) => `<tr>
+             <td><code>${esc(a.licenseKey)}</code></td><td>${esc(a.package || "—")}</td>
+             <td>${esc(a.summary)}</td><td>${a.expiresAt ? licenseDate(a.expiresAt) : "Perpetua"}</td></tr>`).join("")}</tbody>
+         </table></div>`
+      : `<div class="info-box">Esta licencia no tiene expansiones. Una expansión (más canales, un módulo nuevo, más
+           paneles…) se compra aparte, viene con su propio código y certificado, y se suma a esta licencia: ingrese su
+           código en «Agregar expansión».</div>`}`;
 
   $("#view").innerHTML = `
     ${banner}
@@ -145,6 +149,17 @@ function licenseActionsHtml(s) {
         </div>
       </div>
       <div class="card">
+        <div class="card-label">Agregar expansión</div>
+        <p class="muted" style="font-size:12px;margin:6px 0 10px">Código del certificado de expansión. Se suma a la licencia
+          ${s.licenseKey ? `<code>${esc(s.licenseKey)}</code>` : "base (actívela primero)"}.
+          ${s.onlineConfigured ? "Se confirma con el servidor de licencias y queda disponible en el acto."
+            : "Sin servidor de licencias: se le indicará cómo cargarla con el archivo .lic."}</p>
+        <input id="lic-addon" placeholder="Código de la expansión" style="width:100%;margin-bottom:8px">
+        <div class="row-actions" style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn" id="lic-addon-add" ${s.licenseKey ? "" : "disabled"}>Agregar expansión</button>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-label">Mantenimiento</div>
         <p class="muted" style="font-size:12px;margin:6px 0 10px">Revalidar contacta al servidor de licencias ahora (trae expansiones nuevas y renueva la gracia).
           Desactivar libera el cupo de este equipo para migrar el servidor a otra máquina.</p>
@@ -177,6 +192,11 @@ function bindLicenseActions(s) {
     if (!input.files || !input.files[0]) { toast("Seleccione el archivo .lic.", true); return; }
     const text = await input.files[0].text();
     await licenseCall(() => Api.post("/api/system/license/import", { licenseFile: text }));
+  });
+  $("#lic-addon-add")?.addEventListener("click", async () => {
+    const code = $("#lic-addon").value.trim();
+    if (!code) { toast("Ingrese el código de la expansión.", true); return; }
+    await licenseCall(() => Api.post("/api/system/license/addon", { activationCode: code }));
   });
   $("#lic-refresh")?.addEventListener("click", async () => {
     await licenseCall(() => Api.post("/api/system/license/refresh"));

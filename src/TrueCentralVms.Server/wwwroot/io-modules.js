@@ -41,6 +41,7 @@ function ioNormalize(m) {
 }
 
 function ioStatusTag(m) {
+  if (m.disabledByLicense) return licenseWaitTag(m).trim();
   if (!m.enabled) return `<span class="tag operator">Pausado</span>`;
   switch (m.status) {
     case "Online": return `<span class="tag on">En línea</span>`;

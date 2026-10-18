@@ -38,7 +38,7 @@ public static class UsersApi
         u.RestrictToLocations, u.ViewOutsideScope, u.Locations.Select(l => l.LocationId).Order().ToList(),
         u.Roles.Select(r => r.RoleId).Order().ToList(),
         u.Roles.Select(r => roles.GetValueOrDefault(r.RoleId)?.Name).OfType<string>().Order().ToList(),
-        editable, u.IsSuperAdmin, ScopeBuilder.Summary(EffectiveOf(u, roles, index)));
+        editable, u.IsSuperAdmin, ScopeBuilder.Summary(EffectiveOf(u, roles, index)), DisabledByLicense: u.DisabledByLicense);
 
     /// <summary>
     /// Con qué alcance queda (o quedaría) el usuario: sus roles más su límite

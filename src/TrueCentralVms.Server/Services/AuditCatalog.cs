@@ -334,6 +334,12 @@ public static class AuditCatalog
             new("license-warning", "Aviso de licencia por vencer"),
             new("license-denied", "Operación rechazada por licencia (módulo o cupo)"),
             new("license-channels-restored", "Canales habilitados al haber cupo en la licencia"),
+            new("license-state-rebuilt", "Estado de licencia reconstruido o migrado al arrancar"),
+            new("license-file-tampered", "Archivo de licencia reemplazado por uno no válido"),
+            new("license-clients-disconnected", "Clientes de escritorio desconectados por licencia no vigente"),
+            new("license-addon-entered", "Código de expansión ingresado"),
+            new("license-quota-trimmed", "Recursos apagados por sobrepasar el cupo de la licencia"),
+            new("license-quota-restored", "Recursos encendidos al volver a haber cupo en la licencia"),
         ]),
         new("isup", "Conexión ISUP",
         [

@@ -37,6 +37,13 @@ public class CercoPanel : ILocatable
 
     /// <summary>El servidor acepta la conexión de este panel.</summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Apagado por el cupo (o el módulo) de la licencia, no por decisión del
+    /// administrador. Cuando vuelve a haber cupo el servidor lo enciende solo
+    /// (LicenseQuotaReconciler); cualquier cambio manual de <see cref="Enabled"/>
+    /// limpia la marca (VmsDbContext.SaveChanges).
+    /// </summary>
+    public bool DisabledByLicense { get; set; }
 
     // ---- estado reportado por el panel ----
     public CercoPanelStatus Status { get; set; } = CercoPanelStatus.Unknown;

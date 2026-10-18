@@ -134,7 +134,7 @@ async function renderSpeakers() {
         <tbody>
           ${speakers.map((s) => `
             <tr data-id="${s.id}">
-              <td>${esc(s.name)}${s.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${locationLineHtml(s.location)}</td>
+              <td>${esc(s.name)}${s.disabledByLicense ? licenseWaitTag(s) : s.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${locationLineHtml(s.location)}</td>
               <td class="muted">${esc(s.groupName ?? "—")}</td>
               <td class="muted">${speakerAddressHtml(s)}</td>
               <td>${esc(s.model ?? "—")}<div class="muted" style="font-size:11px">${esc(s.serialNumber ?? "")}</div></td>

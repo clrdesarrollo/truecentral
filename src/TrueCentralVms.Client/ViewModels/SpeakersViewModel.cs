@@ -96,8 +96,9 @@ public sealed partial class SpeakersViewModel : ObservableObject
     /// <summary>Hay una escucha local en curso (sonido del servidor o de la biblioteca).</summary>
     [ObservableProperty] private bool _isPreviewing;
 
-    /// <summary>Sus roles incluyen "Usar parlantes".</summary>
-    public static bool CanUse => PermissionScope.Current.Has(Core.Domain.Permissions.SpeakersPlay);
+    /// <summary>Sus roles incluyen "Usar parlantes" y la licencia, el módulo de parlantes.</summary>
+    public static bool CanUse => PermissionScope.Current.Has(Core.Domain.Permissions.SpeakersPlay)
+                                 && PermissionScope.Current.IsLicensed(Core.Contracts.LicenseFeatures.ModuleSpeakers);
 
     /// <summary>El panel se muestra si hay parlantes y sus roles permiten usarlos (como en la web).</summary>
     public bool IsPanelVisible => HasSpeakers && CanUse;

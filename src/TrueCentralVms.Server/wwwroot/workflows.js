@@ -345,7 +345,7 @@ async function renderWorkflows() {
               <td class="muted">${w.cooldownSeconds > 0 ? `${w.cooldownSeconds} s` : "—"}</td>
               <td>${w.runCount}</td>
               <td class="muted">${w.lastRunAt ? wfDate(w.lastRunAt) : "—"}</td>
-              <td>${w.enabled ? `<span class="tag on">Activa</span>` : `<span class="tag off">Pausada</span>`}</td>
+              <td>${w.enabled ? `<span class="tag on">Activa</span>` : w.disabledByLicense ? licenseWaitTag(w).trim() : `<span class="tag off">Pausada</span>`}</td>
               <td class="row-actions">
                 ${isAdmin ? `<button class="btn ghost btn-wf-test" title="Ejecuta las acciones de verdad con un evento de ejemplo">Probar</button>
                 <button class="btn ghost btn-wf-edit">Abrir</button>

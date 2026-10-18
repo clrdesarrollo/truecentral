@@ -79,6 +79,16 @@ public sealed class CercoConnectionManager
 
     public bool IsConnected(string deviceId) => _byDevice.ContainsKey(deviceId);
 
+    /// <summary>
+    /// Corta la conexión del panel (si la hay). El receptor la suelta al cerrarse
+    /// el socket; si el panel quedó deshabilitado, su reconexión se rechaza.
+    /// </summary>
+    public void Disconnect(string deviceId)
+    {
+        if (_byDevice.TryGetValue(deviceId, out var c))
+            try { c.Socket.Abort(); } catch { /* ya estaba cerrado */ }
+    }
+
     public CercoConnection? Get(string deviceId) =>
         _byDevice.TryGetValue(deviceId, out var c) ? c : null;
 

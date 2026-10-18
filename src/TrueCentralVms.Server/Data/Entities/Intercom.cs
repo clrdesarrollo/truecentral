@@ -54,6 +54,13 @@ public class Intercom : ILocatable, IIsupEquipment
 
     /// <summary>El servidor mantiene su enlace de llamadas y lo ofrece a los operadores.</summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Apagado por el cupo (o el módulo) de la licencia, no por decisión del
+    /// administrador. Cuando vuelve a haber cupo el servidor lo enciende solo
+    /// (LicenseQuotaReconciler); cualquier cambio manual de <see cref="Enabled"/>
+    /// limpia la marca (VmsDbContext.SaveChanges).
+    /// </summary>
+    public bool DisabledByLicense { get; set; }
 
     public IntercomStatus Status { get; set; } = IntercomStatus.Unknown;
     public string? LastError { get; set; }

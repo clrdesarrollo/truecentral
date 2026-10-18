@@ -32,17 +32,17 @@
       </div>
       <nav id="nav">
         <a href="#/" data-route="dashboard">Panel</a>
-        <a href="#/workflows" data-route="workflows" data-perm="workflows.view">Automatizaciones</a>
-        <a href="#/sounds" data-route="sounds" data-perm="sounds.manage">Biblioteca de sonidos</a>
+        <a href="#/workflows" data-route="workflows" data-module="module_automation" data-perm="workflows.view">Automatizaciones</a>
+        <a href="#/sounds" data-route="sounds" data-needs-license data-perm="sounds.manage">Biblioteca de sonidos</a>
 
         <div class="nav-divider">Aplicaciones</div>
-        <a href="#/live" data-route="live" data-perm="live.view">Vista en vivo</a>
-        <a href="#/alarms" data-route="alarms" data-perm="alarms.monitor">Alarmas</a>
-        <a href="#/cerco" data-route="cerco" data-perm="cerco.monitor">Cerco eléctrico</a>
-        <a href="#/event-center" data-route="event-center" data-perm="events.attend">Centro de eventos</a>
-        <a href="#/videowall" data-route="videowall" data-perm="wall.operate">Videowall</a>
-        <a href="#/intercom-console" data-route="intercom-console" data-perm="intercom.answer">Citofonía</a>
-        <a href="#/anpr" data-route="anpr" data-perm="anpr.view">ANPR</a>
+        <a href="#/live" data-route="live" data-module="module_video" data-perm="live.view">Vista en vivo</a>
+        <a href="#/alarms" data-route="alarms" data-module="module_alarms" data-perm="alarms.monitor">Alarmas</a>
+        <a href="#/cerco" data-route="cerco" data-module="module_fence" data-perm="cerco.monitor">Cerco eléctrico</a>
+        <a href="#/event-center" data-route="event-center" data-needs-license data-perm="events.attend">Centro de eventos</a>
+        <a href="#/videowall" data-route="videowall" data-module="module_videowall" data-perm="wall.operate">Videowall</a>
+        <a href="#/intercom-console" data-route="intercom-console" data-module="module_intercom" data-perm="intercom.answer">Citofonía</a>
+        <a href="#/anpr" data-route="anpr" data-module="module_anpr" data-perm="anpr.view">ANPR</a>
 
         <div class="nav-divider">Configuración</div>
 
@@ -51,38 +51,38 @@
             <span class="caret" aria-hidden="true"></span><span>Dispositivos</span>
           </button>
           <div class="nav-children">
-            <a href="#/devices" data-route="devices" data-perm="devices.manage">Fuentes de video</a>
-            <a href="#/alarm-panels" data-route="alarm-panels" data-perm="alarms.configure">Paneles de alarma</a>
-            <a href="#/cerco-panels" data-route="cerco-panels" data-perm="cerco.configure">Paneles de cerco</a>
-            <a href="#/access" data-route="access" data-perm="access.configure">Control de acceso</a>
-            <a href="#/speakers" data-route="speakers" data-perm="speakers.configure|speakers.play">Parlantes IP</a>
-            <a href="#/io-modules" data-route="io-modules" data-perm="io.configure|io.operate">Módulos de E/S</a>
-            <a href="#/alarm-screens" data-route="alarm-screens" data-perm="screens.configure">Pantallas de alarma</a>
-            <a href="#/intercoms" data-route="intercoms" data-perm="intercom.configure">Citofonía</a>
-            <a href="#/device-maintenance" data-route="device-maintenance" data-perm="maintenance.view">Hora y mantenimiento</a>
+            <a href="#/devices" data-route="devices" data-module="module_video|module_anpr" data-perm="devices.manage">Fuentes de video</a>
+            <a href="#/alarm-panels" data-route="alarm-panels" data-module="module_alarms" data-perm="alarms.configure">Paneles de alarma</a>
+            <a href="#/cerco-panels" data-route="cerco-panels" data-module="module_fence" data-perm="cerco.configure">Paneles de cerco</a>
+            <a href="#/access" data-route="access" data-module="module_access" data-perm="access.configure">Control de acceso</a>
+            <a href="#/speakers" data-route="speakers" data-module="module_speakers" data-perm="speakers.configure|speakers.play">Parlantes IP</a>
+            <a href="#/io-modules" data-route="io-modules" data-module="module_io" data-perm="io.configure|io.operate">Módulos de E/S</a>
+            <a href="#/alarm-screens" data-route="alarm-screens" data-module="module_alarm_screens" data-perm="screens.configure">Pantallas de alarma</a>
+            <a href="#/intercoms" data-route="intercoms" data-module="module_intercom" data-perm="intercom.configure">Citofonía</a>
+            <a href="#/device-maintenance" data-route="device-maintenance" data-needs-license data-perm="maintenance.view">Hora y mantenimiento</a>
             <div class="nav-group" data-group="videowall">
               <button type="button" class="nav-toggle">
                 <span class="caret" aria-hidden="true"></span><span>Videowalls</span>
               </button>
               <div class="nav-children">
-                <a href="#/decoders" data-route="decoders" data-perm="devices.manage">Decodificadores</a>
-                <a href="#/walls" data-route="walls" data-perm="devices.manage">Muro de video</a>
+                <a href="#/decoders" data-route="decoders" data-module="module_videowall" data-perm="devices.manage">Decodificadores</a>
+                <a href="#/walls" data-route="walls" data-module="module_videowall" data-perm="devices.manage">Muro de video</a>
               </div>
             </div>
           </div>
         </div>
-        <a href="#/resources" data-route="resources">Recursos</a>
+        <a href="#/resources" data-route="resources" data-needs-license>Recursos</a>
 
         <div class="nav-group" data-group="access">
           <button type="button" class="nav-toggle">
             <span class="caret" aria-hidden="true"></span><span>Control de acceso</span>
           </button>
           <div class="nav-children">
-            <a href="#/access-monitor" data-route="access-monitor" data-perm="access.monitor">Monitoreo</a>
-            <a href="#/access-persons" data-route="access-persons" data-perm="persons.view">Personas</a>
-            <a href="#/access-levels" data-route="access-levels" data-perm="persons.view">Niveles de acceso</a>
-            <a href="#/access-schedules" data-route="access-schedules" data-perm="persons.view">Horarios</a>
-            <a href="#/access-events" data-route="access-events" data-perm="access.monitor">Registros de acceso</a>
+            <a href="#/access-monitor" data-route="access-monitor" data-module="module_access" data-perm="access.monitor">Monitoreo</a>
+            <a href="#/access-persons" data-route="access-persons" data-module="module_access" data-perm="persons.view">Personas</a>
+            <a href="#/access-levels" data-route="access-levels" data-module="module_access" data-perm="persons.view">Niveles de acceso</a>
+            <a href="#/access-schedules" data-route="access-schedules" data-module="module_access" data-perm="persons.view">Horarios</a>
+            <a href="#/access-events" data-route="access-events" data-module="module_access" data-perm="access.monitor">Registros de acceso</a>
           </div>
         </div>
 
@@ -102,7 +102,7 @@
             <span class="caret" aria-hidden="true"></span><span>Streaming</span>
           </button>
           <div class="nav-children">
-            <a href="#/sessions" data-route="sessions" data-perm="sessions.manage">Sesiones</a>
+            <a href="#/sessions" data-route="sessions" data-module="module_video" data-perm="sessions.manage">Sesiones</a>
           </div>
         </div>
 
@@ -112,7 +112,7 @@
           </button>
           <div class="nav-children">
             <a href="#/services" data-route="services">Servicios</a>
-            <a href="#/isup" data-route="isup" data-perm="system.services">Conexión ISUP</a>
+            <a href="#/isup" data-route="isup" data-needs-license data-perm="system.services">Conexión ISUP</a>
             <a href="#/license" data-route="license">Licencia</a>
           </div>
         </div>
@@ -158,35 +158,35 @@
 
   <script src="api.js?v=2"></script>
   <!-- walls.js va ANTES: app.js referencia sus funciones al armar las rutas. -->
-  <script src="walls.js?v=5"></script>
+  <script src="walls.js?v=6"></script>
   <script src="isup.js?v=2"></script>
-  <script src="alarms.js?v=13"></script>
-  <script src="speakers.js?v=12"></script>
-  <script src="io-modules.js?v=1"></script>
+  <script src="alarms.js?v=14"></script>
+  <script src="speakers.js?v=13"></script>
+  <script src="io-modules.js?v=2"></script>
   <script src="alarm-screens.js?v=1"></script>
-  <script src="intercoms.js?v=6"></script>
-  <script src="access.js?v=10"></script>
+  <script src="intercoms.js?v=7"></script>
+  <script src="access.js?v=11"></script>
   <script src="maintenance.js?v=2"></script>
   <script src="enroll.js?v=1"></script>
   <script src="access-catalog.js?v=17"></script>
   <script src="access-monitor.js?v=7"></script>
-  <script src="workflows.js?v=19"></script>
+  <script src="workflows.js?v=20"></script>
   <script src="workflow-editor.js?v=10"></script>
   <script src="services.js?v=2"></script>
-  <script src="license.js?v=3"></script>
-  <script src="anpr.js?v=2"></script>
+  <script src="license.js?v=4"></script>
+  <script src="anpr.js?v=3"></script>
   <script src="alarm-monitor.js?v=4"></script>
   <script src="event-center.js?v=3"></script>
   <script src="videowall.js?v=2"></script>
   <script src="intercom-console.js?v=2"></script>
   <script src="signalr.min.js?v=1"></script>
   <script src="hub.js?v=2"></script>
-  <script src="cerco.js?v=11"></script>
+  <script src="cerco.js?v=12"></script>
   <script src="cerco-alarm.js?v=5"></script>
   <script src="resources.js?v=9"></script>
   <!-- live.js va DESPUÉS de resources.js: usa sus íconos de ubicación. -->
   <script src="live.js?v=2"></script>
   <script src="roles.js?v=3"></script>
-  <script src="app.js?v=59"></script>
+  <script src="app.js?v=62"></script>
 </body>
 </html>

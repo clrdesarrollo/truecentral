@@ -39,6 +39,8 @@
 #define ServerExe      "TrueCentralVms.Server.exe"
 #define DataDirName    "CLRTrueCentralVMS"
 #define WebPort        "5090"
+; Debe coincidir con LicenseStateStore.RegistryPath del servidor.
+#define LicenseRegistryKey "SOFTWARE\CLRobotics\TrueCentralVMS\Runtime"
 #define ArcPort        "5091"
 #define CercoPort      "5092"   ; receptor WebSocket de los paneles de cerco
 #define CercoFwPort    "5093"   ; descarga de firmware (OTA) de los paneles de cerco
@@ -920,14 +922,23 @@ end;
 // ¿Hay una licencia ACTIVADA en este equipo? Devuelve su código de activación,
 // o cadena vacía si no hay ninguna.
 //
-// La marca fiable es el código guardado en state.json: desactivar desde el
-// panel lo pone en null (y el .lic firmado puede quedar en disco si Windows lo
-// tenía tomado en ese momento — LicenseService ignora ese IOException y
-// reintenta en el próximo arranque). Solo cuando no hay state.json legible se
-// cae al archivo .lic como única pista.
+// La marca fiable es activation.json, la pista en claro que el servidor deja
+// para este aviso (su estado real va cifrado): existe solo mientras hay una
+// licencia activada. Las versiones anteriores guardaban el código en
+// state.json. Desactivar desde el panel borra la pista (y el .lic firmado
+// puede quedar en disco si Windows lo tenía tomado en ese momento —
+// LicenseService ignora ese IOException y reintenta en el próximo arranque);
+// por eso el .lic solo cuenta cuando no hay ninguna de las dos.
 function ActivatedLicenseCode(): string;
 begin
   Result := '';
+  if FileExists(LicenseDir() + '\activation.json') then
+  begin
+    Result := JsonStringValue(LicenseDir() + '\activation.json', 'activationCode');
+    exit;
+  end;
+  if FileExists(LicenseDir() + '\state.dat') then
+    exit;
   if FileExists(LicenseDir() + '\state.json') then
   begin
     Result := JsonStringValue(LicenseDir() + '\state.json', 'activationCode');
@@ -993,6 +1004,20 @@ begin
                    mbCriticalError, MB_YESNO or MB_DEFBUTTON2) = IDYES;
 end;
 
+// Borra del registro todo valor de la clave de licencia salvo la marca de
+// prueba («Profile»). Ver LicenseStateStore en el servidor.
+procedure DeleteLicenseStateValues();
+var
+  Names: TArrayOfString;
+  I: Integer;
+begin
+  if not RegGetValueNames(HKLM64, '{#LicenseRegistryKey}', Names) then
+    exit;
+  for I := 0 to GetArrayLength(Names) - 1 do
+    if CompareText(Names[I], 'Profile') <> 0 then
+      RegDeleteValue(HKLM64, '{#LicenseRegistryKey}', Names[I]);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ResultCode: Integer;
@@ -1032,6 +1057,13 @@ begin
     // Datos del sistema: base de datos, fotos, matrículas, workflows, licencia
     // y registros.
     DelTree(DataDir(), True, True, True);
+
+    // Copias del estado de licencia en el registro (las escribe el servicio,
+    // como LocalSystem, en la vista de 64 bits: un valor «Data-<huella>» por
+    // carpeta de datos). La marca de prueba («Profile», en la misma clave) se
+    // CONSERVA a propósito: reinstalar no regala otro período de prueba. No
+    // guarda datos del cliente.
+    DeleteLicenseStateValues();
 
     // Lo que queda en {app} después de que Inno borró los archivos del registro
     // de instalación: los ajustes del equipo (marcados uninsneveruninstall), la

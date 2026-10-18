@@ -111,7 +111,7 @@ async function renderDecoders() {
               <td class="muted">${esc(d.host)}:${d.port}</td>
               <td>${esc(d.model ?? "—")}</td>
               <td>${ws.length ? ws.map((w) => esc(w.name)).join(", ") : `<span class="muted">sin muro</span>`}</td>
-              <td>${d.enabled ? `<span class="tag on">Activo</span>` : `<span class="tag off">Inactivo</span>`}</td>
+              <td>${d.enabled ? `<span class="tag on">Activo</span>` : d.disabledByLicense ? licenseWaitTag(d).trim() : `<span class="tag off">Inactivo</span>`}</td>
               <td class="row-actions">
                 <a class="btn ghost" href="#/decoders/device?id=${d.id}" title="Conexión, salidas, entradas y diagnóstico">Configurar</a>
                 ${isAdmin ? `<button class="btn danger btn-delete">Eliminar</button>` : ""}
@@ -302,7 +302,7 @@ function dcdDrawPage() {
     <div class="acd-back"><a class="btn ghost small" href="#/decoders">← Volver a la lista</a></div>
     <div class="acd-head">
       <div class="acd-title">
-        <h3>${esc(d.name)}${d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</h3>
+        <h3>${esc(d.name)}${d.disabledByLicense ? licenseWaitTag(d) : d.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}</h3>
         <div class="muted">${[driver, d.model, `${d.host}:${d.port}`].filter(Boolean).map(esc).join(" · ")}</div>
       </div>
       <div class="acd-status" id="dcd-status"></div>

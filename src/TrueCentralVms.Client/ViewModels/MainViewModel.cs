@@ -846,8 +846,9 @@ public partial class MainViewModel : ObservableObject
         {
             if (entity is "devices" or "channels" or "locations")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadTreeAsync());
+            // Cambió la licencia: el aviso y los módulos que incluye (los demás se ocultan).
             if (entity is "license")
-                Application.Current.Dispatcher.InvokeAsync(() => _ = PollLicenseAsync());
+                Application.Current.Dispatcher.InvokeAsync(() => { _ = PollLicenseAsync(); _ = LoadPermissionsAsync(); });
             // Un administrador cambió el alcance por ubicación de este usuario
             // (los árboles y módulos recargan con sus propios tópicos).
             if (entity is "scope")

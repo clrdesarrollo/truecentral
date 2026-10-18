@@ -42,10 +42,31 @@ public static class AuthApi
             }
 
             // Cupo de clientes de escritorio simultáneos (la cabecera la manda
-            // solo el cliente WPF; el panel web no consume puesto). Con la
-            // licencia restringida el login sigue: el cliente muestra el aviso.
+            // solo el cliente WPF; el panel web no consume puesto).
             string? clientId = ctx.Request.Headers.TryGetValue("X-TCVMS-Client", out var clientHeader)
                 ? clientHeader.ToString() : null;
+            // Sin licencia vigente (vencida, revocada, prueba terminada, reloj
+            // atrasado) el cliente de escritorio no entra: es la consola de
+            // operación. El panel web sí, porque desde ahí se regulariza la
+            // licencia (Sistema → Licencia).
+            if (clientId is not null && !license.IsOperational)
+            {
+                var snapshot = license.Snapshot;
+                string reason = snapshot.Message ?? "El sistema no tiene una licencia vigente.";
+                await audit.LogAsAsync(ctx, user.Id, user.Username, user.Role, "license", "license-denied",
+                    targetType: "client", targetName: TokenService.SeatOf(clientId),
+                    detail: "Ingreso del cliente de escritorio denegado: licencia no vigente. " + reason, success: false);
+                // Al operador, un mensaje corto y sin datos de la licencia; el
+                // detalle queda en la bitácora y en el panel web.
+                bool expired = snapshot.ExpiresUtc is { } expires && expires <= DateTime.UtcNow;
+                return Results.Json(new
+                {
+                    error = expired
+                        ? "La licencia del sistema expiró. No es posible iniciar sesión."
+                        : "La licencia del sistema no está vigente. No es posible iniciar sesión.",
+                    licenseDenied = true,
+                }, statusCode: StatusCodes.Status402PaymentRequired);
+            }
             // Un administrador acaba de liberar el puesto de este equipo: el
             // cliente que seguía abierto no puede recuperarlo renovando solo la
             // sesión (403 = el cliente vuelve al ingreso con este aviso).
@@ -58,7 +79,7 @@ public static class AuthApi
                                                   "Podrá volver a ingresar en un minuto." },
                     statusCode: StatusCodes.Status403Forbidden);
             }
-            if (clientId is not null && license.IsOperational
+            if (clientId is not null
                 && license.Deny(null, LicenseFeatures.MaxClientSessions, tokens.CountDesktopSessions(excludingClientId: clientId)) is { } denied)
             {
                 await audit.LogAsAsync(ctx, user.Id, user.Username, user.Role, "license", "license-denied",
@@ -109,7 +130,7 @@ public static class AuthApi
             return Results.Ok();
         });
 
-        app.MapGet("/api/auth/me", async (HttpContext ctx, VmsDbContext db) =>
+        app.MapGet("/api/auth/me", async (HttpContext ctx, VmsDbContext db, LicenseService license) =>
         {
             if (ApiSecurity.CurrentSession(ctx) is not { } s) return Results.Unauthorized();
             // Su alcance (roles + límite propio), para mostrarlo: el servidor ya filtra todo lo demás.
@@ -118,7 +139,9 @@ public static class AuthApi
             // Sus permisos (unión de sus roles): la interfaz oculta lo demás.
             var roleNames = await db.UserRoles.Where(ur => ur.UserId == s.UserId)
                 .Join(db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => r.Name).OrderBy(n => n).ToListAsync();
-            var permissions = new MyPermissionsDto(scope.IsAdmin, scope.EffectivePermissions.ToList(), roleNames);
+            // Y los módulos de la licencia: lo que no incluye se oculta a todos.
+            var permissions = new MyPermissionsDto(scope.IsAdmin, scope.EffectivePermissions.ToList(), roleNames,
+                license.LicensedModules(), license.IsOperational);
             return Results.Ok(new { s.UserId, s.Username, s.Role, s.ExpiresAt, Scope = dto, Permissions = permissions });
         });
 

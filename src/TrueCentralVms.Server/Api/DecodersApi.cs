@@ -24,7 +24,7 @@ public static class DecodersApi
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> IdentifyGenerations = new();
 
     private static DecoderDto ToDto(Decoder d) => new(
-        d.Id, d.Name, d.DriverKey, d.Host, d.Port, d.Username, d.Enabled, d.Model, d.Notes, d.CreatedAt);
+        d.Id, d.Name, d.DriverKey, d.Host, d.Port, d.Username, d.Enabled, d.Model, d.Notes, d.CreatedAt, DisabledByLicense: d.DisabledByLicense);
 
     private static DecoderCapabilitiesDto ToDto(DecoderCapabilities caps) => new(
         caps.DecodeChannelStart, caps.DecodeChannelCount,

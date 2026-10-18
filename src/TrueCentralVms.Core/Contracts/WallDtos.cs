@@ -14,7 +14,9 @@ namespace TrueCentralVms.Core.Contracts;
 /// <summary>Decodificador de muro tal como lo ven el panel y el cliente. NUNCA incluye la contraseña.</summary>
 public sealed record DecoderDto(
     int Id, string Name, string DriverKey, string Host, int Port,
-    string Username, bool Enabled, string? Model, string? Notes, DateTime CreatedAt);
+    string Username, bool Enabled, string? Model, string? Notes, DateTime CreatedAt,
+    /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
+    bool DisabledByLicense = false);
 
 /// <summary>Alta/edición de un decodificador. En edición, Password null o vacía = mantener la actual.</summary>
 public sealed record DecoderWriteDto(

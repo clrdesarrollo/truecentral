@@ -75,7 +75,9 @@ public sealed record AccessDeviceDto(
     /// <summary>ID ISUP del equipo si se conecta al servidor por ISUP (null = por IP).</summary>
     string? IsupDeviceId = null,
     /// <summary>El servidor tiene guardada su clave ISUP.</summary>
-    bool HasIsupKey = false);
+    bool HasIsupKey = false,
+    /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
+    bool DisabledByLicense = false);
 
 public sealed record AccessDeviceWriteDto(
     string Name,

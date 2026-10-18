@@ -8,6 +8,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Server.Services.Licensing;
 using TrueCentralVms.Core.Domain;
 
 namespace TrueCentralVms.Server.Api;
@@ -139,11 +140,15 @@ public static class CercoApi
         // -------- crear (genera ID + PSK) --------
         app.MapPost("/api/cerco/panels", async (HttpContext ctx, CercoPanelUpsertDto request, VmsDbContext db,
             CredentialProtector protector, IConfiguration config, ScopedHub hub, CercoConnectionManager conns,
-            AuditService audit, CancellationToken ct) =>
+            AuditService audit, LicenseService license, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre es obligatorio (máximo 128 caracteres).");
+            // Licencia: el módulo siempre; el cupo solo si nace activado (los desactivados no lo ocupan).
+            if (license.Deny(LicenseFeatures.ModuleFence, request.Enabled ? LicenseFeatures.FencePanels : null,
+                    await db.CercoPanels.CountAsync(p => p.Enabled, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "cerco-panel", request.Name.Trim());
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, null, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
 
@@ -180,13 +185,17 @@ public static class CercoApi
 
         // -------- editar --------
         app.MapPut("/api/cerco/panels/{id:int}", async (HttpContext ctx, int id, CercoPanelUpsertDto request, VmsDbContext db,
-            ScopedHub hub, CercoConnectionManager conns, AuditService audit, CancellationToken ct) =>
+            ScopedHub hub, CercoConnectionManager conns, AuditService audit, LicenseService license, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.CercoConfigure, out _) is { } failure) return failure;
             var panel = await db.CercoPanels.Include(p => p.Zones).FirstOrDefaultAsync(p => p.Id == id, ct);
             if (panel is null) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre es obligatorio (máximo 128 caracteres).");
+            if (!panel.Enabled && request.Enabled
+                && license.Deny(LicenseFeatures.ModuleFence, LicenseFeatures.FencePanels,
+                    await db.CercoPanels.CountAsync(p => p.Enabled && p.Id != id, ct)) is { } denied)
+                return await license.DenyAsync(ctx, denied, "cerco-panel", panel.Name);
             var (locationId, locationError) = await EquipmentLocation.ResolveAsync(db, request.LocationId, panel.LocationId, ct);
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
 

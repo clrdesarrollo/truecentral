@@ -31,6 +31,10 @@ public static class LicenseFeatures
     public const string ModuleAlarms = "module_alarms";
     public const string AlarmPanels = "alarm_panels";
 
+    // Cerco eléctrico (paneles energizadores propios de CLRobotics)
+    public const string ModuleFence = "module_fence";
+    public const string FencePanels = "fence_panels";
+
     // Control de acceso (módulo aún no implementado en el VMS: la clave existe
     // para que la licencia ya pueda venderse y el catálogo no cambie después)
     public const string ModuleAccess = "module_access";
@@ -72,6 +76,7 @@ public static class LicenseFeatures
         new(ModulePlayback, "Reproducción remota", null, null),
         new(ModuleAnpr, "Reconocimiento de patentes", AnprChannels, "fuentes ANPR"),
         new(ModuleAlarms, "Paneles de alarma", AlarmPanels, "paneles"),
+        new(ModuleFence, "Cerco eléctrico", FencePanels, "paneles de cerco"),
         new(ModuleAccess, "Control de acceso", AccessDoors, "puertas"),
         new(ModuleVideowall, "Muro de video", Videowalls, "muros"),
         new(ModuleVideowall, "Decodificadores de muro", VideowallDecoders, "decodificadores"),

@@ -133,7 +133,7 @@ async function renderAnpr() {
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
   const deviceOptions = anprSources
-    .map((s) => `<option value="${s.deviceId}" ${String(anprState.deviceId) === String(s.deviceId) ? "selected" : ""}>${esc(s.deviceName)}${s.enabled ? "" : " (inactiva)"}</option>`)
+    .map((s) => `<option value="${s.deviceId}" ${String(anprState.deviceId) === String(s.deviceId) ? "selected" : ""}>${esc(s.deviceName)}${s.disabledByLicense ? " (esperando cupo de licencia)" : s.enabled ? "" : " (inactiva)"}</option>`)
     .join("");
   const takeOptions = [50, 100, 200, 500]
     .map((n) => `<option value="${n}" ${anprState.take === n ? "selected" : ""}>${n}</option>`).join("");

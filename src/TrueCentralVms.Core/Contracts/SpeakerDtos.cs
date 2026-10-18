@@ -45,6 +45,8 @@ public sealed record SpeakerDto(
     string? IsupDeviceId = null,
     /// <summary>Hay clave ISUP guardada (la clave nunca viaja).</summary>
     bool HasIsupKey = false,
+    /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
+    bool DisabledByLicense = false,
     /// <summary>Solo agentes «TrueCentral Speaker»: id del equipo enrolado (null = aún sin enrolar).</summary>
     string? AgentId = null,
     /// <summary>Solo agentes: vencimiento del código de enrolamiento vigente (null = no hay uno pendiente).</summary>

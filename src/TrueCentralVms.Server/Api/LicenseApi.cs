@@ -73,6 +73,20 @@ public static class LicenseApi
                 : Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status422UnprocessableEntity);
         });
 
+        // Código de una expansión comprada: se confirma contra el servidor de
+        // licencias y se revalida para traerla (sin conexión, explica el .lic).
+        app.MapPost("/api/system/license/addon", async (HttpContext ctx, LicenseActivateRequest request,
+            LicenseService license, AuditService audit, VmsDbContext db, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.SystemLicense, out _) is { } failure) return failure;
+            var result = await license.AddAddonAsync(request.ActivationCode ?? "", ct);
+            await audit.LogAsync(ctx, "license", "license-addon-entered", targetType: "license",
+                targetId: Trim(request.ActivationCode), detail: result.Message, success: result.Success);
+            return result.Success
+                ? Results.Ok(new { message = result.Message, status = await license.GetStatusAsync(db, ct) })
+                : Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status422UnprocessableEntity);
+        });
+
         app.MapPost("/api/system/license/deactivate", async (HttpContext ctx, LicenseService license, AuditService audit,
             VmsDbContext db, CancellationToken ct) =>
         {

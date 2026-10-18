@@ -45,6 +45,7 @@ function cercoBind(ev, fn) {
 }
 
 function cercoConnDot(p) {
+  if (p.disabledByLicense) return licenseWaitTag(p).trim();
   if (!p.enabled) return `<span class="tag operator" title="Deshabilitado">pausado</span>`;
   return p.connected
     ? `<span class="dot ok" title="Conectado"></span>`

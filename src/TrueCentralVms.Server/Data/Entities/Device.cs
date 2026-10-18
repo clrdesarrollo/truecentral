@@ -40,6 +40,13 @@ public class Device : IIsupEquipment
     /// le mantiene abierto el canal de eventos ANPR mientras esté en línea.
     /// </summary>
     public bool AnprEnabled { get; set; }
+    /// <summary>
+    /// Apagado por el cupo (o el módulo) de la licencia, no por decisión del
+    /// administrador. Cuando vuelve a haber cupo el servidor lo enciende solo
+    /// (LicenseQuotaReconciler); cualquier cambio manual de <see cref="AnprEnabled"/>
+    /// limpia la marca (VmsDbContext.SaveChanges).
+    /// </summary>
+    public bool AnprDisabledByLicense { get; set; }
 
     /// <summary>
     /// Ubicación del equipo en el árbol de Recursos (null = por ubicar). La

@@ -180,6 +180,17 @@ function locationFieldValue(id) {
   return select.value ? Number(select.value) : 0;
 }
 
+/**
+ * Etiqueta de un recurso que la licencia dejó apagado por pasarse del cupo
+ * (o porque su módulo salió de la licencia): el servidor lo vuelve a encender
+ * solo cuando haya cupo. Vacío si no es el caso.
+ */
+function licenseWaitTag(item) {
+  return item?.disabledByLicense
+    ? ` <span class="tag warn" title="Quedó apagado por el cupo de la licencia: se enciende solo cuando haya cupo.">Esperando cupo de licencia</span>`
+    : "";
+}
+
 /** Ruta de la ubicación bajo el nombre del equipo en las listas. */
 function locationLineHtml(path) {
   return path
@@ -232,11 +243,18 @@ function showCurrentUser() {
 // valida igual cada solicitud. Las páginas preguntan con Perms.can("clave") o,
 // si basta con uno de varios, Perms.can("clave1|clave2"). Los enlaces del menú
 // llevan data-perm con la misma sintaxis.
+// Además, lo de un módulo que la licencia no incluye se oculta a todos (también
+// al administrador): los enlaces llevan data-module ("module_x", o varios con |
+// si basta con uno) y las páginas preguntan con Perms.licensed("module_x").
+// Sin licencia vigente no hay módulos y se ocultan también los enlaces con
+// data-needs-license: queda solo lo necesario para regularizarla.
 // ---------------------------------------------------------------------------
 const Perms = {
   admin: false,
   keys: new Set(),
   roles: [],
+  modules: null,  // módulos licenciados; null = no se sabe (servidor anterior): no se oculta nada
+  operational: true, // false = licencia no vigente: solo lo necesario para regularizarla
   loaded: false,
   async load() {
     let me;
@@ -246,11 +264,15 @@ const Perms = {
       this.admin = !!p.isAdmin;
       this.keys = new Set(p.permissions ?? []);
       this.roles = p.roles ?? [];
+      this.modules = Array.isArray(p.licensedModules) ? new Set(p.licensedModules) : null;
+      this.operational = p.licenseOperational !== false;
     } else {
       // Servidor anterior a los roles: el administrador puede todo y el resto, lo de siempre.
       this.admin = me.role === "Admin";
       this.keys = new Set();
       this.roles = [];
+      this.modules = null;
+      this.operational = true;
     }
     this.loaded = true;
     applyNavPermissions();
@@ -262,12 +284,25 @@ const Perms = {
     if (!this.loaded) return Api.role === "Admin";
     return String(spec).split("|").some((k) => this.keys.has(k.trim()));
   },
-  reset() { this.admin = false; this.keys = new Set(); this.roles = []; this.loaded = false; },
+  /** true si la licencia incluye el módulo (o uno de "module_a|module_b"). */
+  licensed(spec) {
+    if (!spec || !this.modules) return true;
+    return String(spec).split("|").some((k) => this.modules.has(k.trim()));
+  },
+  /** true si el enlace o la página se puede usar con la licencia actual. */
+  allowedByLicense(el) {
+    if (!el) return true;
+    if (el.hasAttribute?.("data-needs-license") && !this.operational) return false;
+    return this.licensed(el.dataset?.module);
+  },
+  reset() { this.admin = false; this.keys = new Set(); this.roles = []; this.modules = null; this.operational = true; this.loaded = false; },
 };
 
-/** Oculta del menú lo que sus roles no permiten (y los grupos y títulos que quedan vacíos). */
+/** Oculta del menú lo que sus roles no permiten o la licencia no incluye (y los grupos y títulos que quedan vacíos). */
 function applyNavPermissions() {
-  $$("#nav a[data-perm]").forEach((a) => { a.hidden = !Perms.can(a.dataset.perm); });
+  $$("#nav a[data-perm], #nav a[data-module], #nav a[data-needs-license]").forEach((a) => {
+    a.hidden = !Perms.can(a.dataset.perm) || !Perms.allowedByLicense(a);
+  });
   // Grupos de adentro hacia afuera: uno anidado vacío deja vacío a su padre.
   [...$$("#nav .nav-group")].reverse().forEach((g) => {
     g.hidden = !g.querySelector(":scope > .nav-children a:not([hidden])");
@@ -289,6 +324,23 @@ async function onPermissionsChanged() {
   Operable.schedule();
   navigate();
   toast("Sus permisos cambiaron: la pantalla se actualizó.");
+}
+
+/**
+ * Cambió la licencia (se activó, se importó, llegó una expansión o venció): el
+ * menú muestra solo los módulos que incluye. La página actual se rehace solo si
+ * su módulo entró o salió de la licencia, para no interrumpir al que está
+ * trabajando en otra.
+ */
+async function onLicenseChanged() {
+  const signature = () => `${Perms.operational}|${Perms.modules ? [...Perms.modules].sort().join(",") : ""}`;
+  const before = signature();
+  const active = $("#nav a.active");
+  const wasAllowed = Perms.allowedByLicense(active);
+  if (!(await Perms.load())) return;
+  if (before === signature()) return;
+  if (active && Perms.allowedByLicense(active) !== wasAllowed) navigate();
+  toast("La licencia cambió: el menú muestra los módulos que incluye.");
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +427,7 @@ function onOperableTopic(topic) {
   if (OP_TOPICS.has(topic)) Operable.schedule();
   if (topic === "scope") showUserScope();
   if (topic === "permissions") onPermissionsChanged();
+  if (topic === "license") onLicenseChanged();
 }
 function onOperableReconnected() { Operable.schedule(); }
 
@@ -1734,7 +1787,7 @@ async function renderUsers() {
             <td>${esc(u.username)}${u.isSuperAdmin ? ` <span class="tag admin" title="Creado al activar la plataforma: acceso total sin importar los roles. Solo él modifica su usuario.">Superadministrador</span>` : ""}</td>
             <td>${userRolesHtml(u)}</td>
             <td>${userScopeHtml(u)}</td>
-            <td><span class="tag ${u.enabled ? "on" : "off"}">${u.enabled ? "Habilitado" : "Deshabilitado"}</span></td>
+            <td>${u.disabledByLicense ? licenseWaitTag(u).trim() : `<span class="tag ${u.enabled ? "on" : "off"}">${u.enabled ? "Habilitado" : "Deshabilitado"}</span>`}</td>
             <td class="muted">${formatDate(u.createdAt)}</td>
             <td class="muted">${formatDate(u.passwordChangedAt)}</td>
             <td class="row-actions">${u.editable === false
@@ -2366,6 +2419,18 @@ function navigate() {
     $("#page-title").textContent = active.textContent.trim();
     $("#view").innerHTML = `<div class="info-box" style="margin:24px">Sus roles no incluyen el acceso a esta página.
       Si lo necesita, pídaselo a quien administra los usuarios.</div>`;
+    return;
+  }
+  // Ídem un módulo que la licencia no incluye (enlace guardado o la licencia cambió).
+  if (active && !Perms.allowedByLicense(active)) {
+    const where = Perms.can("system.license") ? ` (<a href="#/license">Sistema → Licencia</a>)` : "";
+    $("#view").className = "";
+    $("#page-title").textContent = active.textContent.trim();
+    $("#view").innerHTML = Perms.operational
+      ? `<div class="info-box" style="margin:24px">Este módulo no está incluido en la licencia del sistema.
+          Para habilitarlo hay que ampliar la licencia${where}.</div>`
+      : `<div class="error-box" style="margin:24px">La licencia del sistema no está vigente: esta página no está
+          disponible hasta regularizarla${where}.</div>`;
     return;
   }
   // Las páginas a pantalla completa (editor de automatizaciones) cambian la

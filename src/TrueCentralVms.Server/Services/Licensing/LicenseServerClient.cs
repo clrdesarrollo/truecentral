@@ -62,6 +62,17 @@ public sealed class LicenseServerClient
             hardware_id = hardwareId,
         }, ct);
 
+    /// <summary>
+    /// ¿El código es una expansión vigente de esta licencia base? No activa
+    /// nada: la expansión llega en el archivo de la base al revalidar.
+    /// </summary>
+    public Task<LicenseServerResult> CheckAddonAsync(string addonCode, string activationCode, CancellationToken ct) =>
+        PostAsync("/api/v1/licenses/addon/", new
+        {
+            addon_code = addonCode,
+            activation_code = activationCode,
+        }, ct);
+
     private async Task<LicenseServerResult> PostAsync(string path, object body, CancellationToken ct)
     {
         if (!IsConfigured)
@@ -105,7 +116,8 @@ public sealed class LicenseServerClient
             Valid: parsed.Valid,
             Status: parsed.Status,
             Message: parsed.Message ?? "",
-            LicenseFileJson: licenseFile);
+            LicenseFileJson: licenseFile,
+            Summary: parsed.Summary);
     }
 
     private sealed class LicenseServerResponse
@@ -115,16 +127,18 @@ public sealed class LicenseServerClient
         [JsonPropertyName("status")] public string? Status { get; set; }
         [JsonPropertyName("message")] public string? Message { get; set; }
         [JsonPropertyName("license_file")] public JsonElement? LicenseFile { get; set; }
+        [JsonPropertyName("summary")] public string? Summary { get; set; }
     }
 }
 
 /// <summary>
 /// Respuesta del servidor de licencias. <paramref name="Reachable"/> false =
 /// no hubo respuesta útil (red, timeout, API key). <paramref name="Valid"/>
-/// solo aplica a validate.
+/// aplica a validate y a la consulta de expansión; <paramref name="Summary"/>,
+/// solo a esta última (lo que aporta la expansión).
 /// </summary>
 public sealed record LicenseServerResult(bool Reachable, bool Success, bool? Valid, string? Status, string Message,
-    string? LicenseFileJson)
+    string? LicenseFileJson, string? Summary = null)
 {
     public static LicenseServerResult Unreachable(string message) => new(false, false, null, null, message, null);
 }
