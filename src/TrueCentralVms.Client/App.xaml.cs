@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using FlyleafLib;
+using TrueCentralVms.Client.Services;
 using TrueCentralVms.Client.Views;
 
 namespace TrueCentralVms.Client;
@@ -31,6 +32,11 @@ public partial class App : Application
             UIRefresh = false,
             LogLevel = LogLevel.Quiet,
         });
+
+        // Apariencia (clásica o Consola): antes de crear cualquier ventana,
+        // porque las vistas toman sus estilos al construirse.
+        var settings = ClientSettings.Load();
+        ClientTheme.Apply(this, settings.Appearance, settings.ConsolePalette);
 
         new LoginWindow().Show();
     }

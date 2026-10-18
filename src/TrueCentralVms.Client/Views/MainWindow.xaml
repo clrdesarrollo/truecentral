@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
         xmlns:views="clr-namespace:TrueCentralVms.Client.Views"
+        xmlns:services="clr-namespace:TrueCentralVms.Client.Services"
         Title="CLR TrueCentral VMS"
         Width="1280" Height="760" MinWidth="900" MinHeight="560"
         WindowStartupLocation="CenterScreen"
@@ -248,7 +249,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#22303F"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource MenuHoverBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -265,7 +266,7 @@
         </Grid.RowDefinitions>
 
         <!-- ===== Navbar / barra de título (oculto en pantalla completa) ===== -->
-        <Border Grid.Row="0" Height="42" Background="{StaticResource PanelBrush}"
+        <Border Grid.Row="0" Height="42" Background="{StaticResource ChromeBrush}"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1"
                 Visibility="{Binding IsGridFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
             <DockPanel>
@@ -277,6 +278,11 @@
                                Foreground="{StaticResource TextBrush}">
                         TrueCentral <Run Foreground="{StaticResource AccentBrush}">VMS</Run>
                     </TextBlock>
+                    <!-- Consola: a qué servidor está conectado este puesto, a la vista -->
+                    <TextBlock Margin="12,1,0,0" VerticalAlignment="Center" FontSize="12"
+                               FontStretch="SemiCondensed" Foreground="{StaticResource MutedBrush}"
+                               Visibility="{x:Static services:ClientTheme.ConsoleOnly}"
+                               Text="{Binding ServerLabel, StringFormat=Consola de operación · {0}}"/>
                 </StackPanel>
 
                 <!-- Botones de ventana -->

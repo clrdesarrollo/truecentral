@@ -133,6 +133,20 @@ public sealed class ClientSettings
     /// <summary>Lo que había en pantalla la última vez (se guarda a medida que cambia).</summary>
     public LiveSession? LastSession { get; set; }
 
+    // ---------- Apariencia ----------
+
+    /// <summary>
+    /// Diseño del cliente: <see cref="ClientTheme.Console"/> (por defecto desde
+    /// 2026-10-18: consola técnica con cifras en monoespaciada, telemetría por
+    /// cuadro y botonera abajo) o <see cref="ClientTheme.Classic"/>
+    /// (el diseño anterior, a elección en Configuración). Un client.json sin este
+    /// dato abre la Consola. Se aplica al abrir el cliente: los estilos se
+    /// resuelven al crear cada ventana.
+    /// </summary>
+    public string Appearance { get; set; } = ClientTheme.Console;
+    /// <summary>Paleta de la Consola (<see cref="ConsolePalettes"/>): "grafito" (por defecto), "control", "petroleo" o "ambar".</summary>
+    public string ConsolePalette { get; set; } = ConsolePalettes.Default;
+
     // ---------- Ventana de alarma ----------
 
     /// <summary>

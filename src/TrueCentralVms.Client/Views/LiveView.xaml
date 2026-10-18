@@ -4,6 +4,7 @@
              xmlns:fl="clr-namespace:FlyleafLib.Controls.WPF;assembly=FlyleafLib"
              xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
              xmlns:views="clr-namespace:TrueCentralVms.Client.Views"
+             xmlns:services="clr-namespace:TrueCentralVms.Client.Services"
              Background="{StaticResource BgBrush}">
     <UserControl.Resources>
         <!-- GhostToggle vive en App.xaml: lo comparte con Reproducción. -->
@@ -26,7 +27,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#1D2733"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -114,7 +115,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#2A3646"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverStrongBrush}"/>
                                 <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -176,7 +177,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#1D2733"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
                             <Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource TextBrush}"/>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
@@ -664,15 +665,37 @@
         </Border>
         </DockPanel>
 
-        <!-- Barra de herramientas del módulo: división de la grilla -->
-        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,6"
+        <!-- Barra de herramientas del módulo: división de la grilla. En la
+             apariencia Consola baja y se centra como botonera flotante (en su
+             propia fila: el video taparía cualquier cosa encima de la grilla). -->
+        <Border DockPanel.Dock="{x:Static services:ClientTheme.LiveToolbarDock}"
+                HorizontalAlignment="{x:Static services:ClientTheme.LiveToolbarAlignment}"
+                Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource BorderBrush}"
                 Visibility="{Binding IsGridFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                    <Setter Property="Padding" Value="10,6"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding Source={x:Static services:ClientTheme.IsConsole}}" Value="True">
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="CornerRadius" Value="3"/>
+                            <Setter Property="Margin" Value="0,2,0,10"/>
+                            <Setter Property="Padding" Value="8,7"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
             <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="{x:Static services:ClientTheme.LiveToolbarSideColumn}"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="{x:Static services:ClientTheme.LiveToolbarSideColumn}"/>
+            </Grid.ColumnDefinitions>
             <!-- Los tres grupos comparten la misma celda: el de la izquierda y
                  el de la derecha se anclan a su borde y "Vistas" queda centrado
                  respecto de la barra completa, sobre la grilla de cámaras. -->
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <!-- Pantalla auxiliar (estilo iVMS-4200): otra ventana de vista en
                  vivo, con grilla propia, para llevar a otro monitor (hasta 3) -->
             <Button Style="{StaticResource GhostButton}" Padding="10,5"
@@ -695,7 +718,7 @@
                 </StackPanel>
             </Button>
             </StackPanel>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left">
                 <TextBlock Text="División:" VerticalAlignment="Center" Margin="0,0,8,0"
                            Foreground="{StaticResource MutedBrush}"/>
                 <!-- Selector de división estilo iVMS-4200: botón con la
@@ -776,7 +799,7 @@
             <!-- Vistas guardadas (las "Custom View" de iVMS-4200): al centro de
                  la barra, porque es a lo que más se vuelve en un turno. Cada
                  vista recuerda la división y qué cámara había en cada cuadro. -->
-            <Grid>
+            <Grid Grid.Column="1" Margin="{x:Static services:ClientTheme.LiveToolbarGroupGap}">
                 <ToggleButton x:Name="ViewsToggle" Style="{StaticResource GhostToggle}" Padding="14,5"
                               HorizontalAlignment="Center" VerticalAlignment="Center"
                               IsChecked="{Binding IsViewsPopupOpen, Mode=TwoWay}"
@@ -908,7 +931,7 @@
                          los clics sobre el video NO llegan a WPF. Por eso cada cuadro
                          tiene su propia barra (siempre WPF y clickeable) para
                          seleccionarlo, y el cuerpo solo es clickeable cuando está vacío. -->
-                    <Border Margin="3" Background="#0A0E13" CornerRadius="4"
+                    <Border Margin="3" Background="{StaticResource CellBgBrush}" CornerRadius="4"
                             BorderThickness="2" MouseLeftButtonDown="OnCellClick"
                             MouseMove="OnCellMouseMove"
                             AllowDrop="True" Drop="OnCellDrop"
@@ -943,9 +966,10 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <!-- Barra del cuadro: número, título, estado y cerrar -->
-                            <DockPanel Grid.Row="0" Background="#151D26" Cursor="Hand">
+                            <DockPanel Grid.Row="0" Background="{StaticResource CellBarBrush}" Cursor="Hand">
                                 <DockPanel.Style>
                                     <Style TargetType="DockPanel">
                                         <Setter Property="ToolTip"
@@ -958,10 +982,16 @@
                                     </Style>
                                 </DockPanel.Style>
                                 <Border DockPanel.Dock="Left" Background="{StaticResource Panel2Brush}"
-                                        CornerRadius="4" Margin="5,3" Padding="6,1">
+                                        CornerRadius="4" Margin="5,3" Padding="6,1"
+                                        Visibility="{x:Static services:ClientTheme.ClassicOnly}">
                                     <TextBlock Text="{Binding Index}" Foreground="{StaticResource MutedBrush}"
                                                FontSize="10.5" FontWeight="Bold"/>
                                 </Border>
+                                <!-- Consola: rótulo del cuadro en mayúsculas y acento -->
+                                <TextBlock DockPanel.Dock="Left" Text="{Binding Index, StringFormat=CAM {0:00}}"
+                                           Foreground="{StaticResource AccentBrush}" FontSize="11.5" FontWeight="SemiBold"
+                                           FontStretch="SemiCondensed" VerticalAlignment="Center" Margin="8,3,6,3"
+                                           Visibility="{x:Static services:ClientTheme.ConsoleOnly}"/>
                                 <Button DockPanel.Dock="Right" Content="&#x2715;" Command="{Binding ClearCommand}"
                                         Background="Transparent" Foreground="{StaticResource MutedBrush}"
                                         BorderThickness="0" Padding="9,2" Cursor="Hand" FontSize="11"
@@ -1038,6 +1068,12 @@
                                         </Style>
                                     </Button.Style>
                                 </Button>
+                                <!-- Consola: resolución que entrega la cámara -->
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding TelemetryResolution}"
+                                           FontFamily="{StaticResource MonoFont}" FontSize="10.5"
+                                           Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"
+                                           Margin="6,0,4,0"
+                                           Visibility="{x:Static services:ClientTheme.ConsoleOnly}"/>
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding Status}" Foreground="#FCD34D"
                                            FontSize="10.5" Margin="6,0" VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis" MaxWidth="220"/>
@@ -1076,10 +1112,21 @@
                                                 Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
                                 <TextBlock Text="Clic para seleccionar este cuadro y doble clic en un canal"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                                           Foreground="#3A4654" FontSize="11.5" TextWrapping="Wrap"
+                                           Foreground="{StaticResource FaintTextBrush}" FontSize="11.5" TextWrapping="Wrap"
                                            TextAlignment="Center" Margin="14"
                                            Visibility="{Binding IsEmpty, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                             </Grid>
+                            <!-- Consola: telemetría del cuadro (la refresca CellTelemetryTicker
+                                 cada segundo). Fila propia bajo el video. -->
+                            <DockPanel Grid.Row="2" Background="{StaticResource CellBarBrush}"
+                                       Visibility="{x:Static services:ClientTheme.ConsoleOnly}">
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding TelemetryUptime}"
+                                           FontFamily="{StaticResource MonoFont}" FontSize="10.5"
+                                           Foreground="{StaticResource OkBrush}" Margin="8,3"/>
+                                <TextBlock Text="{Binding TelemetryText}" FontFamily="{StaticResource MonoFont}"
+                                           FontSize="10.5" Foreground="{StaticResource TextBrush}" Margin="8,3"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </DockPanel>
                         </Grid>
                     </Border>
                 </DataTemplate>

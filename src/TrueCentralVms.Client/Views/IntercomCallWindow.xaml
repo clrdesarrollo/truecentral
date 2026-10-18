@@ -90,7 +90,7 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    <Border Grid.Row="0" Background="#151D26" CornerRadius="6,6,0,0"
+                    <Border Grid.Row="0" Background="{StaticResource CellBarBrush}" CornerRadius="6,6,0,0"
                             Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
                         <DockPanel Margin="8,4">
                             <TextBlock DockPanel.Dock="Left" Text="{Binding Title}" ToolTip="{Binding Title}"

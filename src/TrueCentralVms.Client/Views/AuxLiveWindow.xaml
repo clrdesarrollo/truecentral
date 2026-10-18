@@ -38,7 +38,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#1D2733"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -138,7 +138,7 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Bd" Property="Background" Value="#1D2733"/>
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
                                     <Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource TextBrush}"/>
                                 </Trigger>
                                 <Trigger Property="IsChecked" Value="True">
@@ -378,7 +378,7 @@
                     <DataTemplate DataType="{x:Type vm:VideoCellViewModel}">
                         <!-- El video de FlyleafLib vive en ventanas nativas superpuestas:
                              los clics sobre el video no llegan a WPF (ver code-behind). -->
-                        <Border Margin="3" Background="#0A0E13" CornerRadius="4"
+                        <Border Margin="3" Background="{StaticResource CellBgBrush}" CornerRadius="4"
                                 BorderThickness="2" MouseLeftButtonDown="OnCellClick"
                                 MouseMove="OnCellMouseMove"
                                 AllowDrop="True" Drop="OnCellDrop"
@@ -414,7 +414,7 @@
                                     <RowDefinition Height="*"/>
                                 </Grid.RowDefinitions>
                                 <!-- Barra del cuadro: número, título, estado y acciones -->
-                                <DockPanel Grid.Row="0" Background="#151D26" Cursor="Hand">
+                                <DockPanel Grid.Row="0" Background="{StaticResource CellBarBrush}" Cursor="Hand">
                                     <DockPanel.Style>
                                         <Style TargetType="DockPanel">
                                             <Setter Property="ToolTip"
@@ -535,7 +535,7 @@
                                                     Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
                                     <TextBlock Text="Clic para seleccionar este cuadro y doble clic en un canal"
                                                HorizontalAlignment="Center" VerticalAlignment="Center"
-                                               Foreground="#3A4654" FontSize="11.5" TextWrapping="Wrap"
+                                               Foreground="{StaticResource FaintTextBrush}" FontSize="11.5" TextWrapping="Wrap"
                                                TextAlignment="Center" Margin="14"
                                                Visibility="{Binding IsEmpty, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                 </Grid>

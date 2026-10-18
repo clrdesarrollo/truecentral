@@ -29,7 +29,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#1D2733"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource Panel2Brush}"/>
@@ -51,6 +51,32 @@
             <Setter Property="FontSize" Value="10.5"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="Margin" Value="0,4,0,0"/>
+        </Style>
+        <!-- Opción de apariencia: miniatura del diseño + nombre; la elegida
+             queda con el borde en acento. -->
+        <Style x:Key="AppearanceOption" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,14,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="Transparent" BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1" CornerRadius="4" Padding="8">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource MutedBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style x:Key="SectionTitle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
@@ -100,6 +126,8 @@
                 <RadioButton x:Name="NavSonido" Content="Sonido" Style="{StaticResource SectionRadio}"
                              Checked="OnSectionChanged"/>
                 <RadioButton x:Name="NavRed" Content="Red" Style="{StaticResource SectionRadio}"
+                             Checked="OnSectionChanged"/>
+                <RadioButton x:Name="NavApariencia" Content="Apariencia" Style="{StaticResource SectionRadio}"
                              Checked="OnSectionChanged"/>
                 <RadioButton x:Name="NavSistema" Content="Sistema" Style="{StaticResource SectionRadio}"
                              Checked="OnSectionChanged"/>
@@ -208,6 +236,108 @@
                          HorizontalAlignment="Left"/>
                 <TextBlock Style="{StaticResource SettingHint}"
                            Text="Entre 5 y 120 segundos. Se aplica al reiniciar la aplicación. El transporte de video es siempre RTSP sobre TCP."/>
+            </StackPanel>
+
+            <!-- ============ APARIENCIA ============ -->
+            <StackPanel x:Name="SectionApariencia" Visibility="Collapsed">
+                <TextBlock Text="Apariencia" Style="{StaticResource SectionTitle}"/>
+
+                <TextBlock Text="Diseño del cliente" Style="{StaticResource FieldLabel}"/>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <RadioButton x:Name="AppearanceClassic" GroupName="Appearance" Style="{StaticResource AppearanceOption}"
+                                 ToolTip="El diseño de siempre: azul pizarra, tarjetas redondeadas">
+                        <StackPanel>
+                            <Border Width="150" Height="70" Background="#0F141A" BorderBrush="#263241" BorderThickness="1"
+                                    CornerRadius="5" ClipToBounds="True">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Top" Height="12" Background="#171F28">
+                                        <Border Width="26" Height="6" CornerRadius="3" Background="#3B82F6"
+                                                HorizontalAlignment="Left" Margin="18,0,0,0"/>
+                                    </Border>
+                                    <Border DockPanel.Dock="Left" Width="12" Background="#171F28"/>
+                                    <UniformGrid Columns="2" Rows="2" Margin="6">
+                                        <Border Background="#171F28" CornerRadius="4" Margin="2"/>
+                                        <Border Background="#171F28" CornerRadius="4" Margin="2"/>
+                                        <Border Background="#171F28" CornerRadius="4" Margin="2"/>
+                                        <Border Background="#171F28" CornerRadius="4" Margin="2"/>
+                                    </UniformGrid>
+                                </DockPanel>
+                            </Border>
+                            <TextBlock Text="Clásica" FontWeight="SemiBold" Margin="2,6,0,0"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="AppearanceConsole" GroupName="Appearance" Style="{StaticResource AppearanceOption}"
+                                 ToolTip="Consola técnica: tipografía condensada, telemetría por cuadro y botonera abajo">
+                        <StackPanel>
+                            <Border Width="150" Height="70" Background="#141414" BorderBrush="#333435" BorderThickness="1"
+                                    CornerRadius="1" ClipToBounds="True">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Top" Height="11" Background="#313131">
+                                        <Border Width="22" Height="2" Background="#3A96EC" VerticalAlignment="Bottom"
+                                                HorizontalAlignment="Left" Margin="18,0,0,0"/>
+                                    </Border>
+                                    <Border DockPanel.Dock="Left" Width="11" Background="#1C1C1C"/>
+                                    <!-- Botonera flotante abajo -->
+                                    <Border DockPanel.Dock="Bottom" Height="7" Width="40" Margin="0,0,0,4"
+                                            BorderBrush="#3A96EC" BorderThickness="1" CornerRadius="1"/>
+                                    <UniformGrid Columns="2" Rows="1" Margin="4,5,4,4">
+                                        <Border Background="#060606" BorderBrush="#333435" BorderThickness="1" Margin="2">
+                                            <Border Height="5" Background="#0A0A0A" VerticalAlignment="Bottom">
+                                                <Border Width="12" Height="1.5" Background="#EDEDED" HorizontalAlignment="Left" Margin="3,0"/>
+                                            </Border>
+                                        </Border>
+                                        <Border Background="#060606" BorderBrush="#333435" BorderThickness="1" Margin="2">
+                                            <Border Height="5" Background="#0A0A0A" VerticalAlignment="Bottom">
+                                                <Border Width="12" Height="1.5" Background="#EDEDED" HorizontalAlignment="Left" Margin="3,0"/>
+                                            </Border>
+                                        </Border>
+                                    </UniformGrid>
+                                </DockPanel>
+                            </Border>
+                            <TextBlock Text="Consola" FontWeight="SemiBold" Margin="2,6,0,0"/>
+                        </StackPanel>
+                    </RadioButton>
+                </StackPanel>
+                <TextBlock Style="{StaticResource SettingHint}" Margin="0,8,0,0"
+                           Text="Consola: tipografía técnica y cifras en monoespaciada, telemetría bajo cada cuadro de video (códec, resolución, FPS, stream y tiempo en vivo) y la botonera de la Vista en Vivo abajo."/>
+
+                <!-- Paleta: solo aplica a la Consola -->
+                <TextBlock Text="Paleta de la Consola" Style="{StaticResource FieldLabel}" Margin="0,14,0,4"/>
+                <ItemsControl x:Name="PaletteList" Focusable="False"
+                              IsEnabled="{Binding IsChecked, ElementName=AppearanceConsole}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <RadioButton GroupName="ConsolePalette" Style="{StaticResource AppearanceOption}"
+                                         Margin="0,0,8,0" Padding="6" IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                         ToolTip="{Binding Palette.Description}">
+                                <StackPanel>
+                                    <!-- Muestra: fondo, panel con el acento y las cuatro señales -->
+                                    <Border Width="92" Height="34" Background="{Binding Palette.Bg}"
+                                            BorderBrush="{Binding Palette.Border}" BorderThickness="1" CornerRadius="1">
+                                        <Border Background="{Binding Palette.Panel}" Margin="5" BorderBrush="{Binding Palette.Border}"
+                                                BorderThickness="1">
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="5,0">
+                                                <Border Width="18" Height="4" Background="{Binding Palette.Accent}" Margin="0,0,6,0"/>
+                                                <Ellipse Width="6" Height="6" Fill="{Binding Palette.Ok}" Margin="0,0,3,0"/>
+                                                <Ellipse Width="6" Height="6" Fill="{Binding Palette.Info}" Margin="0,0,3,0"/>
+                                                <Ellipse Width="6" Height="6" Fill="{Binding Palette.Warn}" Margin="0,0,3,0"/>
+                                                <Ellipse Width="6" Height="6" Fill="{Binding Palette.Danger}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Border>
+                                    <TextBlock Text="{Binding Palette.Name}" FontSize="12" Margin="2,5,0,0"/>
+                                </StackPanel>
+                            </RadioButton>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Style="{StaticResource SettingHint}" Foreground="{StaticResource AccentBrush}" Margin="0,10,0,0"
+                           Text="El diseño y la paleta se aplican la próxima vez que abra el cliente."/>
             </StackPanel>
 
             <!-- ============ SISTEMA ============ -->

@@ -62,7 +62,7 @@
                                 <Setter TargetName="Mark" Property="Visibility" Value="Visible"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsCurrentMonth}" Value="False">
-                                <Setter TargetName="Num" Property="Foreground" Value="#3A4654"/>
+                                <Setter TargetName="Num" Property="Foreground" Value="{StaticResource FaintTextBrush}"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsFuture}" Value="True">
                                 <Setter TargetName="Num" Property="Foreground" Value="#2C3846"/>
@@ -498,7 +498,7 @@
         <!-- Grilla de reproducción: una entrada por POSICIÓN (cuadro con canal
              o posición libre), todas a la misma hora. La plantilla se elige por
              el tipo del elemento, así que ambas conviven en el mismo panel. -->
-        <Grid Background="#06090D">
+        <Grid Background="{StaticResource VideoAreaBrush}">
             <ItemsControl ItemsSource="{Binding Playback.Slots}" Margin="4">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -524,7 +524,7 @@
                                                 </MultiBinding>
                                             </DataTrigger.Binding>
                                             <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                            <Setter Property="Background" Value="#101A24"/>
+                                            <Setter Property="Background" Value="{StaticResource CellHoverBrush}"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -545,7 +545,7 @@
                              los clics sobre él NO llegan a WPF, así que la barra del
                              cuadro selecciona/silencia/cierra y los dobles clics sobre
                              el video se enganchan en OnFlyleafHostLoaded (code-behind). -->
-                        <Border Margin="3" Background="#0A0E13" CornerRadius="4" BorderThickness="2"
+                        <Border Margin="3" Background="{StaticResource CellBgBrush}" CornerRadius="4" BorderThickness="2"
                                 MouseLeftButtonDown="OnCellClick"
                                 AllowDrop="True" Drop="OnSlotDrop" DragOver="OnSlotDragOver" DragLeave="OnSlotDragLeave">
                             <Border.Style>
@@ -572,7 +572,7 @@
                                                 </MultiBinding>
                                             </DataTrigger.Binding>
                                             <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                            <Setter Property="Background" Value="#101A24"/>
+                                            <Setter Property="Background" Value="{StaticResource CellHoverBrush}"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -582,7 +582,7 @@
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="*"/>
                                 </Grid.RowDefinitions>
-                                <DockPanel Grid.Row="0" Background="#151D26" Cursor="Hand">
+                                <DockPanel Grid.Row="0" Background="{StaticResource CellBarBrush}" Cursor="Hand">
                                     <Button DockPanel.Dock="Right" Content="&#x2715;" Command="{Binding CloseCommand}"
                                             Background="Transparent" Foreground="{StaticResource MutedBrush}"
                                             BorderThickness="0" Padding="9,2" Cursor="Hand" FontSize="11"
@@ -646,7 +646,7 @@
                                     <TextBlock Text="{Binding Title}" Margin="10,4" FontSize="11.5"
                                                Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
                                 </DockPanel>
-                                <Grid Grid.Row="1" Background="#06090D" MouseLeftButtonDown="OnVideoAreaClick">
+                                <Grid Grid.Row="1" Background="{StaticResource VideoAreaBrush}" MouseLeftButtonDown="OnVideoAreaClick">
                                     <fl:FlyleafHost Player="{Binding Player}" AttachedDragMove="None"
                                                     KeyBindings="None" OpenOnDrop="None" SwapOnDrop="None"
                                                     ToggleFullScreenOnDoubleClick="None"
@@ -654,7 +654,7 @@
                                                     Visibility="{Binding IsPlaying, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                     <TextBlock Text="{Binding Status}" HorizontalAlignment="Center" VerticalAlignment="Center"
                                                TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360"
-                                               Foreground="#5A6674" FontSize="11.5"
+                                               Foreground="{StaticResource DimTextBrush}" FontSize="11.5"
                                                Visibility="{Binding IsPlaying, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
                                 </Grid>
                             </Grid>
@@ -667,7 +667,7 @@
             <TextBlock Text="Doble clic en un canal del árbol, o arrástrelo hasta la posición donde quiera verlo."
                        HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,18"
                        TextWrapping="Wrap" IsHitTestVisible="False"
-                       TextAlignment="Center" MaxWidth="420" Foreground="#3A4654" FontSize="12.5"
+                       TextAlignment="Center" MaxWidth="420" Foreground="{StaticResource FaintTextBrush}" FontSize="12.5"
                        Visibility="{Binding Playback.Cells.Count, Converter={x:Static vm:ZeroToVisibility.Instance}}"/>
         </Grid>
     </DockPanel>

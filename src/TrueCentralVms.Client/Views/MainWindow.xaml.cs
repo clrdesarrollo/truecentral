@@ -4,6 +4,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using TrueCentralVms.Client.Services;
 using TrueCentralVms.Client.ViewModels;
 
 namespace TrueCentralVms.Client.Views;
@@ -20,6 +21,7 @@ public partial class MainWindow : Window
         // El menú del usuario cuelga alineado a la DERECHA de su botón: es lo
         // último del navbar y el menú es más ancho que el botón.
         UserMenuPopup.CustomPopupPlacementCallback = PlaceUserMenu;
+        if (ClientTheme.IsConsole) SetUpConsole();
         Loaded += async (_, _) =>
         {
             // La última sesión se reabre con el árbol ya cargado: las cámaras
@@ -41,6 +43,17 @@ public partial class MainWindow : Window
             if (e.PropertyName == nameof(MainViewModel.IsGridFullscreen))
                 ApplyGridFullscreen(_vm.IsGridFullscreen);
         };
+    }
+
+    // ------------------------------------------------------------------
+    // Apariencia Consola: la franja de telemetría bajo cada cuadro se
+    // refresca con un tic de 1 s que solo existe con esa apariencia.
+    // ------------------------------------------------------------------
+    private void SetUpConsole()
+    {
+        var ticker = new CellTelemetryTicker(_vm);
+        Loaded += (_, _) => ticker.Start();
+        Closed += (_, _) => ticker.Dispose();
     }
 
     // ------------------------------------------------------------------

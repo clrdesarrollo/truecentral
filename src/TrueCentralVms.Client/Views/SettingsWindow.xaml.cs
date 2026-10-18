@@ -42,6 +42,13 @@ public partial class SettingsWindow : Window
         VolumeSlider.Value = Math.Clamp(settings.DefaultVolume, 0, 100);
         TimeoutBox.Text = settings.ApiTimeoutSeconds.ToString();
 
+        // Misma regla que ClientTheme.Apply: todo lo que no sea "clasica" es la Consola.
+        (string.Equals(settings.Appearance, ClientTheme.Classic, StringComparison.OrdinalIgnoreCase)
+            ? AppearanceClassic : AppearanceConsole).IsChecked = true;
+        var current = ConsolePalettes.Find(settings.ConsolePalette);
+        _palettes = ConsolePalettes.All.Select(p => new PaletteChoice(p) { IsSelected = p == current }).ToList();
+        PaletteList.ItemsSource = _palettes;
+
         AutoLoginCheck.IsChecked = settings.AutoLogin;
         AlertPlacementCheck.IsChecked = settings.AlertWindowRememberPlacement;
         AutoLoginAccountText.Text = settings.Username is { Length: > 0 } user
@@ -92,6 +99,7 @@ public partial class SettingsWindow : Window
         SectionImagen.Visibility = NavImagen.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionSonido.Visibility = NavSonido.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionRed.Visibility = NavRed.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SectionApariencia.Visibility = NavApariencia.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionSistema.Visibility = NavSistema.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionLicencia.Visibility = NavLicencia.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -145,9 +153,30 @@ public partial class SettingsWindow : Window
         // cliente; la contraseña recordada se administra en el propio login.
         _settings.AutoLogin = AutoLoginCheck.IsChecked == true;
         _settings.AlertWindowRememberPlacement = AlertPlacementCheck.IsChecked == true;
+        // La apariencia rige desde el próximo arranque (los estilos se toman
+        // al crear cada ventana): se avisa para que nadie la crea ignorada.
+        string appearance = AppearanceConsole.IsChecked == true ? ClientTheme.Console : ClientTheme.Classic;
+        string palette = (_palettes.FirstOrDefault(p => p.IsSelected)?.Palette ?? ConsolePalettes.Control).Key;
+        bool appearanceChanged = !string.Equals(appearance, _settings.Appearance, StringComparison.OrdinalIgnoreCase)
+            || (appearance == ClientTheme.Console
+                && !string.Equals(palette, ConsolePalettes.Find(_settings.ConsolePalette).Key, StringComparison.OrdinalIgnoreCase));
+        _settings.Appearance = appearance;
+        _settings.ConsolePalette = palette;
         _settings.Save();
+        if (appearanceChanged)
+            MessageBox.Show(this, "La nueva apariencia se aplicará la próxima vez que abra el cliente.",
+                "Apariencia", MessageBoxButton.OK, MessageBoxImage.Information);
         DialogResult = true;
     }
 
     private void OnCancelClick(object sender, RoutedEventArgs e) => DialogResult = false;
+
+    private List<PaletteChoice> _palettes = [];
+
+    /// <summary>Opción de paleta de la lista (el RadioButton marca IsSelected).</summary>
+    private sealed class PaletteChoice(ConsolePalette palette)
+    {
+        public ConsolePalette Palette { get; } = palette;
+        public bool IsSelected { get; set; }
+    }
 }

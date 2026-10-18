@@ -210,7 +210,7 @@
                                                         <!-- Barra del cuadro (número, cámara, estado). Va aparte, como en la
                                                              Vista en vivo: Flyleaf pinta el video en ventanas propias que
                                                              taparían cualquier cosa superpuesta. -->
-                                                        <DockPanel Grid.Row="0" Background="#151D26">
+                                                        <DockPanel Grid.Row="0" Background="{StaticResource CellBarBrush}">
                                                             <Border DockPanel.Dock="Left" Background="{StaticResource Panel2Brush}"
                                                                     CornerRadius="4" Margin="5,3" Padding="6,1">
                                                                 <TextBlock Text="{Binding Index}" Foreground="{StaticResource MutedBrush}"

@@ -12,7 +12,7 @@
             <Setter Property="CornerRadius" Value="999"/>
             <Setter Property="Padding" Value="9,2"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Background" Value="#1D2733"/>
+            <Setter Property="Background" Value="{StaticResource HoverBrush}"/>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding StateLevel}" Value="on">
                     <Setter Property="Background" Value="#12351F"/>
