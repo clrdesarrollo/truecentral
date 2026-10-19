@@ -36,16 +36,49 @@ public static class LicenseApi
                 : Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status422UnprocessableEntity);
         });
 
+        // Ingreso único en línea: base y expansiones en una sola lista. Cada
+        // código queda en la bitácora con la acción que le tocó.
+        app.MapPost("/api/system/license/apply", async (HttpContext ctx, LicenseCodesRequest request,
+            LicenseService license, AuditService audit, VmsDbContext db, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.SystemLicense, out _) is { } failure) return failure;
+            var codes = (request.Codes ?? []).Append(request.ActivationCode).ToList();
+            var result = await license.ApplyCodesAsync(codes, ct);
+            if (result.Items.Count == 0)
+                await audit.LogAsync(ctx, "license", "license-activated", targetType: "license",
+                    detail: result.Message, success: false);
+            foreach (var item in result.Items)
+            {
+                string action = item.Step switch
+                {
+                    "refresh" => "license-refresh-requested",
+                    "addon" => "license-addon-entered",
+                    _ => "license-activated",
+                };
+                await audit.LogAsync(ctx, "license", action, targetType: "license",
+                    targetId: Trim(item.Code), detail: item.Message, success: item.Success);
+            }
+            var status = await license.GetStatusAsync(db, ct);
+            return result.Success
+                ? Results.Ok(new { message = result.Message, items = result.Items, status })
+                : Results.Json(new { error = result.Message, items = result.Items, status },
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+        });
+
         // Solicitud de activación sin internet: el administrador la descarga y
-        // la envía a soporte, que devuelve el .lic para importar.
-        app.MapPost("/api/system/license/request", async (HttpContext ctx, LicenseActivateRequest request,
+        // la envía a soporte, que devuelve el .lic para importar. Acepta un
+        // código (activationCode) o la lista completa (codes).
+        app.MapPost("/api/system/license/request", async (HttpContext ctx, LicenseCodesRequest request,
             LicenseService license, AuditService audit) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.SystemLicense, out _) is { } failure) return failure;
-            var file = license.BuildActivationRequest(request.ActivationCode ?? "");
+            var codes = (request.Codes ?? []).Append(request.ActivationCode).ToList();
+            var file = license.BuildActivationRequest(codes);
+            string listed = string.Join(", ", codes.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c!.Trim()));
             await audit.LogAsync(ctx, "license", "license-request-generated", targetType: "license",
-                targetId: Trim(request.ActivationCode),
-                detail: $"Generó la solicitud de activación sin conexión ({file.FileName}) para el equipo {license.HardwareIdentifier}.");
+                targetId: Trim(codes.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c))),
+                detail: $"Generó la solicitud de activación sin conexión ({file.FileName}) para el equipo {license.HardwareIdentifier}" +
+                        (listed.Length > 0 ? $" con los códigos {listed}." : "."));
             return Results.Ok(file);
         });
 

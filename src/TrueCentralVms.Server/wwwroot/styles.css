@@ -2222,3 +2222,7 @@ body.live-aux .sidebar, body.live-aux .topbar, body.live-aux #license-banner { d
 .scr-code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 30px; font-weight: 700; letter-spacing: .18em;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; width: fit-content; }
 .wf-dest-hint { font-size: 11.5px; margin-top: 3px; }
+
+/* Licencia: fila de área en el resumen y en el detalle de un código */
+table.grid tr.lic-area td { background: var(--panel-2); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding-top: 7px; padding-bottom: 7px; }
+table.grid tr[data-code]:hover td { background: var(--panel-2); }
