@@ -71,7 +71,7 @@ public sealed class AccessControlService(
         d.LocationId,
         SupportsCardCapture(d.DriverKey),
         d.IsupDeviceId,
-        d.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: d.DisabledByLicense);
+        d.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: d.DisabledByLicense, HolidayNote: d.HolidayNote);
 
     /// <summary>Puerta con su equipo, para el monitoreo en vivo y los niveles de acceso.</summary>
     public AccessDoorStateDto ToDoorDto(AccessDoor door)
@@ -103,6 +103,19 @@ public sealed class AccessControlService(
     }
 
     /// <summary>¿El driver de esa marca sabe bajar huellas al equipo?</summary>
+    /// <summary>Formato de huella de los equipos de ese driver.</summary>
+    public string FingerprintFormatOf(string driverKey)
+    {
+        try { return drivers.Find(driverKey)?.Create().FingerprintFormat ?? AccessFingerprintFormats.Hikvision; }
+        catch (DriverException) { return AccessFingerprintFormats.Hikvision; }
+    }
+
+    public bool SupportsFingerprintImport(string driverKey)
+    {
+        try { return drivers.Find(driverKey)?.Create().SupportsFingerprintImport ?? false; }
+        catch (DriverException) { return false; }
+    }
+
     public bool SupportsFingerprintSync(string driverKey)
     {
         try { return drivers.Find(driverKey)?.Create().SupportsFingerprintSync ?? false; }

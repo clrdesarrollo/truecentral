@@ -166,13 +166,31 @@ function accessScheduleSummary(schedule) {
     run = tramos ? { from: day, to: day, tramos } : null;
   }
   if (run) parts.push(run);
-  return parts.map((p) => {
+  const week = parts.map((p) => {
     const days = p.from === p.to
       ? ACCESS_DAYS_SHORT[p.from]
       : `${ACCESS_DAYS_SHORT[p.from]} a ${ACCESS_DAYS_SHORT[p.to]}`;
     return `${days} ${p.tramos}`;
   }).join(" · ");
+  const holiday = schedule.segments.filter((s) => s.day === ACCESS_HOLIDAY_DAY)
+    .sort((a, b) => a.startMinutes - b.startMinutes)
+    .map((s) => `${accessHhmm(s.startMinutes)}-${accessHhmm(s.endMinutes)}`).join(", ");
+  const holidayText = {
+    Closed: " · feriados: sin acceso",
+    Special: ` · feriados ${holiday}`,
+  }[schedule.holidayMode ?? "Normal"] ?? "";
+  return week + holidayText;
 }
+
+/** "Día" de los tramos de feriado de un horario (0-6 son domingo a sábado). */
+const ACCESS_HOLIDAY_DAY = 7;
+
+/** Qué hace un horario en feriados. */
+const ACCESS_HOLIDAY_MODES = {
+  Normal: "Como un día normal (ignora los feriados)",
+  Closed: "Sin acceso",
+  Special: "Horario especial",
+};
 
 /** Deja de refrescar cuando el operador se fue de la página o abrió un modal. */
 function accessPollGuard(hash, timer) {
@@ -202,6 +220,9 @@ async function renderAccessSchedules() {
   try { schedules = await Api.get("/api/access/schedules"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
+  let holidays = [];
+  try { holidays = await Api.get("/api/access/holidays"); } catch { /* sin calendario visible */ }
+
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Horarios</h3>
@@ -228,11 +249,48 @@ async function renderAccessSchedules() {
             </div></td>
           </tr>`).join("")}
       </tbody>
-    </table></div>`;
+    </table></div>
+
+    <div class="toolbar" style="margin-top:28px">
+      <h3>Feriados</h3>
+      ${isAdmin ? `<button class="btn ghost" id="btn-holiday-new">Agregar feriado</button>` : ""}
+    </div>
+    <div class="info-box">
+      Un solo calendario para toda la instalación. Cada horario decide qué hacer en estos días
+      (<b>En feriados</b> al editarlo): ignorarlos, no dejar pasar o usar un horario especial. Los equipos
+      los aplican solos, aunque se corte el servidor.
+    </div>
+    ${holidays.length ? `<div class="table-scroll"><table class="grid" id="holiday-table">
+      <thead><tr><th>Nombre</th><th>Fecha</th><th>Se repite</th><th></th></tr></thead>
+      <tbody>
+        ${holidays.map((h) => `
+          <tr data-id="${h.id}">
+            <td>${esc(h.name)}</td>
+            <td>${esc(accessHolidayDates(h))}</td>
+            <td class="muted">${h.yearly ? "Todos los años" : "Solo ese año"}</td>
+            <td><div class="row-actions">${isAdmin ? `
+              <button class="btn ghost btn-holiday-edit">Editar</button>
+              <button class="btn danger btn-holiday-delete">Eliminar</button>` : ""}</div></td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>` : `<div class="muted">Todavía no hay feriados en el calendario.</div>`}`;
+
+  const holidayOf = (e) => holidays.find((h) => h.id === Number(e.target.closest("tr").dataset.id));
+  $("#btn-holiday-new")?.addEventListener("click", () => accessHolidayModal(null));
+  $$("#holiday-table .btn-holiday-edit").forEach((b) => b.addEventListener("click", (e) => accessHolidayModal(holidayOf(e))));
+  $$("#holiday-table .btn-holiday-delete").forEach((b) => b.addEventListener("click", async (e) => {
+    const holiday = holidayOf(e);
+    if (!confirm(`¿Eliminar el feriado "${holiday.name}"?`)) return;
+    try {
+      await Api.delete(`/api/access/holidays/${holiday.id}`);
+      toast("Feriado eliminado. Se está reescribiendo en los equipos.");
+      renderAccessSchedules();
+    } catch (err) { toast(err.error, true); }
+  }));
 
   const byRow = (e) => schedules.find((s) => s.id === Number(e.target.closest("tr").dataset.id));
   $("#btn-schedule-new")?.addEventListener("click", () => accessScheduleModal(null));
-  $$("#view .btn-schedule-edit").forEach((b) => b.addEventListener("click", (e) => accessScheduleModal(byRow(e))));
+  $$("#view tr .btn-schedule-edit").forEach((b) => b.addEventListener("click", (e) => accessScheduleModal(byRow(e))));
   $$("#view .btn-schedule-delete").forEach((b) => b.addEventListener("click", async (e) => {
     const schedule = byRow(e);
     if (!confirm(`¿Eliminar el horario "${schedule.name}"?`)) return;
@@ -244,11 +302,71 @@ async function renderAccessSchedules() {
   }));
 }
 
+/** "18-09-2026" o "18-09-2026 al 19-09-2026" (las fechas llegan como "2026-09-18"). */
+function accessHolidayDates(h) {
+  const show = (d) => d.split("-").reverse().join("-");
+  return h.startDate === h.endDate ? show(h.startDate) : `${show(h.startDate)} al ${show(h.endDate)}`;
+}
+
+function accessHolidayModal(holiday) {
+  const isNew = !holiday;
+  openModal(`
+    <h3>${isNew ? "Agregar feriado" : "Editar feriado"}</h3>
+    <div id="ah-error"></div>
+    <form id="access-holiday-form">
+      <div class="field">
+        <label>Nombre</label>
+        <input id="ah-name" required maxlength="128" value="${esc(holiday?.name ?? "")}" placeholder="Fiestas Patrias, Navidad…">
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Primer día</label>
+          <input id="ah-start" type="date" required value="${esc(holiday?.startDate ?? "")}">
+        </div>
+        <div class="field">
+          <label>Último día</label>
+          <input id="ah-end" type="date" required value="${esc(holiday?.endDate ?? "")}">
+        </div>
+      </div>
+      <label class="checkbox-row"><input type="checkbox" id="ah-yearly" ${holiday?.yearly ?? true ? "checked" : ""}>
+        Se repite todos los años en las mismas fechas</label>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" id="ah-cancel">Cancelar</button>
+        <button class="btn" type="submit" id="ah-save">${isNew ? "Agregar" : "Guardar cambios"}</button>
+      </div>
+    </form>`);
+  // Un feriado de un día: el último día sigue al primero mientras no se lo toque.
+  $("#ah-start").addEventListener("change", () => { if (!$("#ah-end").value || $("#ah-end").value < $("#ah-start").value) $("#ah-end").value = $("#ah-start").value; });
+  $("#ah-cancel").addEventListener("click", closeModal);
+  $("#access-holiday-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = {
+      name: $("#ah-name").value.trim(),
+      startDate: $("#ah-start").value,
+      endDate: $("#ah-end").value || $("#ah-start").value,
+      yearly: $("#ah-yearly").checked,
+    };
+    const save = $("#ah-save");
+    save.disabled = true;
+    try {
+      if (isNew) await Api.post("/api/access/holidays", body);
+      else await Api.put(`/api/access/holidays/${holiday.id}`, body);
+      closeModal();
+      toast(isNew ? "Feriado agregado. Se está escribiendo en los equipos." : "Feriado actualizado. Se está reescribiendo en los equipos.");
+      renderAccessSchedules();
+    } catch (err) {
+      $("#ah-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+      save.disabled = false;
+    }
+  });
+}
+
 /** Editor semanal: una fila por día, con sus tramos y botones para agregar y copiar. */
 function accessScheduleModal(schedule) {
   const isNew = !schedule;
-  const segments = new Map();   // día → [{start, end}]
-  for (let day = 0; day < 7; day++) segments.set(day, []);
+  const segments = new Map();   // día → [{start, end}]; el 7 son los feriados
+  for (let day = 0; day <= ACCESS_HOLIDAY_DAY; day++) segments.set(day, []);
+  let holidayMode = schedule?.holidayMode ?? "Normal";
   for (const s of schedule?.segments ?? []) segments.get(s.day).push({ start: s.startMinutes, end: s.endMinutes });
   if (isNew) {
     // Un horario nuevo arranca con la jornada más común, para no partir de cero.
@@ -257,7 +375,7 @@ function accessScheduleModal(schedule) {
 
   const dayRow = (day) => `
     <div class="access-day" data-day="${day}">
-      <div class="access-day-name">${ACCESS_DAYS[day]}</div>
+      <div class="access-day-name">${day === ACCESS_HOLIDAY_DAY ? "Feriados" : ACCESS_DAYS[day]}</div>
       <div class="access-day-segments">
         ${segments.get(day).map((s, i) => `
           <span class="access-segment" data-i="${i}">
@@ -269,12 +387,14 @@ function accessScheduleModal(schedule) {
       </div>
       <div class="access-day-actions">
         <button type="button" class="btn ghost seg-add" title="Agregar un tramo a este día">+ tramo</button>
-        <button type="button" class="btn ghost seg-copy" title="Copiar los tramos de este día a los otros seis">Copiar a todos</button>
+        ${day === ACCESS_HOLIDAY_DAY ? "" : `<button type="button" class="btn ghost seg-copy" title="Copiar los tramos de este día a los otros seis">Copiar a todos</button>`}
       </div>
     </div>`;
 
   const redraw = () => {
-    $("#as-days").innerHTML = [1, 2, 3, 4, 5, 6, 0].map(dayRow).join("");
+    const days = [1, 2, 3, 4, 5, 6, 0];
+    if (holidayMode === "Special") days.push(ACCESS_HOLIDAY_DAY);
+    $("#as-days").innerHTML = days.map(dayRow).join("");
     bindDays();
   };
 
@@ -311,7 +431,7 @@ function accessScheduleModal(schedule) {
       readDays();
       const day = Number(e.target.closest(".access-day").dataset.day);
       const source = segments.get(day).map((s) => ({ ...s }));
-      for (let other = 0; other < 7; other++)
+      for (let other = 0; other < 7; other++)   // los feriados no: tienen su propio horario
         if (other !== day) segments.set(other, source.map((s) => ({ ...s })));
       redraw();
     }));
@@ -336,7 +456,19 @@ function accessScheduleModal(schedule) {
         <label>Cuándo deja pasar</label>
         <div id="as-days"></div>
         <div class="muted" style="font-size:12px;margin-top:6px">
-          Hasta 8 tramos por día (es el tope de los equipos). Un día sin tramos no deja pasar a nadie.
+          Hasta 8 tramos por día (es el tope de los equipos; las controladoras ZKTeco C3 admiten 3). Un día sin tramos no deja pasar a nadie.
+        </div>
+      </div>
+      <div class="field">
+        <label>En feriados</label>
+        <select id="as-holiday">
+          ${Object.entries(ACCESS_HOLIDAY_MODES).map(([value, label]) =>
+            `<option value="${value}" ${value === holidayMode ? "selected" : ""}>${esc(label)}</option>`).join("")}
+        </select>
+        <div class="muted" style="font-size:12px;margin-top:4px">
+          Los feriados se cargan en la página de Horarios. Una controladora ZKTeco C3 tiene un solo calendario
+          para todos sus horarios: si alguno de los que usan sus puertas ignora los feriados, a esa controladora
+          no se le escriben (queda avisado en su ficha).
         </div>
       </div>
       <div class="modal-actions">
@@ -346,6 +478,13 @@ function accessScheduleModal(schedule) {
     </form>`, "wider");
 
   redraw();
+  $("#as-holiday").addEventListener("change", (e) => {
+    readDays();
+    holidayMode = e.target.value;
+    if (holidayMode === "Special" && !segments.get(ACCESS_HOLIDAY_DAY).length)
+      segments.get(ACCESS_HOLIDAY_DAY).push({ start: 9 * 60, end: 14 * 60 });
+    redraw();
+  });
   $("#as-cancel").addEventListener("click", closeModal);
   $("#access-schedule-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -353,8 +492,10 @@ function accessScheduleModal(schedule) {
     const body = {
       name: $("#as-name").value.trim(),
       description: $("#as-description").value.trim() || null,
-      segments: [...segments.entries()].flatMap(([day, list]) =>
-        list.map((s) => ({ day, startMinutes: s.start, endMinutes: s.end }))),
+      segments: [...segments.entries()]
+        .filter(([day]) => day !== ACCESS_HOLIDAY_DAY || holidayMode === "Special")
+        .flatMap(([day, list]) => list.map((s) => ({ day, startMinutes: s.start, endMinutes: s.end }))),
+      holidayMode,
     };
     const save = $("#as-save");
     save.disabled = true;
@@ -1072,9 +1213,12 @@ function accessPersonModal(person, levels) {
     // Huella: la plantilla solo existe acá si se acaba de capturar. Las que ya
     // estaban vienen sin plantilla (el servidor nunca la devuelve) y viajan
     // así, que es como se le dice "dejá la que tenés".
-    fingerprints: (person?.fingerprints ?? []).map((f) => ({
+    // Solo las del lector USB (Hikvision): las ZKTeco se traen desde un equipo
+    // y se muestran aparte (zkFingers).
+    fingerprints: (person?.fingerprints ?? []).filter((f) => (f.format ?? "hikvision") !== "zk-v10").map((f) => ({
       number: f.number, name: f.name, quality: f.quality, source: f.source, template: null, isNew: false,
     })),
+    zkFingers: (person?.fingerprints ?? []).filter((f) => f.format === "zk-v10"),
     levelIds: new Set(person?.levelIds ?? []),
     // El rostro: `image` en base64 solo cuando se acaba de elegir una foto
     // nueva; `has` dice si la persona ya tiene una guardada, que no se
@@ -1203,6 +1347,10 @@ function accessPersonModal(person, levels) {
       </div>
     </div>
     <div class="field">
+      <label>Huellas ZKTeco</label>
+      <div id="pw-zk">${zkBlock()}</div>
+    </div>
+    <div class="field">
       <label>Rostro</label>
       <div id="pw-face">${faceBlock()}</div>
     </div>`;
@@ -1247,6 +1395,58 @@ function accessPersonModal(person, levels) {
           </div>
         </div>
       </div>`;
+  };
+
+  /**
+   * Huellas para los equipos ZKTeco (formato propio, no sirven las del lector
+   * USB): se enrolan en el menú de un terminal ZKTeco con sensor (MA500…) con
+   * el ID de la persona, y se traen desde aquí; el VMS las reparte solo a sus
+   * demás equipos ZKTeco.
+   */
+  const zkBlock = () => {
+    const list = draft.zkFingers.length
+      ? `<div>${draft.zkFingers.map((f) => `<span class="tag admin" title="${esc(f.source ?? "")}">${esc(f.name)}</span>`).join(" ")}</div>`
+      : `<div class="muted">Sin huellas ZKTeco.</div>`;
+    const action = isNew
+      ? `<div class="muted" style="font-size:12px">Guarde la persona primero: después se le pueden traer las huellas.</div>`
+      : `<div class="row-actions" style="margin-top:6px">
+           <select id="pw-zk-device"><option value="">Cargando equipos…</option></select>
+           <button type="button" class="btn ghost" id="pw-zk-import">Traer huellas desde el equipo</button>
+         </div>
+         <div class="muted" style="font-size:12px;margin-top:4px">
+           Enrólelas en el menú del terminal ZKTeco con el ID de usuario <b>${esc(person.employeeNo)}</b> y tráigalas aquí:
+           el VMS las copia a los demás equipos ZKTeco donde tiene acceso.
+         </div>`;
+    return list + action;
+  };
+
+  const bindZk = async () => {
+    const select = $("#pw-zk-device");
+    if (!select) return;
+    try {
+      const devices = (await Api.get("/api/access/devices")).filter((d) => d.driverKey === "zkteco-c3");
+      select.innerHTML = devices.length
+        ? devices.map((d) => `<option value="${d.id}">${esc(d.name)}${d.model ? ` (${esc(d.model)})` : ""}</option>`).join("")
+        : `<option value="">No hay equipos ZKTeco</option>`;
+    } catch { select.innerHTML = `<option value="">No se pudieron cargar los equipos</option>`; }
+    $("#pw-zk-import")?.addEventListener("click", async (e) => {
+      const deviceId = Number(select.value);
+      if (!deviceId) return;
+      const button = e.currentTarget;
+      button.disabled = true;
+      button.textContent = "Leyendo el equipo…";
+      try {
+        const r = await Api.post(`/api/access/persons/${person.id}/fingerprints/import`, { deviceId });
+        draft.zkFingers = r.fingers.map((name) => ({ name, source: select.selectedOptions[0]?.textContent }));
+        $("#pw-zk").innerHTML = zkBlock();
+        bindZk();
+        toast(`Se trajeron ${r.count} huella(s). Se están copiando a sus equipos ZKTeco.`);
+      } catch (err) {
+        toast(err.error, true);
+        button.disabled = false;
+        button.textContent = "Traer huellas desde el equipo";
+      }
+    });
   };
 
   /** Las dos manos (se elige el dedo en el dibujo) y la ficha del dedo elegido. */
@@ -1406,6 +1606,7 @@ function accessPersonModal(person, levels) {
       bindCards();
       bindFingers();
       bindFace();
+      bindZk();
       $("#pw-card-read")?.addEventListener("click", cardCaptureDialog);
     }
     if (step === 2) {

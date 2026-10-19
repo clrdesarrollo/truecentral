@@ -77,7 +77,9 @@ public sealed record AccessDeviceDto(
     /// <summary>El servidor tiene guardada su clave ISUP.</summary>
     bool HasIsupKey = false,
     /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
-    bool DisabledByLicense = false);
+    bool DisabledByLicense = false,
+    /// <summary>Por qué el equipo quedó sin feriados (controladoras con calendario propio), o null.</summary>
+    string? HolidayNote = null);
 
 public sealed record AccessDeviceWriteDto(
     string Name,
@@ -214,6 +216,26 @@ public sealed record AccessDoorWriteDto(string Name, bool Enabled);
 /// <summary>Tramo de un horario: día (0 = domingo … 6 = sábado) y minutos desde medianoche.</summary>
 public sealed record AccessScheduleSegmentDto(int Day, int StartMinutes, int EndMinutes);
 
+/// <summary>Qué hace un horario en los días feriados del calendario.</summary>
+public enum AccessHolidayMode
+{
+    /// <summary>Ignora los feriados: rige como un día normal (lo que hacía antes el VMS).</summary>
+    Normal,
+    /// <summary>Sin acceso en feriados.</summary>
+    Closed,
+    /// <summary>Tramos propios para los feriados (los tramos con día 7).</summary>
+    Special,
+}
+
+/// <summary>
+/// Un feriado del calendario de la instalación. Con <c>Yearly</c> se repite
+/// cada año en las mismas fechas (Navidad); sin él, es solo ese año.
+/// </summary>
+public sealed record AccessHolidayDto(int Id, string Name, DateOnly StartDate, DateOnly EndDate, bool Yearly,
+    DateTime CreatedAt, DateTime UpdatedAt);
+
+public sealed record AccessHolidayWriteDto(string Name, DateOnly StartDate, DateOnly EndDate, bool Yearly);
+
 public sealed record AccessScheduleDto(
     int Id,
     string Name,
@@ -226,12 +248,15 @@ public sealed record AccessScheduleDto(
     /// <summary>Niveles de acceso que lo usan (no se puede borrar si hay alguno).</summary>
     int LevelCount,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    /// <summary>Qué hace en feriados; con <see cref="AccessHolidayMode.Special"/> sus tramos de feriado van con día 7.</summary>
+    AccessHolidayMode HolidayMode = AccessHolidayMode.Normal);
 
 public sealed record AccessScheduleWriteDto(
     string Name,
     string? Description,
-    IReadOnlyList<AccessScheduleSegmentDto> Segments);
+    IReadOnlyList<AccessScheduleSegmentDto> Segments,
+    AccessHolidayMode HolidayMode = AccessHolidayMode.Normal);
 
 // --- Niveles de acceso -----------------------------------------------------
 
@@ -284,7 +309,12 @@ public sealed record AccessFingerprintDto(
     string Name,
     int? Quality,
     string? Source,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    /// <summary>"hikvision" o "zk-v10": a qué equipos puede ir (ver AccessFingerprintFormats).</summary>
+    string Format = "hikvision");
+
+/// <summary>Traer al VMS las huellas que un equipo tiene de la persona (enroladas en su menú).</summary>
+public sealed record AccessFingerprintImportDto(int DeviceId);
 
 /// <summary>
 /// Huella que manda el panel al guardar una persona. <paramref name="Template"/>

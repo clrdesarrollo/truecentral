@@ -42,7 +42,7 @@ public static class AccessCatalogApi
         s.Id, s.Name, s.Description, s.PlanNumber, s.IsBuiltIn,
         s.Segments.OrderBy(x => x.Day).ThenBy(x => x.StartMinutes)
             .Select(x => new AccessScheduleSegmentDto(x.Day, x.StartMinutes, x.EndMinutes)).ToList(),
-        levelCount, s.CreatedAt, s.UpdatedAt);
+        levelCount, s.CreatedAt, s.UpdatedAt, s.HolidayMode);
 
     private static AccessLevelDto ToDto(AccessLevel l) => new(
         l.Id, l.Name, l.Description, l.AccessScheduleId, l.AccessSchedule?.Name ?? "", l.Enabled,
@@ -76,13 +76,18 @@ public static class AccessCatalogApi
     /// se rechazan en vez de fusionarse en silencio: casi siempre son un error
     /// de tipeo del operador y conviene que lo vea.
     /// </summary>
-    private static string? ValidateSegments(IReadOnlyList<AccessScheduleSegmentDto> segments)
+    private static string? ValidateSegments(IReadOnlyList<AccessScheduleSegmentDto> segments,
+        AccessHolidayMode holidayMode = AccessHolidayMode.Normal)
     {
-        if (segments.Count == 0)
+        if (!segments.Any(s => s.Day < AccessTimeSegment.HolidayDay))
             return "El horario necesita al menos un tramo (un horario sin tramos no deja pasar a nadie).";
+        bool special = holidayMode == AccessHolidayMode.Special;
+        if (special && !segments.Any(s => s.Day == AccessTimeSegment.HolidayDay))
+            return "Con «horario especial» en feriados, indique al menos un tramo para los feriados.";
         foreach (var segment in segments)
         {
-            if (segment.Day is < 0 or > 6) return "El día de un tramo debe estar entre 0 (domingo) y 6 (sábado).";
+            if (segment.Day is < 0 or > AccessTimeSegment.HolidayDay || (segment.Day == AccessTimeSegment.HolidayDay && !special))
+                return "El día de un tramo debe estar entre 0 (domingo) y 6 (sábado); el 7 (feriados) solo con «horario especial».";
             if (segment.StartMinutes is < 0 or >= MinutesPerDay || segment.EndMinutes is < 1 or > MinutesPerDay)
                 return "Los tramos van entre las 00:00 y las 24:00.";
             if (segment.EndMinutes <= segment.StartMinutes)
@@ -111,12 +116,12 @@ public static class AccessCatalogApi
     private static string DayName(int day) => day switch
     {
         0 => "domingo", 1 => "lunes", 2 => "martes", 3 => "miércoles",
-        4 => "jueves", 5 => "viernes", _ => "sábado",
+        4 => "jueves", 5 => "viernes", 6 => "sábado", _ => "feriados",
     };
 
     /// <summary>Los tramos guardados como los quiere el asignador de ranuras.</summary>
     private static List<AccessTimeSegment> SegmentsOf(AccessSchedule schedule) =>
-        schedule.Segments.Select(s => new AccessTimeSegment(s.Day, s.StartMinutes, s.EndMinutes)).ToList();
+        AccessSyncService.PlanSegmentsOf(schedule);
 
     /// <summary>
     /// Deja el horario apuntando a la ranura que le corresponde por su
@@ -160,6 +165,7 @@ public static class AccessCatalogApi
     {
         MapDoors(app);
         MapSchedules(app);
+        MapHolidays(app);
         MapLevels(app);
         MapPersons(app);
         // El historial (buscador y reportes) vive en AccessRecordsApi.
@@ -476,7 +482,7 @@ public static class AccessCatalogApi
             if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre del horario es obligatorio (máximo 128 caracteres).");
-            if (ValidateSegments(request.Segments) is { } invalid) return Error(invalid);
+            if (ValidateSegments(request.Segments, request.HolidayMode) is { } invalid) return Error(invalid);
             string name = request.Name.Trim();
             if (await db.AccessSchedules.AnyAsync(s => s.Name == name, ct))
                 return Error("Ya existe un horario con ese nombre.", StatusCodes.Status409Conflict);
@@ -485,6 +491,7 @@ public static class AccessCatalogApi
             {
                 Name = name,
                 Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
+                HolidayMode = request.HolidayMode,
                 Segments = request.Segments
                     .Select(s => new AccessScheduleSegment { Day = s.Day, StartMinutes = s.StartMinutes, EndMinutes = s.EndMinutes })
                     .ToList(),
@@ -510,7 +517,7 @@ public static class AccessCatalogApi
                 return Error("El horario 24/7 es del sistema y no se puede editar. Cree uno nuevo si necesita otro.");
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre del horario es obligatorio (máximo 128 caracteres).");
-            if (ValidateSegments(request.Segments) is { } invalid) return Error(invalid);
+            if (ValidateSegments(request.Segments, request.HolidayMode) is { } invalid) return Error(invalid);
             string name = request.Name.Trim();
             if (await db.AccessSchedules.AnyAsync(s => s.Name == name && s.Id != id, ct))
                 return Error("Ya existe otro horario con ese nombre.", StatusCodes.Status409Conflict);
@@ -518,6 +525,7 @@ public static class AccessCatalogApi
             string before = Describe(schedule);
             schedule.Name = name;
             schedule.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+            schedule.HolidayMode = request.HolidayMode;
             db.AccessScheduleSegments.RemoveRange(schedule.Segments);
             schedule.Segments = request.Segments
                 .Select(s => new AccessScheduleSegment { Day = s.Day, StartMinutes = s.StartMinutes, EndMinutes = s.EndMinutes })
@@ -565,9 +573,111 @@ public static class AccessCatalogApi
     private static string Describe(AccessSchedule schedule)
     {
         if (schedule.Segments.Count == 0) return "sin tramos";
-        return string.Join("; ", schedule.Segments
+        string week = string.Join("; ", schedule.Segments
+            .Where(s => s.Day < AccessTimeSegment.HolidayDay || schedule.HolidayMode == AccessHolidayMode.Special)
             .OrderBy(s => s.Day).ThenBy(s => s.StartMinutes)
             .Select(s => $"{DayName(s.Day)} {Hhmm(s.StartMinutes)}-{Hhmm(s.EndMinutes)}"));
+        return schedule.HolidayMode switch
+        {
+            AccessHolidayMode.Closed => week + "; sin acceso en feriados",
+            AccessHolidayMode.Normal => week + "; feriados como día normal",
+            _ => week,
+        };
+    }
+
+    // ==================================================================
+    // Feriados
+    // ==================================================================
+
+    private static AccessHolidayDto ToDto(AccessHoliday h) =>
+        new(h.Id, h.Name, h.StartDate, h.EndDate, h.Yearly, h.CreatedAt, h.UpdatedAt);
+
+    private static string Describe(AccessHoliday h) =>
+        (h.StartDate == h.EndDate ? $"{h.StartDate:dd-MM-yyyy}" : $"{h.StartDate:dd-MM-yyyy} al {h.EndDate:dd-MM-yyyy}") +
+        (h.Yearly ? ", todos los años" : "");
+
+    private static string? ValidateHoliday(AccessHolidayWriteDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
+            return "El nombre del feriado es obligatorio (máximo 128 caracteres).";
+        if (request.EndDate < request.StartDate) return "El último día no puede ser anterior al primero.";
+        if (request.EndDate.DayNumber - request.StartDate.DayNumber > 30)
+            return "Un feriado puede durar hasta 31 días (para más, cargue varios).";
+        if (request.StartDate.Year < 2000 || request.EndDate.Year > 2037)
+            return "Las fechas van entre 2000 y 2037 (el tope de los equipos).";
+        return null;
+    }
+
+    /// <summary>
+    /// El calendario de feriados, uno solo para toda la instalación. Cambiarlo
+    /// reescribe a las personas cuyos horarios no ignoran los feriados y los
+    /// calendarios de las controladoras que llevan uno propio.
+    /// </summary>
+    private static void MapHolidays(WebApplication app)
+    {
+        app.MapGet("/api/access/holidays", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.PersonsView, Permissions.AccessConfigure) is { } failure) return failure;
+            var holidays = await db.AccessHolidays.AsNoTracking().OrderBy(h => h.StartDate).ToListAsync(ct);
+            return Results.Ok(holidays.Select(ToDto));
+        });
+
+        app.MapPost("/api/access/holidays", async (HttpContext ctx, AccessHolidayWriteDto request, VmsDbContext db,
+            AccessSyncService sync, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
+            if (ValidateHoliday(request) is { } invalid) return Error(invalid);
+            var holiday = new AccessHoliday
+            {
+                Name = request.Name.Trim(), StartDate = request.StartDate, EndDate = request.EndDate, Yearly = request.Yearly,
+            };
+            db.AccessHolidays.Add(holiday);
+            await AccessSyncService.MarkHolidayDependentsPendingAsync(db, ct);
+            await db.SaveChangesAsync(ct);
+            sync.RequestSync();
+            await audit.LogAsync(ctx, "access", "holiday-created",
+                targetType: "access-holiday", targetId: holiday.Id.ToString(), targetName: holiday.Name,
+                detail: $"Agregó el feriado '{holiday.Name}' ({Describe(holiday)}).");
+            return Results.Ok(ToDto(holiday));
+        });
+
+        app.MapPut("/api/access/holidays/{id:int}", async (HttpContext ctx, int id, AccessHolidayWriteDto request,
+            VmsDbContext db, AccessSyncService sync, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
+            var holiday = await db.AccessHolidays.FirstOrDefaultAsync(h => h.Id == id, ct);
+            if (holiday is null) return Results.NotFound();
+            if (ValidateHoliday(request) is { } invalid) return Error(invalid);
+            string before = $"'{holiday.Name}' ({Describe(holiday)})";
+            holiday.Name = request.Name.Trim();
+            holiday.StartDate = request.StartDate;
+            holiday.EndDate = request.EndDate;
+            holiday.Yearly = request.Yearly;
+            holiday.UpdatedAt = DateTime.UtcNow;
+            await AccessSyncService.MarkHolidayDependentsPendingAsync(db, ct);
+            await db.SaveChangesAsync(ct);
+            sync.RequestSync();
+            await audit.LogAsync(ctx, "access", "holiday-updated",
+                targetType: "access-holiday", targetId: holiday.Id.ToString(), targetName: holiday.Name,
+                detail: $"Modificó el feriado {before} → '{holiday.Name}' ({Describe(holiday)}).");
+            return Results.Ok(ToDto(holiday));
+        });
+
+        app.MapDelete("/api/access/holidays/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
+            AccessSyncService sync, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
+            var holiday = await db.AccessHolidays.FirstOrDefaultAsync(h => h.Id == id, ct);
+            if (holiday is null) return Results.NotFound();
+            db.AccessHolidays.Remove(holiday);
+            await AccessSyncService.MarkHolidayDependentsPendingAsync(db, ct);
+            await db.SaveChangesAsync(ct);
+            sync.RequestSync();
+            await audit.LogAsync(ctx, "access", "holiday-deleted",
+                targetType: "access-holiday", targetId: id.ToString(), targetName: holiday.Name,
+                detail: $"Eliminó el feriado '{holiday.Name}' ({Describe(holiday)}).");
+            return Results.Ok();
+        });
     }
 
     private static string Hhmm(int minutes) => $"{minutes / 60:00}:{minutes % 60:00}";
@@ -956,6 +1066,60 @@ public static class AccessCatalogApi
 
         // Reintentar la escritura de UNA persona (la típica: se arregló el
         // equipo y el operador no quiere esperar el reintento solo).
+        // Traer las huellas que un equipo tiene de la persona (las enroladas en
+        // el menú de un terminal ZKTeco MA, por ejemplo). Reemplazan las de ese
+        // formato que ya tuviera, y se reparten solas a sus demás equipos.
+        app.MapPost("/api/access/persons/{id:int}/fingerprints/import", async (HttpContext ctx, int id,
+            AccessFingerprintImportDto request, VmsDbContext db, AccessControlService access, CredentialProtector protector,
+            AccessSyncService sync, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
+            var person = await db.AccessPersons.Include(p => p.Fingerprints).FirstOrDefaultAsync(p => p.Id == id, ct);
+            if (person is null) return Results.NotFound();
+            var device = await db.AccessDevices.FirstOrDefaultAsync(d => d.Id == request.DeviceId, ct);
+            if (device is null) return Error("Ese equipo ya no existe.", StatusCodes.Status404NotFound);
+            if (!access.SupportsFingerprintImport(device.DriverKey))
+                return Error($"El equipo '{device.Name}' no permite leer las huellas que tiene guardadas.");
+
+            IReadOnlyList<AccessFingerprintData> found;
+            try { found = await access.DriverOf(device).ReadFingerprintsAsync(access.ConnectionOf(device), person.EmployeeNo, ct); }
+            catch (DriverException ex)
+            {
+                await audit.LogAsync(ctx, "access", "person-fingerprints-imported",
+                    targetType: "access-person", targetId: person.Id.ToString(), targetName: person.FullName,
+                    detail: $"No se pudieron traer las huellas de '{person.FullName}' desde '{device.Name}': {ex.Message}",
+                    success: false);
+                return Error(ex.Message, StatusCodes.Status502BadGateway);
+            }
+            if (found.Count == 0)
+                return Error($"El equipo '{device.Name}' no tiene huellas de esta persona. Enrólelas en el menú del equipo " +
+                             $"con el ID de usuario {person.EmployeeNo} y vuelva a intentar.");
+
+            string format = found[0].Format;
+            foreach (var old in person.Fingerprints.Where(f => f.Format == format).ToList())
+            {
+                db.AccessFingerprints.Remove(old);
+                person.Fingerprints.Remove(old);
+            }
+            foreach (var f in found)
+                person.Fingerprints.Add(new AccessFingerprint
+                {
+                    AccessPersonId = person.Id, Number = f.Number, Format = f.Format,
+                    TemplateCiphertext = protector.Protect(f.Template),
+                    Source = Trimmed($"Equipo {device.Name}"),
+                });
+            person.UpdatedAt = DateTime.UtcNow;
+            await AccessSyncService.MarkPendingAsync(db, [person.Id], ct);
+            await db.SaveChangesAsync(ct);
+            sync.RequestSync();
+
+            string fingers = string.Join(", ", found.Select(f => AccessFingers.NameOf(f.Number)));
+            await audit.LogAsync(ctx, "access", "person-fingerprints-imported",
+                targetType: "access-person", targetId: person.Id.ToString(), targetName: person.FullName,
+                detail: $"Trajo {found.Count} huella(s) de '{person.FullName}' desde '{device.Name}' ({fingers}).");
+            return Results.Ok(new { Count = found.Count, Fingers = found.Select(f => AccessFingers.NameOf(f.Number)) });
+        });
+
         app.MapPost("/api/access/persons/{id:int}/sync", async (HttpContext ctx, int id, VmsDbContext db,
             AccessSyncService sync, AuditService audit, CancellationToken ct) =>
         {
@@ -1112,8 +1276,11 @@ public static class AccessCatalogApi
     {
         if (wanted is null) return "";   // el formulario no las administra: no se tocan
 
+        // El formulario administra las del lector USB (Hikvision). Las ZKTeco
+        // entran por "Traer huellas desde un equipo" y aquí no se tocan.
+        const string usb = AccessFingerprintFormats.Hikvision;
         var changes = new List<string>();
-        foreach (var gone in person.Fingerprints.Where(f => wanted.All(w => w.Number != f.Number)).ToList())
+        foreach (var gone in person.Fingerprints.Where(f => f.Format == usb && wanted.All(w => w.Number != f.Number)).ToList())
         {
             db.AccessFingerprints.Remove(gone);
             person.Fingerprints.Remove(gone);
@@ -1122,7 +1289,7 @@ public static class AccessCatalogApi
 
         foreach (var write in wanted)
         {
-            var existing = person.Fingerprints.FirstOrDefault(f => f.Number == write.Number);
+            var existing = person.Fingerprints.FirstOrDefault(f => f.Number == write.Number && f.Format == usb);
             if (write.Template is null)
             {
                 if (existing is null) changes.Add($"{AccessFingers.NameOf(write.Number)} sin captura");
@@ -1137,6 +1304,7 @@ public static class AccessCatalogApi
                     TemplateCiphertext = protector.Protect(write.Template),
                     Quality = write.Quality,
                     Source = Trimmed(write.Source),
+                    Format = usb,
                 });
                 changes.Add($"{AccessFingers.NameOf(write.Number)} enrolada");
             }

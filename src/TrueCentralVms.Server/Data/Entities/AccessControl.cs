@@ -34,6 +34,13 @@ public class AccessSchedule
     /// <summary>El horario 24/7 que crea el servidor: no se edita ni se borra.</summary>
     public bool IsBuiltIn { get; set; }
 
+    /// <summary>
+    /// Qué hace en los feriados del calendario. Con
+    /// <see cref="AccessHolidayMode.Special"/> sus tramos de feriado son los de
+    /// <see cref="AccessScheduleSegment.Day"/> = 7.
+    /// </summary>
+    public AccessHolidayMode HolidayMode { get; set; } = AccessHolidayMode.Normal;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
@@ -68,7 +75,25 @@ public class AccessPlanSlot
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
-/// <summary>Un tramo de un día del horario. Día 0 = domingo, como <see cref="DayOfWeek"/>.</summary>
+/// <summary>
+/// Un feriado del calendario de la instalación (uno solo para todos los
+/// equipos). Los horarios deciden qué hacer en ellos
+/// (<see cref="AccessSchedule.HolidayMode"/>).
+/// </summary>
+public class AccessHoliday
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public DateOnly StartDate { get; set; }
+    /// <summary>Último día del feriado (igual a <see cref="StartDate"/> si dura un día).</summary>
+    public DateOnly EndDate { get; set; }
+    /// <summary>Se repite cada año en las mismas fechas.</summary>
+    public bool Yearly { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>Un tramo de un día del horario. Día 0 = domingo, como <see cref="DayOfWeek"/>; 7 = feriado.</summary>
 public class AccessScheduleSegment
 {
     public int Id { get; set; }
@@ -233,6 +258,12 @@ public class AccessFingerprint
 
     /// <summary>De dónde salió ("Lector USB PUESTO-01"), para saber quién la tomó.</summary>
     public string? Source { get; set; }
+
+    /// <summary>
+    /// Formato de la plantilla (<see cref="TrueCentralVms.Core.Drivers.AccessFingerprintFormats"/>):
+    /// solo va a los equipos que lo entienden. Un mismo dedo puede estar en los dos.
+    /// </summary>
+    public string Format { get; set; } = TrueCentralVms.Core.Drivers.AccessFingerprintFormats.Hikvision;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -33,7 +33,7 @@ namespace TrueCentralVms.Server.Services;
 /// la vista (equipo caído, credencial rechazada, marca que no admite padrón) y
 /// se reintenta en la pasada siguiente.
 /// </summary>
-public sealed class AccessSyncService(
+public sealed partial class AccessSyncService(
     IServiceScopeFactory scopeFactory,
     AccessControlService access,
     CredentialProtector credentials,
@@ -126,6 +126,14 @@ public sealed class AccessSyncService(
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            try
+            {
+                await RefreshHolidaysAsync(stoppingToken);
+                await SyncHolidayCalendarsAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (Exception ex) { logger.LogWarning(ex, "La escritura de los feriados en los equipos falló."); }
+
             try { await SyncPendingAsync(stoppingToken, retryFailedNow: false); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception ex) { logger.LogWarning(ex, "La escritura del padrón en los equipos falló."); }
@@ -576,15 +584,16 @@ public sealed class AccessSyncService(
         if (!person.Enabled || person.ValidTo <= DateTime.UtcNow) return result;
 
         // Puerta → tramos que la persona tiene sobre ella, sumando todos los
-        // niveles que se la dan.
+        // niveles que se la dan (con sus tramos de feriado, día 7).
         var byDoor = new Dictionary<int, (AccessDoor Door, List<AccessTimeSegment> Segments, List<string> Sources)>();
+        var ignoresHolidays = new HashSet<int>();
         foreach (var assignment in person.Levels)
         {
             var level = assignment.AccessLevel;
             if (level is null || !level.Enabled || level.AccessSchedule is null) continue;
-            var segments = level.AccessSchedule.Segments
-                .Select(s => new AccessTimeSegment(s.Day, s.StartMinutes, s.EndMinutes)).ToList();
-            if (segments.Count == 0) continue;   // un horario sin tramos no deja pasar a nadie
+            var segments = PlanSegmentsOf(level.AccessSchedule);
+            if (!segments.Any(s => s.Day < AccessTimeSegment.HolidayDay)) continue;   // sin tramos no deja pasar a nadie
+            bool normal = level.AccessSchedule.HolidayMode == AccessHolidayMode.Normal;
 
             foreach (var levelDoor in level.Doors)
             {
@@ -593,6 +602,7 @@ public sealed class AccessSyncService(
                 if (!byDoor.TryGetValue(door.Id, out var entry))
                     byDoor[door.Id] = entry = (door, [], []);
                 entry.Segments.AddRange(segments);
+                if (normal) ignoresHolidays.Add(door.Id);
                 if (!entry.Sources.Contains(level.AccessSchedule.Name)) entry.Sources.Add(level.AccessSchedule.Name);
             }
         }
@@ -601,11 +611,19 @@ public sealed class AccessSyncService(
         // Cada conjunto de tramos necesita su ranura en los equipos.
         var rights = new Dictionary<int, List<AccessDoorRight>>();
         var slotsByDevice = new Dictionary<int, Dictionary<int, AccessWeekPlan>>();
+        List<AccessHolidayDate>? upcoming = null;
         foreach (var (door, segments, sources) in byDoor.Values)
         {
-            var canonical = Canonical(segments);
+            var canonical = MergeHolidays(Canonical(segments), ignoresHolidays.Contains(door.Id));
             var slot = await SlotForAsync(db, canonical, string.Join(" + ", sources), ct);
             var plan = new AccessWeekPlan(slot.Number, slot.Label, canonical);
+            // Los feriados viajan solo con los horarios que no los ignoran.
+            if (plan.HolidayMode != AccessHolidayMode.Normal)
+            {
+                upcoming ??= UpcomingHolidays(await db.AccessHolidays.AsNoTracking().ToListAsync(ct),
+                    DateOnly.FromDateTime(DateTime.Now));
+                plan = plan with { Holidays = upcoming };
+            }
 
             int deviceId = door.AccessDeviceId;
             if (!rights.TryGetValue(deviceId, out var doorRights)) rights[deviceId] = doorRights = [];
@@ -621,7 +639,7 @@ public sealed class AccessSyncService(
         var cards = person.Cards.Where(c => c.Enabled).Select(c => c.Number).OrderBy(n => n).ToList();
         // Las plantillas se descifran una sola vez, no una por equipo.
         var fingerprints = person.Fingerprints.OrderBy(f => f.Number)
-            .Select(f => new AccessFingerprintData(f.Number, credentials.Unprotect(f.TemplateCiphertext)))
+            .Select(f => new AccessFingerprintData(f.Number, credentials.Unprotect(f.TemplateCiphertext), f.Format))
             .ToList();
         // La foto también se descifra una sola vez: pesa bastante más que una
         // plantilla y va a los equipos con cámara tal cual está.
@@ -653,7 +671,8 @@ public sealed class AccessSyncService(
                 person.ValidTo,
                 string.IsNullOrWhiteSpace(pin) ? null : pin,
                 cards,
-                biometric ? fingerprints : [],
+                // Cada equipo, solo las huellas de su formato (las marcas no se entienden entre sí).
+                biometric ? fingerprints.Where(f => f.Format == access.FingerprintFormatOf(device!.DriverKey)).ToList() : [],
                 camera ? face : null,
                 doorRights.OrderBy(d => d.DoorNumber).ToList());
             result[deviceId] = new DeviceTarget(plan, slotsByDevice[deviceId].Values.ToList());
@@ -671,7 +690,7 @@ public sealed class AccessSyncService(
         person.ValidFrom, person.ValidTo, person.Enabled, person.PinCiphertext.Length > 0,
         person.Cards.OrderBy(c => c.Id).Select(c => new AccessCardDto(c.Id, c.Number, c.Enabled)).ToList(),
         person.Fingerprints.OrderBy(f => f.Number)
-            .Select(f => new AccessFingerprintDto(f.Number, AccessFingers.NameOf(f.Number), f.Quality, f.Source, f.CreatedAt))
+            .Select(f => new AccessFingerprintDto(f.Number, AccessFingers.NameOf(f.Number), f.Quality, f.Source, f.CreatedAt, f.Format))
             .ToList(),
         person.Face is { } face
             ? new AccessFaceDto(face.Bytes, face.ContentType, face.Source, face.CreatedAt)

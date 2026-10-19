@@ -121,9 +121,11 @@ builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionAccessDriver
 builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionIsupAccessDriverFactory>();
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaAccessDriverFactory>();
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.ZkTeco.ZkTecoAccessDriverFactory>();
+builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.ZkTeco.C3AccessDriverFactory>();
 builder.Services.AddSingleton<AccessDriverRegistry>();
 // Configuración propia de los equipos (puertas y lectores), por marca.
 builder.Services.AddSingleton<IAccessDeviceSettingsProvider, HikvisionAccessSettingsProvider>();
+builder.Services.AddSingleton<IAccessDeviceSettingsProvider, TrueCentralVms.Drivers.ZkTeco.C3AccessSettingsProvider>();
 builder.Services.AddSingleton<AccessControlService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessControlService>());
 // El padrón (personas, credenciales, horarios y niveles) lo escribe el
@@ -150,6 +152,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>())
 // Módulos de E/S: drivers, registro y servicio (una conexión por módulo, sondeo
 // de entradas y órdenes a los relés).
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Adam.AdamIoDriverFactory>();
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.ZkTeco.C3IoDriverFactory>();
 builder.Services.AddSingleton<IoModuleDriverRegistry>();
 builder.Services.AddSingleton<IoModuleService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IoModuleService>());

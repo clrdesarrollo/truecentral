@@ -1135,6 +1135,9 @@ async function changeIpModal(d, devices, knownPassword) {
   // DNS propuestos: la puerta de enlace (casi siempre resuelve) y uno público.
   const dns1 = gateway || "";
   const dns2 = "8.8.8.8";
+  // ZKTeco (protocolo C3): la orden va por MAC, sin usuario ni clave, y solo
+  // lleva IP fija, máscara y puerta de enlace (sin DHCP, DNS ni hora).
+  const zk = d.brand === "ZKTeco";
 
   openModal(`
     <h3>Cambiar IP</h3>
@@ -1145,7 +1148,7 @@ async function changeIpModal(d, devices, knownPassword) {
     </p>
     <div id="dip-error"></div>
     <form id="dip-form">
-      <div class="field">
+      <div class="field ${zk ? "hidden" : ""}">
         <label>Modo</label>
         <div class="segmented" role="radiogroup">
           <label><input type="radio" name="dip-mode" value="static" ${d.dhcp ? "" : "checked"}> IP fija</label>
@@ -1168,7 +1171,7 @@ async function changeIpModal(d, devices, knownPassword) {
           <label>Puerta de enlace (opcional)</label>
           <input id="dip-gw" value="${esc(gateway)}">
         </div>
-        <div class="form-grid">
+        ${zk ? "" : `<div class="form-grid">
           <div class="field">
             <label>DNS preferido (opcional)</label>
             <input id="dip-dns1" value="${esc(dns1)}" placeholder="vacío = no cambiar">
@@ -1177,13 +1180,13 @@ async function changeIpModal(d, devices, knownPassword) {
             <label>DNS alternativo (opcional)</label>
             <input id="dip-dns2" value="${esc(dns2)}">
           </div>
-        </div>
+        </div>`}
       </div>
       <div id="dip-dhcp-note" class="muted hidden" style="font-size:12px;margin:-4px 0 12px">
         El equipo tomará IP, máscara, puerta de enlace y DNS del servidor DHCP de la red. TrueCentral lo
         busca después por su MAC para mostrar la IP que le tocó.
       </div>
-      ${knownPassword ? "" : `
+      ${knownPassword || zk ? "" : `
       <div class="form-grid">
         <div class="field">
           <label>Usuario del equipo</label>
@@ -1194,13 +1197,16 @@ async function changeIpModal(d, devices, knownPassword) {
           <input id="dip-pass" type="password" autocomplete="current-password" required>
         </div>
       </div>`}
-      <label class="check-row" style="display:flex;gap:8px;align-items:flex-start;margin:0 0 12px">
+      ${zk ? "" : `<label class="check-row" style="display:flex;gap:8px;align-items:flex-start;margin:0 0 12px">
         <input type="checkbox" id="dip-time" ${knownPassword ? "checked" : ""}>
         <span>Sincronizar fecha, hora y zona horaria (con horario de verano) con este servidor</span>
-      </label>
+      </label>`}
       <div class="muted" style="font-size:12px;margin:-4px 0 12px" id="dip-static-note">
-        Se comprueba antes que la IP nueva no esté ocupada. Los DNS se configuran entrando al equipo
-        una vez que está en su IP nueva (con el mismo usuario y contraseña).
+        ${zk
+          ? `Se comprueba antes que la IP nueva no esté ocupada. La orden va por la MAC del equipo y no pide clave;
+             la hora se ajusta después de agregarlo (Hora y mantenimiento).`
+          : `Se comprueba antes que la IP nueva no esté ocupada. Los DNS se configuran entrando al equipo
+             una vez que está en su IP nueva (con el mismo usuario y contraseña).`}
       </div>
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="dip-cancel">Cancelar</button>
@@ -1263,11 +1269,11 @@ async function changeIpModal(d, devices, knownPassword) {
       ip: $("#dip-ip").value.trim(),
       mask: $("#dip-mask").value.trim(),
       gateway: $("#dip-gw").value.trim(),
-      dns1: $("#dip-dns1").value.trim(),
-      dns2: $("#dip-dns2").value.trim(),
-      username: knownPassword ? "admin" : $("#dip-user").value.trim(),
-      password: knownPassword ?? $("#dip-pass").value,
-      syncTime: $("#dip-time").checked,
+      dns1: $("#dip-dns1")?.value.trim() ?? "",
+      dns2: $("#dip-dns2")?.value.trim() ?? "",
+      username: knownPassword || zk ? "admin" : $("#dip-user").value.trim(),
+      password: knownPassword ?? $("#dip-pass")?.value ?? "",
+      syncTime: $("#dip-time")?.checked ?? false,
     };
     if (!dhcp) {
       if (!isIPv4(body.ip)) { showError("Escriba la IP nueva completa (por ejemplo 192.168.10.60)."); return; }

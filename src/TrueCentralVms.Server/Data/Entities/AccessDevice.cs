@@ -46,6 +46,15 @@ public class AccessDevice : IIsupEquipment
     public bool SupportsEvents { get; set; }
     public bool SupportsCards { get; set; }
     public bool SupportsFingerprint { get; set; }
+
+    /// <summary>
+    /// Huella del calendario de feriados escrito en el equipo, en los que llevan
+    /// uno propio (ZKTeco C3); null = hay que escribirlo.
+    /// </summary>
+    public string? AppliedHolidayHash { get; set; }
+
+    /// <summary>Por qué el equipo quedó sin feriados (C3 con un horario que los ignora), o null.</summary>
+    public string? HolidayNote { get; set; }
     public bool SupportsFace { get; set; }
     /// <summary>Cupo de personas del equipo (null si no lo informa).</summary>
     public int? UserCapacity { get; set; }

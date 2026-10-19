@@ -6,8 +6,13 @@ using TrueCentralVms.Drivers.ZkTeco;
 
 namespace TrueCentralVms.Server.Services;
 
-/// <summary>Equipo ZKTeco que respondió el sondeo de la red local.</summary>
-public sealed record ZkDiscoveredDto(string Ip, int Port, string Model, string Serial, string Mac);
+/// <summary>
+/// Equipo ZKTeco que respondió el sondeo de la red local. <c>DriverKey</c>
+/// distingue los terminales autónomos (<c>zkteco-tcp</c>) de las controladoras
+/// inBio/C3 (<c>zkteco-c3</c>), que hablan otro protocolo.
+/// </summary>
+public sealed record ZkDiscoveredDto(string Ip, int Port, string Model, string Serial, string Mac,
+    string DriverKey = "zkteco-tcp", string SubnetMask = "", string Gateway = "", string Firmware = "");
 
 /// <summary>
 /// Descubrimiento de equipos ZKTeco. El protocolo del fabricante no tiene un
@@ -20,6 +25,12 @@ public sealed record ZkDiscoveredDto(string Ip, int Port, string Model, string S
 /// clave de comunicación de fábrica (0) y se le preguntan sus datos. Un equipo
 /// con clave propia igual aparece en la lista, pero sin identificación: se
 /// agrega escribiendo su clave en el formulario.
+///
+/// Las controladoras inBio y C3 no contestan ese saludo: tienen su propia
+/// búsqueda (<see cref="C3Protocol.BuildDiscovery"/>, UDP 65535) y en la
+/// respuesta ya vienen modelo, serie, MAC, máscara y gateway, así que no se les
+/// abre sesión. Como los terminales, contestan por unicast vía su gateway: una
+/// controladora en otra subred sin ruta hacia el servidor no aparece.
 /// </summary>
 public static class ZkDiscovery
 {
@@ -37,12 +48,17 @@ public static class ZkDiscovery
         TimeSpan window, ILogger? logger = null, IPAddress? directedHost = null,
         IReadOnlySet<string>? skipIdentify = null, CancellationToken ct = default)
     {
+        var c3Task = ProbeC3Async(window, directedHost, ct);
         var responders = await ProbeAsync(window, directedHost, ct);
-        if (responders.Count == 0)
+        var controllers = await c3Task;
+        if (responders.Count == 0 && controllers.Count == 0)
         {
             logger?.LogInformation("ZKTeco: ningún equipo respondió el sondeo en {Window}s.", window.TotalSeconds);
             return [];
         }
+        // Una controladora no contesta el saludo de terminal, pero si algún
+        // firmware lo hiciera se queda la identificación de la búsqueda C3.
+        responders.RemoveAll(ip => controllers.Any(c => c.Ip == ip));
 
         using var limiter = new SemaphoreSlim(IdentifyParallelism);
         var devices = await Task.WhenAll(responders.Select(async ip =>
@@ -54,8 +70,9 @@ public static class ZkDiscovery
             finally { limiter.Release(); }
         }));
 
-        logger?.LogInformation("ZKTeco: {Count} equipo(s) en {Window}s.", devices.Length, window.TotalSeconds);
-        return devices.OrderBy(d => d.Ip, StringComparer.OrdinalIgnoreCase).ToList();
+        logger?.LogInformation("ZKTeco: {Count} terminal(es) y {Controllers} controladora(s) en {Window}s.",
+            devices.Length, controllers.Count, window.TotalSeconds);
+        return devices.Concat(controllers).OrderBy(d => d.Ip, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>Direcciones que contestaron el saludo del SDK por UDP.</summary>
@@ -69,14 +86,7 @@ public static class ZkDiscovery
         socket.EnableBroadcast = true;
         socket.Bind(new IPEndPoint(IPAddress.Any, 0));   // las respuestas llegan al puerto de origen
 
-        var broadcasts = NetworkInterface.GetAllNetworkInterfaces()
-            .Where(n => n.OperationalStatus == OperationalStatus.Up &&
-                        n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-            .SelectMany(n => n.GetIPProperties().UnicastAddresses)
-            .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && a.IPv4Mask is not null)
-            .Select(a => BroadcastOf(a.Address, a.IPv4Mask!))
-            .Distinct()
-            .ToList();
+        var broadcasts = LocalBroadcasts();
 
         void SendProbes()
         {
@@ -128,6 +138,152 @@ public static class ZkDiscovery
         }
         return found;
     }
+
+    /// <summary>
+    /// Controladoras inBio/C3 que contestaron su búsqueda. La respuesta sale
+    /// del puerto 65535 de la controladora hacia el puerto de origen del sondeo.
+    /// </summary>
+    private static async Task<List<ZkDiscoveredDto>> ProbeC3Async(TimeSpan window, IPAddress? directedHost, CancellationToken ct)
+    {
+        byte[] probe = C3Protocol.BuildDiscovery();
+
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        socket.EnableBroadcast = true;
+        socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+
+        var broadcasts = LocalBroadcasts();
+        void SendProbes()
+        {
+            foreach (var address in broadcasts)
+                try { socket.SendTo(probe, new IPEndPoint(address, C3Protocol.DiscoveryPort)); } catch { }
+            try { socket.SendTo(probe, new IPEndPoint(IPAddress.Broadcast, C3Protocol.DiscoveryPort)); } catch { }
+            if (directedHost is not null)
+                try { socket.SendTo(probe, new IPEndPoint(directedHost, C3Protocol.DiscoveryPort)); } catch { }
+        }
+
+        SendProbes();
+
+        var found = new Dictionary<string, ZkDiscoveredDto>(StringComparer.OrdinalIgnoreCase);
+        var buffer = new byte[2048];
+        var deadline = DateTime.UtcNow + window;
+        bool resent = false;
+
+        while (!ct.IsCancellationRequested)
+        {
+            var remaining = deadline - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero) break;
+            if (!resent && remaining < window / 2)
+            {
+                SendProbes();
+                resent = true;
+            }
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(remaining);
+            SocketReceiveFromResult result;
+            try
+            {
+                result = await socket.ReceiveFromAsync(
+                    buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), timeoutCts.Token);
+            }
+            catch (OperationCanceledException) { break; }
+            catch (SocketException) { continue; }
+
+            // El propio sondeo vuelve por broadcast: no es respuesta (no es ReplyOk ni trae "MAC=").
+            if (!C3Protocol.TryReadFrame(buffer.AsSpan(0, result.ReceivedBytes), out byte command, out var data) ||
+                command != C3Protocol.ReplyOk)
+                continue;
+            var values = C3Protocol.ParseKeyValues(data);
+            if (!values.TryGetValue("MAC", out var mac) || mac.Length == 0) continue;
+
+            // La IP es la que la controladora dice tener: si está en otra subred
+            // es la que hay que mostrar (y la que hay que cambiar).
+            string ip = values.GetValueOrDefault("IP") is { Length: > 0 } announced
+                ? announced : ((IPEndPoint)result.RemoteEndPoint).Address.ToString();
+            found[mac] = new ZkDiscoveredDto(ip, C3Protocol.DefaultPort,
+                values.GetValueOrDefault("Device") ?? "", values.GetValueOrDefault("SN") ?? "",
+                mac.Replace(':', '-').ToLowerInvariant(), "zkteco-c3",
+                values.GetValueOrDefault("NetMask") ?? "", values.GetValueOrDefault("GATEIPAddress") ?? "",
+                values.GetValueOrDefault("Ver") ?? "");
+        }
+        return found.Values.ToList();
+    }
+
+    /// <summary>
+    /// Cambia IP, máscara y puerta de enlace de una controladora C3 por su MAC
+    /// (lo que hace ZKAccess con "Modificar dirección IP"): una trama
+    /// <see cref="C3Protocol.CmdModifyIp"/> por broadcast desde cada interfaz,
+    /// así llega aunque la controladora esté en otra subred del mismo cable. No
+    /// lleva clave. Validado contra una inBio480. Devuelve true si alguna
+    /// respondió que sí; una en otra subred aplica el cambio pero su respuesta
+    /// puede no volver (sale por su puerta de enlace), así que el llamador
+    /// confirma igual con una búsqueda.
+    /// </summary>
+    public static async Task<bool> ChangeNetworkAsync(string mac, string ip, string mask, string gateway, CancellationToken ct)
+    {
+        string normalized = string.Join(':', mac.Replace("-", "").Replace(":", "").ToUpperInvariant().Chunk(2).Select(c => new string(c)));
+        string text = $"MAC={normalized},IPAddress={ip},NetMask={mask}" + (gateway.Length > 0 ? $",GATEIPAddress={gateway}" : "");
+        byte[] frame = C3Protocol.BuildFrame(C3Protocol.CmdModifyIp, System.Text.Encoding.ASCII.GetBytes(text));
+
+        var sockets = new List<Socket>();
+        try
+        {
+            // Una sesión por interfaz: el broadcast general sale por una sola.
+            foreach (var local in NetworkInterface.GetAllNetworkInterfaces()
+                         .Where(n => n.OperationalStatus == OperationalStatus.Up &&
+                                     n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                         .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+                         .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && a.IPv4Mask is not null))
+            {
+                var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp) { EnableBroadcast = true };
+                try
+                {
+                    socket.Bind(new IPEndPoint(local.Address, 0));
+                    socket.SendTo(frame, new IPEndPoint(IPAddress.Broadcast, C3Protocol.DiscoveryPort));
+                    socket.SendTo(frame, new IPEndPoint(BroadcastOf(local.Address, local.IPv4Mask!), C3Protocol.DiscoveryPort));
+                    sockets.Add(socket);
+                }
+                catch (SocketException) { socket.Dispose(); }
+            }
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(3));
+            var replies = sockets.Select(async socket =>
+            {
+                var buffer = new byte[512];
+                while (!timeout.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var result = await socket.ReceiveFromAsync(buffer, SocketFlags.None,
+                            new IPEndPoint(IPAddress.Any, 0), timeout.Token);
+                        // El propio broadcast vuelve: se distingue porque no es una respuesta.
+                        if (C3Protocol.TryReadFrame(buffer.AsSpan(0, result.ReceivedBytes), out byte command, out _) &&
+                            command == C3Protocol.ReplyOk)
+                            return true;
+                    }
+                    catch (OperationCanceledException) { break; }
+                    catch (SocketException) { }
+                }
+                return false;
+            }).ToList();
+            return (await Task.WhenAll(replies)).Any(ok => ok);
+        }
+        finally
+        {
+            foreach (var socket in sockets) socket.Dispose();
+        }
+    }
+
+    /// <summary>Broadcast de cada subred IPv4 de las interfaces activas.</summary>
+    private static List<IPAddress> LocalBroadcasts() => NetworkInterface.GetAllNetworkInterfaces()
+        .Where(n => n.OperationalStatus == OperationalStatus.Up &&
+                    n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+        .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+        .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && a.IPv4Mask is not null)
+        .Select(a => BroadcastOf(a.Address, a.IPv4Mask!))
+        .Distinct()
+        .ToList();
 
     /// <summary>Modelo y serie del equipo, si acepta la clave de comunicación de fábrica.</summary>
     private static async Task<ZkDiscoveredDto> IdentifyAsync(string ip, CancellationToken ct)

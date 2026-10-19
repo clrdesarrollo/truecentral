@@ -16,9 +16,11 @@ public sealed class ZkTecoAccessDriverFactory : IAccessControlDriverFactory
 }
 
 /// <summary>
-/// Control de acceso ZKTeco (terminales autónomos tipo MA/F/SF y controladoras
-/// inBio) por el protocolo propio del fabricante en el puerto TCP 4370
-/// (<see cref="ZkProtocol"/>), el mismo que usan ZKAccess y ZKBioSecurity.
+/// Control de acceso ZKTeco: terminales autónomos (familias F/SF/iClock) por el
+/// protocolo del Standalone SDK en el puerto TCP 4370 (<see cref="ZkProtocol"/>).
+/// Las controladoras inBio/C3 y los terminales de acceso MA300/MA500 hablan
+/// OTRO protocolo en el mismo puerto (el del PullSDK) y van por
+/// <see cref="C3AccessDriver"/>: no contestan los mensajes de este.
 ///
 /// Qué lee el administrador de dispositivos: nombre de modelo
 /// (<c>~DeviceName</c>), serie (<c>~SerialNumber</c>), firmware, plataforma,
