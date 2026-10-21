@@ -139,8 +139,7 @@ async function renderAnpr() {
     .map((n) => `<option value="${n}" ${anprState.take === n ? "selected" : ""}>${n}</option>`).join("");
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Lecturas de patentes</h3>
+    <div class="toolbar page-toolbar">
       <div class="anpr-sources" id="anpr-sources"></div>
     </div>
     <div class="filter-bar">

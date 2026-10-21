@@ -124,8 +124,7 @@ async function renderServices() {
   servicesRowsCache = {};
   $("#view").innerHTML = `
     <div id="svc-cards">${serverCardsHtml(data.server, data.services)}</div>
-    <div class="toolbar">
-      <h3>Supervisor de servicios</h3>
+    <div class="toolbar page-toolbar">
       ${isAdmin ? `<button class="btn danger" id="btn-server-restart" ${data.server.canRestart ? "" : "disabled"}
         title="${esc(data.server.restartHint || "Detiene y vuelve a iniciar el servicio de Windows completo")}">Reiniciar servidor completo</button>` : ""}
     </div>

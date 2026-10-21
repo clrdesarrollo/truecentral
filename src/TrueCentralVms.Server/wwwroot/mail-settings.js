@@ -14,8 +14,7 @@ async function renderMailSettings() {
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Servidor de correo saliente <span class="muted" style="font-weight:normal;font-size:12px">(SMTP con que el servidor envía correos)</span></h3>
+    <div class="toolbar page-toolbar">
     </div>
     <div class="info-box" style="margin-bottom:12px">
       Lo usan las automatizaciones con la acción <b>Enviar correo</b>. Sin un servidor configurado y habilitado, esas acciones fallan.

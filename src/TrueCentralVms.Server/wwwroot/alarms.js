@@ -69,10 +69,7 @@ async function renderAlarmPanels() {
 
   const isAdmin = Perms.can("alarms.configure");
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Paneles de alarma <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
-      ${isAdmin ? `<button class="btn" id="btn-alarm-new">Agregar panel</button>` : ""}
-    </div>
+    ${isAdmin ? `<div class="toolbar page-toolbar"><button class="btn" id="btn-alarm-new">Agregar panel</button></div>` : ""}
     ${panels.length === 0 ? `
       <div class="info-box">
         Aún no hay paneles de alarma. ${isAdmin

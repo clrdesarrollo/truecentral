@@ -62,8 +62,7 @@ async function renderCercoPanels() {
 
   const isAdmin = Perms.can("cerco.configure");
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Paneles de cerco <span class="muted" style="font-weight:normal;font-size:12px">(tiempo real)</span></h3>
+    <div class="toolbar page-toolbar">
       ${isAdmin ? `<button class="btn" id="btn-cerco-new">Agregar panel</button>` : ""}
     </div>
     ${panels.length === 0 ? `
@@ -611,7 +610,7 @@ async function renderCercoMonitor() {
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
   $("#view").innerHTML = `
-    <div class="toolbar"><h3>Monitor de cercos <span class="muted" style="font-weight:normal;font-size:12px">(tiempo real)</span></h3>
+    <div class="toolbar page-toolbar">
       <button class="btn ghost" id="cerco-history" title="Todos los eventos guardados, con filtros y exportación">Historial</button></div>
     ${panels.length === 0 ? `<div class="info-box">No hay paneles de cerco configurados.</div>` : `
     <div class="card-grid" id="cerco-cards">

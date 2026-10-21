@@ -35,8 +35,8 @@ async function renderBackups() {
       una actualización, pero <b>no se pueden restaurar en otro equipo</b> (si se pierde este servidor, se pierden con él).
       Defina una contraseña de respaldo y guárdela fuera del sistema.
     </div>`}
-    <div class="toolbar">
-      <h3>Respaldos <span class="muted" style="font-weight:normal;font-size:12px">(${esc(d.directory)})</span></h3>
+    <div class="muted" style="font-size:12px;margin:-6px 0 12px">Carpeta: ${esc(d.directory)}</div>
+    <div class="toolbar page-toolbar">
       <div class="row-actions">
         <button class="btn ghost" id="bk-password">${s.hasPassword ? "Cambiar contraseña de respaldo…" : "Definir contraseña de respaldo…"}</button>
         <button class="btn" id="bk-run" ${d.busy ? "disabled" : ""}>${d.busy ? "Respaldando…" : "Respaldar ahora"}</button>

@@ -105,8 +105,7 @@ async function renderAccessDevices() {
   // tabla mostraría cámaras hasta que termine el primer sondeo de acceso).
   const scanReady = discoveryOptions === ACCESS_DISCOVERY && lastScan;
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Equipos de control de acceso <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
+    <div class="toolbar page-toolbar">
       ${isAdmin ? `<button class="btn" id="btn-access-new">Agregar equipo</button>` : ""}
     </div>
     ${devices.length === 0 ? `

@@ -231,6 +231,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   color: var(--text); font: inherit; font-size: 13.5px; padding: 6px 10px; cursor: pointer;
 }
 .user-menu-toggle:hover, .user-menu-toggle[aria-expanded="true"] { background: var(--panel-2); }
+.user-menu-toggle .user-menu-icon { font-size: 22px; line-height: 1; color: var(--muted); margin-right: -3px; }
 .user-menu-toggle .caret {
   width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
   border-top: 5px solid var(--muted); transition: transform .15s;
@@ -343,8 +344,15 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   margin-left: var(--sb-w); padding-top: var(--topbar-h); min-height: 100vh; min-width: 0;
   display: flex; flex-direction: column; transition: margin-left .2s ease;
 }
-/* Encabezado de la página: migas de pan arriba y el título debajo. */
-.page-titles { padding: 18px 24px 0; display: flex; flex-direction: column-reverse; gap: 3px; }
+/* Encabezado de la página: migas de pan arriba y el título debajo; a la derecha,
+   centradas con ese bloque, las acciones principales de la página. */
+.page-titles { padding: 18px 24px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.page-titles-text { display: flex; flex-direction: column-reverse; gap: 3px; min-width: 0; }
+.page-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.page-actions:empty { display: none; }
+/* El panel de inicio abre con el estado de las instalaciones: sin título ni migas. */
+.shell:has(main#view.view-dashboard) .page-titles { display: none; }
+.page-actions .row-actions { margin: 0; }
 .page-titles h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3; color: var(--text); letter-spacing: -.2px; }
 .breadcrumb { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .breadcrumb li + li::before { content: "/"; padding: 0 6px; opacity: .6; }
@@ -376,6 +384,7 @@ main#view { padding: 20px 24px 28px; overflow: auto; flex: 1; }
 
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .toolbar h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text); }
+.toolbar > :only-child { margin-left: auto; }
 
 table.grid {
   width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel);
@@ -685,7 +694,9 @@ main#view.view-editor { padding: 0; overflow: hidden; display: flex; flex-direct
 .shell:has(main#view.view-editor) .topbar-brand { width: auto; }
 /* Título en una sola línea, con las migas al lado, para dejarle alto al lienzo. */
 .shell:has(main#view.view-editor) .page-titles,
-.shell:has(main#view.view-live) .page-titles { flex-direction: row; align-items: baseline; gap: 14px; padding: 10px 16px; }
+.shell:has(main#view.view-live) .page-titles { padding: 10px 16px; }
+.shell:has(main#view.view-editor) .page-titles-text,
+.shell:has(main#view.view-live) .page-titles-text { flex-direction: row; align-items: baseline; gap: 14px; }
 .shell:has(main#view.view-editor) .page-titles h2,
 .shell:has(main#view.view-live) .page-titles h2 { font-size: 17px; }
 
@@ -2685,6 +2696,16 @@ table.kv tr + tr th, table.kv tr + tr td { border-top: 1px solid var(--border); 
 table.kv .tag { margin: 0 4px 4px 0; }
 .cert-fp { font-size: 12px; word-break: break-all; }
 
+/* ---- Mi cuenta ---- */
+.account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; max-width: 1100px; align-items: start; }
+.account-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.account-head .mdi { font-size: 48px; line-height: 1; color: var(--muted); }
+.account-name { font-size: 18px; font-weight: 600; }
+.pw-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 16px; }
+.pw-pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); transition: background .15s, color .15s, border-color .15s; }
+.pw-pill::before { content: "\2022"; margin-right: 6px; }
+.pw-pill.ok { background: rgba(var(--ok-rgb, 22, 163, 74), .14); border-color: rgba(var(--ok-rgb, 22, 163, 74), .5); color: var(--ok-text); }
+.pw-pill.ok::before { content: "\2713"; }
 /* ---- Sistema → Acceso desde Internet ---- */
 .wan-scenarios { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
 .wan-scenario { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }

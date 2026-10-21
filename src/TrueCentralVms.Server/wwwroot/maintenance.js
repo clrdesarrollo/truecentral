@@ -99,8 +99,7 @@ async function renderDeviceMaintenance() {
 
   const isAdmin = Perms.can("maintenance.manage");
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Hora y mantenimiento <span class="muted" style="font-weight:normal;font-size:12px">(se actualiza solo)</span></h3>
+    <div class="toolbar page-toolbar">
       <div class="row-actions">
         <button class="btn ghost" id="mt-check" title="Pregunta ya la hora a los equipos, sin cambiar nada">Leer ahora</button>
         ${isAdmin ? `<button class="btn ghost" id="mt-policy">Política…</button>

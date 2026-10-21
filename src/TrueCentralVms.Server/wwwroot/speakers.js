@@ -113,8 +113,7 @@ async function renderSpeakers() {
 
   const isAdmin = Perms.can("speakers.configure");
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Parlantes IP <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
+    <div class="toolbar page-toolbar">
       <div class="row-actions">
         ${speakers.length ? `<button class="btn" id="btn-speaker-play-all" title="Reproducir en varios parlantes a la vez (sincronizado)">Reproducir en varios…</button>` : ""}
         ${isAdmin ? `<button class="btn" id="btn-speaker-new">Agregar parlante</button>` : ""}

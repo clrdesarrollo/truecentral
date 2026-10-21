@@ -224,8 +224,7 @@ async function renderAccessSchedules() {
   try { holidays = await Api.get("/api/access/holidays"); } catch { /* sin calendario visible */ }
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Horarios</h3>
+    <div class="toolbar page-toolbar">
       ${isAdmin ? `<button class="btn" id="btn-schedule-new">Crear horario</button>` : ""}
     </div>
     <div class="info-box">
@@ -527,8 +526,7 @@ async function renderAccessLevels() {
   } catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Niveles de acceso</h3>
+    <div class="toolbar page-toolbar">
       ${isAdmin ? `<button class="btn" id="btn-level-new" ${doors.length ? "" : "disabled"}>Crear nivel</button>` : ""}
     </div>
     <div class="info-box">
@@ -901,8 +899,7 @@ async function renderAccessPersons() {
   } catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Personas</h3>
+    <div class="toolbar page-toolbar">
       <div class="row-actions">
         ${isAdmin ? `<button class="btn ghost" id="btn-person-sync"
           title="Escribe ahora en los equipos todo lo que esté pendiente">Escribir pendientes</button>

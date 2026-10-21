@@ -231,10 +231,11 @@ function showAppShell() {
   showUserScope();
 }
 
-/** Nombre y roles del usuario conectado, en la barra superior. */
+/** Nombre del usuario conectado, en la barra superior (sus roles, al pasar el mouse). */
 function showCurrentUser() {
   const roles = Perms.roles.length ? Perms.roles.join(", ") : (Api.role === "Admin" ? "Administrador" : "Operador");
-  $("#current-user").textContent = `${Api.username} (${roles})`;
+  $("#current-user").textContent = Api.username;
+  $("#btn-user-menu").title = `Roles: ${roles}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -683,8 +684,7 @@ async function renderSessions() {
 
     $("#view").innerHTML = `
       ${desktopSeatsHtml(seats)}
-      <div class="toolbar" style="margin-top:22px">
-        <h3>Sesiones de video activas <span class="muted" style="font-weight:normal;font-size:12px">(se actualiza cada 5 s)</span></h3>
+      <div class="toolbar page-toolbar" style="margin-top:22px">
       </div>
       ${sessions.length === 0 ? `<div class="info-box">Nadie está viendo video en este momento.</div>` : `
       <div class="table-scroll"><table class="grid">
@@ -801,8 +801,7 @@ async function renderDevices() {
 
   const isAdmin = Perms.can("devices.manage");
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Dispositivos administrados</h3>
+    <div class="toolbar page-toolbar">
       ${isAdmin ? `<button class="btn" id="btn-device-new">Agregar dispositivo</button>` : ""}
     </div>
     ${devices.length === 0 ? `
@@ -1716,8 +1715,7 @@ async function renderUsers() {
   const scopeCtx = { locations, unassigned: unassigned.length, roles };
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Usuarios del sistema</h3>
+    <div class="toolbar page-toolbar">
       <button class="btn" id="btn-user-new">Agregar usuario</button>
     </div>
     <table class="grid">
@@ -2039,8 +2037,7 @@ async function renderAudit() {
     .join("");
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Bitácora de auditoría</h3>
+    <div class="toolbar page-toolbar">
       <button class="btn ghost" id="audit-export" title="Descarga los eventos que coinciden con los filtros (máximo 100.000)">Exportar CSV</button>
     </div>
     <div class="filter-bar">
@@ -2242,6 +2239,7 @@ const routes = {
   "#/mail": renderMailSettings,
   "#/backups": renderBackups,
   "#/certificate": renderCertificate,
+  "#/account": renderAccount,
   "#/wan": renderWan,
   "#/license": renderLicense,
 };
@@ -2351,7 +2349,23 @@ function showBreadcrumb(link) {
 }
 
 /** Suelta lo que la página actual dejó corriendo: sondeos, hub, sonidos y menús. */
+/** Acciones principales de la página (botones), en la cabecera a la altura del título. */
+function setPageActions(html) {
+  $("#page-actions").innerHTML = html || "";
+}
+
+// La barra principal de una página (.page-toolbar) no repite el título: sus
+// botones y filtros suben a la cabecera, a la altura del título. Mover los nodos
+// conserva sus eventos; también vale cuando la página se vuelve a dibujar.
+new MutationObserver(() => {
+  const bar = document.querySelector("#view .page-toolbar");
+  if (!bar) return;
+  $("#page-actions").replaceChildren(...bar.childNodes);
+  bar.remove();
+}).observe(document.querySelector("#view"), { childList: true, subtree: true });
+
 function leaveCurrentPage() {
+  setPageActions("");            // las acciones son de la página que se deja
   clearInterval(sessionsTimer);  // el sondeo de sesiones vive solo en su página
   dashboardLeave();              // ídem el refresco y el reloj del panel de inicio
   clearInterval(wallsTimer);     // ídem el del estado de los muros
@@ -2641,6 +2655,11 @@ $("#btn-download-addon").addEventListener("click", async () => {
 
 // "Acerca de": producto, fabricante, versión/build del servidor, plataforma y
 // estado de la licencia (lo que soporte pide primero).
+$("#btn-account").addEventListener("click", () => {
+  setUserMenu(false);
+  location.hash = "#/account";
+});
+
 $("#btn-about").addEventListener("click", async () => {
   setUserMenu(false);
   let a;
