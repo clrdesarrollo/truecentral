@@ -100,17 +100,17 @@
                         <TextBlock Grid.Column="2" Text="Dirección (IP o nombre)" Style="{StaticResource FieldLabel}"/>
                         <TextBlock Grid.Column="4" Text="Puerto" Style="{StaticResource FieldLabel}"/>
                         <ComboBox x:Name="ProtocolBox" Grid.Row="1" Grid.Column="0" Style="{StaticResource DarkComboBox}"
-                                  SelectedIndex="0" SelectionChanged="OnServerPartChanged"
-                                  ToolTip="https solo si el servidor tiene un certificado instalado">
+                                  SelectedIndex="1" SelectionChanged="OnServerPartChanged"
+                                  ToolTip="https (los servidores desde la versión 0.5.22 solo atienden por https)">
                             <ComboBoxItem Content="http"/>
                             <ComboBoxItem Content="https"/>
                         </ComboBox>
                         <TextBox x:Name="HostBox" Grid.Row="1" Grid.Column="2" Style="{StaticResource DarkTextBox}"
                                  TextChanged="OnServerPartChanged"
-                                 ToolTip="IP o nombre del servidor; también puede pegar la dirección completa (http://…:5090)"/>
+                                 ToolTip="IP o nombre del servidor; también puede pegar la dirección completa (https://…)"/>
                         <TextBox x:Name="PortBox" Grid.Row="1" Grid.Column="4" Style="{StaticResource DarkTextBox}"
                                  TextChanged="OnServerPartChanged" MaxLength="5"
-                                 ToolTip="Puerto del servidor (por defecto 5090)"/>
+                                 ToolTip="Puerto del servidor (por defecto 443)"/>
                     </Grid>
                 </StackPanel>
             </Border>

@@ -117,7 +117,7 @@ public sealed class SpeakerTalkClient(ApiClient api) : IAsyncDisposable
                 Query = $"ids={string.Join(',', speakerIds)}&access_token={Uri.EscapeDataString(api.Token)}",
             };
             var socket = new ClientWebSocket();
-            socket.Options.RemoteCertificateValidationCallback = static (_, _, _, _) => true;
+            socket.Options.RemoteCertificateValidationCallback = ServerTrust.ForWebSocket(baseUri);
             socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
             try
             {

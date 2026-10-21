@@ -80,7 +80,7 @@ public partial class LoginWindow : Window
     // guarda sigue siendo una sola URL, igual que antes, para que las cuentas
     // y contraseñas recordadas sigan calzando con su servidor.
     // ------------------------------------------------------------------
-    private const int DefaultServerPort = 5090;
+    private const int DefaultServerPort = 443;
     private bool _fillingServer;
 
     /// <summary>Reparte una URL guardada en protocolo, dirección y puerto.</summary>
@@ -97,7 +97,7 @@ public partial class LoginWindow : Window
             }
             else
             {
-                ProtocolBox.SelectedIndex = 0;
+                ProtocolBox.SelectedIndex = 1;
                 HostBox.Text = url?.Trim() ?? "";
                 PortBox.Text = DefaultServerPort.ToString();
             }
@@ -113,6 +113,13 @@ public partial class LoginWindow : Window
     {
         // Durante InitializeComponent la lista dispara antes de que existan los demás campos.
         if (_fillingServer || HostBox is null || PortBox is null || ServerSummary is null) return;
+        // Cambiar de protocolo con el puerto propio del otro (80 ↔ 443) lo cambia también.
+        if (ReferenceEquals(sender, ProtocolBox))
+        {
+            string port = PortBox.Text.Trim();
+            if (ProtocolBox.SelectedIndex == 1 && port == "80") PortBox.Text = "443";
+            else if (ProtocolBox.SelectedIndex == 0 && port == "443") PortBox.Text = "80";
+        }
         // Pegaron la dirección completa (http://…:5090): se reparte en sus partes.
         if (ReferenceEquals(sender, HostBox) && HostBox.Text.Contains("://") &&
             TryParseServer(HostBox.Text, out _, out _, out _))
@@ -131,16 +138,16 @@ public partial class LoginWindow : Window
     private void UpdateServerSummary() =>
         ServerSummary.Text = TryComposeServerUrl(out string url, out _) ? url : "Servidor sin configurar";
 
-    /// <summary>"http://host:puerto" → sus partes. Sin protocolo se asume http; sin
-    /// puerto, el del protocolo (80/443), como hacía el campo único de antes.</summary>
+    /// <summary>"https://host:puerto" → sus partes. Sin protocolo se asume https; sin
+    /// puerto, el del protocolo (443/80), como hacía el campo único de antes.</summary>
     private static bool TryParseServer(string? url, out string scheme, out string host, out int port)
     {
-        scheme = Uri.UriSchemeHttp;
+        scheme = Uri.UriSchemeHttps;
         host = "";
         port = DefaultServerPort;
         if (string.IsNullOrWhiteSpace(url)) return false;
         string text = url.Trim();
-        if (!text.Contains("://")) text = "http://" + text;
+        if (!text.Contains("://")) text = "https://" + text;
         if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) || uri.Host.Length == 0)
             return false;
@@ -277,6 +284,19 @@ public partial class LoginWindow : Window
             main.Show();
             Close();
         }
+        catch (ApiException) when (TryComposeServerUrl(out string url, out _) && ServerTrust.TakeRejected(url) is { } untrusted)
+        {
+            // Certificado que este equipo no conoce (el propio del servidor, o cambió): lo decide el operador.
+            if (AskTrust(untrusted))
+            {
+                ServerTrust.Trust(untrusted);
+                await AttemptLoginAsync();
+                return;
+            }
+            ErrorText.Text = "No se ingresó: no se confió en el certificado del servidor.";
+            ErrorText.Visibility = Visibility.Visible;
+            ServerSettingsToggle.IsChecked = true;
+        }
         catch (ApiException ex)
         {
             ErrorText.Text = ex.Message;
@@ -290,5 +310,22 @@ public partial class LoginWindow : Window
             LoginButton.IsEnabled = true;
             LoginButton.Content = "Ingresar";
         }
+    }
+
+    /// <summary>Pregunta si se confía en un certificado que este equipo no conoce.</summary>
+    private bool AskTrust(ServerTrust.Untrusted cert)
+    {
+        string fingerprint = ServerTrust.Format(cert.Spki);
+        string message = cert.KeyChanged
+            ? $"¡ATENCIÓN! El servidor {cert.Authority} se presenta con una llave DISTINTA de la que este equipo conocía.\n\n" +
+              "Puede ser un certificado nuevo instalado por el administrador, pero también alguien interceptando la conexión. " +
+              "Confíe solo si el administrador le confirma la huella nueva.\n\n"
+            : $"El servidor {cert.Authority} se presenta con un certificado que este equipo no conoce " +
+              "(lo normal la primera vez con el certificado propio del servidor).\n\n";
+        message += $"Emitido para: {cert.Subject}\nVence: {cert.NotAfter:dd-MM-yyyy}\n\nHuella de la llave (SHA-256):\n{fingerprint}\n\n" +
+                   "Compárela con la de Sistema → Certificado HTTPS en el panel web del servidor. ¿Confiar en este servidor?";
+        return AppMessageBox.Show(this, message, cert.KeyChanged ? "La llave del servidor cambió" : "Certificado del servidor",
+            MessageBoxButton.YesNo, cert.KeyChanged ? MessageBoxImage.Warning : MessageBoxImage.Question,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 }
