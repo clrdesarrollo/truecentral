@@ -86,6 +86,12 @@ public static class ServerTrust
         }
     }
 
+    /// <summary>¿Este equipo ya confió en una llave para esa dirección? (entonces se la conoce por https)</summary>
+    public static bool IsPinned(Uri uri)
+    {
+        lock (Sync) return Pins().ContainsKey(Authority(uri));
+    }
+
     /// <summary>Desde ahora se acepta esa llave para esa dirección.</summary>
     public static void Trust(Untrusted certificate)
     {

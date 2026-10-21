@@ -76,28 +76,29 @@ public partial class LoginWindow : Window
     }
 
     // ------------------------------------------------------------------
-    // Servidor (tras el engranaje): protocolo, dirección y puerto. Lo que se
-    // guarda sigue siendo una sola URL, igual que antes, para que las cuentas
-    // y contraseñas recordadas sigan calzando con su servidor.
+    // Servidor (tras el engranaje): dirección y puerto; el protocolo lo
+    // detecta ServerProtocol al ingresar. Lo que se guarda sigue siendo una
+    // sola URL (con su protocolo), igual que antes, para que las cuentas y
+    // contraseñas recordadas sigan calzando con su servidor.
     // ------------------------------------------------------------------
     private const int DefaultServerPort = 443;
     private bool _fillingServer;
+    /// <summary>La URL con la que se está intentando ingresar (ya con su protocolo detectado).</summary>
+    private string? _attemptUrl;
 
-    /// <summary>Reparte una URL guardada en protocolo, dirección y puerto.</summary>
+    /// <summary>Reparte una URL guardada en dirección y puerto.</summary>
     private void ShowServer(string? url)
     {
         _fillingServer = true;
         try
         {
-            if (TryParseServer(url, out string scheme, out string host, out int port))
+            if (TryParseServer(url, out _, out string host, out int port))
             {
-                ProtocolBox.SelectedIndex = scheme == Uri.UriSchemeHttps ? 1 : 0;
                 HostBox.Text = host;
                 PortBox.Text = port.ToString();
             }
             else
             {
-                ProtocolBox.SelectedIndex = 1;
                 HostBox.Text = url?.Trim() ?? "";
                 PortBox.Text = DefaultServerPort.ToString();
             }
@@ -111,16 +112,9 @@ public partial class LoginWindow : Window
 
     private void OnServerPartChanged(object sender, RoutedEventArgs e)
     {
-        // Durante InitializeComponent la lista dispara antes de que existan los demás campos.
+        // Durante InitializeComponent un campo dispara antes de que existan los demás.
         if (_fillingServer || HostBox is null || PortBox is null || ServerSummary is null) return;
-        // Cambiar de protocolo con el puerto propio del otro (80 ↔ 443) lo cambia también.
-        if (ReferenceEquals(sender, ProtocolBox))
-        {
-            string port = PortBox.Text.Trim();
-            if (ProtocolBox.SelectedIndex == 1 && port == "80") PortBox.Text = "443";
-            else if (ProtocolBox.SelectedIndex == 0 && port == "443") PortBox.Text = "80";
-        }
-        // Pegaron la dirección completa (http://…:5090): se reparte en sus partes.
+        // Pegaron la dirección completa (https://…:5090): se reparte en sus partes.
         if (ReferenceEquals(sender, HostBox) && HostBox.Text.Contains("://") &&
             TryParseServer(HostBox.Text, out _, out _, out _))
         {
@@ -135,8 +129,16 @@ public partial class LoginWindow : Window
         UpdateServerSummary();
     }
 
-    private void UpdateServerSummary() =>
-        ServerSummary.Text = TryComposeServerUrl(out string url, out _) ? url : "Servidor sin configurar";
+    /// <summary>La dirección con el protocolo con que se ingresó la última vez, o "por detectar".</summary>
+    private void UpdateServerSummary()
+    {
+        if (!TryReadServer(out string host, out int port, out _))
+        {
+            ServerSummary.Text = "Servidor sin configurar";
+            return;
+        }
+        ServerSummary.Text = KnownUrl(host, port) ?? $"{ServerProtocol.Compose(Uri.UriSchemeHttps, host, port)[8..]} · protocolo automático";
+    }
 
     /// <summary>"https://host:puerto" → sus partes. Sin protocolo se asume https; sin
     /// puerto, el del protocolo (443/80), como hacía el campo único de antes.</summary>
@@ -157,38 +159,51 @@ public partial class LoginWindow : Window
         return true;
     }
 
-    /// <summary>
-    /// Arma la URL con las tres partes. El puerto se omite si es el propio del
-    /// protocolo (80 con http, 443 con https): así queda idéntica a la que se
-    /// guardaba antes y las cuentas recordadas siguen encontrándose.
-    /// </summary>
-    private bool TryComposeServerUrl(out string url, out string error)
+    /// <summary>Dirección y puerto escritos, validados (sin protocolo: se detecta al ingresar).</summary>
+    private bool TryReadServer(out string host, out int port, out string error)
     {
-        url = "";
-        string scheme = ProtocolBox.SelectedIndex == 1 ? Uri.UriSchemeHttps : Uri.UriSchemeHttp;
-        string host = HostBox.Text.Trim().TrimEnd('/');
+        host = HostBox.Text.Trim().TrimEnd('/');
+        port = 0;
         if (host.Length == 0)
         {
             error = "Indique la dirección IP o el nombre del servidor.";
             return false;
         }
-        if (!int.TryParse(PortBox.Text.Trim(), out int port) || port is < 1 or > 65535)
+        if (!int.TryParse(PortBox.Text.Trim(), out port) || port is < 1 or > 65535)
         {
             error = "El puerto del servidor debe ser un número entre 1 y 65535.";
             return false;
         }
-        // IPv6 sin corchetes (fe80::1) → [fe80::1]
-        if (host.Contains(':') && !host.StartsWith('[')) host = $"[{host}]";
-        bool defaultPort = (scheme == Uri.UriSchemeHttp && port == 80) || (scheme == Uri.UriSchemeHttps && port == 443);
-        string candidate = defaultPort ? $"{scheme}://{host}" : $"{scheme}://{host}:{port}";
-        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri) || uri.AbsolutePath != "/" || uri.Host.Length == 0)
+        if (!Uri.TryCreate(ServerProtocol.Compose(Uri.UriSchemeHttps, host, port), UriKind.Absolute, out var uri)
+            || uri.AbsolutePath != "/" || uri.Host.Length == 0)
         {
             error = "La dirección del servidor no es válida: escriba solo la IP o el nombre (sin rutas ni espacios).";
             return false;
         }
-        url = candidate;
         error = "";
         return true;
+    }
+
+    /// <summary>La URL guardada (ajustes o cuentas) para esa dirección y puerto, con su protocolo.</summary>
+    private string? KnownUrl(string host, int port)
+    {
+        string? Match(string? url) =>
+            TryParseServer(url, out _, out string h, out int p) && p == port &&
+            string.Equals(h, host.Trim('[', ']'), StringComparison.OrdinalIgnoreCase) ? url : null;
+        return Match(_settings.ServerUrl) ?? _settings.Accounts.Select(a => Match(a.ServerUrl)).FirstOrDefault(u => u is not null);
+    }
+
+    /// <summary>
+    /// ¿Esa dirección ya se usó por https en este equipo? (cuenta o ajuste guardado
+    /// con https, o una llave confiada). Entonces no se acepta que pase a http.
+    /// </summary>
+    private bool KnownHttps(string host, int port)
+    {
+        string https = ServerProtocol.Compose(Uri.UriSchemeHttps, host, port);
+        bool saved = new[] { _settings.ServerUrl, _settings.LastSession?.ServerUrl }
+            .Concat(_settings.Accounts.Select(a => a.ServerUrl))
+            .Any(u => string.Equals(u?.TrimEnd('/'), https, StringComparison.OrdinalIgnoreCase));
+        return saved || (Uri.TryCreate(https, UriKind.Absolute, out var uri) && ServerTrust.IsPinned(uri));
     }
 
     // ------------------------------------------------------------------
@@ -255,7 +270,7 @@ public partial class LoginWindow : Window
         LoginButton.Content = "Conectando…";
         try
         {
-            if (!TryComposeServerUrl(out string serverUrl, out string serverError))
+            if (!TryReadServer(out string host, out int port, out string serverError))
             {
                 ErrorText.Text = serverError;
                 ErrorText.Visibility = Visibility.Visible;
@@ -263,6 +278,16 @@ public partial class LoginWindow : Window
                 HostBox.Focus();
                 return;
             }
+            var detection = await ServerProtocol.DetectAsync(host, port, KnownHttps(host, port));
+            if (detection.Url is not { } serverUrl)
+            {
+                ErrorText.Text = detection.Error;
+                ErrorText.Visibility = Visibility.Visible;
+                ServerSettingsToggle.IsChecked = true;
+                return;
+            }
+            _attemptUrl = serverUrl;
+            ServerSummary.Text = serverUrl;
             string username = UserBox.Text.Trim();
             string password = CurrentPassword();
 
@@ -284,7 +309,7 @@ public partial class LoginWindow : Window
             main.Show();
             Close();
         }
-        catch (ApiException) when (TryComposeServerUrl(out string url, out _) && ServerTrust.TakeRejected(url) is { } untrusted)
+        catch (ApiException) when (_attemptUrl is { } url && ServerTrust.TakeRejected(url) is { } untrusted)
         {
             // Certificado que este equipo no conoce (el propio del servidor, o cambió): lo decide el operador.
             if (AskTrust(untrusted))
