@@ -34,6 +34,13 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     ContentRootPath = WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : null,
 });
 builder.Host.UseWindowsService(o => o.ServiceName = ServiceSupervisor.WindowsServiceName);
+// Como servicio, conectarse con Windows antes del arranque pesado (base, certificado,
+// respaldo y migraciones): Windows da solo 30 s (ver EarlyServiceLifetime).
+if (WindowsServiceHelpers.IsWindowsService())
+{
+    builder.Services.AddSingleton<WindowsServiceLifetime>();
+    builder.Services.AddSingleton<IHostLifetime, EarlyServiceLifetime>();
+}
 // El apagado ordenado incluye detener PostgreSQL embebido (pg_ctl stop): darle
 // margen antes de que el host (o el SCM) corte el proceso. Los servicios se
 // detienen en paralelo: el apagado dura lo que el más lento y no la suma de
@@ -298,6 +305,8 @@ HikvisionSdk.LogDirectory = string.IsNullOrWhiteSpace(sdkLogDirectory)
     : Environment.ExpandEnvironmentVariables(sdkLogDirectory);
 
 var app = builder.Build();
+if (app.Services.GetService<IHostLifetime>() is EarlyServiceLifetime earlyLifetime)
+    await earlyLifetime.WaitForStartAsync(CancellationToken.None);
 
 // ---------------------------------------------------------------------------
 // Base de datos: iniciar PostgreSQL embebido y aplicar migraciones
