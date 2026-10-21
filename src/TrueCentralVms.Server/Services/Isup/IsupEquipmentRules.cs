@@ -84,7 +84,20 @@ public static class IsupEquipmentRules
     {
         if (!host.Enabled) return "El servicio ISUP está deshabilitado en este servidor (Isup:Enabled = false).";
         var status = await isup.GetHostStatusAsync(ct);
-        if (status is null) return "El servicio ISUP del servidor no está en ejecución; revise Sistema → Servicios.";
+        if (status is null)
+        {
+            // Sin respuesta no siempre es «detenido»: tras un reinicio el host tarda unos segundos en abrir su API, y una consulta
+            // puede no responder a tiempo. Solo se dice que no está en ejecución cuando el proceso de verdad no está.
+            if (!host.IsRunning)
+                return host.RestartPending
+                    ? $"El servicio ISUP del servidor se está reiniciando; el {noun} se conectará solo en cuanto vuelva."
+                    : "El servicio ISUP del servidor no está en ejecución; revise Sistema → Servicios.";
+            if (!isup.Connected)
+                return $"El servicio ISUP del servidor se está iniciando; el {noun} se conectará solo en cuanto el servicio esté listo.";
+            status = isup.LastHostStatus;
+            if (status is null)
+                return "El servicio ISUP del servidor no respondió a tiempo al consultar su estado; se vuelve a intentar en un momento.";
+        }
         int port = status.Listeners.FirstOrDefault(l => l.Name == "Registro")?.Port ?? host.Options.RegistrationPorts.FirstOrDefault();
         string setup = $"En el {noun}: plataforma ISUP 5.0 con servidor {status.PublicAddress}, puerto {port}, ID «{isupId}» y la misma clave.";
         // Quien llama aquí ya tiene el equipo en el VMS: un rechazo por «no dado de alta» es de antes de agregarlo (el directorio

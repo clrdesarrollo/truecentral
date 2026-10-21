@@ -49,6 +49,8 @@ public sealed class AlarmPanelService(
     {
         public IAlarmSubscription? Subscription;
         public string Fingerprint = "";
+        /// <summary>El panel se conecta por ISUP (lo consulta el servicio ISUP, no el servidor directo).</summary>
+        public bool IsIsup;
         public string? LastError;
         public DateTime NextRetryAt = DateTime.MinValue;
         public DateTime NextPollAt = DateTime.MinValue;
@@ -134,6 +136,20 @@ public sealed class AlarmPanelService(
     {
         if (!online) return;
         foreach (var worker in _workers.Values.Where(w => w.Fingerprint?.Contains($"|{isupId}|", StringComparison.Ordinal) == true))
+        {
+            worker.NextRetryAt = DateTime.MinValue;
+            worker.NextPollAt = DateTime.MinValue;
+        }
+        RequestReconcile();
+    }
+
+    /// <summary>
+    /// El servicio ISUP quedó listo: los paneles ISUP sin conexión se consultaron mientras arrancaba (o estaba caído) y esperan su
+    /// reintento de un minuto con ese aviso; se vuelven a consultar ya, para mostrar el motivo real.
+    /// </summary>
+    private void OnIsupHostConnected()
+    {
+        foreach (var worker in _workers.Values.Where(w => w.IsIsup && w.LastError is not null))
         {
             worker.NextRetryAt = DateTime.MinValue;
             worker.NextPollAt = DateTime.MinValue;
@@ -285,6 +301,7 @@ public sealed class AlarmPanelService(
     {
         // Un panel ISUP que se conecta (o vuelve) se lee de inmediato, sin esperar el reintento de un minuto.
         isup.DeviceOnlineChanged += OnIsupDeviceChanged;
+        isup.HostConnected += OnIsupHostConnected;
         var consumer = Task.Run(() => ConsumeAsync(ct), ct);
         var purger = Task.Run(() => PurgeLoopAsync(ct), ct);
 
@@ -355,6 +372,7 @@ public sealed class AlarmPanelService(
             }
 
             var connection = ConnectionOf(panel);
+            worker.IsIsup = connection.IsupId is { Length: > 0 };
             string fingerprint = $"{panel.DriverKey}|{connection.UseHttps}|{connection.Host}|{connection.Port}|{connection.Username}|{connection.Password}|{connection.IsupId}" +
                                  $"|{Convert.ToBase64String(panel.IsupKeyCiphertext ?? [])}";
             if (worker.Fingerprint != fingerprint)
