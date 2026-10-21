@@ -326,15 +326,20 @@ class LvSession {
     // Sin STUN los candidatos locales salen al instante: la oferta va completa (sin trickle).
     await lvIceGathered(pc, 1500);
     if (this.closed) throw lvCancelled();
-    const res = await Api.post("/api/streams/webrtc", {
-      deviceId: this.channel.deviceId, rtspChannel: this.channel.rtspChannel,
-      profile: this.profile, offer: pc.localDescription.sdp,
-    });
+    const res = await this.negotiate(pc.localDescription.sdp);
     this.id = res.session;
     if (this.closed) { this.release(); throw lvCancelled(); }
     const port = /a=candidate:\S+ \d+ \S+ \d+ \S+ (\d+) typ host/.exec(res.answer);
     this.icePort = port ? port[1] : null;
     await pc.setRemoteDescription({ type: "answer", sdp: res.answer });
+  }
+
+  /** Oferta al servidor → { answer, session }. La reproducción (playback.js) pide otra concesión. */
+  negotiate(offer) {
+    return Api.post("/api/streams/webrtc", {
+      deviceId: this.channel.deviceId, rtspChannel: this.channel.rtspChannel,
+      profile: this.profile, offer,
+    });
   }
 
   /** Bytes y cuadros de video recibidos (vigía de señal). */
@@ -362,6 +367,244 @@ class LvSession {
     this.id = null;
     lvDeleteSession(id);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Entrega alternativa por MSE para lo que WebRTC no admite (H.265 con
+// B-frames: MediaMTX corta la sesión al primer B-frame). El servidor
+// reempaqueta la ruta a MP4 fragmentado sin recodificar (/api/streams/mse) y
+// el navegador la decodifica con Media Source Extensions en un <video> oculto;
+// la sesión expone su captureStream(), así que el cuadro la trata igual que a
+// una WebRTC (captura, grabación local, zoom y vigía de señal incluidos).
+// ---------------------------------------------------------------------------
+const LV_MSE_KEY = "tcvms.live.mse";
+
+/** Canales (y perfil) que deben ir por MSE: los aprendidos se recuerdan en este navegador. */
+const lvMseChannels = (() => {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(LV_MSE_KEY) || "[]"); } catch { /* sin almacenamiento */ }
+  return new Set(Array.isArray(list) ? list : []);
+})();
+function lvMseKey(channel, profile) { return `${channel.deviceId}/${channel.rtspChannel}/${profile}`; }
+function lvMarkMse(key) {
+  lvMseChannels.add(key);
+  try { localStorage.setItem(LV_MSE_KEY, JSON.stringify([...lvMseChannels])); } catch { /* modo privado */ }
+}
+
+/** Sesión WebRTC o MSE según lo aprendido del canal. */
+function lvNewSession(channel, profile) {
+  return lvMseChannels.has(lvMseKey(channel, profile)) ? new LvMseSession(channel, profile) : new LvSession(channel, profile);
+}
+
+/**
+ * Códec RFC 6381 del MP4 (init segment): "hvc1.1.6.L153.B0", "avc1.640028"…
+ * Recorre moov › trak › mdia › minf › stbl › stsd hasta la entrada de video y
+ * su caja de configuración (hvcC / avcC). null si el init todavía está incompleto.
+ */
+function lvMp4Codec(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const type = (o) => String.fromCharCode(bytes[o + 4], bytes[o + 5], bytes[o + 6], bytes[o + 7]);
+  const find = (start, end, name) => {
+    for (let o = start; o + 8 <= end;) {
+      const size = dv.getUint32(o);
+      if (size < 8 || o + size > end) return null;
+      if (type(o) === name) return { o, end: o + size };
+      o += size;
+    }
+    return null;
+  };
+  let box = { o: -8, end: bytes.length };
+  for (const name of ["moov", "trak", "mdia", "minf", "stbl", "stsd"]) {
+    box = find(box.o + 8, box.end, name);
+    if (!box) return null;
+  }
+  const entry = box.o + 16; // stsd: cabecera (8) + versión/flags (4) + cantidad (4)
+  if (entry + 8 > box.end) return null;
+  const fmt = type(entry), entryEnd = entry + dv.getUint32(entry);
+  const hex = (n) => n.toString(16).toUpperCase().padStart(2, "0");
+  if (fmt === "hvc1" || fmt === "hev1") {
+    const c = find(entry + 86, entryEnd, "hvcC");
+    if (!c) return null;
+    const d = c.o + 8;
+    const b1 = bytes[d + 1];
+    const space = ["", "A", "B", "C"][b1 >> 6], tier = (b1 >> 5) & 1 ? "H" : "L", profile = b1 & 0x1f;
+    let compat = dv.getUint32(d + 2), rev = 0;
+    for (let i = 0; i < 32; i++) { rev = (rev << 1) | (compat & 1); compat >>>= 1; }
+    const cons = [...bytes.subarray(d + 6, d + 12)];
+    while (cons.length && cons[cons.length - 1] === 0) cons.pop();
+    return [`${fmt}.${space}${profile}`, (rev >>> 0).toString(16).toUpperCase(), `${tier}${bytes[d + 12]}`,
+      ...cons.map((b) => b.toString(16).toUpperCase())].join(".");
+  }
+  if (fmt === "avc1" || fmt === "avc3") {
+    const c = find(entry + 86, entryEnd, "avcC");
+    if (!c) return null;
+    const d = c.o + 8;
+    return `${fmt}.${hex(bytes[d + 1])}${hex(bytes[d + 2])}${hex(bytes[d + 3])}`;
+  }
+  return null;
+}
+
+class LvMseSession {
+  constructor(channel, profile) {
+    this.channel = channel;
+    this.profile = profile;
+    this.kind = "mse";
+    this.stream = new MediaStream();
+    this.pc = null;
+    this.id = null;
+    this.closed = false;
+    this.hasAudio = false;
+    this.icePort = null;
+    this.onDrop = null;
+    this.onAudio = null;
+    this.bytes = 0;
+    this.ws = null;
+    this.video = null;
+    this.ms = null;
+    this.sb = null;
+    this.queue = [];
+    this.codec = "";
+  }
+
+  /** URL del WebSocket (la reproducción de grabaciones la cambia). */
+  url() {
+    const q = new URLSearchParams({ deviceId: this.channel.deviceId, rtspChannel: this.channel.rtspChannel,
+      profile: this.profile, access_token: Api.token || "" });
+    return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/streams/mse?${q}`;
+  }
+
+  /** Resuelve cuando hay imagen y su captureStream() ya trae la pista de video. */
+  open() {
+    return new Promise((resolve, reject) => {
+      const fail = (error) => { if (!this.closed) { this.close(); reject({ error }); } };
+      const video = this.video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.style.cssText = "position:fixed;left:-10px;top:-10px;width:2px;height:2px;opacity:0;pointer-events:none";
+      document.body.append(video);
+      const ms = this.ms = new MediaSource();
+      video.src = URL.createObjectURL(ms);
+      let pending = new Uint8Array(0), started = false, resolved = false;
+      const timer = setTimeout(() => { if (!resolved) fail("El equipo no entregó imagen a tiempo."); }, 25000);
+      ms.addEventListener("sourceopen", () => {
+        const ws = this.ws = new WebSocket(this.url());
+        ws.binaryType = "arraybuffer";
+        ws.onmessage = (e) => {
+          if (this.closed) return;
+          const chunk = new Uint8Array(e.data);
+          this.bytes += chunk.byteLength;
+          if (!this.sb) {
+            // Se junta hasta tener el init segment completo para saber el códec exacto.
+            const merged = new Uint8Array(pending.length + chunk.length);
+            merged.set(pending); merged.set(chunk, pending.length);
+            pending = merged;
+            const codec = lvMp4Codec(pending);
+            if (!codec) { if (pending.length > 4 * 1024 * 1024) fail("El video recibido no tiene un formato reconocible."); return; }
+            this.codec = codec;
+            const mime = `video/mp4; codecs="${codec}"`;
+            if (!MediaSource.isTypeSupported(mime)) {
+              fail(codec.startsWith("hev") || codec.startsWith("hvc")
+                ? "Este navegador no decodifica H.265 (sin decodificación por hardware). Use Chrome o Edge actualizados en un equipo con soporte H.265, o el cliente de escritorio."
+                : `Este navegador no admite el formato de video de la cámara (${codec}).`);
+              return;
+            }
+            try { this.sb = ms.addSourceBuffer(mime); } catch (err) { fail(`No se pudo preparar el video: ${err.message}`); return; }
+            this.sb.mode = "segments";
+            this.sb.addEventListener("updateend", () => this.pump());
+            this.queue.push(pending);
+            pending = null;
+          } else {
+            this.queue.push(chunk);
+          }
+          this.pump();
+        };
+        ws.onclose = (e) => {
+          clearTimeout(timer);
+          if (this.closed) return;
+          if (!resolved) { fail(e.reason || "El servidor cerró la conexión de video."); return; }
+          this.onDrop?.();
+        };
+      }, { once: true });
+      // Primer cuadro: recién ahí captureStream() trae la pista de video.
+      const ready = () => {
+        if (resolved || this.closed || video.readyState < 2 || !video.videoWidth) return;
+        resolved = true;
+        clearTimeout(timer);
+        const captured = video.captureStream ? video.captureStream() : video.mozCaptureStream?.();
+        if (!captured) { fail("Este navegador no permite mostrar este video."); return; }
+        captured.getVideoTracks().forEach((t) => this.stream.addTrack(t));
+        resolve();
+      };
+      video.addEventListener("loadeddata", ready);
+      video.addEventListener("playing", ready);
+      video.addEventListener("canplay", () => { if (!started) { started = true; video.play().catch(() => {}); } ready(); });
+    });
+  }
+
+  /** Pasa al SourceBuffer lo recibido y mantiene el video cerca del borde en vivo. */
+  pump() {
+    const sb = this.sb, v = this.video;
+    if (!sb || sb.updating || this.closed) return;
+    const buf = sb.buffered;
+    if (buf.length) {
+      const end = buf.end(buf.length - 1);
+      if (end - v.currentTime > 1.5) v.currentTime = Math.max(end - 0.3, buf.start(buf.length - 1));
+      // Lo ya visto sobra: el búfer no crece sin límite.
+      if (v.currentTime - buf.start(0) > 30) { try { sb.remove(buf.start(0), v.currentTime - 10); return; } catch { /* ocupado */ } }
+    }
+    const next = this.queue.shift();
+    if (!next) return;
+    try { sb.appendBuffer(next); }
+    catch (err) {
+      if (err.name === "QuotaExceededError") { this.queue.unshift(next); return; }
+      if (!this.closed) this.onDrop?.();
+    }
+  }
+
+  async videoStats() {
+    if (this.closed) return null;
+    const q = this.video?.getVideoPlaybackQuality?.();
+    return { bytes: this.bytes, frames: q ? q.totalVideoFrames : 0 };
+  }
+
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    try { this.ws?.close(); } catch { /* ya cerrado */ }
+    this.stream.getTracks().forEach((t) => t.stop());
+    if (this.video) {
+      const src = this.video.src;
+      this.video.removeAttribute("src");
+      this.video.load();
+      this.video.remove();
+      if (src) URL.revokeObjectURL(src);
+    }
+  }
+
+  release() { /* no hay sesión que liberar en el servidor: cerrar el WebSocket basta */ }
+}
+
+/**
+ * ¿La sesión WebRTC recién abierta es H.265 y dejó de recibir video? Es la
+ * firma de los B-frames (MediaMTX la corta al primero, a los ~2 s). Resuelve
+ * true en ese caso; false si sigue fluyendo o no es H.265.
+ */
+async function lvLooksLikeHevcBframes(session) {
+  if (!session.pc) return false;
+  let codec = "";
+  try {
+    const stats = await session.pc.getStats();
+    for (const r of stats.values())
+      if (r.type === "inbound-rtp" && r.kind === "video") codec = stats.get(r.codecId)?.mimeType || "";
+  } catch { return false; }
+  if (!/h265|hevc/i.test(codec)) return false;
+  await new Promise((r) => setTimeout(r, 3500));
+  if (session.closed) return false;
+  const a = await session.videoStats();
+  await new Promise((r) => setTimeout(r, 2000));
+  if (session.closed) return false;
+  const b = await session.videoStats();
+  return !!a && !!b && b.bytes === a.bytes;
 }
 
 /** Resuelve cuando el <video> ya tiene imagen; rechaza si la conexión se cae o vence el plazo. */
@@ -470,7 +713,7 @@ class LvFeed {
     this.videos.forEach((v) => { v.srcObject = null; });
     this.connecting = true;
     this.render();
-    const s = new LvSession(this.channel, this.profile);
+    const s = lvNewSession(this.channel, this.profile);
     s.onAudio = () => this.render();
     this.session = s;
     try {
@@ -500,8 +743,19 @@ class LvFeed {
     this.lastBytes = -1; this.stall = 0;
     s.onDrop = () => this.dropped(s);
     this.status = this.status.startsWith("Señal perdida") || this.status.includes("Reintentando") ? "" : this.status;
+    if (s.kind === "mse") this.flash("H.265 por entrega alternativa: sin audio en el panel web.", 8000);
     this.render();
     lvRefreshTreeLive();
+    if (s.kind !== "mse") this.watchHevc(seq, s);
+  }
+
+  /** H.265 con B-frames por WebRTC: se aprende el canal y se reabre por MSE (el servidor reempaqueta). */
+  async watchHevc(seq, s) {
+    if (!(await lvLooksLikeHevcBframes(s)) || seq !== this.seq || s !== this.session || this.disposed) return;
+    lvMarkMse(lvMseKey(this.channel, this.profile));
+    this.status = "H.265 con B-frames: cambiando a la entrega alternativa…";
+    this.render();
+    this.open();
   }
 
   failed(seq, s, err) {
@@ -571,7 +825,7 @@ class LvFeed {
     this.render();
     const stale = () => seq !== this.switchSeq || openSeq !== this.seq || this.disposed;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const s = new LvSession(this.channel, target);
+      const s = lvNewSession(this.channel, target);
       s.onAudio = () => this.render();
       this.pending = s;
       const back = this.backVideo();
@@ -600,6 +854,7 @@ class LvFeed {
       s.onDrop = () => this.dropped(s);
       this.lastBytes = -1; this.stall = 0;
       this.applyFront();
+      if (s.kind !== "mse") this.watchHevc(this.seq, s);
       if (keepForRestore) {
         // Restaurar el maximizado vuelve a este al instante.
         old.onDrop = () => { if (this.parked?.session === old) this.releaseParked(); };

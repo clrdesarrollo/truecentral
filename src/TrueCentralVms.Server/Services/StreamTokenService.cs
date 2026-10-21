@@ -15,7 +15,10 @@ public sealed record StreamGrant(
     DateTime ExpiresAt,
     /// <summary>Cámara propia de un frente de citofonía (ruta ic/...): el alcance
     /// es el del frente, no el de un canal de video.</summary>
-    int? IntercomId = null);
+    int? IntercomId = null,
+    /// <summary>IP del navegador cuando el que lee es el relé MSE del propio
+    /// servidor (MediaMTX ve 127.0.0.1): la auditoría registra esta.</summary>
+    string? ViewerIp = null);
 
 /// <summary>
 /// Tokens de streaming de corta vida: autorizan INICIAR una lectura RTSP de
@@ -30,13 +33,14 @@ public sealed class StreamTokenService
     private readonly ConcurrentDictionary<string, StreamGrant> _grants = new();
 
     public (string Token, StreamGrant Grant) Issue(int userId, string username, string path,
-        int deviceId, string deviceName, int rtspChannel, string profile, int? intercomId = null)
+        int deviceId, string deviceName, int rtspChannel, string profile, int? intercomId = null,
+        string? viewerIp = null)
     {
         PruneExpired();
         string token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24))
             .Replace('+', '-').Replace('/', '_').TrimEnd('=');
         var grant = new StreamGrant(userId, username, path, deviceId, deviceName, rtspChannel, profile,
-            DateTime.UtcNow.Add(Lifetime), intercomId);
+            DateTime.UtcNow.Add(Lifetime), intercomId, viewerIp);
         _grants[token] = grant;
         return (token, grant);
     }

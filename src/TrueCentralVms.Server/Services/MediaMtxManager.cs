@@ -779,7 +779,7 @@ public sealed partial class MediaMtxManager(
 
     /// <summary>Ubica ffmpeg.exe una sola vez; sin él, los canales marcados
     /// con proxy caen al pull directo (y se avisa una vez en el log).</summary>
-    private string? ResolveFfmpeg()
+    internal string? ResolveFfmpeg()
     {
         _ffmpegPath ??= FindFfmpeg();
         if (_ffmpegPath is null && !_ffmpegWarned)

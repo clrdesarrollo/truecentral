@@ -55,8 +55,7 @@ public static class StreamsApi
             var grant = await IssueGrantAsync(ctx, session, db, streamTokens, request.DeviceId, request.RtspChannel, request.Profile);
             if (grant.Failure is not null) return grant.Failure;
 
-            var remote = ctx.Connection.RemoteIpAddress;
-            string? clientIp = remote is null ? null : (remote.IsIPv4MappedToIPv6 ? remote.MapToIPv4() : remote).ToString();
+            string? clientIp = ViewerIp(ctx);
             MediaMtxManager.WhepAnswer answer;
             try
             {
@@ -78,6 +77,35 @@ public static class StreamsApi
             // Nunca 401: el panel lo tomaría como sesión vencida y llevaría al ingreso.
             return Results.Json(new { error = TranslateWhepError(answer.Status, reason), detail = reason },
                 statusCode: answer.Status is 400 or 404 ? StatusCodes.Status422UnprocessableEntity : StatusCodes.Status502BadGateway);
+        });
+
+        // ------------------------------------------------------------------
+        // Vista en vivo del panel web por MSE (WebSocket con MP4 fragmentado)
+        // para lo que WebRTC no admite: H.265 con B-frames. Misma concesión
+        // (permiso, canal habilitado, alcance); FFmpeg la canjea en MediaMTX
+        // como cualquier lector y la auditoría registra la IP del navegador.
+        // ------------------------------------------------------------------
+        app.MapGet("/api/streams/mse", async (HttpContext ctx, int deviceId, int rtspChannel, StreamProfile? profile,
+            VmsDbContext db, StreamTokenService streamTokens, MediaMtxManager mtx, ILogger<Program> logger) =>
+        {
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend) is { } failure) return failure;
+            if (!ctx.WebSockets.IsWebSocketRequest)
+                return Results.Json(new { error = "Se esperaba una conexión WebSocket." }, statusCode: StatusCodes.Status400BadRequest);
+            if (!mtx.IsRunning)
+                return Results.Json(new { error = "El servicio de streaming no está disponible en el servidor." },
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            if (mtx.ResolveFfmpeg() is not { } ffmpeg)
+                return Results.Json(new { error = "El servidor no tiene FFmpeg (tools\\ffmpeg) para entregar este video al navegador." },
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+
+            var grant = await IssueGrantAsync(ctx, session, db, streamTokens, deviceId, rtspChannel,
+                profile ?? StreamProfile.Main, ViewerIp(ctx));
+            if (grant.Failure is not null) return grant.Failure;
+
+            using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
+            await MseRelay.RunAsync(ws, ffmpeg, $"rtsp://127.0.0.1:{mtx.RtspPort}/{grant.Path}?token={grant.Token}",
+                $"{grant.Path} ({session.Username})", logger, ctx.RequestAborted);
+            return Results.Empty;
         });
 
         // Cerrar un cuadro: libera la sesión WebRTC al instante (sin esperar a
@@ -142,6 +170,13 @@ public static class StreamsApi
         return $"rtsp://{host}:{mtx.RtspPort}/{path}?token={token}";
     }
 
+    /// <summary>IP del navegador (IPv4 si llega mapeada en IPv6).</summary>
+    internal static string? ViewerIp(HttpContext ctx)
+    {
+        var remote = ctx.Connection.RemoteIpAddress;
+        return remote is null ? null : (remote.IsIPv4MappedToIPv6 ? remote.MapToIPv4() : remote).ToString();
+    }
+
     private sealed record GrantResult(IResult? Failure, string Path = "", string Token = "", DateTime ExpiresAt = default);
 
     /// <summary>
@@ -151,7 +186,7 @@ public static class StreamsApi
     /// y el WebRTC del panel web.
     /// </summary>
     private static async Task<GrantResult> IssueGrantAsync(HttpContext ctx, SessionInfo session, VmsDbContext db,
-        StreamTokenService streamTokens, int deviceId, int rtspChannel, StreamProfile requested)
+        StreamTokenService streamTokens, int deviceId, int rtspChannel, StreamProfile requested, string? viewerIp = null)
     {
         var channel = await db.Channels.Include(c => c.Device)
             .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.RtspChannel == rtspChannel);
@@ -168,12 +203,12 @@ public static class StreamsApi
         string profile = requested == StreamProfile.Main ? "main" : "sub";
         string path = MediaMtxManager.PathName(deviceId, rtspChannel, requested);
         var (token, grant) = streamTokens.Issue(session.UserId, session.Username, path,
-            channel.DeviceId, channel.Device.Name, rtspChannel, profile);
+            channel.DeviceId, channel.Device.Name, rtspChannel, profile, viewerIp: viewerIp);
         return new GrantResult(null, path, token, grant.ExpiresAt);
     }
 
     /// <summary>Mensaje de error de MediaMTX (JSON {"error": "..."} o texto).</summary>
-    private static string WhepErrorText(string body)
+    internal static string WhepErrorText(string body)
     {
         try
         {
@@ -186,7 +221,7 @@ public static class StreamsApi
     }
 
     /// <summary>Rechazo de MediaMTX en palabras del operador.</summary>
-    private static string TranslateWhepError(int status, string reason)
+    internal static string TranslateWhepError(int status, string reason)
     {
         if (reason.Contains("codec", StringComparison.OrdinalIgnoreCase))
             return "Este navegador no puede reproducir el formato de video de la cámara por WebRTC " +
