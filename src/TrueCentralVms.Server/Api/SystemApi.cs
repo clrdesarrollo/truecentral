@@ -96,6 +96,13 @@ public static class SystemApi
             return Results.Ok(metrics.Read());
         });
 
+        // Throughput de red del servidor (el indicador del panel lo consulta cada pocos segundos).
+        app.MapGet("/api/system/network", (HttpContext ctx, SystemMetrics metrics) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
+            return Results.Ok(metrics.ReadNetwork());
+        });
+
         // ------------------------------------------------------------------
         // Supervisor de servicios
         // ------------------------------------------------------------------

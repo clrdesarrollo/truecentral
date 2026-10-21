@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 let dashboardTimer = null;
 let dashboardClock = null;
+let dashboardNetTimer = null;
 let dashboardData = null;
 // Series que el usuario ocultó en la leyenda de la actividad (por pestaña).
 const dashboardHidden = new Set();
@@ -27,7 +28,8 @@ const DB_SOURCE_ICON = {
 function dashboardLeave() {
   clearInterval(dashboardTimer);
   clearInterval(dashboardClock);
-  dashboardTimer = dashboardClock = null;
+  clearInterval(dashboardNetTimer);
+  dashboardTimer = dashboardClock = dashboardNetTimer = null;
 }
 
 async function renderDashboard() {
@@ -38,6 +40,11 @@ async function renderDashboard() {
   await dashboardRefresh(true);
   dashboardTimer = setInterval(() => dashboardRefresh(false), 30000);
   dashboardClock = setInterval(dashboardTick, 1000);
+  // El throughput se mueve en vivo: su propia consulta liviana cada 3 s.
+  dashboardNetTimer = setInterval(async () => {
+    const net = await Api.get("/api/system/network").catch(() => null);
+    if (net && dashboardData) { dashboardData.server.network = net; dbNetUpdate(net); }
+  }, 3000);
 }
 
 async function dashboardRefresh(first) {
@@ -56,6 +63,7 @@ async function dashboardRefresh(first) {
   $("#view").innerHTML = dashboardHtml(dashboardData);
   dashboardBind();
   dashboardTick();
+  if (dashboardData.server.network) requestAnimationFrame(() => requestAnimationFrame(() => dbNetUpdate(dashboardData.server.network)));
   // El anillo se llena con animación: se dibuja vacío y se completa en el cuadro siguiente.
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const bar = $("#view .db-ring .bar");
@@ -382,6 +390,7 @@ function dbHealthHtml(d) {
   return `
   <section class="db-card span-4">
     <div class="db-card-head"><h4><i class="mdi mdi-server" aria-hidden="true"></i>Salud del servidor</h4><a href="#/services">Servicios →</a></div>
+    ${s.network ? dbNetHtml(s.network) : ""}
     <div class="db-gauges">
       ${gauge(s.cpu, "CPU", "procesador")}
       ${gauge(s.ram, "Memoria", `${s.ramUsedGb.toFixed(1)} de ${s.ramTotalGb.toFixed(0)} GB`)}
@@ -395,6 +404,101 @@ function dbHealthHtml(d) {
       <div class="db-health-row"><span><i class="mdi mdi-clock" aria-hidden="true"></i>Hora del servidor (UTC)</span><b>${new Date(d.generatedAt).toISOString().slice(11, 16)}</b></div>
     </div>
   </section>`;
+}
+
+// ---------------------------------------------------------------------------
+// Throughput de red: medidor de aguja (escala automática) + entrada/salida y
+// la curva de los últimos 5 minutos. Se actualiza en su lugar cada 3 s.
+// ---------------------------------------------------------------------------
+const DB_NET = { cx: 100, cy: 100, r: 70, from: 150, sweep: 240 };
+
+function dbMbps(v) {
+  if (v >= 1000) return { n: (v / 1000).toLocaleString("es-CL", { maximumFractionDigits: 2 }), u: "Gbps" };
+  return { n: v.toLocaleString("es-CL", { maximumFractionDigits: v < 10 ? 2 : v < 100 ? 1 : 0 }), u: "Mbps" };
+}
+
+/** Escala del medidor: redonda y con aire sobre el pico reciente, sin pasar la capacidad del enlace. */
+function dbNetScale(net) {
+  const want = dbNiceMax(Math.max(10, net.peakMbps * 1.25, (net.rxMbps + net.txMbps) * 1.25));
+  return net.linkMbps > 0 ? Math.min(want, dbNiceMax(net.linkMbps)) : want;
+}
+
+function dbNetPoint(f, r) {
+  const a = (DB_NET.from + DB_NET.sweep * f) * Math.PI / 180;
+  return [DB_NET.cx + r * Math.cos(a), DB_NET.cy + r * Math.sin(a)];
+}
+
+function dbNetHtml(net) {
+  const max = dbNetScale(net);
+  const { r } = DB_NET;
+  const [x0, y0] = dbNetPoint(0, r), [x1, y1] = dbNetPoint(1, r);
+  const arc = `M${x0.toFixed(1)},${y0.toFixed(1)} A${r},${r} 0 1 1 ${x1.toFixed(1)},${y1.toFixed(1)}`;
+  const len = (r * DB_NET.sweep * Math.PI / 180).toFixed(1);
+  const ticks = [0, .25, .5, .75, 1].map((f) => {
+    const [ox, oy] = dbNetPoint(f, r + 9), [ix, iy] = dbNetPoint(f, r - 9), [tx, ty] = dbNetPoint(f, r + 19);
+    const m = dbMbps(max * f);
+    return `<line class="tick" x1="${ox.toFixed(1)}" y1="${oy.toFixed(1)}" x2="${ix.toFixed(1)}" y2="${iy.toFixed(1)}"/>
+      <text class="tick-lbl" x="${tx.toFixed(1)}" y="${(ty + 3).toFixed(1)}" text-anchor="middle">${m.n}</text>`;
+  }).join("");
+  return `
+    <div class="db-net" id="db-net" data-max="${max}">
+      <div class="db-net-gauge">
+        <svg viewBox="0 0 200 160" role="img" aria-label="Throughput de red del servidor">
+          <defs><linearGradient id="db-net-grad" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="#6cb3fa"/><stop offset=".6" stop-color="#1f6feb"/><stop offset="1" stop-color="#7c5cff"/>
+          </linearGradient></defs>
+          <path class="track" d="${arc}" fill="none" stroke-width="12" stroke-linecap="round"/>
+          <path class="value" d="${arc}" fill="none" stroke="url(#db-net-grad)" stroke-width="12" stroke-linecap="round"
+            stroke-dasharray="${len}" stroke-dashoffset="${len}" data-len="${len}"/>
+          ${ticks}
+          <g class="needle" style="transform: rotate(${DB_NET.from}deg)">
+            <path d="M${DB_NET.cx - 8},${DB_NET.cy} L${DB_NET.cx},${DB_NET.cy - 3.5} L${DB_NET.cx + r - 12},${DB_NET.cy} L${DB_NET.cx},${DB_NET.cy + 3.5} Z"/>
+          </g>
+          <circle class="hub" cx="${DB_NET.cx}" cy="${DB_NET.cy}" r="7"/>
+          <text class="big" x="${DB_NET.cx}" y="${DB_NET.cy + 34}" text-anchor="middle" id="db-net-val">—</text>
+          <text class="unit" x="${DB_NET.cx}" y="${DB_NET.cy + 50}" text-anchor="middle" id="db-net-unit">Mbps</text>
+        </svg>
+        <div class="db-net-title">Throughput</div>
+      </div>
+      <div class="db-net-side">
+        <div class="db-net-flow in"><i class="mdi mdi-arrow-down" aria-hidden="true"></i><span>Entrada</span><b id="db-net-rx">—</b></div>
+        <div class="db-net-flow out"><i class="mdi mdi-arrow-up" aria-hidden="true"></i><span>Salida</span><b id="db-net-tx">—</b></div>
+        <div class="db-net-spark" id="db-net-spark"></div>
+        <div class="db-net-meta" id="db-net-meta"></div>
+      </div>
+    </div>`;
+}
+
+function dbNetUpdate(net) {
+  const box = $("#db-net");
+  if (!box) return;
+  // Si el tráfico pasó la escala (o bajó mucho), se redibuja con la escala nueva.
+  const max = dbNetScale(net);
+  if (max !== Number(box.dataset.max)) {
+    box.outerHTML = dbNetHtml(net);
+    requestAnimationFrame(() => dbNetUpdate(net));
+    return;
+  }
+  const total = net.rxMbps + net.txMbps;
+  const f = Math.max(0, Math.min(1, total / max));
+  box.querySelector(".needle").style.transform = `rotate(${DB_NET.from + DB_NET.sweep * f}deg)`;
+  const value = box.querySelector(".value");
+  value.style.strokeDashoffset = (Number(value.dataset.len) * (1 - f)).toFixed(1);
+  const t = dbMbps(total);
+  $("#db-net-val").textContent = t.n;
+  $("#db-net-unit").textContent = t.u;
+  const fmt = (v) => { const m = dbMbps(v); return `${m.n} ${m.u}`; };
+  $("#db-net-rx").textContent = fmt(net.rxMbps);
+  $("#db-net-tx").textContent = fmt(net.txMbps);
+  const hist = net.history.length > 1 ? net.history : [0, 0];
+  $("#db-net-spark").innerHTML = dbSparkSvg(hist);
+  const use = net.linkMbps > 0 ? (total / net.linkMbps) * 100 : null;
+  const link = net.linkMbps > 0 ? fmt(net.linkMbps) : null;
+  box.classList.toggle("hot", use != null && use >= 85);
+  box.classList.toggle("warm", use != null && use >= 60 && use < 85);
+  $("#db-net-meta").innerHTML =
+    `<span>Pico 5 min <b>${esc(fmt(net.peakMbps))}</b></span>` +
+    (link ? `<span title="${esc(net.adapters.join(", "))}">Enlace ${esc(link)} · <b>${use < 0.1 && total > 0 ? "<0,1" : use.toLocaleString("es-CL", { maximumFractionDigits: 1 })} %</b> en uso</span>` : "");
 }
 
 // ---------------------------------------------------------------------------
