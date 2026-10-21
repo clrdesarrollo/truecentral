@@ -93,6 +93,44 @@ function Invoke-PublishScreen([string]$OutDir, [string]$Package) {
     & "$env:SystemRoot\System32\tar.exe" -czf $Package -C $OutDir .
     if ($LASTEXITCODE -ne 0) { throw "No se pudo comprimir el paquete de la app de las pantallas de alarma." }
     Write-Host ("  {0}  ({1:N1} MB)" -f (Split-Path -Leaf $Package), ((Get-Item $Package).Length / 1MB)) -ForegroundColor DarkGray
+    Protect-ScreenPackage $Package
+}
+
+function Find-OpenSsl {
+    $cmd = Get-Command openssl -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    foreach ($candidate in @("$env:ProgramFiles\Git\usr\bin\openssl.exe", "$env:ProgramFiles\Git\mingw64\bin\openssl.exe")) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
+# Firma del paquete de las pantallas: un manifiesto (producto, versión, archivo y
+# SHA-256) firmado con Ed25519. La Pi lo verifica con la llave pública que trae su
+# actualizador y no instala nada sin firma válida: así ni un servidor comprometido
+# puede empujarles código. La llave privada NO va en git: TCVMS_UPDATE_SIGNING_KEY
+# (ruta, credencial de archivo en Jenkins) o installer\config\update-signing.key.
+function Protect-ScreenPackage([string]$Package) {
+    foreach ($old in @("$Package.manifest", "$Package.manifest.sig")) { if (Test-Path $old) { Remove-Item -Force $old } }
+    $key = $env:TCVMS_UPDATE_SIGNING_KEY
+    if (-not $key) { $key = Join-Path $PSScriptRoot 'config\update-signing.key' }
+    if (-not (Test-Path $key)) {
+        Write-Warning ("Paquete de las pantallas SIN FIRMA (falta TCVMS_UPDATE_SIGNING_KEY o installer\config\update-signing.key): " +
+            "las pantallas instaladas no lo aceptarán como actualización.")
+        return
+    }
+    $openssl = Find-OpenSsl
+    if (-not $openssl) { throw 'Para firmar el paquete de las pantallas hace falta openssl (viene con Git for Windows).' }
+    $sha = (Get-FileHash -Algorithm SHA256 $Package).Hash.ToLowerInvariant()
+    $manifest = "producto=truecentral-screen`nversion=$script:Version`narchivo=$(Split-Path -Leaf $Package)`nsha256=$sha`n"
+    [IO.File]::WriteAllText("$Package.manifest", $manifest, (New-Object System.Text.UTF8Encoding($false)))
+    $raw = "$Package.manifest.sig.bin"
+    & $openssl pkeyutl -sign -inkey $key -rawin -in "$Package.manifest" -out $raw
+    if ($LASTEXITCODE -ne 0) { throw 'openssl no pudo firmar el paquete de las pantallas.' }
+    # La firma viaja en Base64 (una línea): es lo que lee el actualizador de la Pi.
+    [IO.File]::WriteAllText("$Package.manifest.sig", [Convert]::ToBase64String([IO.File]::ReadAllBytes($raw)), (New-Object System.Text.UTF8Encoding($false)))
+    Remove-Item -Force $raw
+    Write-Host "  Paquete de las pantallas firmado (Ed25519)." -ForegroundColor DarkGray
 }
 
 function Assert-File([string]$Path, [string]$Hint) {

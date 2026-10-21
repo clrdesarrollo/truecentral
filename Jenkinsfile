@@ -409,10 +409,28 @@ pipeline {
                         // llega al script como TCVMS_LICENSE_APIKEY; Jenkins la tapa
                         // en el log. Sin la credencial se compila igual, pero el build
                         // queda inestable: esos servidores solo se activan sin conexion.
+                        // Llave privada de firma de las actualizaciones de las pantallas
+                        // (credencial 'truecentral-update-signing-key', tipo Secret file;
+                        // la genera installer
+ew-update-signing-key.ps1). Le llega al
+                        // script como TCVMS_UPDATE_SIGNING_KEY (ruta). Sin ella el paquete
+                        // de las pantallas sale sin firma y las pantallas instaladas no lo
+                        // aceptan: el build queda inestable.
+                        def signingKeyId = 'truecentral-update-signing-key'
+                        def withSigningKey = { body ->
+                            try {
+                                withCredentials([file(credentialsId: signingKeyId, variable: 'TCVMS_UPDATE_SIGNING_KEY')]) { body() }
+                            } catch (Exception e) {
+                                if (!(e.message ?: '').contains(signingKeyId)) { throw e }
+                                unstable("Falta la credencial '${signingKeyId}' (Secret file con la llave privada de firma de " +
+                                         "las actualizaciones): el paquete de las pantallas sale SIN firma.")
+                                body()
+                            }
+                        }
                         def licenseKeyId = 'truecentral-license-apikey'
                         try {
                             withCredentials([string(credentialsId: licenseKeyId, variable: 'TCVMS_LICENSE_APIKEY')]) {
-                                buildInstallers()
+                                withSigningKey { buildInstallers() }
                             }
                         } catch (Exception e) {
                             // Solo se tolera que falte la credencial; cualquier otro
@@ -420,7 +438,7 @@ pipeline {
                             if (!(e.message ?: '').contains(licenseKeyId)) { throw e }
                             unstable("Falta la credencial '${licenseKeyId}' (Secret text con la API key del producto " +
                                      "truecentral en bouncer.clrobotics.cl): los instaladores salen SIN activacion en linea.")
-                            buildInstallers()
+                            withSigningKey { buildInstallers() }
                         }
                     }
                 }
