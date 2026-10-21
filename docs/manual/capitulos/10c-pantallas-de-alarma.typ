@@ -61,7 +61,7 @@ o por USB.
 
 #importante[La búsqueda automática del servidor no cruza VLANs ni subredes. Si
   la pantalla no lo encuentra, muestra _Buscando el servidor_ con una casilla
-  para escribir su dirección (por ejemplo, `http://192.168.1.50:5090`) y el
+  para escribir su dirección (por ejemplo, `https://192.168.1.50`) y el
   botón #boton("USAR").]
 
 == Aprobar una pantalla

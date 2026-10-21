@@ -12,9 +12,17 @@ cada módulo está en su propio capítulo.
 == Ingresar al panel web
 
 El panel web se abre desde un navegador actualizado (Chrome, Edge o Firefox)
-en la dirección del servidor, que por omisión usa el puerto 5090; por ejemplo,
-`http://192.168.1.10:5090`. Si no conoce la dirección, pídasela al
+en la dirección del servidor, siempre con `https`; por ejemplo,
+`https://192.168.1.10`. Si no conoce la dirección, pídasela al
 administrador del sistema.
+
+Mientras el servidor use su certificado propio, el navegador avisa que la
+conexión no es privada: la conexión va cifrada igual, pero el navegador no
+conoce a quien emitió el certificado. Para dejar de verlo, instale el
+certificado del servidor como confiable en el equipo (#menu("Sistema",
+"Certificado HTTPS"), botón #boton("Descargar certificado")) o pida al
+administrador que cargue uno emitido por la entidad certificadora de su
+organización.
 
 #captura(
   "web-inicio-sesion.png",

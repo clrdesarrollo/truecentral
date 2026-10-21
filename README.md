@@ -15,7 +15,7 @@ HikCentral / SmartPSS / iVMS-4200).
 │  │                            API 127.0.0.1:9911, auth delegada por HTTP)      │
 │  ├─ Servicio ISUP (TrueCentralVms.IsupHost.exe, proceso aparte, SDK HCISUP,    │
 │  │                 equipos detrás de NAT/4G :7660-7667, API 127.0.0.1:7699)    │
-│  ├─ Panel web de administración (wwwroot, SPA sin framework, :5090)            │
+│  ├─ Panel web de administración (wwwroot, SPA sin framework, https :443)       │
 │  ├─ API REST + SignalR (/hubs/vms)                                             │
 │  └─ Drivers de gestión: Hikvision (HCNetSDK/ISAPI/ISUP) · Dahua · ONVIF · ZK   │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -38,7 +38,9 @@ HikCentral / SmartPSS / iVMS-4200).
 
 | Servicio | Puerto | Bind |
 |---|---|---|
-| HTTP / API / SignalR / panel web | **5090** | 0.0.0.0 |
+| HTTPS: API / SignalR / panel web / clientes | **443** | 0.0.0.0 y :: |
+| HTTP solo equipos sin TLS (`/api/alarms/push`, `/api/isup/files`); el resto redirige o se rechaza | **80** | 0.0.0.0 y :: |
+| HTTP interno (autorización de MediaMTX, sonda de salud) | **5099** | 127.0.0.1 y ::1 |
 | PostgreSQL embebido | **25490** | 127.0.0.1 |
 | MediaMTX RTSP (espectadores) | **8654** | 0.0.0.0, solo TCP |
 | MediaMTX API de control | **9911** | 127.0.0.1 |
@@ -98,7 +100,10 @@ cd src\TrueCentralVms.Watchdog
 dotnet run
 ```
 
-Panel web: `http://localhost:5090`. El sistema viene **desactivado de
+Panel web: `https://localhost` (certificado propio del servidor: el navegador
+avisa hasta que se confía en él o se carga uno en Sistema → Certificado HTTPS).
+En desarrollo, el perfil `server` de `.claude/launch.json` usa `https://localhost:5090`.
+El sistema viene **desactivado de
 fábrica**: el primer administrador se crea desde el asistente del panel, que
 solo acepta conexiones desde la propia máquina del servidor.
 
@@ -139,7 +144,9 @@ Qué hace la suite en el equipo, además de copiar archivos:
   automático) con acciones de recuperación del SCM (reinicio a los 5, 15 y
   60 s si el proceso muere; contador reseteado tras un día estable). Las
   caídas de los servicios internos las cubre el supervisor del servidor.
-- Reglas de firewall: TCP 5090 (panel/API), 5091 (receptor SIA DC-09) y 5092
+- Antes de instalar revisa que 443 y 80 estén libres (IIS u otro servidor web):
+  si no, se detiene, salvo que `appsettings.Local.json` defina otros en `Web`.
+- Reglas de firewall: TCP 443 (HTTPS), 80 (equipos sin TLS), 5091 (receptor SIA DC-09) y 5092
   (receptor de paneles de cerco por WebSocket), UDP por programa para el
   descubrimiento de equipos (SADP 37020, WS-Discovery 3702, Dahua 37810), TCP
   8654 para el MediaMTX del servidor y, para el servicio ISUP
@@ -150,7 +157,7 @@ Qué hace la suite en el equipo, además de copiar archivos:
 - Si el puerto 25490 de PostgreSQL está ocupado, elige el primer libre hasta
   25539 y lo anota en `appsettings.Local.json` (una vez creado el clúster,
   el puerto vive dentro de él y no se cambia).
-- Al terminar ofrece abrir `http://localhost:5090`: el sistema viene
+- Al terminar ofrece abrir `https://localhost`: el sistema viene
   desactivado de fábrica y el primer administrador se crea desde el asistente
   del panel, que solo acepta conexiones desde la propia máquina.
 - Copia el **runtime de Visual C++** (`VCRUNTIME140`, `VCRUNTIME140_1`,

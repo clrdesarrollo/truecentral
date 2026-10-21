@@ -16,7 +16,11 @@ puertos. Si entre los equipos, los puestos y el servidor hay otro firewall
 #table(
   columns: (auto, auto, 1fr),
   table.header[Puerto][Protocolo][Uso],
-  [5090], [TCP], [Panel web y conexión de los clientes de monitoreo.],
+  [443], [TCP], [Panel web, clientes de monitoreo, pantallas y parlantes
+    (HTTPS).],
+  [80], [TCP], [Solo equipos que no cifran: paneles de alarma que envían
+    eventos por HTTP y terminales ISUP que descargan fotos. Las páginas se
+    redirigen a HTTPS.],
   [8654], [TCP], [Video en vivo y reproducción hacia los clientes de
     monitoreo.],
   [8660], [UDP y TCP], [Vista en vivo del panel web (video hacia el
@@ -117,8 +121,10 @@ límite.
 #table(
   columns: (auto, auto, 1fr),
   table.header[Ajuste][Por omisión][Qué controla],
-  [`Urls` y `Streaming` › `ServerPort`], [`http://*:5090` \ 5090], [Puerto del
-    panel web. Si lo cambia, cambie los dos al mismo número.],
+  [`Web` › `HttpsPort`, `HttpPort` \ e `InternalPort`], [443 \ 80 \ 5099],
+    [Puertos HTTPS (todo), HTTP (solo equipos sin cifrado; 0 = cerrado) e
+    interno (solo en el propio servidor). Si cambia los dos primeros, abra los
+    nuevos en el firewall.],
   [`Streaming` › `PublicHost`], [vacío], [Nombre o IP con que los clientes y
     navegadores llegan al servidor cuando hay NAT o un nombre DNS (por
     ejemplo, `vms.miempresa.cl`). Vacío = la dirección que usó cada cliente.],
