@@ -34,6 +34,15 @@ public static class ServerTrust
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "CLRTrueCentralVMS", "trusted-servers.json");
 
+    /// <summary>
+    /// Carpeta que deja el instalador descargado desde el panel (solo la escriben los administradores): la huella de
+    /// la llave del servidor del que se bajó (trusted-keys.txt, una por línea) y su dirección (server-url.txt).
+    /// </summary>
+    public static string MachineDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "CLRTrueCentralVMS-Client");
+
+    private static HashSet<string>? _machineKeys;
+
     /// <summary>"host:puerto" de una URL (la confianza es por dirección).</summary>
     public static string Authority(Uri uri) => $"{uri.IdnHost}:{uri.Port}".ToLowerInvariant();
 
@@ -55,6 +64,8 @@ public static class ServerTrust
         string spki = SpkiFingerprint(cert);
         lock (Sync)
         {
+            // Llave que dejó el instalador (vale para cualquier nombre del servidor: la llave es solo suya).
+            if (MachineKeys().Contains(spki)) return true;
             var pins = Pins();
             if (pins.TryGetValue(authority, out string? pinned) && pinned == spki) return true;
             _lastRejected = new Untrusted(authority, spki, cert.Subject, cert.NotAfter, pins.ContainsKey(authority));
@@ -105,6 +116,21 @@ public static class ServerTrust
     /// <summary>Validación para un WebSocket hacia <paramref name="uri"/>.</summary>
     public static RemoteCertificateValidationCallback ForWebSocket(Uri uri) =>
         (_, cert, _, errors) => Validate(uri, cert, errors);
+
+    private static HashSet<string> MachineKeys()
+    {
+        if (_machineKeys is not null) return _machineKeys;
+        _machineKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            string path = Path.Combine(MachineDirectory, "trusted-keys.txt");
+            if (File.Exists(path))
+                foreach (string line in File.ReadAllLines(path))
+                    if (line.Trim() is { Length: 64 } key) _machineKeys.Add(key);
+        }
+        catch { /* sin acceso: se pregunta como siempre */ }
+        return _machineKeys;
+    }
 
     private static Dictionary<string, string> Pins()
     {

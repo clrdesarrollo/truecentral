@@ -100,8 +100,12 @@ cd src\TrueCentralVms.Watchdog
 dotnet run
 ```
 
-Panel web: `https://localhost` (certificado propio del servidor: el navegador
-avisa hasta que se confía en él o se carga uno en Sistema → Certificado HTTPS).
+Panel web: `https://localhost`. El certificado lo emite la CA propia del servidor
+(restringida a sus nombres y a IP privadas): el navegador avisa hasta que esa CA se
+instala como raíz de confianza (Sistema → Certificado HTTPS → Descargar CA) o se
+carga un certificado de la organización. El cliente de escritorio, las pantallas
+y los agentes fijan la huella de la llave del servidor (al emparejarse, o desde el
+nombre del instalador descargado del panel).
 En desarrollo, el perfil `server` de `.claude/launch.json` usa `https://localhost:5090`.
 El sistema viene **desactivado de
 fábrica**: el primer administrador se crea desde el asistente del panel, que

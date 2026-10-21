@@ -210,7 +210,7 @@ public sealed class ClientSettings
                 return (JsonSerializer.Deserialize<ClientSettings>(File.ReadAllText(FilePath)) ?? new()).UpgradeServerUrls();
         }
         catch { /* preferencias corruptas: se parte de cero */ }
-        return new();
+        return new() { ServerUrl = InstalledServerUrl() ?? "https://localhost" };
     }
 
     public void Save()
@@ -233,6 +233,18 @@ public sealed class ClientSettings
         foreach (var account in Accounts) account.ServerUrl = UpgradeUrl(account.ServerUrl);
         if (LastSession is not null) LastSession.ServerUrl = UpgradeUrl(LastSession.ServerUrl);
         return this;
+    }
+
+    /// <summary>Dirección del servidor del que se descargó el instalador (la deja el instalador), si la hay.</summary>
+    private static string? InstalledServerUrl()
+    {
+        try
+        {
+            string path = Path.Combine(ServerTrust.MachineDirectory, "server-url.txt");
+            return File.Exists(path) && File.ReadAllText(path).Trim() is { Length: > 0 } url
+                && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps ? url : null;
+        }
+        catch { return null; }
     }
 
     private static string UpgradeUrl(string url) =>

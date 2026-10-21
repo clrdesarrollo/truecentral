@@ -74,16 +74,18 @@ public static class SystemApi
         // La descarga acepta el token por query: la inicia el navegador (no
         // fetch) y no puede mandar la cabecera Authorization.
         app.MapGet("/api/system/client-installer", async (HttpContext ctx, IConfiguration config, IWebHostEnvironment env,
-            AuditService audit) =>
+            AuditService audit, Services.Https.ServerCertificateManager certificates, Services.Https.WebPorts ports) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             var file = FindClientInstaller(config, env);
             if (file is null)
                 return Results.Json(new { error = "Este servidor no tiene publicado el instalador del cliente de escritorio." },
                     statusCode: StatusCodes.Status404NotFound);
+            string name = ClientInstallerName(file.Name, ctx.Request.Host.Host, ports.HttpsPort,
+                Services.Https.ServerCertificateManager.SpkiFingerprint(certificates.Current));
             await audit.LogAsync(ctx, "system", "client-installer-downloaded",
-                detail: $"Descargó el instalador del cliente de escritorio ({file.Name}).");
-            return Results.File(file.FullName, "application/octet-stream", file.Name);
+                detail: $"Descargó el instalador del cliente de escritorio ({name}).");
+            return Results.File(file.FullName, "application/octet-stream", name);
         });
 
         // Uso de recursos del servidor (indicadores del cliente y del panel).
@@ -173,6 +175,20 @@ public static class SystemApi
             }
             return Results.Ok(new { message = result.Message });
         });
+    }
+
+    /// <summary>
+    /// Nombre de descarga del instalador del cliente: lleva la dirección del servidor y la huella de su llave
+    /// ("…-Setup-0.5.22~192.168.1.10~443~ab12….exe"). El instalador las lee de su propio nombre y deja ese servidor
+    /// como conocido y de confianza en el equipo, así el primer ingreso no depende de que el operador compare la
+    /// huella. Vale lo que valga la descarga: hágala desde el propio servidor o con la CA del servidor instalada.
+    /// </summary>
+    private static string ClientInstallerName(string fileName, string host, int httpsPort, string spki)
+    {
+        // Una IPv6 o un nombre con caracteres raros no van en un nombre de archivo: entonces solo la huella.
+        bool hostOk = host.Length is > 0 and <= 100 && host.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-');
+        string suffix = hostOk ? $"~{host}~{httpsPort}~{spki}" : $"~~~{spki}";
+        return Path.GetFileNameWithoutExtension(fileName) + suffix + Path.GetExtension(fileName);
     }
 
     /// <summary>
