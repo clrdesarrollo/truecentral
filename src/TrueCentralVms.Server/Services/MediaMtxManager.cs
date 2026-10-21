@@ -29,6 +29,7 @@ public sealed partial class MediaMtxManager(
     CredentialProtector protector,
     IConfiguration config,
     IHostEnvironment env,
+    Network.WanAccessService wan,
     ILogger<MediaMtxManager> logger) : IHostedService
 {
     private readonly SemaphoreSlim _configLock = new(1, 1);
@@ -711,6 +712,8 @@ public sealed partial class MediaMtxManager(
         if (!WebRtcEnabled) return "webrtc: no\n";
         var hosts = new List<string>();
         if (config["Streaming:PublicHost"] is { Length: > 0 } publicHost) hosts.Add(publicHost.Trim());
+        // Acceso desde Internet: el navegador de afuera llega por la dirección pública (mismo puerto ICE).
+        if (wan.Has(Network.WanAccessService.ScenarioOperators)) hosts.Add(wan.PublicHost);
         // Lista JSON (["a","b"]) o texto separado por comas.
         foreach (var child in config.GetSection("Streaming:WebRtcAdditionalHosts").GetChildren())
             if (child.Value is { Length: > 0 } value) hosts.Add(value.Trim());

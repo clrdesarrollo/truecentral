@@ -29,6 +29,7 @@ public sealed class IsupService : BackgroundService, IIsupGateway
     private readonly IConfiguration _config;
     private readonly ILogger<IsupService> _logger;
     private readonly AuditService _audit;
+    private readonly Network.WanAccessService _wan;
     private volatile Dictionary<string, string> _namesById = new(StringComparer.Ordinal);
     private readonly HttpClient _http;
     private readonly ConcurrentDictionary<string, IsupDeviceState> _states = new(StringComparer.Ordinal);
@@ -40,9 +41,10 @@ public sealed class IsupService : BackgroundService, IIsupGateway
     private DateTime _lastEventUtc;
 
     public IsupService(IsupHostManager host, IServiceScopeFactory scopes, CredentialProtector protector, IConfiguration config,
-        AuditService audit, ILogger<IsupService> logger)
+        AuditService audit, Network.WanAccessService wan, ILogger<IsupService> logger)
     {
         _audit = audit;
+        _wan = wan;
         _host = host;
         _scopes = scopes;
         _protector = protector;
@@ -581,6 +583,9 @@ public sealed class IsupService : BackgroundService, IIsupGateway
             if (_config["Isup:DownloadBaseUrl"] is { Length: > 0 } explicitBase) return explicitBase.TrimEnd('/');
             var host = _host.Options.PublicAddress is { Length: > 0 } a ? a : _hostPublicAddress ?? "127.0.0.1";
             var ports = Https.WebPorts.From(_config);
+            // Acceso desde Internet: el puerto HTTP que reenvía el router.
+            if (_wan.Has(Network.WanAccessService.ScenarioIsup) && _wan.PublicPort("http") is var publicHttp and > 0)
+                return publicHttp == 80 ? $"http://{host}" : $"http://{host}:{publicHttp}";
             return ports.HttpUrl(host) ?? ports.HttpsUrl(host);
         }
     }

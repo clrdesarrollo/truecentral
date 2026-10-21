@@ -38,6 +38,18 @@ public static class AuthApi
             }
             throttle.RecordSuccess(request.Username);
 
+            // Desde fuera de las redes locales solo entra quien tiene «Entrar desde Internet».
+            var wan = ctx.RequestServices.GetRequiredService<Services.Network.WanAccessService>();
+            if (wan.IsRemote(ctx.Connection.RemoteIpAddress)
+                && !(await ctx.RequestServices.GetRequiredService<UserScopeService>().ForUserAsync(user.Id)).Has(TrueCentralVms.Core.Domain.Permissions.RemoteAccess))
+            {
+                await audit.LogAsAsync(ctx, user.Id, user.Username, user.Role, "auth", "login-remote-denied",
+                    detail: $"Login denegado: intentó entrar desde Internet ({ctx.Connection.RemoteIpAddress}) sin el permiso «Entrar desde Internet».",
+                    success: false);
+                return Results.Json(new { error = "Su usuario no tiene permitido entrar desde Internet: conéctese desde la red local." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             if (passwords.IsExpired(user))
             {
                 await audit.LogAsAsync(ctx, user.Id, user.Username, user.Role, "auth", "login-blocked",

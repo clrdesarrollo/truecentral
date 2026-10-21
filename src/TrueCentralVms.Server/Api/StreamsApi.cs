@@ -164,6 +164,10 @@ public static class StreamsApi
     /// <summary>URL RTSP de una ruta de MediaMTX con su token. Host visible para los clientes: configurable (NAT/DNS) o el del request.</summary>
     internal static string PublicRtspUrl(HttpContext ctx, IConfiguration config, MediaMtxManager mtx, string path, string token)
     {
+        // Cliente desde Internet (acceso encendido): la dirección pública y el puerto que reenvía el router.
+        var wan = ctx.RequestServices.GetRequiredService<Services.Network.WanAccessService>();
+        if (wan.Has(Services.Network.WanAccessService.ScenarioOperators) && wan.IsRemote(ctx.Connection.RemoteIpAddress))
+            return $"rtsp://{wan.PublicHost}:{wan.PublicPort("rtsp")}/{path}?token={token}";
         string host = config["Streaming:PublicHost"] is { Length: > 0 } configured
             ? configured
             : ctx.Request.Host.Host;
