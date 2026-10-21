@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Pipelines;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -135,37 +136,66 @@ internal sealed class IsupHttpHandler(string deviceId, string noun) : HttpMessag
 
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => SerializeToStreamAsync(stream, context, CancellationToken.None);
 
-        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken ct)
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken ct) =>
+            PumpAsync(async (bytes, token) => { await stream.WriteAsync(bytes, token); await stream.FlushAsync(token); return true; }, ct);
+
+        // Los lectores (paneles y terminales de acceso) piden el cuerpo con ReadAsStreamAsync. Lo que hace HttpContent por omisión es
+        // cargarlo ENTERO en memoria antes de devolverlo, y este no termina mientras el equipo esté en línea: quien abría la escucha
+        // quedaba esperando para siempre (y con él el sondeo de todos los paneles). Se entrega una tubería que se va llenando, y la
+        // escritura se detiene cuando el lector la cierra.
+        protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult(OpenPipe());
+
+        protected override Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken) => Task.FromResult(OpenPipe());
+
+        private Stream OpenPipe()
+        {
+            var pipe = new Pipe();
+            _ = Task.Run(async () =>
+            {
+                Exception? error = null;
+                try { await PumpAsync(async (bytes, token) => !(await pipe.Writer.WriteAsync(bytes, token)).IsCompleted, CancellationToken.None); }
+                catch (Exception ex) { error = ex; }
+                await pipe.Writer.CompleteAsync(error);
+            });
+            return pipe.Reader.AsStream();
+        }
+
+        /// <summary>Escribe las partes con <paramref name="write"/> hasta que el equipo se desconecta o el lector ya no está (false).</summary>
+        private async Task PumpAsync(Func<byte[], CancellationToken, ValueTask<bool>> write, CancellationToken ct)
         {
             var queue = Channel.CreateBounded<(string ContentType, byte[] Body)>(new BoundedChannelOptions(1000) { FullMode = BoundedChannelFullMode.DropOldest });
             using var subscription = gateway.SubscribeAlarms(deviceId, alarm =>
             {
                 foreach (var part in PartsOf(alarm)) queue.Writer.TryWrite(part);
             });
-            await WritePartAsync(stream, "application/json", Heartbeat(), ct);
+            if (!await write(Part("application/json", Heartbeat()), ct)) return;
             while (!ct.IsCancellationRequested && gateway.IsOnline(deviceId))
             {
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 wait.CancelAfter(TimeSpan.FromSeconds(20));
+                byte[] next;
                 try
                 {
                     var part = await queue.Reader.ReadAsync(wait.Token);
-                    await WritePartAsync(stream, part.ContentType, part.Body, ct);
+                    next = Part(part.ContentType, part.Body);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
-                    await WritePartAsync(stream, "application/json", Heartbeat(), ct);
+                    next = Part("application/json", Heartbeat());
                 }
+                if (!await write(next, ct)) return;
             }
         }
 
-        private static async Task WritePartAsync(Stream stream, string contentType, byte[] body, CancellationToken ct)
+        private static byte[] Part(string contentType, byte[] body)
         {
             var head = Encoding.ASCII.GetBytes($"--{Boundary}\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\n\r\n");
-            await stream.WriteAsync(head, ct);
-            await stream.WriteAsync(body, ct);
-            await stream.WriteAsync("\r\n"u8.ToArray(), ct);
-            await stream.FlushAsync(ct);
+            var part = new byte[head.Length + body.Length + 2];
+            head.CopyTo(part, 0);
+            body.CopyTo(part, head.Length);
+            part[^2] = (byte)'\r';
+            part[^1] = (byte)'\n';
+            return part;
         }
 
         private static byte[] Heartbeat() =>

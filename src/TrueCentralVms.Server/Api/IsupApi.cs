@@ -27,12 +27,17 @@ public static class IsupApi
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             var status = await isup.GetHostStatusAsync(ct);
-            var address = host.Options.PublicAddress is { Length: > 0 } configured ? configured : status?.PublicAddress;
+            // Sin dirección fija, cada equipo apunta a la IP de este servidor que está en su red: con una sola red es esa; con varias se
+            // listan todas (addresses) y el formulario pide la de la red del equipo.
+            var configured = host.Options.PublicAddress is { Length: > 0 } c ? c : null;
+            var locals = status?.LocalAddresses ?? [];
+            bool perDevice = configured is null && status?.PerDeviceAddress == true;
             return Results.Ok(new
             {
                 enabled = host.Enabled,
                 running = status is not null,
-                address,
+                address = configured ?? (perDevice ? (locals.Count == 1 ? locals[0] : null) : status?.PublicAddress),
+                addresses = perDevice ? locals : [],
                 port = host.Options.RegistrationPorts.FirstOrDefault(),
             });
         });
@@ -48,7 +53,7 @@ public static class IsupApi
             {
                 known.Add(d.DeviceId);
                 devices.Add(new IsupDeviceDto(d.DeviceId, d.Online, d.Address, d.Protocol, d.OnlineSince, d.Asleep, d.Firmware, d.AlarmLinkUp,
-                    equipment.GetValueOrDefault(d.DeviceId) ?? []));
+                    equipment.GetValueOrDefault(d.DeviceId) ?? [], d.AnnouncedAddress));
             }
             // Equipos del VMS que el host aún no conoce (servicio detenido o recién dados de alta).
             foreach (var (id, refs) in equipment.Where(kv => !known.Contains(kv.Key)))
@@ -58,7 +63,7 @@ public static class IsupApi
             return Results.Ok(new IsupStatusDto(host.Enabled, host.IsRunning && status is not null,
                 host.Enabled && !host.IsRunning ? host.LastError ?? "El servicio ISUP no está en ejecución." : null,
                 status?.PublicAddress, status?.Listeners ?? [], devices.OrderBy(d => d.DeviceId, StringComparer.Ordinal).ToList(),
-                status?.Rejections ?? [], host.AllowLegacy));
+                status?.Rejections ?? [], host.AllowLegacy, status?.PerDeviceAddress ?? false, status?.LocalAddresses ?? []));
         });
 
         // Compatibilidad ISUP 2.0/4.0: esas versiones no prueban la clave al registrarse (basta el ID para suplantar al

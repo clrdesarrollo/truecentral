@@ -172,6 +172,12 @@ Type: files; Name: "{app}\client-setup\CLRTrueCentralVMS-Client-Setup-*.exe"
 Type: files; Name: "{app}\webcontrol\CLRTrueCentralVMS-Complemento-Setup-*.exe"
 ; App de las pantallas de alarma de versiones anteriores (se publica la nueva).
 Type: files; Name: "{app}\screen-packages\truecentral-screen-*-linux-arm64.tar.gz*"
+; Demo de HCNetSDK que las versiones anteriores copiaban con las DLL de Hikvision,
+; y los ajustes que deja al abrirla.
+Type: files; Name: "{app}\ClientDemoEn.exe"
+Type: filesandordirs; Name: "{app}\ClientDemoDll"
+Type: files; Name: "{app}\DemoLocalCfg.json"
+Type: files; Name: "{app}\DeviceCfg.json"
 
 [Files]
 ; Servidor publicado (self-contained). Se excluyen los restos de desarrollo

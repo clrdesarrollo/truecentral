@@ -73,7 +73,8 @@ async function wireIsupFields(prefix, noun) {
     (Hikvision: <b>Red → Acceso a plataforma</b> o <b>Comunicación → ISUP</b>) configure:
     <div class="probe-grid" style="margin-top:6px">
       <span>Protocolo</span><b>ISUP 5.0</b>
-      <span>Dirección del servidor</span><b>${esc(c.address ?? "(la IP de este servidor)")}</b>
+      <span>Dirección del servidor</span><b>${esc(c.address ?? (c.addresses?.length > 1
+        ? `la IP de este servidor en la red del ${noun}: ${c.addresses.join(" o ")}` : "(la IP de este servidor)"))}</b>
       <span>Puerto</span><b>${c.port}</b>
       <span>ID del dispositivo</span><b>el mismo ID de arriba</b>
       <span>Clave de cifrado</span><b>la misma clave de arriba (ISUP 2.0/4.0: sin clave)</b>
@@ -114,12 +115,17 @@ async function renderIsupStatus() {
     ? d.equipment.map((e) => `<a href="${(ISUP_KIND_LABELS[e.kind] ?? ["", "#/"])[1]}">${esc(e.name)}</a> <span class="muted">(${esc((ISUP_KIND_LABELS[e.kind] ?? [e.kind])[0])})</span>`).join("<br>")
     : `<span class="muted">—</span>`;
   const since = (d) => d.onlineSince ? new Date(d.onlineSince).toLocaleString("es-CL") : "—";
+  const locals = s.localAddresses ?? [];
+  const serverAddress = !s.perDeviceAddress ? `<b>${esc(s.publicAddress ?? "—")}</b>`
+    : locals.length > 1 ? `<b>de este servidor en la red del equipo</b> (${locals.map((a) => `<b>${esc(a)}</b>`).join(" o ")})`
+    : `<b>${esc(locals[0] ?? s.publicAddress ?? "—")}</b>`;
   $("#view").innerHTML = `
     ${!s.enabled ? `<div class="error-box">El servicio ISUP está deshabilitado en la configuración (Isup:Enabled = false).</div>` : ""}
     ${s.error ? `<div class="error-box">${esc(s.error)}</div>` : ""}
+    ${isupNetworksWarningHtml(s)}
     <div class="info-box">
       Los equipos Hikvision que el servidor no alcanza por IP (detrás de NAT, 4G o MPLS) se conectan ellos por <b>ISUP</b>:
-      en el equipo se configura la dirección del servidor <b>${esc(s.publicAddress ?? "—")}</b>, el puerto
+      en el equipo se configura la dirección ${serverAddress}, el puerto
       <b>${s.listeners.find((l) => l.name === "Registro")?.port ?? 7660}</b>, su ID y su clave. Se agregan en cada módulo eligiendo
       la conexión «ISUP». Desde internet deben estar abiertos hacia el servidor los puertos 7660 a 7667 (TCP; el 7660 y el 7663 también UDP).
     </div>
@@ -134,13 +140,14 @@ async function renderIsupStatus() {
     <div class="toolbar" style="margin-top:14px"><h3>Equipos</h3></div>
     ${s.devices.length === 0 ? `<div class="info-box">Todavía no hay equipos ISUP. Se agregan desde cada módulo (Dispositivos, Control de acceso, Paneles de alarma, Parlantes, Citofonía).</div>` : `
     <div class="table-scroll"><table class="grid">
-      <thead><tr><th>ID ISUP</th><th>Equipo en el VMS</th><th>Estado</th><th>Dirección</th><th>Protocolo</th><th>Conectado desde</th><th>Alarmas</th><th></th></tr></thead>
+      <thead><tr><th>ID ISUP</th><th>Equipo en el VMS</th><th>Estado</th><th>Dirección</th><th title="IP de este servidor que se le indicó al equipo para alarmas, video y voz">Servidor anunciado</th><th>Protocolo</th><th>Conectado desde</th><th>Alarmas</th><th></th></tr></thead>
       <tbody>${s.devices.map((d) => `
         <tr data-id="${esc(d.deviceId)}">
           <td><b>${esc(d.deviceId)}</b></td>
           <td>${equipment(d)}</td>
           <td>${d.online ? (d.asleep ? `<span class="tag operator">En reposo</span>` : `<span class="tag on">Conectado</span>`) : `<span class="tag off">Sin conexión</span>`}</td>
           <td class="muted">${esc(d.address ?? "—")}</td>
+          <td class="muted">${esc(d.announcedAddress ?? "—")}</td>
           <td class="muted">${d.protocol ? `ISUP ${esc(d.protocol)}` : "—"}${d.firmware ? `<div style="font-size:11px">${esc(d.firmware)}</div>` : ""}</td>
           <td class="muted">${since(d)}</td>
           <td>${d.online && d.protocol === "5.0" ? (d.alarmLinkUp ? `<span class="dot ok" title="Enlace de alarmas abierto"></span>` : `<span class="dot bad" title="El equipo no abrió su enlace de alarmas"></span>`) : `<span class="muted">—</span>`}</td>
@@ -182,6 +189,29 @@ async function renderIsupStatus() {
     if ($("#modal-backdrop") && !$("#modal-backdrop").classList.contains("hidden")) return;
     renderIsupStatus();
   }, 10000);
+}
+
+/**
+ * Aviso de un servidor con más de una red (cable y Wi-Fi, una red de cámaras, una VPN): cada equipo tiene que apuntar a la IP de
+ * este servidor que está en SU red. Sin dirección fija, el servicio le contesta a cada uno por la IP por la que llegó; con una
+ * dirección fija privada, los equipos de las otras redes no la alcanzan.
+ */
+function isupNetworksWarningHtml(s) {
+  const locals = s.localAddresses ?? [];
+  if (!s.running || locals.length < 2) return "";
+  const list = locals.map((a) => `<b>${esc(a)}</b>`).join(", ");
+  if (s.perDeviceAddress) {
+    return `<div class="warn-box">Este servidor tiene más de una red (${list}). A cada equipo se le anuncia la IP de este servidor
+      por la que llegó: en cada equipo configure la de su red (la columna «Servidor anunciado» muestra la que recibió). Un equipo
+      que se conecta desde internet necesita la dirección pública: defínala en Sistema → Acceso desde Internet.</div>`;
+  }
+  if (locals.includes(s.publicAddress)) {
+    return `<div class="warn-box">Este servidor tiene más de una red (${list}) y la dirección ISUP está fija en
+      <b>${esc(s.publicAddress)}</b> (Isup:PublicAddress): los equipos de las otras redes no la alcanzan. Si no hay equipos que se
+      conecten desde internet, quite Isup:PublicAddress de appsettings.Local.json y reinicie el servicio: a cada equipo se le
+      anunciará la IP por la que llegó.</div>`;
+  }
+  return "";
 }
 
 /**

@@ -94,7 +94,10 @@ public sealed partial class IsupEngine : IDisposable
         _options = options;
         _nativeDir = nativeDir;
         _dataDir = dataDir;
-        _publicIp = string.IsNullOrWhiteSpace(options.PublicAddress) ? LocalNetwork.InternetFacingIp() : options.PublicAddress.Trim();
+        _configuredAddress = options.PublicAddress?.Trim() ?? "";
+        // Sin dirección configurada, la de salida a internet queda solo para el servidor de imágenes (una sola para todos) y para un
+        // equipo al que todavía no se le anunció la suya.
+        _publicIp = PerDeviceAddress ? LocalNetwork.InternetFacingIp() : _configuredAddress;
         var logDir = Path.Combine(dataDir, "sdklog");
         Directory.CreateDirectory(logDir);
 
@@ -189,7 +192,10 @@ public sealed partial class IsupEngine : IDisposable
              $"voz {options.VoicePort}, alarmas {options.AlarmPort} (5.0)" +
              (options.AllowLegacy ? $" y {options.LegacyAlarmPort} (2.0/4.0)" : "; equipos ISUP 2.0/4.0 NO admitidos (sin clave)") +
              $", imágenes {options.PictureServerPort}. " +
-             $"Dirección que se anuncia a los equipos: {_publicIp}. SDK CMS 0x{Isup.NET_ECMS_GetBuildVersion():X8}, stream 0x{Isup.NET_ESTREAM_GetBuildVersion():X8}.");
+             (PerDeviceAddress
+                 ? $"A cada equipo se le anuncia la IP de este servidor por la que llega (IP de este servidor: {string.Join(", ", LocalNetwork.Candidates(includeVirtual: false))}). "
+                 : $"Dirección que se anuncia a los equipos: {_configuredAddress} (configurada). ") +
+             $"SDK CMS 0x{Isup.NET_ECMS_GetBuildVersion():X8}, stream 0x{Isup.NET_ESTREAM_GetBuildVersion():X8}.");
         return null;
     }
 
@@ -280,19 +286,21 @@ public sealed partial class IsupEngine : IDisposable
             _registrations.TryGetValue(id, out var r);
             bool online = _userByDevice.ContainsKey(id);
             devices.Add(new IsupDeviceState(id, online, r?.Address, r?.Protocol, online ? r?.Since : null, r?.Asleep == true, r?.Firmware,
-                online && r != null && !r.Legacy && AlarmLinkUp(r.Address)));
+                online && r != null && !r.Legacy && AlarmLinkUp(r.Address), AnnouncedTo(id)));
         }
         List<IsupListenerState> listeners;
         lock (_listeners) listeners = _listeners.ToList();
         return new IsupHostStatus(version, _publicIp, listeners, devices,
-            _rejections.Values.OrderByDescending(r => r.LastAt).Take(100).ToList());
+            _rejections.Values.OrderByDescending(r => r.LastAt).Take(100).ToList(),
+            PerDeviceAddress, LocalNetwork.Candidates(includeVirtual: false));
     }
 
     public IsupDeviceState? GetDeviceState(string id)
     {
         if (!_registrations.TryGetValue(id, out var r)) return null;
         bool online = _userByDevice.ContainsKey(id);
-        return new IsupDeviceState(id, online, r.Address, r.Protocol, online ? r.Since : null, r.Asleep, r.Firmware, online && !r.Legacy && AlarmLinkUp(r.Address));
+        return new IsupDeviceState(id, online, r.Address, r.Protocol, online ? r.Since : null, r.Asleep, r.Firmware, online && !r.Legacy && AlarmLinkUp(r.Address),
+            AnnouncedTo(id));
     }
 
     void Reject(string id, string reason)
@@ -352,9 +360,11 @@ public sealed partial class IsupEngine : IDisposable
 
                 case Isup.ENUM_DEV_DAS_REQ:
                 {
-                    // El equipo pregunta a qué servidor registrarse: a este mismo, en el primer puerto de registro.
+                    // El equipo pregunta a qué servidor registrarse: a este mismo, en el primer puerto de registro, por la IP por la que llegó.
                     int port = _options.RegistrationPorts.FirstOrDefault(p => p > 0);
-                    var das = $"{{\"Type\":\"DAS\",\"DasInfo\":{{\"Address\":\"{_publicIp}\",\"Domain\":\"\",\"ServerType\":0,\"Port\":{port},\"UdpPort\":{port}}}}}";
+                    var deviceIp = pOut != IntPtr.Zero && outLen >= 420 ? Isup.ReadCString(pOut + Layout.RegAddress, 128) : "";
+                    var address = Announce(IdOf(pOut, outLen), deviceIp);
+                    var das = $"{{\"Type\":\"DAS\",\"DasInfo\":{{\"Address\":\"{address}\",\"Domain\":\"\",\"ServerType\":0,\"Port\":{port},\"UdpPort\":{port}}}}}";
                     var db = Encoding.ASCII.GetBytes(das);
                     if (pIn != IntPtr.Zero && db.Length < inLen)
                     {
@@ -403,7 +413,7 @@ public sealed partial class IsupEngine : IDisposable
                     _userByDevice[id] = lUserID;
                     _deviceByUser[lUserID] = id;
                     _rejections.TryRemove(id, out _);
-                    FillServerInfo(pIn, inLen, legacy);
+                    FillServerInfo(pIn, inLen, legacy, Announce(id, address));
                     Emit($"Equipo '{id}' en línea{(address.Length > 0 ? $" (IP {address})" : "")}, ISUP {reg.Protocol}{(firmware.Length > 0 ? $", firmware {firmware}" : "")}" +
                          $"{(fullSerial.Length > 0 ? $", serie {fullSerial}" : serial.Length > 0 ? $", serie {serial}" : "")}.");
                     Raise(new IsupHostEvent(IsupEventKinds.Online, id, DateTimeOffset.Now, address));
@@ -433,6 +443,8 @@ public sealed partial class IsupEngine : IDisposable
                     var ip = pOut != IntPtr.Zero && outLen >= 420 ? Isup.ReadCString(pOut + Layout.RegAddress, 128) : "";
                     if (id.Length > 0 && ip.Length > 0 && _registrations.TryGetValue(id, out var reg)) _registrations[id] = reg with { Address = ip };
                     Emit($"Equipo '{id}': cambió su dirección{(ip.Length > 0 ? $" a {ip}" : "")}.");
+                    // Puede haber cambiado de red: el próximo video o voz se le pide por la IP de este servidor que ahora le corresponde.
+                    if (id.Length > 0 && ip.Length > 0) Announce(id, ip);
                     return 1;
                 }
 
@@ -467,8 +479,9 @@ public sealed partial class IsupEngine : IDisposable
     /// <summary>
     /// Respuesta de registro (NET_EHOME_SERVER_INFO_V50, 1488 bytes que llegan en cero): latido, servidor de alarmas (MQTT en 5.0, TCP/UDP en
     /// 2.0/4.0) y servidor de imágenes. La hora (NTP) no se toca: la pone en hora el módulo de mantenimiento del VMS.
+    /// <paramref name="address"/> es la que se le anuncia al equipo.
     /// </summary>
-    void FillServerInfo(IntPtr pIn, uint inLen, bool legacy)
+    void FillServerInfo(IntPtr pIn, uint inLen, bool legacy, string address)
     {
         if (pIn == IntPtr.Zero || inLen < 300) return;
         int alarmPort = legacy ? _options.LegacyAlarmPort : _options.AlarmPort;
@@ -477,13 +490,15 @@ public sealed partial class IsupEngine : IDisposable
         Marshal.WriteInt32(pIn, Layout.SrvTimeOutCount, 6);
         if (alarmPort > 0)
         {
-            WriteAddress(pIn + Layout.SrvTcpAlarm, _publicIp, alarmPort);
-            WriteAddress(pIn + Layout.SrvUdpAlarm, _publicIp, alarmPort);
+            WriteAddress(pIn + Layout.SrvTcpAlarm, address, alarmPort);
+            WriteAddress(pIn + Layout.SrvUdpAlarm, address, alarmPort);
             // 0 = solo UDP, 1 = UDP y TCP, 2 = MQTT (ISUP 5.0). Con 0 la cámara ANPR de pruebas nunca mantenía abierto su enlace MQTT.
             Marshal.WriteInt32(pIn, Layout.SrvAlarmType, legacy ? 1 : 2);
         }
         if (_hPictures >= 0 && inLen >= Layout.SrvMinSize)
         {
+            // El módulo de imágenes escucha y se anuncia en UNA dirección (la configurada o la de salida a internet), fijada al arrancar:
+            // se le indica esa, no la del equipo, o subiría las fotos a una IP en la que nadie escucha.
             WriteAddress(pIn + Layout.SrvPicture, _publicIp, _options.PictureServerPort);
             Marshal.WriteInt32(pIn, Layout.SrvPicType, PictureServerType);
             WriteAscii(pIn + Layout.SrvCloudAk, PictureAccessKey, 64);

@@ -15,7 +15,9 @@ public sealed record IsupDeviceDto(
     bool Asleep,
     string? Firmware,
     bool AlarmLinkUp,
-    IReadOnlyList<IsupEquipmentRefDto> Equipment);
+    IReadOnlyList<IsupEquipmentRefDto> Equipment,
+    /// <summary>Dirección de este servidor que se le anunció al registrarse (alarmas, video, voz).</summary>
+    string? AnnouncedAddress = null);
 
 /// <summary>
 /// Página Sistema → Conexión ISUP: si el servicio corre, qué puertos abrió, qué dirección anuncia a los equipos, el estado de cada
@@ -30,7 +32,11 @@ public sealed record IsupStatusDto(
     IReadOnlyList<IsupDeviceDto> Devices,
     IReadOnlyList<IsupRejection> Rejections,
     /// <summary>¿Se aceptan equipos ISUP 2.0/4.0 (sin clave)? Apagado por omisión; se enciende con confirmación del riesgo.</summary>
-    bool AllowLegacy = false);
+    bool AllowLegacy = false,
+    /// <summary>true si a cada equipo se le anuncia la IP de este servidor por la que llegó (sin dirección fija configurada).</summary>
+    bool PerDeviceAddress = false,
+    /// <summary>IPv4 de este servidor (sin adaptadores virtuales): con más de una, cada equipo apunta a la de su red.</summary>
+    IReadOnlyList<string>? LocalAddresses = null);
 
 /// <summary>Encender o apagar la compatibilidad ISUP 2.0/4.0. Encender exige <paramref name="Confirm"/> = "HABILITAR".</summary>
 public sealed record IsupLegacyRequestDto(bool Enabled, string? Confirm = null);

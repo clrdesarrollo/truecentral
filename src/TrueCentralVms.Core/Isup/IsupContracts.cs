@@ -20,7 +20,10 @@ namespace TrueCentralVms.Core.Isup;
 /// </summary>
 public sealed class IsupHostOptions
 {
-    /// <summary>IP (o nombre) con que los equipos llegan al servidor. Vacío = la IP local de salida a internet.</summary>
+    /// <summary>
+    /// IP (o nombre) con que los equipos llegan al servidor, la misma para todos. Vacío = a cada equipo se le anuncia la IP de este
+    /// servidor por la que llegó (un servidor con dos redes tiene una IP en cada una).
+    /// </summary>
     public string PublicAddress { get; set; } = "";
     /// <summary>
     /// Puertos de registro (TCP y UDP). El 7660 es el de fábrica de ISUP; el
@@ -67,7 +70,9 @@ public sealed record IsupDeviceState(
     bool Asleep,
     string? Firmware,
     /// <summary>true si el equipo mantiene abierta su conexión de alarmas con el servidor.</summary>
-    bool AlarmLinkUp);
+    bool AlarmLinkUp,
+    /// <summary>Dirección del servidor que se le anunció al registrarse (para alarmas, video y voz); null si aún no se le anunció.</summary>
+    string? AnnouncedAddress = null);
 
 /// <summary>
 /// Un equipo que intentó registrarse y fue rechazado: ID desconocido (no está
@@ -78,13 +83,20 @@ public sealed record IsupRejection(string DeviceId, string Reason, DateTimeOffse
 /// <summary>Un puerto que el host debía abrir y si lo logró.</summary>
 public sealed record IsupListenerState(string Name, int Port, bool Open, string? Error);
 
-/// <summary>Foto completa del host ISUP (página Sistema → Conexión ISUP).</summary>
+/// <summary>
+/// Foto completa del host ISUP (página Sistema → Conexión ISUP). <paramref name="PublicAddress"/> es la dirección configurada o, si
+/// cada equipo recibe la suya (<paramref name="PerDeviceAddress"/>), la de salida a internet, que se usa con los que aún no se
+/// registraron. <paramref name="LocalAddresses"/> son las IPv4 de este servidor (sin adaptadores virtuales): con más de una, un equipo
+/// tiene que apuntar a la de su red.
+/// </summary>
 public sealed record IsupHostStatus(
     string Version,
     string PublicAddress,
     IReadOnlyList<IsupListenerState> Listeners,
     IReadOnlyList<IsupDeviceState> Devices,
-    IReadOnlyList<IsupRejection> Rejections);
+    IReadOnlyList<IsupRejection> Rejections,
+    bool PerDeviceAddress = false,
+    IReadOnlyList<string>? LocalAddresses = null);
 
 /// <summary>Clase de evento que el host envía al servidor por /events (una línea JSON cada uno).</summary>
 public static class IsupEventKinds

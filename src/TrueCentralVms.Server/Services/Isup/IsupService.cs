@@ -38,6 +38,7 @@ public sealed class IsupService : BackgroundService, IIsupGateway
     private readonly SemaphoreSlim _directoryWake = new(0);
     private volatile bool _connected;
     private volatile string? _hostPublicAddress;
+    private volatile IsupHostStatus? _lastStatus;
     private DateTime _lastEventUtc;
 
     public IsupService(IsupHostManager host, IServiceScopeFactory scopes, CredentialProtector protector, IConfiguration config,
@@ -60,8 +61,17 @@ public sealed class IsupService : BackgroundService, IIsupGateway
     /// <summary>Un equipo ISUP entró o salió de línea (id, en línea). Corre en el hilo del canal de eventos: encolar y volver.</summary>
     public event Action<string, bool>? DeviceOnlineChanged;
 
+    /// <summary>
+    /// El canal de eventos con el host quedó abierto (al arrancar el servidor o tras relanzar el host). Los equipos que se consultaron
+    /// mientras el host arrancaba quedaron con ese aviso: con esto se vuelven a consultar sin esperar su reintento.
+    /// </summary>
+    public event Action? HostConnected;
+
     /// <summary>true mientras el canal de eventos con el host está abierto.</summary>
     public bool Connected => _connected;
+
+    /// <summary>Último estado completo que entregó el host (null si nunca respondió desde que arrancó el servidor).</summary>
+    public IsupHostStatus? LastHostStatus => _lastStatus;
 
     /// <summary>Último evento o latido recibido del host (UTC).</summary>
     public DateTime LastEventUtc => _lastEventUtc;
@@ -124,6 +134,8 @@ public sealed class IsupService : BackgroundService, IIsupGateway
         _connected = true;
         _lastEventUtc = DateTime.UtcNow;
         _logger.LogInformation("Conectado al servicio ISUP interno.");
+        try { HostConnected?.Invoke(); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Error al avisar que el servicio ISUP quedó conectado."); }
         while (!ct.IsCancellationRequested)
         {
             // El host late cada 15 s: 45 s sin nada = colgado.
@@ -255,7 +267,9 @@ public sealed class IsupService : BackgroundService, IIsupGateway
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            return await _http.GetFromJsonAsync<IsupHostStatus>("/status", Json, cts.Token);
+            var status = await _http.GetFromJsonAsync<IsupHostStatus>("/status", Json, cts.Token);
+            if (status is not null) _lastStatus = status;
+            return status;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException) { return null; }
     }

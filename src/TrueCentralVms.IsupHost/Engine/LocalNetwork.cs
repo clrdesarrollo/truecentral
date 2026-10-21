@@ -7,8 +7,11 @@ namespace TrueCentralVms.IsupHost.Engine;
 /// <summary>Direcciones de este equipo (para anunciarlas a los equipos ISUP y para escuchar el servidor de imágenes tras un NAT).</summary>
 public static class LocalNetwork
 {
-    /// <summary>IPv4 de los adaptadores activos (Ethernet, Wi-Fi, VPN…); las de adaptadores virtuales de VMware/Hyper-V van al final.</summary>
-    public static List<string> Candidates()
+    /// <summary>
+    /// IPv4 de los adaptadores activos (Ethernet, Wi-Fi, VPN…); las de adaptadores virtuales de VMware/Hyper-V van al final, o se
+    /// omiten con <paramref name="includeVirtual"/> en false.
+    /// </summary>
+    public static List<string> Candidates(bool includeVirtual = true)
     {
         var list = new List<(string Ip, bool Virtual)>();
         foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
@@ -25,7 +28,7 @@ public static class LocalNetwork
                 list.Add((ip, virt));
             }
         }
-        return list.OrderBy(x => x.Virtual).Select(x => x.Ip).ToList();
+        return list.Where(x => includeVirtual || !x.Virtual).OrderBy(x => x.Virtual).Select(x => x.Ip).Distinct().ToList();
     }
 
     /// <summary>true si la IP es de algún adaptador de este equipo (se puede escuchar en ella).</summary>

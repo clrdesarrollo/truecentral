@@ -24,7 +24,7 @@ public sealed partial class IsupEngine
         if (_hStream < 0) throw new IsupCommandException(-1, "El puerto de video ISUP no está abierto en el servidor.");
         var stream = new MediaStream(deviceId, channel, playback: false) { UserId = userId, Legacy = IsLegacy(deviceId) };
         var inp = new NET_EHOME_PREVIEWINFO_IN { iChannel = channel, dwStreamType = (uint)streamType, dwLinkMode = 0 };
-        Isup.SetIp(ref inp.struStreamSever, _publicIp, (ushort)_options.StreamPort);
+        Isup.SetIp(ref inp.struStreamSever, AddressFor(deviceId), (ushort)_options.StreamPort);
         var outp = new NET_EHOME_PREVIEWINFO_OUT();
         _liveAwaiting[stream] = 0;   // antes de pedirlo: en 2.0/4.0 el enlace puede llegar antes de que la llamada vuelva
         if (!Isup.NET_ECMS_StartGetRealStream(userId, ref inp, ref outp))
@@ -124,7 +124,7 @@ public sealed partial class IsupEngine
             struStartTime = ToEhomeTime(startLocal), struStopTime = ToEhomeTime(stopLocal),
             byLocalOrUTC = 0, byDuplicateSegment = 0,
         };
-        Isup.SetIp(ref inp.struStreamSever, _publicIp, (ushort)_options.PlaybackPort);
+        Isup.SetIp(ref inp.struStreamSever, AddressFor(deviceId), (ushort)_options.PlaybackPort);
         var outp = new NET_EHOME_PLAYBACK_INFO_OUT();
         if (!Isup.NET_ECMS_StartPlayBack(userId, ref inp, ref outp))
         {

@@ -145,7 +145,8 @@ límite.
   [`Isup` › `PublicAddress`], [vacío], [IP o nombre con que los equipos llegan
     al servidor, que se les anuncia al conectarse para las alarmas, el video y
     la voz. Fíjelo cuando el servidor está detrás de un router (la IP pública o
-    el nombre DNS). Vacío = la IP local del servidor.],
+    el nombre DNS). Vacío = a cada equipo, la IP del servidor por la que llegó
+    (con dos redes, cada equipo recibe la de la suya).],
   [`Isup` › `RegistrationPorts`], [`[7660, 7661]`], [Puertos de registro. El
     7661 es el que usaba la receptora de Hikvision de versiones anteriores:
     los paneles que reportaban a ella se conectan ahí sin tocarlos.],
