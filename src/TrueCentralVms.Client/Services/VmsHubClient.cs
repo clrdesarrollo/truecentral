@@ -94,6 +94,12 @@ public sealed class VmsHubClient : IAsyncDisposable
         _connection = new HubConnectionBuilder()
             .WithUrl($"{baseUrl.TrimEnd('/')}{VmsHubContract.HubPath}", options =>
             {
+                // Mismo criterio de confianza en el certificado que la API (ServerTrust).
+                var hubUri = new Uri(baseUrl);
+                options.HttpMessageHandlerFactory = handler =>
+                    handler is HttpClientHandler http ? ServerTrust.Configure(http) : handler;
+                options.WebSocketConfiguration = socket =>
+                    socket.RemoteCertificateValidationCallback = ServerTrust.ForWebSocket(hubUri);
                 // SignalR lo envía como ?access_token=, que el middleware del
                 // servidor acepta además del header Bearer.
                 options.AccessTokenProvider = () =>

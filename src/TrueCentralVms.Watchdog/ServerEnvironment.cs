@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace TrueCentralVms.Watchdog;
 
 /// <summary>
-/// Localiza la instalación del servidor y lee su configuración real (puerto web
+/// Localiza la instalación del servidor y lee su configuración real (puertos web
 /// y puerto de PostgreSQL) para monitorear exactamente lo que está instalado.
 /// El Watchdog se instala en {app}\watchdog, así que el servidor se busca en la
 /// carpeta del ejecutable y en su carpeta padre.
@@ -13,12 +13,14 @@ public sealed class ServerEnvironment
 {
     public string ServerDirectory { get; private init; } = "";
     public bool ServerFound { get; private init; }
-    public string BaseUrl { get; private init; } = $"http://localhost:{DefaultWebPort}";
-    public int WebPort { get; private init; } = DefaultWebPort;
+    /// <summary>Panel web (HTTPS) para abrirlo en el navegador.</summary>
+    public string BaseUrl { get; private init; } = "https://localhost";
+    public int InternalPort { get; private init; } = DefaultInternalPort;
     public int PgPort { get; private init; } = DefaultPgPort;
 
-    /// <summary>Puerto web del servidor (el mismo del panel de administración).</summary>
-    private const int DefaultWebPort = 5090;
+    /// <summary>Puertos del servidor por omisión (sección "Web" de su configuración).</summary>
+    private const int DefaultHttpsPort = 443;
+    private const int DefaultInternalPort = 5099;
 
     /// <summary>Puerto por defecto del PostgreSQL embebido (privado, solo 127.0.0.1).</summary>
     private const int DefaultPgPort = 25490;
@@ -27,12 +29,12 @@ public sealed class ServerEnvironment
     private const string ServerExeName = "TrueCentralVms.Server.exe";
 
     /// <summary>
-    /// URL de sondeo del estado. Va por 127.0.0.1 y no por "localhost" a
-    /// propósito: si el servidor quedara atado solo a IPv4, resolver "localhost"
-    /// a ::1 cuesta ~2 s por intento y el sondeo agotaría su timeout, marcando
-    /// como caída una API que está perfectamente viva.
+    /// URL de sondeo del estado: por el puerto interno del servidor (HTTP solo
+    /// en loopback, sin certificado de por medio). Va por 127.0.0.1 y no por
+    /// "localhost": resolver "localhost" a ::1 puede costar ~2 s por intento y
+    /// el sondeo agotaría su timeout, marcando como caída una API viva.
     /// </summary>
-    public string HealthUrl => $"http://127.0.0.1:{WebPort}/api/health";
+    public string HealthUrl => $"http://127.0.0.1:{InternalPort}/api/health";
 
     public static ServerEnvironment Discover()
     {
@@ -48,7 +50,7 @@ public sealed class ServerEnvironment
 
         // Misma precedencia que el servidor instalado (entorno Production):
         // appsettings.json < appsettings.Production.json < appsettings.Local.json.
-        string? urls = null;
+        int httpsPort = DefaultHttpsPort, internalPort = DefaultInternalPort;
         int pgPort = DefaultPgPort;
         string? dataDir = null;
         foreach (string name in new[] { "appsettings.json", "appsettings.Production.json", "appsettings.Local.json" })
@@ -63,8 +65,11 @@ public sealed class ServerEnvironment
                     CommentHandling = JsonCommentHandling.Skip,
                     AllowTrailingCommas = true,
                 });
-                if (doc.RootElement.TryGetProperty("Urls", out var u) && u.ValueKind == JsonValueKind.String)
-                    urls = u.GetString();
+                if (doc.RootElement.TryGetProperty("Web", out var web) && web.ValueKind == JsonValueKind.Object)
+                {
+                    if (web.TryGetProperty("HttpsPort", out var h) && h.TryGetInt32(out int https)) httpsPort = https;
+                    if (web.TryGetProperty("InternalPort", out var i) && i.TryGetInt32(out int inner)) internalPort = inner;
+                }
                 if (doc.RootElement.TryGetProperty("Database", out var db) && db.ValueKind == JsonValueKind.Object)
                 {
                     if (db.TryGetProperty("PgPort", out var p) && p.TryGetInt32(out int port))
@@ -85,14 +90,13 @@ public sealed class ServerEnvironment
         if (ReadClusterPort(serverDir, dataDir) is int clusterPort)
             pgPort = clusterPort;
 
-        int webPort = ParseWebPort(urls) ?? DefaultWebPort;
         return new ServerEnvironment
         {
             ServerDirectory = serverDir,
             ServerFound = true,
-            WebPort = webPort,
+            InternalPort = internalPort,
             PgPort = pgPort,
-            BaseUrl = $"http://localhost:{webPort}",
+            BaseUrl = httpsPort == 443 ? "https://localhost" : $"https://localhost:{httpsPort}",
         };
     }
 
@@ -133,20 +137,5 @@ public sealed class ServerEnvironment
         {
             return null;
         }
-    }
-
-    /// <summary>Primer puerto http de la lista de Urls ("http://*:5090;...").</summary>
-    private static int? ParseWebPort(string? urls)
-    {
-        if (string.IsNullOrWhiteSpace(urls))
-            return null;
-        foreach (string raw in urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            string candidate = raw.Replace("0.0.0.0", "localhost").Replace("[::]", "localhost")
-                                  .Replace("+", "localhost").Replace("*", "localhost");
-            if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttp)
-                return uri.Port;
-        }
-        return null;
     }
 }

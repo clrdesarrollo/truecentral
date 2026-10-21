@@ -53,7 +53,7 @@ switch (command)
         string? code = Option("--code");
         if (server is null || code is null)
         {
-            Console.Error.WriteLine("Uso: truecentral-speaker enroll --server http://<servidor>:5090 --code ABCD-EFGH");
+            Console.Error.WriteLine("Uso: truecentral-speaker enroll --server https://<servidor> --code ABCD-EFGH");
             return 2;
         }
         var store = new AgentStore(dataDirectory);

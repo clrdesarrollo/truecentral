@@ -530,7 +530,7 @@ public sealed partial class MediaMtxManager(
                 # GHSA-w334-5mp5-h897). Ningún navegador habla directo con la
                 # API ni con la señalización WebRTC: sin orígenes permitidos.
                 authMethod: http
-                authHTTPAddress: http://127.0.0.1:{config.GetValue("Streaming:ServerPort", 5090)}/api/streaming/auth
+                authHTTPAddress: {Https.WebPorts.From(config).InternalUrl}/api/streaming/auth
                 authHTTPExclude: []
                 apiAllowOrigins: []
 

@@ -2638,3 +2638,11 @@ a.db-kpi:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(16, 24
   .db-ring .bar { transition: none; }
   .db-hero.alarm .db-ring::after, .db-sys.alarm .db-sys-ico { animation: none; }
 }
+
+/* ---- Sistema → Certificado HTTPS ---- */
+table.kv { border-collapse: collapse; width: 100%; }
+table.kv th { text-align: left; font-weight: 600; color: var(--muted); width: 230px; padding: 8px 12px 8px 0; vertical-align: top; }
+table.kv td { padding: 8px 0; vertical-align: top; }
+table.kv tr + tr th, table.kv tr + tr td { border-top: 1px solid var(--border); }
+table.kv .tag { margin: 0 4px 4px 0; }
+.cert-fp { font-size: 12px; word-break: break-all; }

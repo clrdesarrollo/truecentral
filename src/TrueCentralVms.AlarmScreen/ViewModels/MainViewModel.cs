@@ -37,6 +37,8 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _screenName = "";
     [ObservableProperty] private string _siteName = "";
     [ObservableProperty] private string _pairingCode = "";
+    [ObservableProperty] private string _pairingFingerprint = "";
+    [ObservableProperty] private bool _canForgetServer;
     [ObservableProperty] private bool _isPairing;
     [ObservableProperty] private bool _isOnline;
     [ObservableProperty] private bool _showSetup;
@@ -122,6 +124,8 @@ public partial class MainViewModel : ObservableObject
         IsOnline = _link.State == LinkState.Online;
         IsPairing = _link.State == LinkState.Pairing && _link.PairingCode.Length > 0;
         PairingCode = _link.PairingCode;
+        PairingFingerprint = _link.PairingFingerprint;
+        CanForgetServer = _link.CanForget;
         ShowSetup = _link.State is LinkState.Searching or LinkState.Blocked;
         SetupTitle = _link.State == LinkState.Blocked ? "Pantalla sin acceso" : "Buscando el servidor";
 
@@ -306,13 +310,21 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task AcknowledgeAll() => await _link.AcknowledgeAllAsync();
 
+    /// <summary>Volver a buscar y emparejar (el servidor cambió de certificado).</summary>
+    [RelayCommand]
+    private void ForgetServer()
+    {
+        _link.ForgetServer();
+        ManualUrl = "";
+    }
+
     /// <summary>Configuración manual: el broadcast no cruza VLANs y en sitios reales eso pasa.</summary>
     [RelayCommand]
     private void UseManualUrl()
     {
         var url = ManualUrl?.Trim();
         if (string.IsNullOrWhiteSpace(url)) return;
-        if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) url = "http://" + url;
+        if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) url = "https://" + url;
 
         _link.UseServer(url);
         StatusText = "Servidor fijado a mano: " + url;

@@ -52,7 +52,7 @@ public partial class MainWindow : Window
         // El servicio, la URL del panel y el puerto de la base no ocupan lugar
         // en la ventana: van en el tooltip del indicador al que pertenecen.
         SvcCard.ToolTip = $"Servicio de Windows {ServiceName}";
-        ApiCard.ToolTip = $"API y panel web: {_env.BaseUrl}/api/health";
+        ApiCard.ToolTip = $"API y panel web: {_env.BaseUrl} (estado por {_env.HealthUrl})";
         DbCard.ToolTip = $"PostgreSQL embebido en 127.0.0.1:{_env.PgPort}";
 
         if (!_env.ServerFound)

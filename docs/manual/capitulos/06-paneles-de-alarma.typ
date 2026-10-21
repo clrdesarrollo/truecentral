@@ -337,14 +337,16 @@ eventos lleguen también cuando ese canal no está disponible, el panel puede
 configurarse para reportar al servidor por una de estas vías:
 
 - *Notificación HTTP*: en el panel, agregue como destino
-  `http://IP-del-servidor:5090/api/alarms/push`.
+  `http://IP-del-servidor/api/alarms/push` (puerto 80, sin cifrado: es lo
+  único que el servidor atiende sin HTTPS, junto con las fotos que bajan los
+  terminales ISUP).
 - *Alarm Receiving Center*: en el panel, configure un centro receptor por
   Tcp/IP con el protocolo ADM-CID (o SIA-DCS), sin cifrado, con la dirección
   del servidor, el puerto 5091 y un número de cuenta de 3 a 16 dígitos.
 
 El servidor acepta estos reportes solo si llegan desde la dirección con que el
 panel está registrado y habilitado en el sistema. El instalador del servidor
-abre los puertos 5090 y 5091 en su firewall. El estado del servicio *Receptor
+abre los puertos 80 y 5091 en su firewall. El estado del servicio *Receptor
 de alarmas (SIA DC-09)* se ve en #menu("Sistema", "Servicios").
 
 === Agregar un panel que se conecta por ISUP

@@ -41,7 +41,8 @@ public sealed class ApiClient
         Converters = { new JsonStringEnumConverter() },
     };
 
-    private readonly HttpClient _http = new()
+    // El certificado del servidor se valida con ServerTrust (CA conocida o huella fijada en este equipo).
+    private readonly HttpClient _http = new(ServerTrust.CreateHandler())
     {
         // Configurable en Configuración → Red (se aplica al iniciar la app).
         Timeout = TimeSpan.FromSeconds(Math.Clamp(ClientSettings.Load().ApiTimeoutSeconds, 5, 120)),
@@ -56,7 +57,7 @@ public sealed class ApiClient
     /// <summary>Cliente aparte para las exportaciones: una descarga dura lo
     /// que el equipo tarde en entregar el tramo, muy por encima del tiempo
     /// límite razonable para una llamada de API.</summary>
-    private readonly HttpClient _downloads = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly HttpClient _downloads = new(ServerTrust.CreateHandler()) { Timeout = Timeout.InfiniteTimeSpan };
 
     private readonly SemaphoreSlim _reloginLock = new(1, 1);
     private string? _password;

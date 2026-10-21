@@ -88,7 +88,7 @@ public sealed class ClientSettings
 {
     private const int MaxAccounts = 8;
 
-    public string ServerUrl { get; set; } = "http://localhost:5090";
+    public string ServerUrl { get; set; } = "https://localhost";
     public string Username { get; set; } = "";
     public bool RememberPassword { get; set; }
     public bool AutoLogin { get; set; }
@@ -207,10 +207,10 @@ public sealed class ClientSettings
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<ClientSettings>(File.ReadAllText(FilePath)) ?? new();
+                return (JsonSerializer.Deserialize<ClientSettings>(File.ReadAllText(FilePath)) ?? new()).UpgradeServerUrls();
         }
         catch { /* preferencias corruptas: se parte de cero */ }
-        return new();
+        return new() { ServerUrl = InstalledServerUrl() ?? "https://localhost" };
     }
 
     public void Save()
@@ -222,6 +222,35 @@ public sealed class ClientSettings
         }
         catch { /* mejor esfuerzo */ }
     }
+
+    /// <summary>
+    /// Desde la 0.5.22 el servidor ya no atiende en http://…:5090 sino en https (443): las direcciones guardadas
+    /// con el puerto viejo pasan a la nueva, así las cuentas y contraseñas recordadas siguen calzando.
+    /// </summary>
+    private ClientSettings UpgradeServerUrls()
+    {
+        ServerUrl = UpgradeUrl(ServerUrl);
+        foreach (var account in Accounts) account.ServerUrl = UpgradeUrl(account.ServerUrl);
+        if (LastSession is not null) LastSession.ServerUrl = UpgradeUrl(LastSession.ServerUrl);
+        return this;
+    }
+
+    /// <summary>Dirección del servidor del que se descargó el instalador (la deja el instalador), si la hay.</summary>
+    private static string? InstalledServerUrl()
+    {
+        try
+        {
+            string path = Path.Combine(ServerTrust.MachineDirectory, "server-url.txt");
+            return File.Exists(path) && File.ReadAllText(path).Trim() is { Length: > 0 } url
+                && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps ? url : null;
+        }
+        catch { return null; }
+    }
+
+    private static string UpgradeUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttp && uri.Port == 5090
+            ? (uri.HostNameType == UriHostNameType.IPv6 ? $"https://[{uri.IdnHost}]" : $"https://{uri.IdnHost}")
+            : url;
 
     public SavedAccount? FindAccount(string serverUrl, string username) =>
         Accounts.FirstOrDefault(a =>

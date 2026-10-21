@@ -21,13 +21,22 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 SERVER=$(grep -oP '"ServerUrl"\s*:\s*"\K[^"]+' "$CONFIG" 2>/dev/null || true)
 TOKEN=$(grep -oP '"DeviceToken"\s*:\s*"\K[^"]+' "$CONFIG" 2>/dev/null || true)
+# Llave del servidor fijada al emparejar: el paquete se ejecuta en la Pi, así que solo se baja del servidor de verdad.
+PIN=$(grep -oP '"PinnedServerKeyBase64"\s*:\s*"\K[^"]+' "$CONFIG" 2>/dev/null || true)
+CURL_TLS=(-k)
+if [[ -n "$PIN" ]]; then
+    CURL_TLS=(-k --pinnedpubkey "sha256//$PIN")
+elif [[ "$SERVER" == https://* ]]; then
+    log "La pantalla aún no fijó la llave del servidor (se fija al conectarse); se actualiza mañana."
+    exit 0
+fi
 
 if [[ -z "$SERVER" || -z "$TOKEN" ]]; then
     log "La pantalla aún no está emparejada; nada que actualizar."
     exit 0
 fi
 
-INFO=$(curl -sf --max-time 20 -H "X-Screen-Token: $TOKEN" "$SERVER/api/screen/client/version") || {
+INFO=$(curl -sf "${CURL_TLS[@]}" --max-time 20 -H "X-Screen-Token: $TOKEN" "$SERVER/api/screen/client/version") || {
     log "El servidor no respondió; se reintenta mañana."
     exit 0
 }
@@ -49,7 +58,7 @@ fi
 
 log "Actualizando de $CURRENT a $LATEST"
 rm -rf "$STAGING" && mkdir -p "$STAGING"
-curl -sf --max-time 600 -H "X-Screen-Token: $TOKEN" -o "$STAGING/paquete.tar.gz" "$SERVER$URL"
+curl -sf "${CURL_TLS[@]}" --max-time 600 -H "X-Screen-Token: $TOKEN" -o "$STAGING/paquete.tar.gz" "$SERVER$URL"
 
 if [[ -n "$SHA" ]]; then
     echo "$SHA  $STAGING/paquete.tar.gz" | sha256sum -c - >/dev/null || {

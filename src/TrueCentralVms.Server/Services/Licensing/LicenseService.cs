@@ -203,6 +203,8 @@ public sealed class LicenseService : BackgroundService
                  || path.StartsWithSegments("/api/system/desktop-seats")
                  // Respaldar es la seguridad de los datos del cliente: nunca depende de la licencia.
                  || path.StartsWithSegments("/api/system/backups")
+                 // Ídem el certificado HTTPS: renovarlo no puede esperar a la licencia.
+                 || path.StartsWithSegments("/api/system/certificate")
                  || path.StartsWithSegments("/api/streaming")
                  || path.StartsWithSegments("/api/audit/client-event"));
     }

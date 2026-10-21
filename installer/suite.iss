@@ -18,7 +18,9 @@
 ;   - appsettings.Local.json (ajustes del equipo) nunca se sobreescribe.
 ;   - El primer administrador se crea desde el panel web, SOLO desde la propia
 ;     máquina (el sistema viene "desactivado de fábrica"): al terminar se
-;     ofrece abrir http://localhost:5090.
+;     ofrece abrir https://localhost.
+;   - Puertos web: HTTPS 443 (todo), HTTP 80 (solo equipos sin TLS) y 5099
+;     interno (loopback). Si 80 o 443 están ocupados, la instalación se detiene.
 ;
 ; Compilación:  installer\build-installers.ps1   (o ISCC /DAppVersion=x.y.z suite.iss)
 ; ============================================================================
@@ -38,7 +40,9 @@
 #define ServiceName    "CLRTrueCentralVMS"
 #define ServerExe      "TrueCentralVms.Server.exe"
 #define DataDirName    "CLRTrueCentralVMS"
-#define WebPort        "5090"
+#define HttpsPort      "443"    ; panel, API, clientes, pantallas y agentes (Web:HttpsPort)
+#define HttpPort       "80"     ; solo equipos sin TLS: paneles de alarma y terminales ISUP (Web:HttpPort)
+#define InternalPort   "5099"   ; HTTP solo en loopback: sonda de salud y MediaMTX (Web:InternalPort)
 ; Debe coincidir con LicenseStateStore.RegistryPath del servidor.
 #define LicenseRegistryKey "SOFTWARE\CLRobotics\TrueCentralVMS\Runtime"
 #define ArcPort        "5091"
@@ -210,7 +214,7 @@ Source: "{#ScreenPackage}"; DestDir: "{app}\screen-packages"; Flags: ignoreversi
 #endif
 
 [Icons]
-Name: "{autoprograms}\CLR TrueCentral VMS\Panel web de CLR TrueCentral VMS"; Filename: "http://localhost:{#WebPort}"
+Name: "{autoprograms}\CLR TrueCentral VMS\Panel web de CLR TrueCentral VMS"; Filename: "https://localhost"
 Name: "{autoprograms}\CLR TrueCentral VMS\Watchdog de CLR TrueCentral VMS"; Filename: "{app}\watchdog\{#WatchdogExe}"
 Name: "{autoprograms}\CLR TrueCentral VMS\Datos de CLR TrueCentral VMS"; Filename: "{commonappdata}\{#DataDirName}"
 Name: "{autodesktop}\Watchdog de CLR TrueCentral VMS"; Filename: "{app}\watchdog\{#WatchdogExe}"; Tasks: desktopicon
@@ -221,7 +225,7 @@ Name: "{autoprograms}\CLR TrueCentral VMS\Instalador del cliente (para otros pue
 [Run]
 ; Abre el panel: el primer administrador se crea desde el asistente, que
 ; solo acepta conexiones desde esta misma máquina.
-Filename: "http://localhost:{#WebPort}"; Description: "Abrir el panel web (crear el primer administrador)"; Flags: postinstall shellexec skipifsilent nowait
+Filename: "https://localhost"; Description: "Abrir el panel web (crear el primer administrador)"; Flags: postinstall shellexec skipifsilent nowait
 ; shellexec (ShellExecuteEx) y no CreateProcess: el Watchdog pide elevación en
 ; su manifiesto y el instalador no puede lanzarlo de otra manera.
 Filename: "{app}\watchdog\{#WatchdogExe}"; Description: "Abrir el Watchdog del servidor"; Flags: postinstall nowait skipifsilent shellexec unchecked
@@ -354,6 +358,43 @@ function PortInUse(Port: Integer): Boolean;
 begin
   Result := RunHidden(SysTool('cmd.exe'),
     '/c netstat -an -p TCP | find ":' + IntToStr(Port) + ' " > nul') = 0;
+end;
+
+// ¿Algún programa ESCUCHA en ese puerto? A diferencia de PortInUse, no da
+// positivo por conexiones salientes (cualquier navegador tiene alguna hacia un
+// :443 remoto). Get-NetTCPConnection no depende del idioma de Windows.
+function ListeningOn(Port: Integer): Boolean;
+begin
+  Result := RunHidden(PowerShellExe(),
+    '-NoProfile -NonInteractive -Command "if (Get-NetTCPConnection -State Listen -LocalPort ' + IntToStr(Port) +
+    ' -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"') = 0;
+end;
+
+// Los puertos web del servidor (443 y 80) deben estar libres: con IIS, otro
+// servidor web o un programa que los reservó, el servicio no podría arrancar.
+// Se revisa con nuestro servicio ya detenido. Si este equipo los cambió en
+// appsettings.Local.json ("Web"), se respeta y no se revisa.
+function WebPortsConflict(): String;
+var
+  Local: AnsiString;
+  Busy: String;
+begin
+  Result := '';
+  if LoadStringFromFile(ExpandConstant('{app}\appsettings.Local.json'), Local) and (Pos('"HttpsPort"', Local) > 0) then
+    exit;
+  Busy := '';
+  if ListeningOn({#HttpsPort}) then Busy := '{#HttpsPort} (HTTPS)';
+  if ListeningOn({#HttpPort}) then
+  begin
+    if Busy <> '' then Busy := Busy + ' y ';
+    Busy := Busy + '{#HttpPort} (HTTP)';
+  end;
+  if Busy <> '' then
+    Result := 'El puerto ' + Busy + ' ya lo usa otro programa de este equipo (por ejemplo IIS u otro servidor web).' + #13#10#13#10 +
+              'CLR TrueCentral VMS atiende el panel web y a los clientes por HTTPS en el 443, y a los equipos sin cifrado ' +
+              '(paneles de alarma, terminales ISUP) en el 80. Libere esos puertos (detenga o reconfigure el otro programa) ' +
+              'y vuelva a ejecutar el instalador.' + #13#10#13#10 +
+              'Si este equipo debe usar otros puertos, defínalos en "Web" de appsettings.Local.json antes de instalar.';
 end;
 
 // Puerto del clúster ya existente (leído de su postgresql.conf), o -1 si no hay
@@ -492,6 +533,7 @@ begin
   StopServiceAndWait('Deteniendo el servicio {#ServiceName}...');
   StopOrphanPostgres();
   StopOrphanMediaMtx();
+  Result := WebPortsConflict();
 end;
 
 procedure ConfigureService();
@@ -530,11 +572,12 @@ end;
 procedure ConfigureFirewall();
 begin
   DeleteFirewallRules();
-  // Panel web + API + SignalR (5090), receptor de alarmas SIA DC-09 (5091) y
+  // Panel web + API + SignalR por HTTPS (443), HTTP de los equipos sin TLS (80),
+  // receptor de alarmas SIA DC-09 (5091) y
   // receptor WebSocket de los paneles de cerco (5092; sin esta regla los paneles
   // no llegan al servidor desde otro equipo) y descarga de firmware OTA (5093).
   RunHidden(SysTool('netsh.exe'),
-    'advfirewall firewall add rule name="CLR TrueCentral VMS Server" dir=in action=allow protocol=TCP localport={#WebPort},{#ArcPort},{#CercoPort},{#CercoFwPort} profile=any');
+    'advfirewall firewall add rule name="CLR TrueCentral VMS Server" dir=in action=allow protocol=TCP localport={#HttpsPort},{#HttpPort},{#ArcPort},{#CercoPort},{#CercoFwPort} profile=any');
   // Respuestas del descubrimiento de equipos: SADP (UDP 37020), WS-Discovery
   // (UDP 3702), Dahua (UDP 37810) y ZKTeco (UDP 4370, control de acceso), y el
   // autodiscovery de las pantallas de alarma de las casetas (UDP 5094).
@@ -608,13 +651,13 @@ begin
   begin
     WizardForm.StatusLabel.Caption := 'Esperando a que el servidor prepare la base de datos y responda...';
     // Primer arranque: initdb + migraciones puede tardar; hasta 120 s.
-    // Por 127.0.0.1 y no "localhost": si el servidor quedara atado solo a IPv4,
-    // resolver ::1 primero consumiría el --max-time y el chequeo fallaría con
-    // el servicio sano.
+    // Por el puerto interno (HTTP solo en loopback, sin certificado de por
+    // medio) y por 127.0.0.1 y no "localhost": resolver ::1 primero podría
+    // consumir el --max-time y el chequeo fallaría con el servicio sano.
     for I := 1 to 60 do
     begin
       if RunHidden(SysTool('curl.exe'),
-           '--silent --fail --max-time 5 http://127.0.0.1:{#WebPort}/api/health') = 0 then
+           '--silent --fail --max-time 5 http://127.0.0.1:{#InternalPort}/api/health') = 0 then
       begin
         Healthy := True;
         break;
@@ -630,12 +673,12 @@ begin
     if Crashed and not WizardSilent() then
       MsgBox('El servicio se instaló, pero se detiene al arrancar.' #13#10#13#10 +
              'Revise el Visor de eventos de Windows (Registro de aplicaciones, origen CLRTrueCentralVMS).' #13#10 +
-             'Causas habituales: el puerto {#WebPort} está ocupado por otro programa, o la base de datos' #13#10 +
+             'Causas habituales: el puerto {#HttpsPort} o el {#HttpPort} está ocupado por otro programa, o la base de datos' #13#10 +
              'no pudo iniciarse (puerto {#PgPort} o permisos sobre ' + DataDir() + ').',
              mbError, MB_OK)
     else if not Healthy and not WizardSilent() then
-      MsgBox('El servicio se instaló y se inició, pero la API todavía no responde en el puerto {#WebPort}.'#13#10 +
-             'Revise el estado en el Visor de eventos de Windows o vuelva a abrir http://localhost:{#WebPort} en unos minutos.',
+      MsgBox('El servicio se instaló y se inició, pero la API todavía no responde.'#13#10 +
+             'Revise el estado en el Visor de eventos de Windows o vuelva a abrir https://localhost en unos minutos.',
              mbInformation, MB_OK);
   end;
 end;
@@ -970,7 +1013,7 @@ begin
                    'Para liberarla hay que desactivarla ANTES, con el sistema todavía' #13#10 +
                    'funcionando:' #13#10#13#10 +
                    '    1. Cancele esta desinstalación.' #13#10 +
-                   '    2. Abra http://localhost:{#WebPort} y entre a Sistema > Licencia.' #13#10 +
+                   '    2. Abra https://localhost y entre a Sistema > Licencia.' #13#10 +
                    '    3. Use "Desactivar en este equipo".' #13#10 +
                    '    4. Vuelva a desinstalar.' #13#10#13#10 +
                    '¿Desea desinstalar igual, SIN liberar la licencia?',

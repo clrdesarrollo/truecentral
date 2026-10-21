@@ -235,8 +235,12 @@ public sealed record AlarmScreenDiscoveryResponse
     public string ServerId { get; init; } = "";
 }
 
-/// <summary>Alta de la pantalla: se anuncia y recibe el código que muestra para que la aprueben.</summary>
-public sealed record AlarmScreenPairStartRequest(string MachineId, string Hostname, string? Version);
+/// <summary>
+/// Alta de la pantalla: se anuncia y recibe el código que muestra para que la aprueben. <paramref name="ServerKey"/>
+/// es la huella (SHA-256 hex) de la llave del servidor que vio la pantalla: si no es la del servidor, hay alguien en
+/// el medio y el servidor no da código.
+/// </summary>
+public sealed record AlarmScreenPairStartRequest(string MachineId, string Hostname, string? Version, string? ServerKey = null);
 
 public sealed record AlarmScreenPairStartResponse(int ScreenId, string PairingCode, string Status);
 

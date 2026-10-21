@@ -12,9 +12,21 @@ cada módulo está en su propio capítulo.
 == Ingresar al panel web
 
 El panel web se abre desde un navegador actualizado (Chrome, Edge o Firefox)
-en la dirección del servidor, que por omisión usa el puerto 5090; por ejemplo,
-`http://192.168.1.10:5090`. Si no conoce la dirección, pídasela al
+en la dirección del servidor, siempre con `https`; por ejemplo,
+`https://192.168.1.10`. Si no conoce la dirección, pídasela al
 administrador del sistema.
+
+Mientras el servidor use su certificado propio, el navegador avisa que la
+conexión no es privada: la conexión va cifrada igual, pero el navegador no
+conoce a la entidad que emitió el certificado, la *CA propia del servidor*.
+Ese aviso no distingue al servidor de un impostor, así que no conviene
+acostumbrarse a saltarlo: pida al administrador que instale la CA del
+servidor como raíz de confianza en los equipos (#menu("Sistema",
+"Certificado HTTPS"), botón #boton("Descargar CA"); en una organización, por
+directiva de grupo) o que cargue un certificado emitido por la entidad
+certificadora de su organización. La CA propia solo puede firmar para los
+nombres de ese servidor y direcciones IP privadas: instalarla no permite
+suplantar ningún otro sitio.
 
 #captura(
   "web-inicio-sesion.png",
@@ -64,8 +76,11 @@ instalarlo en un puesto:
 + Desde ese puesto, ingrese al panel web.
 + Abra el menú de su usuario (arriba a la derecha) y haga clic en
   *Descargar el cliente*. El navegador baja
-  `CLRTrueCentralVMS-Client-Setup-<versión>.exe`.
-+ Ejecute el archivo y siga los pasos del instalador.
+  `CLRTrueCentralVMS-Client-Setup-<versión>~<servidor>~<puerto>~<huella>.exe`.
++ Ejecute el archivo y siga los pasos del instalador. No le cambie el nombre:
+  de él toma la dirección del servidor y la huella de su certificado, y el
+  cliente queda confiando en ese servidor sin preguntar (y rechaza cualquier
+  otro que se haga pasar por él).
 
 #nota[En el propio servidor, el instalador queda además en
   #menu("Inicio", "CLR TrueCentral VMS", "Instalador del cliente (para otros puestos)").
@@ -77,7 +92,11 @@ instalarlo en un puesto:
 #captura("cliente-inicio-sesion.png", ancho: 50%, pie: [Ventana de ingreso del cliente de monitoreo.])
 
 + En *Servidor*, escriba la dirección del servidor, la misma del panel web
-  (puede omitir `http://`).
+  (puede omitir `https://`). Si el cliente no se instaló con el instalador
+  descargado desde el panel, la primera vez muestra la huella del certificado
+  del servidor y pregunta si confiar: compárela con la de #menu("Sistema",
+  "Certificado HTTPS") antes de aceptar. Si más adelante la huella cambia, el
+  cliente lo advierte; no acepte sin confirmarlo con el administrador.
 + En *Usuario*, escriba su nombre de usuario. La flecha #boton("▾") muestra los
   usuarios que ingresaron antes en este equipo; el basurero de cada uno lo
   quita de la lista.

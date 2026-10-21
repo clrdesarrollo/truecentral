@@ -96,11 +96,27 @@ public static class AlarmScreensApi
         // tiene credencial. Devuelve el código que la pantalla muestra para
         // que un administrador la apruebe en el panel.
         app.MapPost("/api/screen/pair", async (HttpContext ctx, AlarmScreenPairStartRequest request, VmsDbContext db,
-            AlarmScreenService screens, AuditService audit, CancellationToken ct) =>
+            AlarmScreenService screens, AuditService audit, Services.Https.ServerCertificateManager certificates, CancellationToken ct) =>
         {
             string machineId = request.MachineId?.Trim() ?? "";
             if (machineId.Length is 0 or > 64) return Error("Falta el identificador del equipo (machineId).", StatusCodes.Status400BadRequest);
             string hostname = Cut(string.IsNullOrWhiteSpace(request.Hostname) ? machineId : request.Hostname.Trim(), MaxName);
+
+            // La pantalla dice qué llave recibió: si no es la nuestra, entre ella y el servidor hay alguien que
+            // descifra la conexión (o un proxy). No se le da código: aprobarla le entregaría la credencial.
+            string ownKey = Services.Https.ServerCertificateManager.SpkiFingerprint(certificates.Current);
+            if (request.ServerKey is { Length: > 0 } seen && !seen.Equals(ownKey, StringComparison.OrdinalIgnoreCase))
+            {
+                if (audit.ShouldLog($"screen-key-mismatch:{machineId}", TimeSpan.FromMinutes(30)))
+                    await audit.LogSystemAsync("screens", "screen-key-mismatch", targetType: "alarm-screen", targetName: hostname,
+                        detail: $"El equipo «{hostname}» ({RemoteIp(ctx)}) pidió emparejarse viendo otra llave de servidor " +
+                                $"({seen[..Math.Min(16, seen.Length)]}…, la nuestra es {ownKey[..16]}…): posible interceptación de la red. " +
+                                "No se le dio código.",
+                        success: false, username: AlarmScreenService.ScreenActor(hostname), clientIp: RemoteIp(ctx),
+                        origin: AlarmScreenService.FromScreen);
+                return Error("La pantalla no está hablando directamente con el servidor (otra llave): revise la red.",
+                    StatusCodes.Status409Conflict);
+            }
             string? version = string.IsNullOrWhiteSpace(request.Version) ? null : Cut(request.Version.Trim(), 32);
 
             var screen = await db.AlarmScreens.FirstOrDefaultAsync(s => s.MachineId == machineId, ct);

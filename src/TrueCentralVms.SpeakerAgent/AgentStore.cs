@@ -9,7 +9,7 @@ public sealed class AgentState
 {
     /// <summary>Identidad del equipo: 32 hex generados en el primer arranque. No cambia al reenrolar.</summary>
     public string AgentId { get; set; } = "";
-    /// <summary>Servidor tal como lo escribió el instalador ("http://192.168.1.10:5090").</summary>
+    /// <summary>Servidor tal como lo escribió el instalador ("https://192.168.1.10").</summary>
     public string? ServerUrl { get; set; }
     /// <summary>Token del equipo, protegido (DPAPI en Windows; en Linux el archivo queda con permisos 600).</summary>
     public string? ProtectedToken { get; set; }

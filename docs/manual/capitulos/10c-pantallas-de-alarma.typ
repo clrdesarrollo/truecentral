@@ -57,11 +57,11 @@ o por USB.
   actualización diaria.
 + Reinicie la Pi. Al arrancar busca el servidor en la red y muestra un código de
   6 dígitos con el texto _Apruebe este código en TrueCentral → Pantallas de
-  alarma_.
+  alarma_, y debajo la *huella del servidor* que ve.
 
 #importante[La búsqueda automática del servidor no cruza VLANs ni subredes. Si
   la pantalla no lo encuentra, muestra _Buscando el servidor_ con una casilla
-  para escribir su dirección (por ejemplo, `http://192.168.1.50:5090`) y el
+  para escribir su dirección (por ejemplo, `https://192.168.1.50`) y el
   botón #boton("USAR").]
 
 == Aprobar una pantalla
@@ -73,14 +73,21 @@ emparejarse aparecen arriba, en *Piden emparejarse*, con su código en grande,
 el nombre del equipo, su dirección IP y cuándo lo pidieron.
 
 + Compruebe que el código coincide con el que muestra la pantalla en la caseta.
-+ Haga clic en #boton("Aprobar").
++ Haga clic en #boton("Aprobar"). La ventana muestra la huella del servidor:
+  debe ser la misma que la de la pantalla. Si es otra, *no la apruebe*: hay
+  alguien interceptando la red entre la caseta y el servidor.
 + Escriba el *Nombre de la pantalla*, por ejemplo _Caseta acceso principal_. Es
   el nombre que verá en las automatizaciones y en el registro de quién marcó
   cada aviso.
 + Haga clic en #boton("Aprobar").
 
 En unos segundos la pantalla recibe su credencial, muestra su nombre y queda
-_En línea_. Desde ahí arranca sola, también después de un corte de luz.
+_En línea_. Desde ahí arranca sola, también después de un corte de luz, y solo
+acepta a ese servidor: si otro equipo se hace pasar por él (o si se cambia el
+certificado del servidor), la pantalla se detiene y lo avisa. Para volver a
+emparejarla después de un cambio de certificado, toque #boton("OLVIDAR
+SERVIDOR Y VOLVER A EMPAREJAR") en la pantalla y reinicie su emparejamiento
+en el panel.
 
 #boton("Rechazar") descarta el pedido: el equipo no puede volver a pedirlo
 hasta que se lo quite de la lista.

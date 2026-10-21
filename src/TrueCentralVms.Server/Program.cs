@@ -10,6 +10,7 @@ using TrueCentralVms.Server.Auth;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services;
+using TrueCentralVms.Server.Services.Https;
 using TrueCentralVms.Server.Services.Supervisor;
 using TrueCentralVms.Server.Services.Workflows;
 using TrueCentralVms.Server.Services.Workflows.Actions;
@@ -63,6 +64,28 @@ if (TrueCentralVms.Server.Services.Backup.BackupRestore.IsRequested(args))
     return;
 }
 builder.Services.AddSingleton(postgres);
+var protector = new CredentialProtector(postgres);
+builder.Services.AddSingleton(protector);
+
+// HTTPS: todo lo de las personas y los programas propios va cifrado por
+// Web:HttpsPort (443) con el certificado del servidor (propio o cargado por el
+// cliente). Web:HttpPort (80) solo atiende a equipos sin TLS y redirige el
+// resto; Web:InternalPort escucha HTTP solo en loopback para MediaMTX y las
+// sondas de salud. Ver WebPorts y la regla por puerto más abajo.
+var webPorts = WebPorts.From(builder.Configuration);
+builder.Services.AddSingleton(webPorts);
+if (!EF.IsDesignTime)
+{
+    var certificates = new ServerCertificateManager(postgres, protector, builder.Configuration);
+    builder.Services.AddSingleton(certificates);
+    builder.Services.AddHostedService<HttpsCertificateMonitor>();
+    builder.WebHost.ConfigureKestrel(k =>
+    {
+        k.ListenAnyIP(webPorts.HttpsPort, l => l.UseHttps(h => h.ServerCertificateSelector = (_, _) => certificates.Current));
+        if (webPorts.HttpPort > 0) k.ListenAnyIP(webPorts.HttpPort);
+        k.ListenLocalhost(webPorts.InternalPort);
+    });
+}
 // En tiempo de diseño (dotnet ef migrations add) el host se construye sin
 // PostgreSQL iniciado: la cadena es un marcador, solo se necesita el modelo.
 builder.Services.AddDbContext<VmsDbContext>(o => o.UseNpgsql(EF.IsDesignTime
@@ -76,7 +99,6 @@ builder.Services.AddSingleton(_ => new LoginThrottle());
 builder.Services.AddSingleton<UserScopeService>();
 builder.Services.AddSingleton<ScopedHub>();
 builder.Services.AddSingleton<PasswordGovernance>();
-builder.Services.AddSingleton<CredentialProtector>();
 builder.Services.AddSingleton<SystemMetrics>();
 
 // Bitácora de auditoría (ISO 27001): registro solo-agregar de todas las
@@ -276,6 +298,8 @@ var app = builder.Build();
 // Base de datos: iniciar PostgreSQL embebido y aplicar migraciones
 // ---------------------------------------------------------------------------
 await postgres.StartAsync(app.Logger);
+// El certificado HTTPS vive en el directorio de datos: recién ahora (initdb exige encontrarlo vacío).
+app.Services.GetService<ServerCertificateManager>()?.Initialize();
 app.Lifetime.ApplicationStopped.Register(() => postgres.Stop(app.Logger));
 
 using (var scope = app.Services.CreateScope())
@@ -301,8 +325,42 @@ using (var scope = app.Services.CreateScope())
     // accesible desde la propia máquina del servidor (ver SetupApi).
     if (!await db.Users.AnyAsync())
         app.Logger.LogWarning(
-            "Sistema sin inicializar: abra http://localhost:5090 EN ESTA MÁQUINA para crear el primer administrador.");
+            "Sistema sin inicializar: abra {Url} EN ESTA MÁQUINA para crear el primer administrador.", webPorts.HttpsUrl("localhost"));
 }
+
+// Regla por puerto: el interno (loopback) solo atiende lo suyo; el HTTP sin
+// cifrar solo a los equipos sin TLS, redirige las páginas a HTTPS y rechaza el
+// resto (una clave o un token no deben viajar en claro).
+app.Use(async (context, next) =>
+{
+    int port = context.Connection.LocalPort;
+    var path = context.Request.Path;
+    if (port == webPorts.InternalPort && port != webPorts.HttpsPort && port != webPorts.HttpPort)
+    {
+        if (!WebPorts.InternalPaths.Any(p => path.StartsWithSegments(p)))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+    }
+    else if (!context.Request.IsHttps && !WebPorts.PlainHttpPaths.Any(p => path.StartsWithSegments(p)))
+    {
+        // Redirección temporal: una permanente queda guardada en el navegador aunque después se cambien los puertos.
+        if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
+        {
+            string host = context.Request.Host.Host;
+            context.Response.Redirect(webPorts.HttpsUrl(host) + context.Request.PathBase + path + context.Request.QueryString,
+                permanent: false);
+        }
+        else
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { error = $"Use HTTPS: {webPorts.HttpsUrl(context.Request.Host.Host)}" });
+        }
+        return;
+    }
+    await next();
+});
 
 app.UseCors();
 // WebSocket propio (fuera de SignalR) para la voz del operador hacia los parlantes.
@@ -417,6 +475,7 @@ app.MapPlaybackApi();
 app.MapDiscoveryApi();
 app.MapSystemApi();
 app.MapBackupApi();
+app.MapCertificateApi();
 app.MapLicenseApi();
 app.MapDecodersApi();
 app.MapWallsApi();
@@ -447,8 +506,8 @@ app.MapHub<AlarmScreenHub>(AlarmScreenProtocol.HubPath);
 // La SPA del panel se sirve para cualquier ruta no-API (hash router).
 app.MapFallbackToFile("index.html");
 
-app.Logger.LogInformation("CLR TrueCentral VMS v{Version} escuchando en {Urls}.",
-    serverVersion, builder.Configuration["Urls"]);
+app.Logger.LogInformation("CLR TrueCentral VMS v{Version} escuchando en HTTPS :{Https}, HTTP :{Http} (solo equipos sin TLS) e interno 127.0.0.1:{Internal}.",
+    serverVersion, webPorts.HttpsPort, webPorts.HttpPort > 0 ? webPorts.HttpPort : "cerrado", webPorts.InternalPort);
 
 // Evidencia de disponibilidad: cada arranque del servidor queda en la bitácora.
 await app.Services.GetRequiredService<AuditService>().LogSystemAsync("system", "server-started",

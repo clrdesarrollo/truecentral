@@ -90,7 +90,12 @@ public sealed class AgentConnection(AgentStore store, AudioEngine audio, ILogger
 
     private async Task RunSessionAsync(AgentState state, string token, CancellationToken ct)
     {
-        using var socket = CreateSocket(state.PinnedCertificate, captured: null);
+        // Enrolado cuando el servidor no tenía HTTPS (o con una huella de antes de la 0.5.22): se fija la llave que
+        // presente ahora, la primera vez que conecta (el token del equipo es lo que lo identifica ante el servidor).
+        var captured = state.PinnedCertificate is { Length: > 0 } pin && !pin.StartsWith(SpkiPrefix, StringComparison.Ordinal)
+            ? new CertificateCapture { Legacy = pin }
+            : state.PinnedCertificate is null ? new CertificateCapture() : null;
+        using var socket = CreateSocket(state.PinnedCertificate, captured);
         await socket.ConnectAsync(ServerAddress.ToConnectUri(state.ServerUrl!), ct);
         await SendRawAsync(socket, new AgentEnvelope
         {
@@ -100,6 +105,11 @@ public sealed class AgentConnection(AgentStore store, AudioEngine audio, ILogger
             Info = DeviceIdentity.Info,
         }, ct);
         var welcome = await ReceiveWelcomeAsync(socket, ct);
+        if (captured?.Thumbprint is { } learned)
+        {
+            store.Update(s => s.PinnedCertificate = learned);
+            log.LogInformation("Certificado del servidor fijado (huella de la llave {Fingerprint}).", learned[SpkiPrefix.Length..]);
+        }
         if (welcome.SpeakerName != state.SpeakerName || welcome.SpeakerId != state.SpeakerId)
             store.Update(s => { s.SpeakerName = welcome.SpeakerName; s.SpeakerId = welcome.SpeakerId; });
 
@@ -309,9 +319,13 @@ public sealed class AgentConnection(AgentStore store, AudioEngine audio, ILogger
         }
     }
 
+    /// <summary>Prefijo de las huellas de la llave pública (las de antes eran del certificado completo).</summary>
+    private const string SpkiPrefix = "spki:";
+
     /// <summary>
-    /// wss: en el enrolamiento se acepta el certificado que presente el servidor (suele ser propio) y se guarda su huella;
-    /// después solo se acepta ese mismo certificado o uno válido para el sistema.
+    /// wss: en el enrolamiento se acepta el certificado que presente el servidor (suele ser propio) y se guarda la huella
+    /// de su LLAVE; después solo se acepta esa misma llave o un certificado válido para el sistema. Se fija la llave y no
+    /// el certificado porque el servidor vuelve a emitir el suyo (misma llave) cuando cambia de IP o de nombre.
     /// </summary>
     private static ClientWebSocket CreateSocket(string? pinned, CertificateCapture? captured)
     {
@@ -321,9 +335,17 @@ public sealed class AgentConnection(AgentStore store, AudioEngine audio, ILogger
         socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
         {
             if (certificate is null) return false;
-            string thumbprint = Convert.ToHexStringLower(SHA256.HashData(certificate.GetRawCertData()));
-            if (captured is not null) { captured.Thumbprint = thumbprint; return true; }
-            return errors == SslPolicyErrors.None || thumbprint == pinned;
+            using var cert = new X509Certificate2(certificate);
+            string spki = SpkiPrefix + Convert.ToHexStringLower(SHA256.HashData(cert.PublicKey.ExportSubjectPublicKeyInfo()));
+            if (captured is not null)
+            {
+                // Huella vieja (del certificado completo): solo se cambia por la de la llave si es el mismo certificado.
+                if (captured.Legacy is { } legacy && errors != SslPolicyErrors.None
+                    && Convert.ToHexStringLower(SHA256.HashData(cert.RawData)) != legacy) return false;
+                captured.Thumbprint = spki;
+                return true;
+            }
+            return errors == SslPolicyErrors.None || spki == pinned;
         };
         return socket;
     }
@@ -331,29 +353,30 @@ public sealed class AgentConnection(AgentStore store, AudioEngine audio, ILogger
     private sealed class CertificateCapture
     {
         public string? Thumbprint { get; set; }
+        /// <summary>Huella de antes (certificado completo) que hay que reemplazar por la de la llave.</summary>
+        public string? Legacy { get; init; }
     }
 }
 
 /// <summary>El servidor rechazó el token o el código (no tiene sentido reintentar seguido).</summary>
 public sealed class AgentRejectedException(string message) : Exception(message);
 
-/// <summary>Cómo se escribe el servidor: "192.168.1.10", "192.168.1.10:5090", "http://vms.local:5090", "https://...".</summary>
+/// <summary>Cómo se escribe el servidor: "192.168.1.10", "192.168.1.10:8443", "https://vms.local", "http://...".</summary>
 public static class ServerAddress
 {
-    public const int DefaultPort = 5090;
+    /// <summary>Puerto de los servidores anteriores a la 0.5.22 (http): se pasa solo a https en el 443.</summary>
+    private const int LegacyPort = 5090;
 
     public static string Normalize(string input)
     {
         string text = input.Trim().TrimEnd('/');
         if (text.Length == 0) throw new ArgumentException("Indique la dirección del servidor de TrueCentral.");
-        if (!text.Contains("://", StringComparison.Ordinal)) text = "http://" + text;
+        // Sin protocolo se asume https (y su puerto 443, salvo que se escriba otro).
+        if (!text.Contains("://", StringComparison.Ordinal)) text = "https://" + text;
         if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             throw new ArgumentException($"Dirección de servidor inválida: '{input}'.");
-        // Sin puerto explícito se asume el de TrueCentral, no el 80.
-        string authority = text[(text.IndexOf("://", StringComparison.Ordinal) + 3)..].Split('/')[0];
-        bool explicitPort = System.Text.RegularExpressions.Regex.IsMatch(authority, @":\d+$");
-        int port = explicitPort ? uri.Port : DefaultPort;
-        return $"{uri.Scheme}://{uri.Host}:{port}";
+        if (uri.Scheme == "http" && uri.Port == LegacyPort) return $"https://{uri.Host}";
+        return uri.IsDefaultPort ? $"{uri.Scheme}://{uri.Host}" : $"{uri.Scheme}://{uri.Host}:{uri.Port}";
     }
 
     public static Uri ToConnectUri(string server)

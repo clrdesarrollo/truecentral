@@ -13,7 +13,7 @@
     Nunca muestra ni guarda claves: de cada panel solo informa si el servidor tiene su clave ISUP guardada.
 
 .PARAMETER Servidor
-    URL del panel web (por omisión http://localhost:5090).
+    URL del panel web (por omisión https://localhost).
 
 .PARAMETER Usuario
     Usuario con el permiso «Paneles de alarma» (por omisión admin). La contraseña se pide al ejecutar.
@@ -34,7 +34,7 @@
     powershell -ExecutionPolicy Bypass -File .\chequeo-isup.ps1 -Usuario admin
 #>
 param(
-    [string] $Servidor = 'http://localhost:5090',
+    [string] $Servidor = 'https://localhost',
     [string] $Usuario = 'admin',
     [pscredential] $Credencial,
     [string] $Salida = (Get-Location).Path,
@@ -45,6 +45,11 @@ param(
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Servidor = $Servidor.TrimEnd('/')
+# El servidor se presenta con su certificado propio (autofirmado): este chequeo corre en el propio servidor o en la LAN del
+# técnico, así que se acepta (PowerShell 5.1 no tiene -SkipCertificateCheck).
+if ($Servidor -like 'https://*') {
+    [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+}
 $informe = New-Object System.Collections.Generic.List[string]
 function Linea([string] $texto = '', [string] $color = '') {
     $informe.Add($texto)

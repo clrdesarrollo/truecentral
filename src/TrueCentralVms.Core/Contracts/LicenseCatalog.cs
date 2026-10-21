@@ -197,7 +197,9 @@ public static class LicenseCatalog
         var errors = new List<string>();
         var constants = typeof(LicenseFeatures)
             .GetFields(BindingFlags.Public | BindingFlags.Static)
-            .Where(f => f.IsLiteral && f.FieldType == typeof(string) && f.Name != nameof(LicenseFeatures.ProductCode))
+            // Area*: nombres de los grupos de las pantallas de licencia, no funcionalidades licenciables.
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string) && f.Name != nameof(LicenseFeatures.ProductCode)
+                        && !f.Name.StartsWith("Area", StringComparison.Ordinal))
             .ToDictionary(f => (string)f.GetRawConstantValue()!, f => f.Name, StringComparer.Ordinal);
 
         var byKey = new Dictionary<string, LicenseFeatureDefinition>(StringComparer.Ordinal);

@@ -96,6 +96,11 @@ Name: "{autodesktop}\CLR TrueCentral VMS Client"; Filename: "{app}\{#ClientExe}"
 [Run]
 Filename: "{app}\{#ClientExe}"; Description: "Abrir CLR TrueCentral VMS Client"; Flags: postinstall nowait skipifsilent
 
+[Dirs]
+; Servidor de confianza y su dirección (los deja RememberServerFromFileName): solo
+; los administradores escriben; los usuarios del puesto solo leen.
+Name: "{commonappdata}\CLRTrueCentralVMS-Client"; Permissions: admins-full system-full users-readexec
+
 [Code]
 function RunHidden(const FileName, Params: string): Integer;
 var
@@ -128,10 +133,65 @@ begin
   KillClientTools();
 end;
 
+// Carpeta de la máquina con lo que deja el instalador para todos los usuarios del
+// puesto (servidor de confianza y su dirección). Aparte de la de datos del
+// servidor (que solo leen SYSTEM y los administradores).
+function MachineDir(): string;
+begin
+  Result := ExpandConstant('{commonappdata}\CLRTrueCentralVMS-Client');
+end;
+
+// Descargado desde el panel web, el instalador se llama
+// "…-Setup-x.y.z~HOST~PUERTO~HUELLA.exe": el servidor le pone su dirección y la
+// huella de la llave de su certificado. Se dejan como servidor conocido y de
+// confianza para todos los usuarios del equipo (el cliente no pregunta por esa
+// llave). El navegador puede agregar " (1)" al final: de la huella se toman solo
+// los 64 caracteres hexadecimales.
+procedure RememberServerFromFileName();
+var
+  Name, Rest, Host, Port, Key, Url, Existing: string;
+  P, I: Integer;
+  Keys: AnsiString;
+begin
+  Name := ChangeFileExt(ExtractFileName(ExpandConstant('{srcexe}')), '');
+  P := Pos('~', Name);
+  if P = 0 then exit;
+  Rest := Copy(Name, P + 1, Length(Name));
+  P := Pos('~', Rest);
+  if P = 0 then exit;
+  Host := Copy(Rest, 1, P - 1);
+  Rest := Copy(Rest, P + 1, Length(Rest));
+  P := Pos('~', Rest);
+  if P = 0 then exit;
+  Port := Copy(Rest, 1, P - 1);
+  Rest := Lowercase(Copy(Rest, P + 1, Length(Rest)));
+  Key := '';
+  for I := 1 to Length(Rest) do
+    if ((Rest[I] >= '0') and (Rest[I] <= '9')) or ((Rest[I] >= 'a') and (Rest[I] <= 'f')) then
+    begin
+      if Length(Key) < 64 then Key := Key + Rest[I];
+    end
+    else
+      break;
+  if Length(Key) <> 64 then exit;
+
+  ForceDirectories(MachineDir());
+  Existing := '';
+  if LoadStringFromFile(MachineDir() + '\trusted-keys.txt', Keys) then Existing := String(Keys);
+  if Pos(Key, Existing) = 0 then
+    SaveStringToFile(MachineDir() + '\trusted-keys.txt', Key + #13#10, True);
+  if Host <> '' then
+  begin
+    if (Port = '') or (Port = '443') then Url := 'https://' + Host else Url := 'https://' + Host + ':' + Port;
+    SaveStringToFile(MachineDir() + '\server-url.txt', Url, False);
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    RememberServerFromFileName();
     RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS Client MediaMTX"');
     // El decodificador inicia la conexión RTSP hacia este equipo (puerto 8554):
     // sin esta regla, la proyección de pantalla no llega al muro de video.
@@ -167,5 +227,7 @@ begin
     // Certificados que MediaMTX se genera solo: no están en el registro de
     // instalación, así que Inno los deja y con ellos la carpeta.
     DelTree(ExpandConstant('{app}\tools'), True, True, True);
+    // Servidor de confianza que dejó la instalación.
+    DelTree(MachineDir(), True, True, True);
   end;
 end;
