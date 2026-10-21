@@ -63,6 +63,7 @@ public sealed class FtpAction(ILogger<FtpAction> logger) : IWorkflowActionExecut
             _ => FtpEncryptionMode.None,
         };
 
+        if (await OutboundAddressPolicy.CheckHostAsync(host, ct) is { } refused) return WorkflowStepResult.Fail(refused);
         await using var client = new AsyncFtpClient(host, username, context.Secret ?? "", port);
         client.Config.EncryptionMode = encryption;
         client.Config.ValidateAnyCertificate = context.Flag("allowInvalidCertificate", false);

@@ -51,9 +51,8 @@ public sealed class HttpAction(ILogger<HttpAction> logger) : IWorkflowActionExec
         // Un manejador por ejecución: cada acción trae sus propias
         // credenciales y su propia política de certificado, y la frecuencia
         // de las automatizaciones es baja (hay tiempo mínimo entre ejecuciones).
-        using var handler = new HttpClientHandler { AllowAutoRedirect = true };
-        if (context.Flag("allowInvalidCertificate", false))
-            handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        // Nunca hacia el propio servidor ni link-local (OutboundAddressPolicy).
+        using var handler = OutboundAddressPolicy.CreateHandler(context.Flag("allowInvalidCertificate", false), allowRedirect: true);
         if (username.Length > 0 && !auth.Equals("None", StringComparison.OrdinalIgnoreCase))
         {
             var credential = new NetworkCredential(username, context.Secret ?? "");
