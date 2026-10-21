@@ -34,8 +34,15 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 builder.Host.UseWindowsService(o => o.ServiceName = ServiceSupervisor.WindowsServiceName);
 // El apagado ordenado incluye detener PostgreSQL embebido (pg_ctl stop): darle
-// margen antes de que el host (o el SCM) corte el proceso.
-builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(60));
+// margen antes de que el host (o el SCM) corte el proceso. Los servicios se
+// detienen en paralelo: el apagado dura lo que el más lento y no la suma de
+// todos (con muchos equipos la suma pasaba el tope; ver ShutdownWatch).
+builder.Services.Configure<HostOptions>(o =>
+{
+    o.ShutdownTimeout = TimeSpan.FromSeconds(
+        Math.Clamp(builder.Configuration.GetValue("Host:ShutdownTimeoutSeconds", 60), 1, 300));
+    o.ServicesStopConcurrently = true;
+});
 
 // Ajustes propios de cada instalación (puerto, rutas...). El instalador nunca
 // sobreescribe este archivo, así que los cambios sobreviven a las actualizaciones.
@@ -465,4 +472,14 @@ _ = Task.Run(async () =>
     }
 });
 
-app.Run();
+ShutdownWatch.Attach(app);
+try
+{
+    app.Run();
+}
+catch (Exception ex) when (ShutdownWatch.IsShutdownTimeout(ex))
+{
+    // El apagado superó el tope, pero ya se detuvo todo lo que se pudo
+    // (PostgreSQL incluido) y ShutdownWatch dejó constancia de quién se
+    // demoró: se sale limpio en vez de caerse.
+}
