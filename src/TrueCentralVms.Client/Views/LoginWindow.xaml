@@ -86,8 +86,6 @@
                                Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="88"/>
-                            <ColumnDefinition Width="8"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="8"/>
                             <ColumnDefinition Width="76"/>
@@ -95,22 +93,19 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <TextBlock Grid.Column="0" Text="Protocolo" Style="{StaticResource FieldLabel}"/>
-                        <TextBlock Grid.Column="2" Text="Dirección (IP o nombre)" Style="{StaticResource FieldLabel}"/>
-                        <TextBlock Grid.Column="4" Text="Puerto" Style="{StaticResource FieldLabel}"/>
-                        <ComboBox x:Name="ProtocolBox" Grid.Row="1" Grid.Column="0" Style="{StaticResource DarkComboBox}"
-                                  SelectedIndex="1" SelectionChanged="OnServerPartChanged"
-                                  ToolTip="https (los servidores desde la versión 0.5.22 solo atienden por https)">
-                            <ComboBoxItem Content="http"/>
-                            <ComboBoxItem Content="https"/>
-                        </ComboBox>
-                        <TextBox x:Name="HostBox" Grid.Row="1" Grid.Column="2" Style="{StaticResource DarkTextBox}"
+                        <TextBlock Grid.Column="0" Text="Dirección (IP o nombre)" Style="{StaticResource FieldLabel}"/>
+                        <TextBlock Grid.Column="2" Text="Puerto" Style="{StaticResource FieldLabel}"/>
+                        <TextBox x:Name="HostBox" Grid.Row="1" Grid.Column="0" Style="{StaticResource DarkTextBox}"
                                  TextChanged="OnServerPartChanged"
                                  ToolTip="IP o nombre del servidor; también puede pegar la dirección completa (https://…)"/>
-                        <TextBox x:Name="PortBox" Grid.Row="1" Grid.Column="4" Style="{StaticResource DarkTextBox}"
+                        <TextBox x:Name="PortBox" Grid.Row="1" Grid.Column="2" Style="{StaticResource DarkTextBox}"
                                  TextChanged="OnServerPartChanged" MaxLength="5"
                                  ToolTip="Puerto del servidor (por defecto 443)"/>
+                        <TextBlock Grid.Row="2" Grid.ColumnSpan="3" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   Text="El protocolo se detecta solo: primero https y, si el servidor no cifra, http."/>
                     </Grid>
                 </StackPanel>
             </Border>
