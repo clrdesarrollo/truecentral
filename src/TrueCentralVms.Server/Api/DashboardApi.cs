@@ -22,6 +22,7 @@ public static class DashboardApi
 {
     private const int Hours = 24;
     private const int FeedSize = 12;
+    private const int ListSize = 6;
 
     // Eventos del cerco que son una intrusión o un intento (no un cambio de estado).
     private static readonly CercoEventKind[] FenceIntrusionKinds =
@@ -58,18 +59,22 @@ public static class DashboardApi
 
             // ---------------- Equipos ----------------
             var videoRows = await db.Devices.AsNoTracking()
-                .Select(d => new { d.Id, d.Status, Channels = d.Channels.Where(c => c.Enabled).Select(c => new { c.Id, c.IsOnline }).ToList() })
+                .Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt,
+                    Channels = d.Channels.Where(c => c.Enabled).Select(c => new { c.Id, c.Name, c.IsOnline }).ToList() })
                 .ToListAsync(ct);
             videoRows = videoRows.Where(d => scope.CanViewDevice(d.Id)).ToList();
-            var cameras = videoRows.SelectMany(d => d.Channels).Where(c => scope.CanViewChannel(c.Id)).ToList();
+            // Un canal queda marcado en línea aunque su grabador se caiga: sin el equipo, la cámara no transmite.
+            var cameras = videoRows.SelectMany(d => d.Channels.Select(c => new
+                    { c.Id, c.Name, IsOnline = c.IsOnline && d.Status == DeviceStatus.Online, Device = d }))
+                .Where(c => scope.CanViewChannel(c.Id)).ToList();
 
-            var accessRows = (await db.AccessDevices.AsNoTracking().Select(d => new { d.Id, d.Status }).ToListAsync(ct))
+            var accessRows = (await db.AccessDevices.AsNoTracking().Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt }).ToListAsync(ct))
                 .Where(d => scope.CanViewAccessDevice(d.Id)).ToList();
-            var intercomRows = (await db.Intercoms.AsNoTracking().Select(d => new { d.Id, d.Status }).ToListAsync(ct))
+            var intercomRows = (await db.Intercoms.AsNoTracking().Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt }).ToListAsync(ct))
                 .Where(d => scope.CanViewIntercom(d.Id)).ToList();
-            var speakerRows = (await db.Speakers.AsNoTracking().Where(s => s.Enabled).Select(d => new { d.Id, d.Status }).ToListAsync(ct))
+            var speakerRows = (await db.Speakers.AsNoTracking().Where(s => s.Enabled).Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt }).ToListAsync(ct))
                 .Where(d => scope.CanViewSpeaker(d.Id)).ToList();
-            var ioRows = (await db.IoModules.AsNoTracking().Where(s => s.Enabled).Select(d => new { d.Id, d.Status }).ToListAsync(ct))
+            var ioRows = (await db.IoModules.AsNoTracking().Where(s => s.Enabled).Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt }).ToListAsync(ct))
                 .Where(d => scope.CanViewIoModule(d.Id)).ToList();
 
             // ---------------- Intrusión (paneles de alarma) ----------------
@@ -124,6 +129,31 @@ public static class DashboardApi
                 remainLocked = doorRows.Count(d => d.Mode == AccessDoorMode.RemainLocked),
             };
 
+            // ---------------- Equipos sin conexión (lo primero que hay que revisar) ----------------
+            // Las cámaras de un grabador caído no se repiten: va el grabador, no cada canal.
+            var offline = new List<DashboardOfflineItem>();
+            offline.AddRange(videoRows.Where(d => d.Status != DeviceStatus.Online)
+                .Select(d => new DashboardOfflineItem(d.Name, "video",
+                    d.Status == DeviceStatus.AuthFailed ? "Clave rechazada" : "Equipo de video", d.LastSeenAt, "#/devices")));
+            offline.AddRange(cameras.Where(c => !c.IsOnline && c.Device.Status == DeviceStatus.Online)
+                .Select(c => new DashboardOfflineItem(c.Name, "camera", $"Cámara de {c.Device.Name}", null, "#/devices")));
+            offline.AddRange(accessRows.Where(d => d.Status != AccessDeviceStatus.Online)
+                .Select(d => new DashboardOfflineItem(d.Name, "access",
+                    d.Status == AccessDeviceStatus.AuthFailed ? "Clave rechazada" : "Control de acceso", d.LastSeenAt, "#/access")));
+            offline.AddRange(panels.Where(p => p.Status != AlarmPanelStatus.Online)
+                .Select(p => new DashboardOfflineItem(p.Name, "alarm",
+                    p.Status == AlarmPanelStatus.AuthFailed ? "Clave rechazada" : "Panel de alarma", p.LastSeenAt, "#/alarm-panels")));
+            offline.AddRange(fences.Where(p => !FenceOnline(p))
+                .Select(p => new DashboardOfflineItem(p.Name, "fence", "Panel de cerco", p.LastSeenAt, "#/cerco-panels")));
+            offline.AddRange(intercomRows.Where(d => d.Status != IntercomStatus.Online)
+                .Select(d => new DashboardOfflineItem(d.Name, "intercom", "Citófono", d.LastSeenAt, "#/intercoms")));
+            offline.AddRange(speakerRows.Where(d => d.Status != SpeakerStatus.Online)
+                .Select(d => new DashboardOfflineItem(d.Name, "speaker", "Parlante IP", d.LastSeenAt, "#/speakers")));
+            offline.AddRange(ioRows.Where(d => d.Status != IoModuleStatus.Online)
+                .Select(d => new DashboardOfflineItem(d.Name, "io", "Módulo de E/S", d.LastSeenAt, "#/io-modules")));
+            // Lo que se cayó hace menos va primero (lo reciente suele ser lo urgente); lo nunca visto, al final.
+            var offlineList = offline.OrderByDescending(o => o.LastSeenAt ?? DateTime.MinValue).ThenBy(o => o.Name).ToList();
+
             // ---------------- Actividad 24 h (por hora) ----------------
             int[] Bucket(IEnumerable<(DateTime Hour, int Count)> rows)
             {
@@ -147,6 +177,8 @@ public static class DashboardApi
                 await query.Select(at).CountAsync(t => t >= prevFrom && t < from, ct);
 
             var feed = new List<DashboardFeedItem>();
+            // Puntos con más eventos en las últimas 24 h (puertas, zonas, cercos, cámaras de patentes).
+            var hotspots = new List<DashboardHotspot>();
             object? activity = null;
             var series = new Dictionary<string, int[]>();
             var previous = new Dictionary<string, int>();
@@ -165,6 +197,12 @@ public static class DashboardApi
                 var alarms = q.Where(e => e.Kind == AlarmEventKind.Alarm);
                 series["alarm"] = await HourlyAsync(alarms, e => e.ReceivedAt);
                 previous["alarm"] = await PreviousAsync(alarms, e => e.ReceivedAt);
+                hotspots.AddRange((await q.Where(e => e.ReceivedAt >= from && e.Kind != AlarmEventKind.Info && e.Kind != AlarmEventKind.System)
+                        .GroupBy(e => new { e.PanelName, e.AreaName, e.ZoneName })
+                        .Select(g => new { g.Key.PanelName, g.Key.AreaName, g.Key.ZoneName, Count = g.Count() })
+                        .OrderByDescending(g => g.Count).Take(ListSize).ToListAsync(ct))
+                    .Select(g => new DashboardHotspot("alarm", g.ZoneName ?? g.AreaName ?? g.PanelName,
+                        g.ZoneName is null && g.AreaName is null ? "Panel de alarma" : g.PanelName, g.Count, "#/alarms")));
                 feed.AddRange((await q.Where(e => e.Severity != AlarmSeverity.Info)
                         .OrderByDescending(e => e.ReceivedAt).Take(FeedSize).ToListAsync(ct))
                     .Select(e => new DashboardFeedItem("alarm", e.ReceivedAt, e.Description,
@@ -181,6 +219,12 @@ public static class DashboardApi
                 var intrusions = q.Where(e => FenceIntrusionKinds.Contains(e.Kind));
                 series["fence"] = await HourlyAsync(intrusions, e => e.ReceivedAt);
                 previous["fence"] = await PreviousAsync(intrusions, e => e.ReceivedAt);
+                hotspots.AddRange((await q.Where(e => e.ReceivedAt >= from && e.Severity != CercoSeverity.Info)
+                        .GroupBy(e => new { e.PanelName, e.ZoneName })
+                        .Select(g => new { g.Key.PanelName, g.Key.ZoneName, Count = g.Count() })
+                        .OrderByDescending(g => g.Count).Take(ListSize).ToListAsync(ct))
+                    .Select(g => new DashboardHotspot("fence", g.ZoneName ?? g.PanelName,
+                        g.ZoneName is null ? "Cerco eléctrico" : g.PanelName, g.Count, "#/cerco")));
                 feed.AddRange((await q.Where(e => e.Severity != CercoSeverity.Info)
                         .OrderByDescending(e => e.ReceivedAt).Take(FeedSize).ToListAsync(ct))
                     .Select(e => new DashboardFeedItem("fence", e.ReceivedAt, e.Description,
@@ -195,6 +239,16 @@ public static class DashboardApi
                 series["denied"] = await HourlyAsync(denied, e => e.ReceivedAt);
                 previous["granted"] = await PreviousAsync(granted, e => e.ReceivedAt);
                 previous["denied"] = await PreviousAsync(denied, e => e.ReceivedAt);
+                hotspots.AddRange((await q.Where(e => e.ReceivedAt >= from && e.Kind != AccessEventKind.Other)
+                        .GroupBy(e => new { e.DeviceName, e.DoorName })
+                        .Select(g => new
+                        {
+                            g.Key.DeviceName, g.Key.DoorName, Count = g.Count(),
+                            Denied = g.Count(e => e.Kind == AccessEventKind.Denied || e.Kind == AccessEventKind.Alarm),
+                        })
+                        .OrderByDescending(g => g.Count).Take(ListSize).ToListAsync(ct))
+                    .Select(g => new DashboardHotspot("access", g.DoorName ?? g.DeviceName,
+                        g.DoorName is null ? "Control de acceso" : g.DeviceName, g.Count, "#/access-events", g.Denied)));
                 feed.AddRange((await q.Where(e => e.Kind == AccessEventKind.Denied || e.Kind == AccessEventKind.Alarm)
                         .OrderByDescending(e => e.ReceivedAt).Take(FeedSize).ToListAsync(ct))
                     .Select(e => new DashboardFeedItem("access", e.ReceivedAt, e.Description,
@@ -212,6 +266,11 @@ public static class DashboardApi
                 }
                 series["plate"] = await HourlyAsync(q, e => e.ReceivedAt);
                 previous["plate"] = await PreviousAsync(q, e => e.ReceivedAt);
+                hotspots.AddRange((await q.Where(e => e.ReceivedAt >= from)
+                        .GroupBy(e => e.Device.Name)
+                        .Select(g => new { Name = g.Key, Count = g.Count() })
+                        .OrderByDescending(g => g.Count).Take(ListSize).ToListAsync(ct))
+                    .Select(g => new DashboardHotspot("plate", g.Name, "Lectura de patentes", g.Count, "#/anpr")));
                 feed.AddRange((await q.OrderByDescending(e => e.ReceivedAt).Take(4)
                         .Select(e => new { e.ReceivedAt, e.PlateNumber, Device = e.Device.Name }).ToListAsync(ct))
                     .Select(e => new DashboardFeedItem("plate", e.ReceivedAt, $"Patente {e.PlateNumber}", e.Device, "Info", "#/anpr")));
@@ -262,12 +321,18 @@ public static class DashboardApi
                 pendingAlerts,
                 activity,
                 feed = feed.OrderByDescending(f => f.At).Take(FeedSize).ToList(),
+                offline = new { total = offlineList.Count, items = offlineList.Take(ListSize).ToList() },
+                hotspots = activity is null ? null : hotspots.OrderByDescending(h => h.Count).Take(ListSize).ToList(),
             });
         });
     }
 
     private static string Join(params string?[] parts) =>
         string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+
+    private sealed record DashboardOfflineItem(string Name, string Kind, string Detail, DateTime? LastSeenAt, string Href);
+
+    private sealed record DashboardHotspot(string Source, string Name, string Detail, int Count, string Href, int? Denied = null);
 
     private sealed record DashboardFeedItem(string Source, DateTime At, string Title, string Detail, string Severity, string Href);
 }
