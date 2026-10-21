@@ -411,8 +411,7 @@ pipeline {
                         // queda inestable: esos servidores solo se activan sin conexion.
                         // Llave privada de firma de las actualizaciones de las pantallas
                         // (credencial 'truecentral-update-signing-key', tipo Secret file;
-                        // la genera installer
-ew-update-signing-key.ps1). Le llega al
+                        // la genera installer/new-update-signing-key.ps1). Le llega al
                         // script como TCVMS_UPDATE_SIGNING_KEY (ruta). Sin ella el paquete
                         // de las pantallas sale sin firma y las pantallas instaladas no lo
                         // aceptan: el build queda inestable.
