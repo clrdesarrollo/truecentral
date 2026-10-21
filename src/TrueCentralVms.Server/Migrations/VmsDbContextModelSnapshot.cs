@@ -3307,6 +3307,10 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<string>("GraphJson")
                         .HasColumnType("text");
 
+                    b.Property<string>("GroupName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime?>("LastRunAt")
                         .HasColumnType("timestamp with time zone");
 

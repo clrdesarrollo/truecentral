@@ -288,11 +288,26 @@ function wfTogglePreview(name, button) {
 // Listado
 // ---------------------------------------------------------------------------
 
+// Grupos: solo ordenan el listado (el motor no los mira). Lo contraído se
+// recuerda en este navegador; los nombres existentes los reutiliza el editor.
+const WF_COLLAPSED_KEY = "tcvms.workflows.collapsed";
+const WF_NO_GROUP = "";
+let wfGroupsCache = null;
+const wfCollator = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
+
+function wfLoadCollapsed() {
+  try { return new Set(JSON.parse(localStorage.getItem(WF_COLLAPSED_KEY) || "[]")); } catch { return new Set(); }
+}
+function wfSaveCollapsed(set) {
+  try { localStorage.setItem(WF_COLLAPSED_KEY, JSON.stringify([...set])); } catch { /* modo privado */ }
+}
+
 async function renderWorkflows() {
   $("#page-title").textContent = "Automatizaciones";
-  let workflows, catalog;
+  let workflows, catalog, alerts = null;
   try {
     [workflows, catalog] = await Promise.all([Api.get("/api/workflows"), wfCatalog()]);
+    alerts = await Api.get("/api/workflows/alerts?pending=true&take=1").catch(() => null);
   } catch (err) {
     $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
     return;
@@ -302,18 +317,74 @@ async function renderWorkflows() {
   const actionLabel = (key) => catalog.actions.find((a) => a.key === key)?.label ?? key;
   const triggerLabel = (key) => catalog.triggers.find((t) => t.key === key)?.label ?? key;
   const stepsOf = (w) => (w.graph?.nodes || []).filter((n) => n.kind !== "trigger").length;
+  const groupOf = (w) => w.group || WF_NO_GROUP;
+  const groupNames = [...new Set(workflows.map(groupOf).filter((g) => g))].sort(wfCollator.compare);
+  wfGroupsCache = groupNames;
+  const ordered = [...groupNames, ...(workflows.some((w) => !w.group) ? [WF_NO_GROUP] : [])];
+  const collapsed = wfLoadCollapsed();
+  const cols = isAdmin ? 11 : 10;
+  let filterGroup = null;
+  try { filterGroup = sessionStorage.getItem("wf-group"); } catch { /* sin almacenamiento */ }
+  if (filterGroup !== null && !ordered.includes(filterGroup)) filterGroup = null;
+
+  const rowHtml = (w) => `
+    <tr data-id="${w.id}" data-search="${esc([w.name, w.description || "", w.group || "", triggerLabel(w.triggerType), wfConditionsText(w),
+      ...w.actions.map((a) => actionLabel(a.type)), w.enabled ? "activa" : "pausada"].join(" · ").toLowerCase())}">
+      ${isAdmin ? `<td class="wf-check"><input type="checkbox" class="wf-sel" aria-label="Seleccionar «${esc(w.name)}»"></td>` : ""}
+      <td>${esc(w.name)}${w.description ? `<div class="muted" style="font-size:11px">${esc(w.description)}</div>` : ""}</td>
+      <td>${esc(triggerLabel(w.triggerType))}</td>
+      <td class="muted" style="font-size:12px;max-width:260px">${esc(wfConditionsText(w))}</td>
+      <td><div class="chip-row" style="margin:0">${w.actions.map((a) =>
+        `<span class="chip" ${a.enabled ? "" : 'style="opacity:.5"'}>${esc(actionLabel(a.type))}</span>`).join("")}</div></td>
+      <td class="muted">${stepsOf(w)}</td>
+      <td class="muted">${w.cooldownSeconds > 0 ? `${w.cooldownSeconds} s` : "—"}</td>
+      <td>${w.runCount}</td>
+      <td class="muted">${w.lastRunAt ? wfDate(w.lastRunAt) : "—"}</td>
+      <td>${w.enabled ? `<span class="tag on">Activa</span>` : w.disabledByLicense ? licenseWaitTag(w).trim() : `<span class="tag off">Pausada</span>`}</td>
+      <td class="row-actions">
+        ${isAdmin ? `<button class="btn ghost btn-wf-test" title="Ejecuta las acciones de verdad con un evento de ejemplo">Probar</button>
+        <button class="btn ghost btn-wf-edit">Abrir</button>
+        <button class="btn ghost btn-wf-duplicate" title="Crea una copia pausada y la abre en el editor para cambiar lo que haga falta">Duplicar</button>
+        <button class="btn danger btn-wf-delete">Eliminar</button>` : `<button class="btn ghost btn-wf-edit">Ver</button>`}
+      </td>
+    </tr>`;
+
+  const groupHtml = (g) => {
+    const items = workflows.filter((w) => groupOf(w) === g).sort((a, b) => wfCollator.compare(a.name, b.name));
+    const active = items.filter((w) => w.enabled).length;
+    return `
+      <tbody class="wf-group ${collapsed.has(g) ? "collapsed" : ""}" data-group="${esc(g)}">
+        <tr class="wf-group-head"><td colspan="${cols}">
+          <div class="wf-group-bar">
+            ${isAdmin ? `<input type="checkbox" class="wf-sel-group" title="Seleccionar todas las de este grupo">` : ""}
+            <button type="button" class="wf-group-toggle" aria-expanded="${!collapsed.has(g)}">
+              <span class="caret" aria-hidden="true"></span>
+              <i class="mdi ${g ? "mdi-folder-outline" : "mdi-folder-remove-outline"}" aria-hidden="true"></i>
+              <b>${g ? esc(g) : "Sin grupo"}</b>
+              <span class="muted wf-group-count" data-total="${items.length}">${items.length} · ${active} activa${active === 1 ? "" : "s"}</span>
+            </button>
+            ${isAdmin && g ? `<span class="wf-group-actions">
+              <button type="button" class="btn ghost small btn-wf-newin" title="Nueva automatización en este grupo">+ Nueva aquí</button>
+              <button type="button" class="btn ghost small btn-wf-rename">Renombrar</button></span>` : ""}
+          </div>
+        </td></tr>
+        ${items.map(rowHtml).join("")}
+      </tbody>`;
+  };
 
   $("#view").innerHTML = `
     <div class="toolbar">
       <h3>Automatizaciones <span class="muted" style="font-weight:normal;font-size:12px">(cuando pasa algo, el servidor actúa solo)</span></h3>
       <div class="row-actions">
-        ${isAdmin ? `<button class="btn ghost" id="btn-wf-smtp">Servidor de correo</button>
-        <button class="btn ghost" id="btn-wf-audio">Sonidos</button>
+        ${isAdmin ? `<button class="btn ghost" id="btn-wf-audio">Sonidos</button>
         <button class="btn" id="btn-wf-new">Nueva automatización</button>` : ""}
       </div>
     </div>
     ${!catalog.smtpConfigured ? `<div class="info-box" style="margin-bottom:12px">
-      Aún no hay <b>servidor de correo</b> configurado: las acciones de correo fallarán hasta que se configure${isAdmin ? " (botón <b>Servidor de correo</b>)" : ""}.
+      Aún no hay <b>servidor de correo</b> configurado: las acciones de correo fallarán hasta que se configure${isAdmin ? ` en <a href="#/mail">Sistema → Correo saliente</a>` : ""}.
+    </div>` : ""}
+    ${alerts?.pending > 0 ? `<div class="error-box" style="margin-bottom:12px">
+      <b>${alerts.pending} alerta(s) sin confirmar.</b> <a href="#/workflow-alerts">Ver alertas</a>
     </div>` : ""}
     ${workflows.length === 0 ? `
       <div class="info-box">
@@ -321,75 +392,139 @@ async function renderWorkflows() {
           ? "Con <b>Nueva automatización</b> se abre el editor de diagrama: parta de un disparador (una alarma de panel, una cámara caída, una patente leída, un acceso, una analítica de video, una hora del día o una llamada externa), agregue condiciones sí/no y conecte acciones: foto, correo, FTP, HTTP, parlante, aviso a los operadores, abrir puerta, armar/desarmar, mover un PTZ."
           : "Un administrador debe crearlas."}
       </div>` : `
-      <div class="wf-search" style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
-        <input type="search" id="wf-search" class="wf-filter" style="max-width:420px;margin:0" autocomplete="off"
-               placeholder="Buscar por nombre, descripción, disparador, filtro, acción o estado…"
+      <div class="wf-listbar">
+        <input type="search" id="wf-search" class="wf-filter" autocomplete="off"
+               placeholder="Buscar por nombre, grupo, disparador, filtro, acción o estado…"
                title="Escriba parte del texto; se buscan todas las palabras en cualquier columna">
-        <span class="muted" id="wf-search-count" style="font-size:12px">${workflows.length} automatización${workflows.length === 1 ? "" : "es"}</span>
+        <select id="wf-group-filter" title="Mostrar solo un grupo">
+          <option value="*">Todos los grupos</option>
+          ${ordered.map((g) => `<option value="${esc(g)}" ${filterGroup === g ? "selected" : ""}>${g ? esc(g) : "Sin grupo"}</option>`).join("")}
+        </select>
+        <span class="muted" id="wf-search-count" style="font-size:12px"></span>
+        <span class="wf-listbar-end">
+          <button type="button" class="btn ghost small" id="wf-expand" title="Desplegar todos los grupos">Desplegar todo</button>
+          <button type="button" class="btn ghost small" id="wf-collapse" title="Contraer todos los grupos">Contraer todo</button>
+          ${isAdmin ? `<button type="button" class="btn ghost small" id="wf-move" disabled>Mover a grupo…</button>` : ""}
+        </span>
       </div>
-      <div class="table-scroll"><table class="grid" id="wf-table">
+      <div class="table-scroll"><table class="grid wf-table" id="wf-table">
         <thead><tr>
+          ${isAdmin ? `<th class="wf-check"><input type="checkbox" id="wf-sel-all" title="Seleccionar las visibles"></th>` : ""}
           <th>Nombre</th><th>Cuándo</th><th>Filtro</th><th>Qué hace</th>
           <th>Pasos</th><th>Espera</th><th>Ejecuciones</th><th>Última</th><th>Estado</th><th></th>
         </tr></thead>
-        <tbody>
-          ${workflows.map((w) => `
-            <tr data-id="${w.id}" data-search="${esc([w.name, w.description || "", triggerLabel(w.triggerType), wfConditionsText(w),
-              ...w.actions.map((a) => actionLabel(a.type)), w.enabled ? "activa" : "pausada"].join(" · ").toLowerCase())}">
-              <td>${esc(w.name)}${w.description ? `<div class="muted" style="font-size:11px">${esc(w.description)}</div>` : ""}</td>
-              <td>${esc(triggerLabel(w.triggerType))}</td>
-              <td class="muted" style="font-size:12px;max-width:260px">${esc(wfConditionsText(w))}</td>
-              <td><div class="chip-row" style="margin:0">${w.actions.map((a) =>
-                `<span class="chip" ${a.enabled ? "" : 'style="opacity:.5"'}>${esc(actionLabel(a.type))}</span>`).join("")}</div></td>
-              <td class="muted">${stepsOf(w)}</td>
-              <td class="muted">${w.cooldownSeconds > 0 ? `${w.cooldownSeconds} s` : "—"}</td>
-              <td>${w.runCount}</td>
-              <td class="muted">${w.lastRunAt ? wfDate(w.lastRunAt) : "—"}</td>
-              <td>${w.enabled ? `<span class="tag on">Activa</span>` : w.disabledByLicense ? licenseWaitTag(w).trim() : `<span class="tag off">Pausada</span>`}</td>
-              <td class="row-actions">
-                ${isAdmin ? `<button class="btn ghost btn-wf-test" title="Ejecuta las acciones de verdad con un evento de ejemplo">Probar</button>
-                <button class="btn ghost btn-wf-edit">Abrir</button>
-                <button class="btn ghost btn-wf-duplicate" title="Crea una copia pausada y la abre en el editor para cambiar lo que haga falta">Duplicar</button>
-                <button class="btn danger btn-wf-delete">Eliminar</button>` : `<button class="btn ghost btn-wf-edit">Ver</button>`}
-              </td>
-            </tr>`).join("")}
-        </tbody>
-      </table></div>`}
-    <h3 style="margin-top:22px">Alertas <span class="muted" style="font-weight:normal;font-size:12px">(quién se dio por enterado y cuándo)</span></h3>
-    <div id="wf-alerts"><div class="info-box">Cargando…</div></div>
-    <h3 style="margin-top:22px">Últimas ejecuciones</h3>
-    <div id="wf-runs"><div class="info-box">Cargando…</div></div>`;
+        ${ordered.map(groupHtml).join("")}
+      </table></div>`}`;
 
-  // Buscador: todas las palabras escritas deben aparecer en la fila (en
-  // cualquier columna). Se recuerda dentro de la sesión del navegador para
-  // que al volver del editor siga filtrado.
+  // Filtro: todas las palabras deben aparecer en la fila; el grupo elegido
+  // acota. Mientras se busca, los grupos se muestran desplegados.
   const search = $("#wf-search");
-  if (search) {
-    const apply = () => {
-      const words = search.value.trim().toLowerCase().split(/\s+/).filter((w) => w.length > 0);
-      let visible = 0;
-      $$("#wf-table tbody tr").forEach((tr) => {
-        const hay = tr.dataset.search || "";
-        const match = words.every((w) => hay.includes(w));
-        tr.style.display = match ? "" : "none";
-        if (match) visible++;
+  const apply = () => {
+    if (!search) return;
+    const words = search.value.trim().toLowerCase().split(/\s+/).filter((w) => w.length > 0);
+    const only = $("#wf-group-filter").value;
+    let visible = 0;
+    $$("#wf-table tbody.wf-group").forEach((tb) => {
+      const inGroup = only === "*" || tb.dataset.group === only;
+      let shown = 0;
+      tb.querySelectorAll("tr[data-id]").forEach((tr) => {
+        const match = inGroup && words.every((w) => (tr.dataset.search || "").includes(w));
+        tr.hidden = !match;
+        if (match) shown++;
       });
-      $("#wf-table .wf-filter-empty")?.remove();
-      if (visible === 0)
-        $("#wf-table tbody").insertAdjacentHTML("beforeend",
-          `<tr class="wf-filter-empty"><td colspan="10" class="muted">Ninguna automatización coincide con «${esc(search.value.trim())}».</td></tr>`);
-      $("#wf-search-count").textContent = words.length === 0
-        ? `${workflows.length} automatización${workflows.length === 1 ? "" : "es"}`
-        : `${visible} de ${workflows.length}`;
-      try { sessionStorage.setItem("wf-search", search.value); } catch { /* sin almacenamiento */ }
-    };
+      tb.hidden = shown === 0;
+      tb.classList.toggle("searching", words.length > 0);
+      const count = tb.querySelector(".wf-group-count");
+      if (words.length) count.textContent = `${shown} de ${count.dataset.total}`;
+      visible += shown;
+    });
+    $("#wf-table .wf-filter-empty")?.remove();
+    if (visible === 0)
+      $("#wf-table").insertAdjacentHTML("beforeend",
+        `<tbody class="wf-filter-empty"><tr><td colspan="${cols}" class="muted">Ninguna automatización coincide con el filtro.</td></tr></tbody>`);
+    $("#wf-search-count").textContent = words.length === 0 && only === "*"
+      ? `${workflows.length} automatización${workflows.length === 1 ? "" : "es"} en ${ordered.length} grupo${ordered.length === 1 ? "" : "s"}`
+      : `${visible} de ${workflows.length}`;
+    try {
+      sessionStorage.setItem("wf-search", search.value);
+      if (only === "*") sessionStorage.removeItem("wf-group"); else sessionStorage.setItem("wf-group", only);
+    } catch { /* sin almacenamiento */ }
+    wfUpdateSelection();
+  };
+  if (search) {
     try { search.value = sessionStorage.getItem("wf-search") || ""; } catch { /* sin almacenamiento */ }
     search.addEventListener("input", apply);
-    if (search.value) apply();
+    $("#wf-group-filter").addEventListener("change", apply);
+    apply();
   }
 
-  $("#btn-wf-new")?.addEventListener("click", () => { location.hash = "#/workflows/edit"; });
-  $("#btn-wf-smtp")?.addEventListener("click", wfSmtpModal);
+  // Contraer / desplegar grupos.
+  const setCollapsed = (tb, on) => {
+    tb.classList.toggle("collapsed", on);
+    tb.querySelector(".wf-group-toggle").setAttribute("aria-expanded", String(!on));
+    if (on) collapsed.add(tb.dataset.group); else collapsed.delete(tb.dataset.group);
+  };
+  $$("#wf-table .wf-group-toggle").forEach((b) => b.addEventListener("click", () => {
+    const tb = b.closest("tbody");
+    setCollapsed(tb, !tb.classList.contains("collapsed"));
+    wfSaveCollapsed(collapsed);
+  }));
+  $("#wf-expand")?.addEventListener("click", () => { $$("#wf-table tbody.wf-group").forEach((tb) => setCollapsed(tb, false)); wfSaveCollapsed(collapsed); });
+  $("#wf-collapse")?.addEventListener("click", () => { $$("#wf-table tbody.wf-group").forEach((tb) => setCollapsed(tb, true)); wfSaveCollapsed(collapsed); });
+
+  // Selección para mover de grupo.
+  const visibleRows = () => $$("#wf-table tbody.wf-group:not([hidden]) tr[data-id]:not([hidden])");
+  function wfUpdateSelection() {
+    const move = $("#wf-move");
+    if (!move) return;
+    const n = $$("#wf-table .wf-sel:checked").length;
+    move.disabled = n === 0;
+    move.textContent = n ? `Mover a grupo… (${n})` : "Mover a grupo…";
+    $$("#wf-table tbody.wf-group").forEach((tb) => {
+      const boxes = [...tb.querySelectorAll("tr[data-id]:not([hidden]) .wf-sel")];
+      const head = tb.querySelector(".wf-sel-group");
+      if (!head) return;
+      head.checked = boxes.length > 0 && boxes.every((c) => c.checked);
+      head.indeterminate = !head.checked && boxes.some((c) => c.checked);
+    });
+  }
+  $$("#wf-table .wf-sel").forEach((c) => c.addEventListener("change", wfUpdateSelection));
+  $$("#wf-table .wf-sel-group").forEach((c) => c.addEventListener("change", () => {
+    c.closest("tbody").querySelectorAll("tr[data-id]:not([hidden]) .wf-sel").forEach((box) => { box.checked = c.checked; });
+    wfUpdateSelection();
+  }));
+  $("#wf-sel-all")?.addEventListener("change", (e) => {
+    visibleRows().forEach((tr) => { tr.querySelector(".wf-sel").checked = e.target.checked; });
+    wfUpdateSelection();
+  });
+  $("#wf-move")?.addEventListener("click", () => {
+    const ids = $$("#wf-table .wf-sel:checked").map((c) => Number(c.closest("tr").dataset.id));
+    wfGroupModal({
+      title: `Mover ${ids.length} automatización${ids.length === 1 ? "" : "es"} a un grupo`,
+      hint: "Escriba un grupo existente o uno nuevo. Vacío = sin grupo.",
+      value: "", groups: groupNames, ok: "Mover",
+      submit: (group) => Api.post("/api/workflows/group", { ids, group }),
+      done: (r) => toast(r.group ? `${r.moved} automatización(es) movidas a «${r.group}».` : `${r.moved} automatización(es) quedaron sin grupo.`),
+    });
+  });
+  $$("#wf-table .btn-wf-rename").forEach((b) => b.addEventListener("click", () => {
+    const from = b.closest("tbody").dataset.group;
+    wfGroupModal({
+      title: `Renombrar el grupo «${from}»`,
+      hint: "Si lo deja vacío, el grupo se disuelve: sus automatizaciones quedan sin grupo.",
+      value: from, groups: groupNames.filter((g) => g !== from), ok: "Guardar",
+      submit: (to) => Api.post("/api/workflows/group/rename", { from, to }),
+      done: (r) => toast(r.group ? `Grupo renombrado a «${r.group}».` : "Grupo disuelto."),
+    });
+  }));
+  $$("#wf-table .btn-wf-newin").forEach((b) => b.addEventListener("click", () => {
+    location.hash = `#/workflows/edit?group=${encodeURIComponent(b.closest("tbody").dataset.group)}`;
+  }));
+
+  $("#btn-wf-new")?.addEventListener("click", () => {
+    const only = $("#wf-group-filter")?.value;
+    location.hash = only && only !== "*" && only !== WF_NO_GROUP ? `#/workflows/edit?group=${encodeURIComponent(only)}` : "#/workflows/edit";
+  });
   $("#btn-wf-audio")?.addEventListener("click", () => { location.hash = "#/sounds"; });
   $$("#view .btn-wf-edit").forEach((b) => b.addEventListener("click", (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
@@ -428,7 +563,6 @@ async function renderWorkflows() {
       const run = await Api.post(`/api/workflows/${id}/test`);
       toast(run.success ? "Prueba ejecutada correctamente." : "La prueba terminó con errores.", !run.success);
       wfRunModal(run);
-      wfLoadRuns();
     } catch (err) {
       toast(err.error, true);
     } finally {
@@ -436,16 +570,109 @@ async function renderWorkflows() {
       button.textContent = "Probar";
     }
   }));
+}
 
-  wfLoadAlerts();
-  wfLoadRuns();
-  // Las ejecuciones y las alertas ocurren solas: refrescar cada 10 s.
+/** Modal de un nombre de grupo (con los existentes como sugerencias). */
+function wfGroupModal({ title, hint, value, groups, ok, submit, done }) {
+  openModal(`
+    <h3>${esc(title)}</h3>
+    <div class="field"><label>Grupo</label>
+      <input id="wfg-name" maxlength="64" list="wfg-list" value="${esc(value)}" placeholder="Ej.: Casa matriz · Accesos" autocomplete="off">
+      <datalist id="wfg-list">${groups.map((g) => `<option value="${esc(g)}">`).join("")}</datalist>
+      <div class="field-hint muted">${esc(hint)}</div></div>
+    <div class="error-box" id="wfg-err" hidden></div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="wfg-cancel">Cancelar</button>
+      <button type="button" class="btn" id="wfg-ok">${esc(ok)}</button>
+    </div>`);
+  const input = $("#wfg-name");
+  input.focus();
+  input.select();
+  $("#wfg-cancel").onclick = closeModal;
+  const send = async () => {
+    $("#wfg-ok").disabled = true;
+    try {
+      const result = await submit(input.value.trim());
+      closeModal();
+      done(result);
+      renderWorkflows();
+    } catch (err) {
+      $("#wfg-err").textContent = err.error;
+      $("#wfg-err").hidden = false;
+      $("#wfg-ok").disabled = false;
+    }
+  };
+  $("#wfg-ok").onclick = send;
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+}
+
+// ---------------------------------------------------------------------------
+// Automatización → Alertas y → Ejecuciones (páginas propias: con muchas
+// automatizaciones el listado ya no las deja a la vista)
+// ---------------------------------------------------------------------------
+const WF_PAGE = 50;
+
+async function renderWorkflowAlerts() {
+  $("#page-title").textContent = "Alertas de automatizaciones";
+  let pendingOnly = false;
+  try { pendingOnly = sessionStorage.getItem("wf-alerts-pending") === "1"; } catch { /* sin almacenamiento */ }
+  $("#view").innerHTML = `
+    <div class="toolbar">
+      <h3>Alertas <span class="muted" style="font-weight:normal;font-size:12px">(quién se dio por enterado y cuándo)</span></h3>
+      <label class="checkbox-row" style="margin:0"><input type="checkbox" id="wf-alerts-pending" ${pendingOnly ? "checked" : ""}> Solo sin confirmar</label>
+    </div>
+    <div id="wf-alerts"><div class="info-box">Cargando…</div></div>`;
+  const state = { skip: 0 };
+  const load = () => wfLoadAlerts({ skip: state.skip, pendingOnly: $("#wf-alerts-pending").checked, onPage: (skip) => { state.skip = skip; load(); } });
+  $("#wf-alerts-pending").addEventListener("change", (e) => {
+    state.skip = 0;
+    try { sessionStorage.setItem("wf-alerts-pending", e.target.checked ? "1" : "0"); } catch { /* sin almacenamiento */ }
+    load();
+  });
+  load();
   clearInterval(workflowsTimer);
-  workflowsTimer = setInterval(() => {
-    if (location.hash !== "#/workflows") return;
-    wfLoadAlerts();
-    wfLoadRuns();
-  }, 10000);
+  workflowsTimer = setInterval(() => { if (location.hash.startsWith("#/workflow-alerts") && state.skip === 0) load(); }, 10000);
+}
+
+async function renderWorkflowRuns() {
+  $("#page-title").textContent = "Ejecuciones de automatizaciones";
+  let workflows = [];
+  try { workflows = await Api.get("/api/workflows"); } catch { /* el filtro queda solo con «Todas» */ }
+  $("#view").innerHTML = `
+    <div class="toolbar">
+      <h3>Últimas ejecuciones</h3>
+      <div class="row-actions" style="align-items:center;gap:12px">
+        <select id="wf-runs-workflow" title="Solo las de una automatización">
+          <option value="">Todas las automatizaciones</option>
+          ${[...workflows].sort((a, b) => wfCollator.compare(a.name, b.name)).map((w) =>
+            `<option value="${w.id}">${esc(w.group ? `${w.group} · ${w.name}` : w.name)}</option>`).join("")}
+        </select>
+        <label class="checkbox-row" style="margin:0"><input type="checkbox" id="wf-runs-errors"> Solo con errores</label>
+      </div>
+    </div>
+    <div id="wf-runs"><div class="info-box">Cargando…</div></div>`;
+  const state = { skip: 0 };
+  const load = () => wfLoadRuns({
+    skip: state.skip, workflowId: Number($("#wf-runs-workflow").value) || null, onlyErrors: $("#wf-runs-errors").checked,
+    onPage: (skip) => { state.skip = skip; load(); },
+  });
+  $("#wf-runs-workflow").addEventListener("change", () => { state.skip = 0; load(); });
+  $("#wf-runs-errors").addEventListener("change", () => { state.skip = 0; load(); });
+  load();
+  clearInterval(workflowsTimer);
+  workflowsTimer = setInterval(() => { if (location.hash.startsWith("#/workflow-runs") && state.skip === 0) load(); }, 10000);
+}
+
+/** Paginador «Anterior / Siguiente» bajo una tabla. */
+function wfPager(total, skip, take, label, onPage) {
+  const from = total ? skip + 1 : 0, to = Math.min(skip + take, total);
+  const html = `<div class="audit-pager"><span class="muted">${from}–${to} de ${total} ${label}</span>
+    <span class="row-actions"><button class="btn ghost small" data-page="prev" ${skip <= 0 ? "disabled" : ""}>« Anterior</button>
+    <button class="btn ghost small" data-page="next" ${to >= total ? "disabled" : ""}>Siguiente »</button></span></div>`;
+  return { html, wire: (root) => {
+    root.querySelector('[data-page="prev"]')?.addEventListener("click", () => onPage(Math.max(0, skip - take)));
+    root.querySelector('[data-page="next"]')?.addEventListener("click", () => onPage(skip + take));
+  } };
 }
 
 /// Resumen legible del filtro del disparador (columna del listado).
@@ -470,17 +697,18 @@ function wfAgo(from, to) {
   return `${Math.floor(seconds / 3600)} h ${Math.floor((seconds % 3600) / 60)} min`;
 }
 
-async function wfLoadAlerts() {
+async function wfLoadAlerts({ skip = 0, pendingOnly = false, onPage = null } = {}) {
   const container = $("#wf-alerts");
   if (!container) return;
   let data;
-  try { data = await Api.get("/api/workflows/alerts?take=25"); }
+  try { data = await Api.get(`/api/workflows/alerts?take=${WF_PAGE}&skip=${skip}${pendingOnly ? "&pending=true" : ""}`); }
   catch (err) { container.innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
   if (data.total === 0) {
-    container.innerHTML = `<div class="info-box">Todavía no se ha emitido ninguna alerta.</div>`;
+    container.innerHTML = `<div class="info-box">${pendingOnly ? "No hay alertas sin confirmar." : "Todavía no se ha emitido ninguna alerta."}</div>`;
     return;
   }
+  const pager = wfPager(data.total, skip, WF_PAGE, "alerta(s)", onPage || (() => {}));
   container.innerHTML = `
     ${data.pending > 0 ? `<div class="error-box" style="margin-bottom:10px">
       <b>${data.pending} alerta(s) sin confirmar.</b> Mientras nadie se dé por enterado quedan pendientes y a la vista.
@@ -509,7 +737,8 @@ async function wfLoadAlerts() {
           </tr>`).join("")}
       </tbody>
     </table></div>
-    <div class="audit-pager"><span class="muted">${data.total} alerta(s) registradas.</span></div>`;
+    ${pager.html}`;
+  pager.wire(container);
 
   $$("#wf-alerts .btn-alert-ack").forEach((b) => b.addEventListener("click", async (e) => {
     const id = e.target.closest("tr").dataset.alert;
@@ -519,7 +748,7 @@ async function wfLoadAlerts() {
       toast(alert.acknowledgedBy === Api.username
         ? "Alerta confirmada; quedó registrado a su nombre."
         : `La alerta ya la había confirmado ${alert.acknowledgedBy}.`);
-      wfLoadAlerts();
+      wfLoadAlerts({ skip, pendingOnly, onPage });
     } catch (err) {
       toast(err.error, true);
       b.disabled = false;
@@ -543,17 +772,21 @@ async function wfLoadAlerts() {
 // Historial de ejecuciones
 // ---------------------------------------------------------------------------
 
-async function wfLoadRuns() {
+async function wfLoadRuns({ skip = 0, workflowId = null, onlyErrors = false, onPage = null } = {}) {
   const container = $("#wf-runs");
   if (!container) return;
   let data;
-  try { data = await Api.get("/api/workflows/runs?take=25"); }
+  try {
+    data = await Api.get(`/api/workflows/runs?take=${WF_PAGE}&skip=${skip}` +
+      `${workflowId ? `&workflowId=${workflowId}` : ""}${onlyErrors ? "&onlyErrors=true" : ""}`);
+  }
   catch (err) { container.innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
   if (data.total === 0) {
-    container.innerHTML = `<div class="info-box">Aún no se ha ejecutado ninguna automatización.</div>`;
+    container.innerHTML = `<div class="info-box">${workflowId || onlyErrors ? "Ninguna ejecución coincide con el filtro." : "Aún no se ha ejecutado ninguna automatización."}</div>`;
     return;
   }
+  const pager = wfPager(data.total, skip, WF_PAGE, "ejecución(es)", onPage || (() => {}));
   container.innerHTML = `
     <div class="table-scroll"><table class="grid">
       <thead><tr><th>Fecha</th><th>Automatización</th><th>Qué la disparó</th><th>Pasos</th><th>Resultado</th><th>Origen</th></tr></thead>
@@ -569,7 +802,8 @@ async function wfLoadRuns() {
           </tr>`).join("")}
       </tbody>
     </table></div>
-    <div class="audit-pager"><span class="muted">${data.total} ejecución(es) en el historial.</span></div>`;
+    ${pager.html}`;
+  pager.wire(container);
 
   $$("#wf-runs tr[data-run]").forEach((row) => row.addEventListener("click", async () => {
     try { wfRunModal(await Api.get(`/api/workflows/runs/${row.dataset.run}`)); }
@@ -943,119 +1177,6 @@ function wfReadField(action, input) {
       break;
     default: action.config[key] = input.value; break;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Servidor de correo saliente
-// ---------------------------------------------------------------------------
-
-async function wfSmtpModal() {
-  let settings;
-  try { settings = await Api.get("/api/workflows/smtp"); }
-  catch (err) { toast(err.error, true); return; }
-
-  openModal(`
-    <h3>Servidor de correo saliente</h3>
-    <div id="wf-smtp-error"></div>
-    <form id="wf-smtp-form">
-      <label class="checkbox-row"><input type="checkbox" id="smtp-enabled" ${settings.enabled ? "checked" : ""}> Habilitado (las automatizaciones pueden enviar correos)</label>
-      <div class="form-grid">
-        <div class="field">
-          <label>Servidor SMTP</label>
-          <input id="smtp-host" value="${esc(settings.host)}" placeholder="smtp.office365.com">
-        </div>
-        <div class="field">
-          <label>Puerto</label>
-          <input id="smtp-port" type="number" min="1" max="65535" value="${settings.port}">
-        </div>
-      </div>
-      <div class="field">
-        <label>Seguridad</label>
-        <select id="smtp-security">
-          <option value="StartTls" ${settings.security === "StartTls" ? "selected" : ""}>STARTTLS (normalmente puerto 587)</option>
-          <option value="Ssl" ${settings.security === "Ssl" ? "selected" : ""}>TLS implícito (normalmente puerto 465)</option>
-          <option value="None" ${settings.security === "None" ? "selected" : ""}>Sin cifrado (servidor interno, puerto 25)</option>
-        </select>
-      </div>
-      <div class="form-grid">
-        <div class="field">
-          <label>Usuario (vacío = sin autenticación)</label>
-          <input id="smtp-username" value="${esc(settings.username)}" autocomplete="username">
-        </div>
-        <div class="field">
-          <label>Contraseña${settings.hasPassword ? " (guardada; vacío = no cambiar)" : ""}</label>
-          <input id="smtp-password" type="password" autocomplete="new-password">
-        </div>
-      </div>
-      <div class="form-grid">
-        <div class="field">
-          <label>Dirección del remitente</label>
-          <input id="smtp-from" value="${esc(settings.fromAddress)}" placeholder="vms@empresa.cl">
-        </div>
-        <div class="field">
-          <label>Nombre del remitente</label>
-          <input id="smtp-fromname" value="${esc(settings.fromName)}">
-        </div>
-      </div>
-      <label class="checkbox-row"><input type="checkbox" id="smtp-cert" ${settings.allowInvalidCertificate ? "checked" : ""}> Aceptar certificado no verificable (servidor de correo interno)</label>
-      <div class="field">
-        <label>Enviar un correo de prueba a</label>
-        <div class="row-actions" style="display:flex;gap:8px">
-          <input id="smtp-test-to" placeholder="usted@empresa.cl" style="flex:1">
-          <button class="btn ghost" type="button" id="smtp-test">Probar</button>
-        </div>
-        <div class="muted" style="font-size:11.5px;margin-top:4px">La prueba usa la configuración ya guardada.</div>
-      </div>
-      <div class="modal-actions">
-        <button class="btn ghost" type="button" id="smtp-cancel">Cerrar</button>
-        <button class="btn" type="submit">Guardar</button>
-      </div>
-    </form>`);
-
-  $("#smtp-cancel").addEventListener("click", closeModal);
-
-  const read = () => ({
-    enabled: $("#smtp-enabled").checked,
-    host: $("#smtp-host").value.trim(),
-    port: Number($("#smtp-port").value) || 587,
-    security: $("#smtp-security").value,
-    username: $("#smtp-username").value.trim(),
-    password: $("#smtp-password").value || null,
-    allowInvalidCertificate: $("#smtp-cert").checked,
-    fromAddress: $("#smtp-from").value.trim(),
-    fromName: $("#smtp-fromname").value.trim(),
-  });
-
-  $("#wf-smtp-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    try {
-      await Api.put("/api/workflows/smtp", read());
-      wfCatalogCache = null;   // cambia el aviso de "sin correo configurado"
-      toast("Servidor de correo guardado.");
-      closeModal();
-      renderWorkflows();
-    } catch (err) {
-      $("#wf-smtp-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
-    }
-  });
-
-  $("#smtp-test").addEventListener("click", async () => {
-    const to = $("#smtp-test-to").value.trim();
-    if (!to) { toast("Indique a qué dirección enviar la prueba.", true); return; }
-    const button = $("#smtp-test");
-    button.disabled = true;
-    button.textContent = "Enviando…";
-    $("#wf-smtp-error").innerHTML = "";
-    try {
-      await Api.post("/api/workflows/smtp/test", { to });
-      $("#wf-smtp-error").innerHTML = `<div class="info-box">Correo de prueba enviado a ${esc(to)}.</div>`;
-    } catch (err) {
-      $("#wf-smtp-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
-    } finally {
-      button.disabled = false;
-      button.textContent = "Probar";
-    }
-  });
 }
 
 // ---------------------------------------------------------------------------

@@ -721,6 +721,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         {
             e.Property(w => w.Name).HasMaxLength(128);
             e.Property(w => w.Description).HasMaxLength(512);
+            e.Property(w => w.GroupName).HasMaxLength(64);
             e.Property(w => w.TriggerType).HasMaxLength(32);
             e.Property(w => w.CreatedBy).HasMaxLength(64);
             e.HasIndex(w => w.Name).IsUnique();
