@@ -373,8 +373,7 @@ async function renderWorkflows() {
   };
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Automatizaciones <span class="muted" style="font-weight:normal;font-size:12px">(cuando pasa algo, el servidor actúa solo)</span></h3>
+    <div class="toolbar page-toolbar">
       <div class="row-actions">
         ${isAdmin ? `<button class="btn ghost" id="btn-wf-audio">Sonidos</button>
         <button class="btn" id="btn-wf-new">Nueva automatización</button>` : ""}
@@ -617,8 +616,7 @@ async function renderWorkflowAlerts() {
   let pendingOnly = false;
   try { pendingOnly = sessionStorage.getItem("wf-alerts-pending") === "1"; } catch { /* sin almacenamiento */ }
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Alertas <span class="muted" style="font-weight:normal;font-size:12px">(quién se dio por enterado y cuándo)</span></h3>
+    <div class="toolbar page-toolbar">
       <label class="checkbox-row" style="margin:0"><input type="checkbox" id="wf-alerts-pending" ${pendingOnly ? "checked" : ""}> Solo sin confirmar</label>
     </div>
     <div id="wf-alerts"><div class="info-box">Cargando…</div></div>`;
@@ -639,8 +637,7 @@ async function renderWorkflowRuns() {
   let workflows = [];
   try { workflows = await Api.get("/api/workflows"); } catch { /* el filtro queda solo con «Todas» */ }
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Últimas ejecuciones</h3>
+    <div class="toolbar page-toolbar">
       <div class="row-actions" style="align-items:center;gap:12px">
         <select id="wf-runs-workflow" title="Solo las de una automatización">
           <option value="">Todas las automatizaciones</option>
@@ -1296,8 +1293,7 @@ async function renderSounds() {
   }
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Sonidos del servidor <span class="muted" style="font-weight:normal;font-size:12px">(se transmiten a los parlantes desde el servidor, sincronizados)</span></h3>
+    <div class="toolbar page-toolbar">
       ${isAdmin ? `<div class="row-actions" style="align-items:center;gap:8px">
         <input type="file" id="wf-audio-file" accept="audio/*" style="max-width:260px">
         <button class="btn" id="wf-audio-upload">Subir</button>

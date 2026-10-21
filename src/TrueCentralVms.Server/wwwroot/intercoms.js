@@ -58,8 +58,7 @@ async function renderIntercoms() {
   const scanReady = discoveryOptions === INTERCOM_DISCOVERY && lastScan;
   const knownDevices = intercoms.map((i) => ({ host: i.host }));
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Frentes de citofonía <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
+    <div class="toolbar page-toolbar">
       <div class="row-actions">
         ${isAdmin ? `<button class="btn" id="btn-intercom-new">Agregar frente</button>` : ""}
       </div>

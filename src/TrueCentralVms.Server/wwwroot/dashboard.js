@@ -33,6 +33,7 @@ function dashboardLeave() {
 async function renderDashboard() {
   $("#page-title").textContent = "Panel";
   const view = $("#view");
+  view.classList.add("view-dashboard");   // sin cabecera (styles.css)
   if (!dashboardData) view.innerHTML = `<div class="db-empty">Cargando el resumen…</div>`;
   await dashboardRefresh(true);
   dashboardTimer = setInterval(() => dashboardRefresh(false), 30000);

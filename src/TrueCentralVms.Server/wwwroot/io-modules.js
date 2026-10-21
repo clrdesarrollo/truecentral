@@ -155,8 +155,7 @@ async function renderIoModules() {
   const canConfigure = Perms.can("io.configure");
   const canOperate = Perms.can("io.operate");
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Módulos de entradas y salidas <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
+    <div class="toolbar page-toolbar">
       <div class="row-actions">
         ${canConfigure ? `<button class="btn" id="btn-io-new">Agregar módulo</button>` : ""}
       </div>

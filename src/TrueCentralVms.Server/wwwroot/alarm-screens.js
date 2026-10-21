@@ -76,8 +76,7 @@ async function renderAlarmScreens() {
     : `<span class="tag off">Las pantallas de alarma no están incluidas en la licencia</span>`;
 
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Pantallas de alarma <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
+    <div class="toolbar page-toolbar">
       <div class="row-actions">
         <button class="btn ghost" id="btn-scr-settings">Sonidos y ajustes</button>
       </div>

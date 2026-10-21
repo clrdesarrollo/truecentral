@@ -88,8 +88,7 @@ async function renderDecoders() {
   const isAdmin = Perms.can("devices.manage");
   const wallsOf = (id) => walls.filter((w) => w.decoderId === id);
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Decodificadores de muro</h3>
+    <div class="toolbar page-toolbar">
       ${isAdmin ? `<button class="btn" id="btn-decoder-new">Agregar decodificador</button>` : ""}
     </div>
     ${decoders.length === 0 ? `
@@ -535,8 +534,7 @@ async function renderWalls() {
 
   const isAdmin = Perms.can("devices.manage");
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Muros de video</h3>
+    <div class="toolbar page-toolbar">
       ${isAdmin ? `<a class="btn" href="#/walls/edit">Crear muro</a>` : ""}
     </div>
     ${walls.length === 0 ? `

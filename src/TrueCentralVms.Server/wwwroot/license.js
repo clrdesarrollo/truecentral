@@ -121,8 +121,7 @@ async function renderLicense() {
     ${banner}
     ${licenseCardsHtml(s)}
     ${isAdmin ? `
-      <div class="toolbar">
-        <h3>Licencia de esta instalación</h3>
+      <div class="toolbar page-toolbar">
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn" id="lic-add">Agregar códigos…</button>
           <button class="btn ghost" id="lic-refresh" ${s.licenseKey && s.mode === "ONLINE" && s.onlineConfigured ? "" : "disabled"}
