@@ -231,6 +231,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   color: var(--text); font: inherit; font-size: 13.5px; padding: 6px 10px; cursor: pointer;
 }
 .user-menu-toggle:hover, .user-menu-toggle[aria-expanded="true"] { background: var(--panel-2); }
+.user-menu-toggle .user-menu-icon { font-size: 22px; line-height: 1; color: var(--muted); margin-right: -3px; }
 .user-menu-toggle .caret {
   width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
   border-top: 5px solid var(--muted); transition: transform .15s;

@@ -231,10 +231,11 @@ function showAppShell() {
   showUserScope();
 }
 
-/** Nombre y roles del usuario conectado, en la barra superior. */
+/** Nombre del usuario conectado, en la barra superior (sus roles, al pasar el mouse). */
 function showCurrentUser() {
   const roles = Perms.roles.length ? Perms.roles.join(", ") : (Api.role === "Admin" ? "Administrador" : "Operador");
-  $("#current-user").textContent = `${Api.username} (${roles})`;
+  $("#current-user").textContent = Api.username;
+  $("#btn-user-menu").title = `Roles: ${roles}`;
 }
 
 // ---------------------------------------------------------------------------
