@@ -2593,6 +2593,34 @@ a.db-kpi:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(16, 24
 .db-sys-num small { display: block; font-size: 10.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
 
 /* Salud del servidor: medidores semicirculares */
+/* Throughput de red: medidor de aguja + entrada/salida */
+.db-net { display: flex; align-items: center; gap: 16px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+.db-net-gauge { flex: none; width: 190px; text-align: center; }
+.db-net-gauge svg { width: 100%; height: auto; display: block; overflow: visible; }
+.db-net .track { stroke: rgba(var(--muted-rgb), .16); }
+.db-net .value { transition: stroke-dashoffset .9s cubic-bezier(.2, .8, .2, 1); filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), .35)); }
+.db-net.warm .value { stroke: var(--warn); }
+.db-net.hot .value { stroke: var(--danger); }
+.db-net .tick { stroke: rgba(var(--muted-rgb), .45); stroke-width: 1.2; }
+.db-net .tick-lbl { fill: var(--muted); font-size: 9px; font-family: var(--font); }
+.db-net .needle { transform-origin: 100px 100px; transform-box: view-box; transition: transform .9s cubic-bezier(.2, .8, .2, 1); }
+.db-net .needle path { fill: var(--text); }
+.db-net .hub { fill: var(--panel); stroke: var(--text); stroke-width: 3; }
+.db-net .big { font-size: 26px; font-weight: 700; fill: var(--text); font-family: var(--font); font-variant-numeric: tabular-nums; }
+.db-net .unit { font-size: 11px; fill: var(--muted); font-family: var(--font); letter-spacing: .5px; }
+.db-net-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-top: -6px; }
+.db-net-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.db-net-flow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.db-net-flow .mdi { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 14px; flex: none; }
+.db-net-flow.in .mdi { color: var(--info-text); background: rgba(var(--accent-rgb), .12); }
+.db-net-flow.out .mdi { color: var(--violet-text); background: rgba(var(--violet-rgb), .12); }
+.db-net-flow b { margin-left: auto; color: var(--text); font-size: 14px; font-variant-numeric: tabular-nums; }
+.db-net-spark { --k: var(--accent); --k-rgb: var(--accent-rgb); }
+.db-net-spark .db-spark { height: 38px; }
+.db-net-meta { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--muted); }
+.db-net-meta b { color: var(--text-body); font-weight: 600; }
+@media (max-width: 520px) { .db-net { flex-direction: column; align-items: stretch; } .db-net-gauge { margin: 0 auto; } }
+@media (prefers-reduced-motion: reduce) { .db-net .needle, .db-net .value { transition: none; } }
 .db-gauges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .db-gauge { text-align: center; }
 .db-gauge svg { width: 100%; max-width: 128px; height: auto; display: block; margin: 0 auto; }

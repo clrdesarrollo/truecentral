@@ -99,6 +99,18 @@ public sealed record SystemMetricsDto(
     double RamPercent, double RamUsedGb, double RamTotalGb,
     double DiskPercent, double DiskUsedGb, double DiskTotalGb, string DiskName);
 
+/// <summary>
+/// Tráfico de red de la máquina del servidor (throughput), en Mbit/s: lo que
+/// entra (cámaras, equipos) y lo que sale (video a clientes y muros). Muestreado
+/// cada <see cref="SampleSeconds"/> s; <see cref="History"/> es el total
+/// (entrada + salida) de los últimos minutos, del más viejo al más nuevo.
+/// <see cref="LinkMbps"/> = velocidad de enlace de las salidas con puerta de enlace
+/// (<see cref="Adapters"/>; 0 = desconocida).
+/// </summary>
+public sealed record NetworkThroughputDto(
+    double RxMbps, double TxMbps, double LinkMbps, double PeakMbps,
+    IReadOnlyList<double> History, int SampleSeconds, IReadOnlyList<string> Adapters);
+
 // ---------------------------------------------------------------------------
 // Supervisor de servicios (watchdog)
 // ---------------------------------------------------------------------------

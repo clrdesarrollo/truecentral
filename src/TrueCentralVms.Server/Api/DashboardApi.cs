@@ -52,6 +52,7 @@ public static class DashboardApi
                 uptimeSeconds = overview.Server.UptimeSeconds,
                 cpu = m.CpuPercent, ram = m.RamPercent, ramUsedGb = m.RamUsedGb, ramTotalGb = m.RamTotalGb,
                 disk = m.DiskPercent, diskUsedGb = m.DiskUsedGb, diskTotalGb = m.DiskTotalGb, diskName = m.DiskName,
+                network = metrics.ReadNetwork(),
                 servicesTotal = supervised.Count,
                 servicesRunning = supervised.Count(s => s.State == ManagedServiceState.Running),
                 servicesFailed = supervised.Where(s => s.State == ManagedServiceState.Failed).Select(s => s.Name).ToList(),
