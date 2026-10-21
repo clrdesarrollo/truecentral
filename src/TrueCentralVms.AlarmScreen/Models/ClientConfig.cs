@@ -18,6 +18,15 @@ public class ClientConfig
     /// <summary>Credencial entregada al emparejar. Es lo que permite el arranque automático.</summary>
     public string DeviceToken { get; set; } = "";
 
+    /// <summary>
+    /// Huella SHA-256 (hex) de la llave del servidor, fijada al emparejar: desde ahí solo se acepta ese servidor
+    /// (o uno con un certificado válido para el sistema). Vacío = todavía sin fijar.
+    /// </summary>
+    public string PinnedServerKey { get; set; } = "";
+
+    /// <summary>La misma huella en Base64, como la pide curl --pinnedpubkey (script de actualización nocturna).</summary>
+    public string PinnedServerKeyBase64 { get; set; } = "";
+
     /// <summary>Nombre de la pantalla, solo para mostrarlo mientras no hay conexión.</summary>
     public string ScreenName { get; set; } = "";
 

@@ -184,7 +184,10 @@ function alarmScreenApproveModal(screen) {
     <div id="scr-modal-error"></div>
     <form id="scr-approve-form">
       <div class="scr-code" style="margin:0 auto 12px">${esc(screen.pairingCode ?? "")}</div>
-      <p class="muted" style="text-align:center;margin-top:0">Confirme que la pantalla de la caseta muestra este mismo código.</p>
+      <p class="muted" style="text-align:center;margin-top:0">Confirme que la pantalla de la caseta muestra este mismo código
+        <b>y esta huella del servidor</b>: <code id="scr-fingerprint">…</code></p>
+      <p class="muted" style="text-align:center;margin-top:0;font-size:12px">Si la huella de la pantalla es otra, NO la apruebe:
+        alguien está interceptando la red entre la caseta y el servidor.</p>
       <div class="field">
         <label>Nombre de la pantalla</label>
         <input id="scr-name" required maxlength="128" value="${esc(screen.name === screen.hostname ? "" : screen.name)}" placeholder="Caseta acceso principal">
@@ -197,6 +200,10 @@ function alarmScreenApproveModal(screen) {
     </form>`);
   $("#scr-cancel").addEventListener("click", closeModal);
   $("#scr-name").focus();
+  // Primeros 8 bytes de la huella de la llave, igual que los muestra la pantalla.
+  Api.get("/api/system/certificate").then((c) => {
+    $("#scr-fingerprint").textContent = c.spki.slice(0, 16).toUpperCase().match(/.{2}/g).join(":");
+  }).catch(() => { $("#scr-fingerprint").textContent = "(no disponible)"; });
   $("#scr-approve-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {

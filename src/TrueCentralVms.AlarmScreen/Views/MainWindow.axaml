@@ -150,6 +150,10 @@
           <TextBlock Text="{Binding PairingCode}" FontSize="82" FontWeight="Bold" Foreground="White"
                      LetterSpacing="12" />
         </Border>
+        <TextBlock Text="{Binding PairingFingerprint, StringFormat=Huella del servidor: {0}}" FontSize="18"
+                   Foreground="#ECEFF1" FontFamily="monospace" HorizontalAlignment="Center" />
+        <TextBlock Text="El administrador debe ver la misma huella en TrueCentral antes de aprobar." FontSize="14"
+                   Foreground="#90A4AE" HorizontalAlignment="Center" />
         <TextBlock Text="{Binding StatusText}" FontSize="14" Foreground="#90A4AE" HorizontalAlignment="Center" />
       </StackPanel>
     </Border>
@@ -167,6 +171,8 @@
           <TextBox Grid.Column="0" Text="{Binding ManualUrl}" Watermark="https://192.168.1.50" FontSize="18" />
           <Button Grid.Column="1" Classes="primary" Content="USAR" Command="{Binding UseManualUrlCommand}" />
         </Grid>
+        <Button Content="OLVIDAR SERVIDOR Y VOLVER A EMPAREJAR" HorizontalAlignment="Center"
+                IsVisible="{Binding CanForgetServer}" Command="{Binding ForgetServerCommand}" />
       </StackPanel>
     </Border>
 

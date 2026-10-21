@@ -1,5 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Security;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using TrueCentralVms.AlarmScreen.Models;
 using TrueCentralVms.Core.Contracts;
@@ -38,6 +41,19 @@ public sealed class ServerLink(ClientConfig config) : IAsyncDisposable
     public string StatusText { get; private set; } = "Iniciando…";
     public string PairingCode { get; private set; } = "";
 
+    /// <summary>
+    /// Huella corta de la llave del servidor con que se está emparejando, para que el administrador la compare con la
+    /// de TrueCentral antes de aprobar (si no coincide, hay alguien en el medio).
+    /// </summary>
+    public string PairingFingerprint => ShortFingerprint(_seenKey);
+
+    /// <summary>¿Hay un servidor recordado que se pueda olvidar para volver a emparejar?</summary>
+    public bool CanForget => config.DeviceToken.Length > 0 || config.PinnedServerKey.Length > 0;
+
+    // Llave que presentó el servidor en la última conexión, y si no coincidió con la fijada.
+    private volatile string? _seenKey;
+    private volatile bool _keyMismatch;
+
     public AlarmScreenSessionDto? Session { get; private set; }
 
     public event Action? Changed;
@@ -60,6 +76,21 @@ public sealed class ServerLink(ClientConfig config) : IAsyncDisposable
         ConfigService.Save(config);
     }
 
+    /// <summary>
+    /// Olvida el servidor (dirección, credencial y llave fijada) para volver a buscarlo y emparejarse: es la salida
+    /// cuando el servidor cambió de certificado. El administrador tendrá que reiniciar el emparejamiento y aprobarla.
+    /// </summary>
+    public void ForgetServer()
+    {
+        config.ServerUrl = "";
+        config.DeviceToken = "";
+        config.PinnedServerKey = "";
+        config.PinnedServerKeyBase64 = "";
+        ConfigService.Save(config);
+        _keyMismatch = false;
+        Report(LinkState.Searching, "Servidor olvidado: buscando de nuevo…");
+    }
+
     // ---------- bucle de vida ----------
 
     /// <summary>
@@ -80,6 +111,16 @@ public sealed class ServerLink(ClientConfig config) : IAsyncDisposable
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return;
+            }
+            catch (Exception) when (_keyMismatch)
+            {
+                // Otro certificado que el fijado: o el servidor lo cambió, o alguien se hace pasar por él. No se
+                // redescubre (un impostor también contestaría el broadcast): lo resuelve una persona.
+                _keyMismatch = false;
+                Report(LinkState.Blocked, "El servidor se presenta con una llave DISTINTA de la que esta pantalla conocía " +
+                    $"(ahora {ShortFingerprint(_seenKey)}). Si el administrador cambió el certificado, toque «Olvidar servidor» " +
+                    "y vuelva a emparejarla; si no, avise: puede haber alguien interceptando la red.");
+                await Task.Delay(TimeSpan.FromSeconds(15), ct);
             }
             catch (Exception ex)
             {
@@ -142,8 +183,16 @@ public sealed class ServerLink(ClientConfig config) : IAsyncDisposable
 
         using var http = PlainClient();
         var start = await http.PostAsJsonAsync("/api/screen/pair",
-            new AlarmScreenPairStartRequest(config.MachineId, Environment.MachineName, Version()), Json, ct);
+            new AlarmScreenPairStartRequest(config.MachineId, Environment.MachineName, Version(), _seenKey), Json, ct);
 
+        if (start.StatusCode == HttpStatusCode.Conflict)
+        {
+            // El servidor ve que esta pantalla recibió otra llave que la suya: hay alguien en el medio.
+            Report(LinkState.Blocked, "El servidor informa que esta pantalla no está hablando directamente con él " +
+                $"(llave recibida {ShortFingerprint(_seenKey)}). Revise la red antes de emparejarla.");
+            await Task.Delay(TimeSpan.FromSeconds(30), ct);
+            return false;
+        }
         if (!start.IsSuccessStatusCode)
         {
             _failedAttempts++;
@@ -191,6 +240,7 @@ public sealed class ServerLink(ClientConfig config) : IAsyncDisposable
             if (status.Token is not { Length: > 0 }) continue;
 
             config.DeviceToken = status.Token;
+            PinSeenKey();
             config.ScreenName = status.ScreenName ?? "";
             config.SiteName = status.SiteName ?? config.SiteName;
             ConfigService.Save(config);
@@ -254,6 +304,13 @@ public sealed class ServerLink(ClientConfig config) : IAsyncDisposable
             ConfigService.Save(config);
         }
 
+        // Emparejada con una versión anterior (sin llave fijada): se fija la que presentó ahora.
+        if (config.PinnedServerKey.Length == 0 && _seenKey is not null)
+        {
+            PinSeenKey();
+            ConfigService.Save(config);
+        }
+
         Report(LinkState.Online, Connected);
         _failedAttempts = 0;
         Resynced?.Invoke();
@@ -283,7 +340,8 @@ public sealed class ServerLink(ClientConfig config) : IAsyncDisposable
                 o.Headers[AlarmScreenProtocol.TokenHeader] = config.DeviceToken;
                 o.HttpMessageHandlerFactory = _ => CreateHandler();
                 // El WebSocket (wss) no pasa por ese manejador: mismo criterio para su certificado.
-                o.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+                o.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback =
+                    (_, certificate, _, errors) => ValidateServerCertificate(certificate, errors);
             })
             .WithAutomaticReconnect(new ForeverRetryPolicy())
             .Build();
@@ -442,13 +500,41 @@ public sealed class ServerLink(ClientConfig config) : IAsyncDisposable
     }
 
     /// <summary>
-    /// Instalaciones on-premise suelen usar certificados autofirmados; el servidor está en la
-    /// misma LAN y se identifica con el device token, no con el certificado.
+    /// El servidor suele presentarse con su certificado propio, que la Pi no conoce: se acepta la llave
+    /// que presentó al emparejar (la que el administrador comparó antes de aprobar) y ninguna otra. Un
+    /// certificado válido para el sistema (CA de la organización instalada en la Pi) también vale.
     /// </summary>
-    private static HttpMessageHandler CreateHandler() => new HttpClientHandler
+    private HttpMessageHandler CreateHandler() => new HttpClientHandler
     {
-        ServerCertificateCustomValidationCallback = (_, _, _, _) => true
+        ServerCertificateCustomValidationCallback = (_, certificate, _, errors) => ValidateServerCertificate(certificate, errors)
     };
+
+    private bool ValidateServerCertificate(X509Certificate? certificate, SslPolicyErrors errors)
+    {
+        if (certificate is null) return false;
+        using var cert = new X509Certificate2(certificate);
+        string spki = Convert.ToHexStringLower(SHA256.HashData(cert.PublicKey.ExportSubjectPublicKeyInfo()));
+        _seenKey = spki;
+        if (errors == SslPolicyErrors.None) return true;
+        // Sin llave fijada todavía (buscando o emparejando): se acepta y se fija al recibir la credencial.
+        if (config.PinnedServerKey.Length == 0) return true;
+        if (spki == config.PinnedServerKey) return true;
+        _keyMismatch = true;
+        return false;
+    }
+
+    private void PinSeenKey()
+    {
+        if (_seenKey is not { } key) return;
+        config.PinnedServerKey = key;
+        config.PinnedServerKeyBase64 = Convert.ToBase64String(Convert.FromHexString(key));
+    }
+
+    /// <summary>Primeros 8 bytes de la huella (AB:CD:…), igual que los muestra el panel de TrueCentral.</summary>
+    private static string ShortFingerprint(string? hex) =>
+        hex is { Length: >= 16 }
+            ? string.Join(":", Enumerable.Range(0, 8).Select(i => hex.Substring(i * 2, 2).ToUpperInvariant()))
+            : "";
 
     private void Report(LinkState state, string text)
     {

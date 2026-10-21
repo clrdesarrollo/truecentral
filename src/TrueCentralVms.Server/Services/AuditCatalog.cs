@@ -267,6 +267,7 @@ public static class AuditCatalog
         new("screens", "Pantallas de alarma",
         [
             new("screen-pair-requested", "Equipo que pidió emparejarse como pantalla de alarma"),
+            new("screen-key-mismatch", "Emparejamiento rechazado: la pantalla vio otra llave de servidor (posible intermediario)"),
             new("screen-approved", "Pantalla de alarma aprobada"),
             new("screen-rejected", "Pantalla de alarma rechazada"),
             new("screen-paired", "Pantalla de alarma que recibió su credencial"),
