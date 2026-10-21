@@ -231,6 +231,9 @@ builder.Services.AddSingleton<IWorkflowActionExecutor, SnapshotAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, EmailAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, FtpAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, HttpAction>();
+// Destinos de las acciones (HTTP, FTP, parlante por URL, correo): nunca el propio
+// servidor salvo que se habilite a propósito (ver OutboundAddressPolicy).
+OutboundAddressPolicy.AllowLoopback = builder.Configuration.GetValue("Workflows:AllowLoopbackTargets", false);
 builder.Services.AddSingleton<IWorkflowActionExecutor, SpeakerAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, NotifyAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, DoorAction>();

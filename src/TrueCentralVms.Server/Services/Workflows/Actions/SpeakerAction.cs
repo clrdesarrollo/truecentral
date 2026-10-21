@@ -99,14 +99,10 @@ public sealed class SpeakerAction(WorkflowStore store, SpeakerService speakers, 
         string mode = Mode(context.Config);
         if (mode == "inventory") return await PlayInventoryAsync(context, ct);
 
-        using var handler = new HttpClientHandler
-        {
-            AllowAutoRedirect = false,
-            // Los equipos de terreno traen certificado autofirmado: la
-            // confianza es por dirección y credenciales (mismo criterio que
-            // los drivers de dispositivos).
-            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
-        };
+        // Los equipos de terreno traen certificado autofirmado: la confianza es
+        // por dirección y credenciales (mismo criterio que los drivers de
+        // dispositivos). La dirección es libre: nunca el propio servidor.
+        using var handler = OutboundAddressPolicy.CreateHandler(acceptAnyCertificate: true, allowRedirect: false);
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(MaxSeconds + 20) };
         var auth = new DigestAuthenticator(context.Text("username").Trim(), context.Secret ?? "");
 

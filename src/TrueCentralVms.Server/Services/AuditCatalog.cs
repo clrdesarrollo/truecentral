@@ -319,6 +319,7 @@ public static class AuditCatalog
             new("workflow-group-changed", "Automatizaciones movidas de grupo"),
             new("workflow-group-renamed", "Grupo de automatizaciones renombrado o disuelto"),
             new("workflow-tested", "Automatización probada a mano"),
+            new("workflow-scope-denied", "Automatización rechazada: usa recursos fuera del alcance de quien la arma"),
             new("workflow-executed", "Automatización ejecutada"),
             new("workflow-failed", "Automatización con acciones fallidas"),
             new("workflow-webhook", "Automatización disparada por llamada externa"),
