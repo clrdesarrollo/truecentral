@@ -81,7 +81,7 @@ public partial class MainWindow : Window
             message = "¿Cerrar CLR TrueCentral VMS?";
         }
 
-        var result = MessageBox.Show(this, message, "Salir de CLR TrueCentral VMS",
+        var result = AppMessageBox.Show(this, message, "Salir de CLR TrueCentral VMS",
             MessageBoxButton.YesNo,
             downloading ? MessageBoxImage.Warning : MessageBoxImage.Question,
             MessageBoxResult.No);
@@ -143,7 +143,7 @@ public partial class MainWindow : Window
         {
             int active = _vm.Downloads.Jobs.Count(j => j.State == DownloadState.Downloading);
             int queued = _vm.Downloads.Jobs.Count(j => j.State == DownloadState.Pending);
-            var answer = MessageBox.Show(this,
+            var answer = AppMessageBox.Show(this,
                 $"Hay {active} descarga(s) de grabaciones en curso" +
                 (queued > 0 ? $" y {queued} en cola" : "") +
                 ".\nCerrar sesión las cancelará y los archivos a medias quedarán incompletos.\n\n" +

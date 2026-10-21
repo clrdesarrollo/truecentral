@@ -810,7 +810,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo ocupar el muro", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo ocupar el muro", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -825,7 +825,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo restaurar el mosaico", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo restaurar el mosaico", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -1050,7 +1050,7 @@ public partial class WallView : UserControl
         int assignedBeyond = screen.Windows.Count(w => w.WindowIndex >= mode && w.Assignment is not null);
         if (mode < screen.WindowMode && assignedBeyond > 0)
         {
-            var confirm = MessageBox.Show(HostWindow,
+            var confirm = AppMessageBox.Show(HostWindow,
                 $"Reducir \"{screen.Label}\" a {mode} ventana(s) detendrá la visualización de {assignedBeyond} cámara(s) que están fuera del nuevo layout.\n\n¿Continuar?",
                 "Reducir layout", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (confirm != MessageBoxResult.Yes)
@@ -1085,7 +1085,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, errorTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, errorTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
             Status("La operación falló.");
         }
         finally
@@ -1653,7 +1653,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo intercambiar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo intercambiar", MessageBoxButton.OK, MessageBoxImage.Warning);
             Status("El intercambio falló.");
         }
     }
@@ -1670,7 +1670,7 @@ public partial class WallView : UserControl
         int cameras = screen.Windows.Count(w => ids.Contains(w.Id) && w.Assignment is not null);
         if (cameras > 1)
         {
-            var confirm = MessageBox.Show(HostWindow,
+            var confirm = AppMessageBox.Show(HostWindow,
                 $"La ventana agrupada muestra UNA cámara (la de la esquina superior izquierda del grupo); " +
                 $"las otras {cameras - 1} cámara(s) seleccionadas se liberarán.\n\n¿Continuar?",
                 "Agrupar ventanas", MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -2020,7 +2020,7 @@ public partial class WallView : UserControl
             .ToList();
         if (targets.Count == 0)
         {
-            MessageBox.Show(HostWindow,
+            AppMessageBox.Show(HostWindow,
                 "Primero haga clic en la ventana del muro donde quiere proyectar (queda resaltada; " +
                 "Ctrl+clic para elegir varias) y vuelva a pulsar 🖥 Proyectar.",
                 "Proyectar", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -2099,7 +2099,7 @@ public partial class WallView : UserControl
         var monitors = ScreenProjectionService.GetMonitors();
         if (monitors.Count == 0)
         {
-            MessageBox.Show(HostWindow, "No se detectaron monitores.", "Proyectar",
+            AppMessageBox.Show(HostWindow, "No se detectaron monitores.", "Proyectar",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return false;
         }
@@ -2128,7 +2128,7 @@ public partial class WallView : UserControl
         if (busyScreenId >= 0)
         {
             string label = _currentWall?.Screens.FirstOrDefault(s => s.Id == busyScreenId)?.Label ?? "La pantalla";
-            MessageBox.Show(HostWindow, $"{label} tiene una operación en curso. Espere a que termine.",
+            AppMessageBox.Show(HostWindow, $"{label} tiene una operación en curso. Espere a que termine.",
                 "Proyectar", MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
@@ -2175,7 +2175,7 @@ public partial class WallView : UserControl
             if (connected == false)
             {
                 Status($"{transmitting} El decoder aún no se conecta: revise que la IP {dialog.SelectedIp} sea alcanzable desde el decoder y que el firewall permita mediamtx.exe.");
-                MessageBox.Show(HostWindow,
+                AppMessageBox.Show(HostWindow,
                     $"La transmisión está activa pero el decoder todavía no se conectó a este PC.\n\n" +
                     $"Compruebe que la IP indicada ({dialog.SelectedIp}) sea alcanzable desde el decoder y que el firewall permita mediamtx.exe (puerto 8554/TCP).\n\n" +
                     "La transmisión sigue en marcha; si el decoder se conecta más tarde, la imagen aparecerá sola.",
@@ -2198,7 +2198,7 @@ public partial class WallView : UserControl
         {
             // Si algún destino ya se había asignado, se restaura lo anterior.
             await StopProjectionAsync();
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo iniciar la transmisión",
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo iniciar la transmisión",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             Status("La transmisión no pudo iniciarse.");
             return false;
@@ -2343,7 +2343,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo asignar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo asignar", MessageBoxButton.OK, MessageBoxImage.Warning);
             Status("La asignación falló.");
         }
     }
@@ -2369,7 +2369,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo liberar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo liberar", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -2412,7 +2412,7 @@ public partial class WallView : UserControl
         catch (Exception ex)
         {
             _projectionTargets.Add(target); // sigue mostrando la proyección
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo liberar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo liberar", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         RenderWall();
     }
@@ -2420,7 +2420,7 @@ public partial class WallView : UserControl
     private async void OnClearAllClick(object sender, RoutedEventArgs e)
     {
         if (_currentWall is null) return;
-        if (MessageBox.Show(HostWindow, $"¿Detener todas las ventanas de \"{_currentWall.Name}\"?",
+        if (AppMessageBox.Show(HostWindow, $"¿Detener todas las ventanas de \"{_currentWall.Name}\"?",
                 "Limpiar muro", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         try
@@ -2438,7 +2438,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -2454,7 +2454,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "Sincronización", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "Sincronización", MessageBoxButton.OK, MessageBoxImage.Warning);
             Status("La sincronización falló.");
         }
         finally
@@ -2799,7 +2799,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo cambiar la flotante", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo cambiar la flotante", MessageBoxButton.OK, MessageBoxImage.Warning);
             RenderFloatLayer(); // volver a la posición real
         }
     }
@@ -2815,7 +2815,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo mover", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo mover", MessageBoxButton.OK, MessageBoxImage.Warning);
             RenderFloatLayer(); // volver a la posición real
         }
     }
@@ -2832,7 +2832,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo asignar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo asignar", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -2846,7 +2846,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo cerrar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo cerrar", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -2934,7 +2934,7 @@ public partial class WallView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(HostWindow, ex.Message, "No se pudo abrir la ventana flotante",
+            AppMessageBox.Show(HostWindow, ex.Message, "No se pudo abrir la ventana flotante",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             Status("La ventana flotante no pudo abrirse.");
         }

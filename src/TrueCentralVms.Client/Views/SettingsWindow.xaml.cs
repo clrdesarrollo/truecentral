@@ -164,7 +164,7 @@ public partial class SettingsWindow : Window
         _settings.ConsolePalette = palette;
         _settings.Save();
         if (appearanceChanged)
-            MessageBox.Show(this, "La nueva apariencia se aplicará la próxima vez que abra el cliente.",
+            AppMessageBox.Show(this, "La nueva apariencia se aplicará la próxima vez que abra el cliente.",
                 "Apariencia", MessageBoxButton.OK, MessageBoxImage.Information);
         DialogResult = true;
     }

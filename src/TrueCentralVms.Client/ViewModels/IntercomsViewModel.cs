@@ -1,3 +1,4 @@
+using TrueCentralVms.Client.Views;
 using System.Collections.ObjectModel;
 using System.Net.Http;
 using System.Windows;
@@ -281,7 +282,7 @@ public sealed partial class IntercomsViewModel : ObservableObject
     {
         item ??= Selected;
         if (item is null || !item.CanOperate) return;
-        var answer = MessageBox.Show(Application.Current.MainWindow,
+        var answer = AppMessageBox.Show(Application.Current.MainWindow,
             $"¿Abrir la puerta de «{item.Name}»?", "Citofonía", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return;
         try
@@ -292,7 +293,7 @@ public sealed partial class IntercomsViewModel : ObservableObject
         catch (ApiException ex)
         {
             StatusMessage = ex.Message;
-            MessageBox.Show(Application.Current.MainWindow, ex.Message, "Citofonía", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(Application.Current.MainWindow, ex.Message, "Citofonía", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 

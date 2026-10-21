@@ -158,7 +158,7 @@ public sealed class ProjectionDialog : Window
             if (SelectedIp.Length == 0 ||
                 (SelectedMonitor is null && string.IsNullOrEmpty(SelectedFile)))
             {
-                MessageBox.Show(this, "Seleccione qué transmitir y la IP del PC.", "Proyectar",
+                AppMessageBox.Show(this, "Seleccione qué transmitir y la IP del PC.", "Proyectar",
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
@@ -167,5 +167,6 @@ public sealed class ProjectionDialog : Window
         buttons.Children.Add(start);
         buttons.Children.Add(cancel);
         root.Children.Add(buttons);
+        DarkChrome.Apply(this);
     }
 }

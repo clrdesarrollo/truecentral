@@ -1,3 +1,4 @@
+using TrueCentralVms.Client.Views;
 using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -298,6 +299,6 @@ public partial class MainViewModel
 
     /// <summary>Confirmación sí/no sobre la ventana principal.</summary>
     private static bool Confirm(string message, string title) =>
-        MessageBox.Show(Application.Current.MainWindow, message, title,
+        AppMessageBox.Show(Application.Current.MainWindow, message, title,
             MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 }
