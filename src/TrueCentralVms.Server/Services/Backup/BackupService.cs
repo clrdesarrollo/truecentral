@@ -11,6 +11,13 @@ using TrueCentralVms.Server.Data.Entities;
 namespace TrueCentralVms.Server.Services.Backup;
 
 /// <summary>
+/// Avance de un respaldo: etapa ("dump" = base de datos, "files" = archivos,
+/// "verify" = relectura completa), bytes de la base ya escritos y los que se
+/// esperan (el tamaño del respaldo anterior; 0 = no se sabe).
+/// </summary>
+public sealed record BackupProgress(string Stage, long Bytes, long ExpectedBytes);
+
+/// <summary>
 /// Respaldos automáticos de la instalación (Sistema → Respaldos). Cada respaldo es un archivo .tcbak cifrado
 /// (<see cref="BackupFormat"/>) con la base completa (pg_dump), la llave de datos (sin ella, las claves guardadas de los
 /// equipos no se recuperan), los archivos de las automatizaciones, la licencia y, si se pide, las fotos de patentes.
@@ -104,7 +111,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
     // ------------------------------------------------------------------ crear
 
     /// <summary>Hace un respaldo completo (uno a la vez). Lanza si falla; el estado queda guardado igual.</summary>
-    public async Task<BackupFileDto> CreateAsync(string kind, CancellationToken ct)
+    public async Task<BackupFileDto> CreateAsync(string kind, CancellationToken ct, IProgress<BackupProgress>? progress = null)
     {
         if (!await _gate.WaitAsync(0, ct))
             throw new InvalidOperationException("Ya hay un respaldo o una prueba de restauración en curso.");
@@ -112,7 +119,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         DateTime attempt = DateTime.UtcNow;
         try
         {
-            var file = await CreateCoreAsync(kind, ct);
+            var file = await CreateCoreAsync(kind, ct, progress);
             int removed = ApplyRetention(Directory, _settings);
             string? secondaryError = CopyToSecondary(Path.Combine(Directory, file.Name), _settings);
             await SaveStateAsync(_state with
@@ -142,9 +149,17 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         }
     }
 
-    private async Task<BackupFileDto> CreateCoreAsync(string kind, CancellationToken ct)
+    private async Task<BackupFileDto> CreateCoreAsync(string kind, CancellationToken ct, IProgress<BackupProgress>? progress)
     {
         System.IO.Directory.CreateDirectory(Directory);
+        // Lo que se espera escribir: el último respaldo bueno es la mejor referencia (la base crece de a poco).
+        long expected = 0;
+        try
+        {
+            if (_state.LastSuccessFile is { Length: > 0 } last && new FileInfo(Path.Combine(Directory, last)) is { Exists: true } info)
+                expected = info.Length;
+        }
+        catch (Exception) { /* sin referencia: el avance va sin porcentaje */ }
         var settings = _settings;
         string? password = BackupPassword;
         string name = BackupPaths.NewName(DateTime.Now, kind);
@@ -170,7 +185,10 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
                 using var encrypted = new BackupFormat.EncryptingStream(file, key, header, raw);
                 using (var zip = new ZipArchive(encrypted, ZipArchiveMode.Create, leaveOpen: true))
                 {
-                    await AddDumpAsync(zip, entries, ct);
+                    long dumped = 0;
+                    await AddDumpAsync(zip, entries, ct,
+                        progress is null ? null : bytes => progress.Report(new BackupProgress("dump", dumped = bytes, expected)));
+                    progress?.Report(new BackupProgress("files", dumped, expected));
                     AddFile(zip, "secrets/tcvms-data.key", BackupPaths.DataKey(pg), entries);
                     AddDirectory(zip, "files/workflows", BackupPaths.Workflows(config, pg), entries, ct);
                     AddDirectory(zip, "files/license", BackupPaths.License(pg), entries, ct);
@@ -180,6 +198,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
                 }
             }
             // Releer todo: cada bloque cifrado se valida con su etiqueta, así que un archivo que se lee entero está sano.
+            progress?.Report(new BackupProgress("verify", new FileInfo(part).Length, expected));
             await using (var check = File.OpenRead(part))
             {
                 var (readHeader, raw) = BackupFormat.ReadHeader(check);
@@ -209,7 +228,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         catch (Exception) { return null; }
     }
 
-    private async Task AddDumpAsync(ZipArchive zip, List<ManifestEntry> entries, CancellationToken ct)
+    private async Task AddDumpAsync(ZipArchive zip, List<ManifestEntry> entries, CancellationToken ct, Action<long>? onBytes = null)
     {
         const string path = "db/truecentral_vms.dump";
         var (user, password) = pg.DumpCredentials;
@@ -220,7 +239,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         long size;
         string sha;
         await using (var target = zip.CreateEntry(path, CompressionLevel.NoCompression).Open())
-            (size, sha) = await CopyHashingAsync(process.StandardOutput.BaseStream, target, ct);
+            (size, sha) = await CopyHashingAsync(process.StandardOutput.BaseStream, target, ct, onBytes);
         await process.WaitForExitAsync(ct);
         string errors = await stderr;
         if (process.ExitCode != 0)
@@ -251,18 +270,21 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         }
     }
 
-    private static async Task<(long Size, string Sha256)> CopyHashingAsync(Stream input, Stream output, CancellationToken ct)
+    private static async Task<(long Size, string Sha256)> CopyHashingAsync(Stream input, Stream output, CancellationToken ct,
+        Action<long>? onBytes = null)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         byte[] buffer = new byte[1 << 16];
-        long total = 0;
+        long total = 0, reported = 0;
         int read;
         while ((read = await input.ReadAsync(buffer, ct)) > 0)
         {
             hash.AppendData(buffer, 0, read);
             output.Write(buffer, 0, read);   // el ZIP escribe sincrónico sobre el flujo cifrado
             total += read;
+            if (onBytes is not null && total - reported >= 4 << 20) onBytes(reported = total);   // cada 4 MB
         }
+        onBytes?.Invoke(total);
         return (total, Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
@@ -504,14 +526,15 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
     /// falla, el servidor sigue arrancando (no dejar el sistema caído por un respaldo), pero queda en el log y en la
     /// bitácora apenas termine la migración.
     /// </summary>
-    public async Task BackupBeforeUpdateAsync(IReadOnlyList<string> pending, CancellationToken ct)
+    public async Task BackupBeforeUpdateAsync(IReadOnlyList<string> pending, CancellationToken ct,
+        IProgress<BackupProgress>? progress = null)
     {
         try { await LoadSettingsAsync(ct); } catch (Exception) { _settings = new BackupSettings(); }
         try { _state = await ReadBlobAsync<BackupState>(StateBlob, ct) ?? new BackupState(); } catch (Exception) { /* base antigua */ }
         logger.LogInformation("Hay {Count} migración(es) pendiente(s): respaldando la base antes de actualizar...", pending.Count);
         try
         {
-            var file = await CreateAsync(BackupKinds.PreUpdate, ct);
+            var file = await CreateAsync(BackupKinds.PreUpdate, ct, progress);
             _pendingAudit.Add(("backup-created", file.Name,
                 $"Respaldo automático antes de actualizar a la versión {ServerVersion} ({pending.Count} migración(es) pendiente(s): " +
                 $"{string.Join(", ", pending.Take(5))}{(pending.Count > 5 ? "…" : "")}). {Size(file.Size)}.", true));
@@ -549,6 +572,14 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
                 {
                     if (reason == "programado")
                         await SaveStateAsync(_state with { LastScheduledDay = DateTime.Now.ToString("yyyy-MM-dd") });
+                    // Ya hay uno fresco (p. ej. el de antes de actualizar, minutos atrás): el diario de hoy queda cubierto.
+                    if (reason == "programado" && _state.LastSuccessUtc is { } recent && DateTime.UtcNow - recent < RecentEnough)
+                    {
+                        logger.LogInformation("Respaldo diario omitido: ya hay uno de hace {Minutes:0} min ({File}).",
+                            (DateTime.UtcNow - recent).TotalMinutes, _state.LastSuccessFile);
+                        await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                        continue;
+                    }
                     try
                     {
                         var file = await CreateAsync(BackupKinds.Daily, stoppingToken);
@@ -580,6 +611,9 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
     /// de las últimas 26 h (servidor apagado a la hora, o el anterior falló) y el último intento fue hace más de una
     /// hora: reintenta solo, sin martillar. En una instalación nueva, el primero sale a los pocos minutos de arrancar.
     /// </summary>
+    /// <summary>Un respaldo bueno así de reciente cubre el diario de hoy.</summary>
+    private static readonly TimeSpan RecentEnough = TimeSpan.FromHours(12);
+
     private string? DueReason(DateTime now)
     {
         if (now.TimeOfDay >= _settings.DailyTimeOfDay.ToTimeSpan() && _state.LastScheduledDay != now.ToString("yyyy-MM-dd"))

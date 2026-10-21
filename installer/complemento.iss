@@ -1,4 +1,4 @@
-; ============================================================================
+﻿; ============================================================================
 ; CLR TrueCentral VMS — Instalador del COMPLEMENTO DE ENROLAMIENTO (Inno Setup 6)
 ; ----------------------------------------------------------------------------
 ; Se instala en el PC donde está conectado el LECTOR DE HUELLAS USB (Hikvision
@@ -100,7 +100,18 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+  WizardForm.PreparingLabel.Caption := 'Cerrando el complemento si está abierto...';
   KillAgent();
+end;
+
+// Después de copiar: la barra queda llena; que el texto diga en qué quedó.
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    WizardForm.StatusLabel.Caption := 'Complemento instalado';
+    WizardForm.FilenameLabel.Caption := 'Se inicia al terminar y queda atendiendo al panel web en este equipo';
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
