@@ -14,9 +14,11 @@
 
   <!-- DLLs nativas de los SDK: se copian junto al ejecutable. Hikvision
        incluye la subcarpeta HCNetSDKCom que el SDK carga en runtime; Dahua
-       lleva dhnetsdk.dll y sus dependencias. -->
+       lleva dhnetsdk.dll y sus dependencias. La carpeta lib\ de HCNetSDK trae
+       además su programa de demostración (ClientDemoEn.exe y ClientDemoDll\):
+       no es parte del servidor y no se distribuye. -->
   <ItemGroup>
-    <None Include="..\..\native\hikvision\**\*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\native\hikvision\**\*" Exclude="..\..\native\hikvision\ClientDemoEn.exe;..\..\native\hikvision\ClientDemoDll\**" CopyToOutputDirectory="PreserveNewest" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\native\dahua\**\*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
     <!-- SDK de SADP (Hikvision): cambio de IP desde la búsqueda. Lleva OpenSSL 3, distinta de la 1.1 de HCNetSDK. -->
     <None Include="..\..\native\hikvision-sadp\**\*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
