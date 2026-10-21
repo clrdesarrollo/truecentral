@@ -83,7 +83,8 @@ install_dotnet_sdk() {
 
 echo "==> Dependencias de audio y utilidades"
 sudo apt-get update -qq
-sudo apt-get install -y --no-install-recommends alsa-utils mpg123 unclutter curl
+# openssl: el actualizador verifica la firma de cada versión nueva antes de instalarla.
+sudo apt-get install -y --no-install-recommends alsa-utils mpg123 unclutter curl openssl
 
 # Sin pipewire-alsa, aplay abre el primer HDMI en crudo y no el del monitor (comprobado en una Pi 4
 # con trixie: "audio open error 524" y la alarma muda). Con él, el "default" de ALSA va a PipeWire,

@@ -74,6 +74,7 @@ public sealed partial class AlarmScreenService(
 
     private ScreenClientRelease? _release;
     private DateTime _releaseReadAt;
+    private string? _unsignedWarned;
 
     /// <summary>Grupo de SignalR con las conexiones de una pantalla.</summary>
     public static string Group(int screenId) => $"screen:{screenId}";
@@ -557,6 +558,10 @@ public sealed partial class AlarmScreenService(
                 Convert.ToHexStringLower(SHA256.HashData(stream)), info.Length,
                 new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero));
             _releaseReadAt = DateTime.UtcNow;
+            if ((!File.Exists(best.Path + ".manifest") || !File.Exists(best.Path + ".manifest.sig"))
+                && _unsignedWarned != info.Name && (_unsignedWarned = info.Name) is not null)
+                logger.LogWarning("Pantallas de alarma: el paquete {File} no trae manifiesto firmado; las pantallas no lo " +
+                                  "instalarán como actualización (se genera al compilar con la llave de firma).", info.Name);
             return _release;
         }
         catch (Exception ex)

@@ -274,7 +274,9 @@ public static class AlarmScreensApi
         });
 
         // Actualización remota: la pantalla consulta la versión publicada y la
-        // descarga (el script de la Pi verifica el SHA-256 antes de instalarla).
+        // descarga junto con su manifiesto firmado (.manifest y .manifest.sig). El
+        // script de la Pi verifica la firma con la llave pública de CLRobotics que
+        // trae instalada: el servidor solo reenvía, no puede fabricar una firma.
         app.MapGet("/api/screen/client/version", (HttpContext ctx, AlarmScreenService screens) =>
         {
             if (RequireScreen(ctx, out _) is { } failure) return failure;
@@ -292,9 +294,15 @@ public static class AlarmScreensApi
         app.MapGet("/api/screen/client/download/{fileName}", (HttpContext ctx, string fileName, AlarmScreenService screens) =>
         {
             if (RequireScreen(ctx, out _) is { } failure) return failure;
-            return screens.LatestRelease() is { } release && string.Equals(release.FileName, fileName, StringComparison.OrdinalIgnoreCase)
-                ? Results.File(release.FullPath, "application/gzip", release.FileName)
-                : Results.NotFound();
+            if (screens.LatestRelease() is not { } release) return Results.NotFound();
+            if (string.Equals(release.FileName, fileName, StringComparison.OrdinalIgnoreCase))
+                return Results.File(release.FullPath, "application/gzip", release.FileName);
+            // El manifiesto y su firma, solo los del paquete vigente.
+            foreach (string suffix in new[] { ".manifest", ".manifest.sig" })
+                if (string.Equals(release.FileName + suffix, fileName, StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(release.FullPath + suffix))
+                    return Results.File(release.FullPath + suffix, "text/plain", release.FileName + suffix);
+            return Results.NotFound();
         });
 
         // ==================================================================

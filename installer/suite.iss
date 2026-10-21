@@ -171,7 +171,7 @@ Type: files; Name: "{app}\client-setup\CLRTrueCentralVMS-Client-Setup-*.exe"
 ; Complemento de enrolamiento de versiones anteriores (se publica el nuevo).
 Type: files; Name: "{app}\webcontrol\CLRTrueCentralVMS-Complemento-Setup-*.exe"
 ; App de las pantallas de alarma de versiones anteriores (se publica la nueva).
-Type: files; Name: "{app}\screen-packages\truecentral-screen-*-linux-arm64.tar.gz"
+Type: files; Name: "{app}\screen-packages\truecentral-screen-*-linux-arm64.tar.gz*"
 
 [Files]
 ; Servidor publicado (self-contained). Se excluyen los restos de desarrollo
@@ -211,6 +211,9 @@ Source: "{#AgentSetup}"; DestDir: "{app}\webcontrol"; Flags: ignoreversion
 ; casetas (GET /api/screen/client/version), que la instalan solas cada noche.
 #ifdef HasScreenPackage
 Source: "{#ScreenPackage}"; DestDir: "{app}\screen-packages"; Flags: ignoreversion
+; Manifiesto firmado (build-installers.ps1): sin él las pantallas no se actualizan.
+Source: "{#ScreenPackage}.manifest"; DestDir: "{app}\screen-packages"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#ScreenPackage}.manifest.sig"; DestDir: "{app}\screen-packages"; Flags: ignoreversion skipifsourcedoesntexist
 #endif
 
 [Icons]

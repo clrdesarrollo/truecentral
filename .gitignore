@@ -40,6 +40,8 @@ appsettings.Local.json
 # installer/build-installers.ps1 en la configuración del instalador (no va a git;
 # en Jenkins viene de la variable TCVMS_LICENSE_APIKEY).
 installer/config/licensing.apikey
+# Llave privada con que se firman las actualizaciones de las pantallas (installer/new-update-signing-key.ps1)
+installer/config/update-signing.key
 # Fotos de los reconocimientos de patentes (las guarda el servidor en runtime;
 # en la base solo queda su ruta)
 /anpr/

@@ -46,5 +46,19 @@ reinstalar la app no obliga a volver a aprobarla. Si se pierde (SD nueva), en el
 ## Actualización remota
 
 `truecentral-screen-update.sh` consulta la versión publicada con la credencial de la
-pantalla, descarga el paquete, verifica su SHA-256, reemplaza la carpeta de la app y, si la
-versión nueva no levanta en 10 segundos, vuelve a la anterior.
+pantalla (solo al servidor cuya llave fijó al emparejarse), descarga el paquete con su
+manifiesto firmado, reemplaza la carpeta de la app y, si la versión nueva no levanta en 10
+segundos, vuelve a la anterior.
+
+**Firma.** Antes de instalar, verifica con `openssl` la firma Ed25519 del manifiesto
+(producto, versión, archivo y SHA-256 del paquete) contra la llave pública de CLRobotics que
+trae el propio script (`UPDATE_PUBKEY`). La firma se hace al compilar
+(`installer\build-installers.ps1`, con la llave privada de la credencial de Jenkins
+`truecentral-update-signing-key` o `installer\config\update-signing.key`), así que ni un
+servidor comprometido puede hacer que una pantalla instale algo que no salió de CLRobotics.
+Sin firma válida no se instala nada, y nunca se instala una versión igual o anterior a la
+que tiene.
+
+La llave se genera con `installer\new-update-signing-key.ps1`. Si hubiera que cambiarla
+(la privada se filtró), hay que poner la pública nueva en `UPDATE_PUBKEY` y volver a correr
+`install-screen.sh` en cada pantalla: el actualizador no se actualiza a sí mismo.
