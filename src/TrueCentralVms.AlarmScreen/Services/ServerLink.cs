@@ -282,6 +282,8 @@ public sealed class ServerLink(ClientConfig config) : IAsyncDisposable
             {
                 o.Headers[AlarmScreenProtocol.TokenHeader] = config.DeviceToken;
                 o.HttpMessageHandlerFactory = _ => CreateHandler();
+                // El WebSocket (wss) no pasa por ese manejador: mismo criterio para su certificado.
+                o.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback = (_, _, _, _) => true;
             })
             .WithAutomaticReconnect(new ForeverRetryPolicy())
             .Build();

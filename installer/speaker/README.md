@@ -41,7 +41,7 @@ para la etapa S8.
    8 caracteres (vale una vez, 15 minutos).
 2. En el equipo, una de dos:
    - página `http://<ip-del-equipo>:8088` (la primera visita define su clave) → servidor y código;
-   - consola: `sudo truecentral-speaker enroll --server http://<servidor>:5090 --code ABCD-EFGH`
+   - consola: `sudo truecentral-speaker enroll --server https://<servidor> --code ABCD-EFGH`
      (en Windows, como administrador: `truecentral-speaker.exe enroll ...`).
 
 El equipo llama al servidor (no hay que abrirle puertos): funciona detrás de NAT, 4G o MPLS. Para reemplazar un

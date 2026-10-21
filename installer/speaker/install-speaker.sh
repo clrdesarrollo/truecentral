@@ -12,7 +12,7 @@
 #
 # Al terminar el equipo queda corriendo y muestra su página en http://<ip>:8088. Para enrolarlo:
 #   - desde esa página (servidor + código), o
-#   - por consola: sudo truecentral-speaker enroll --server http://<servidor>:5090 --code ABCD-EFGH
+#   - por consola: sudo truecentral-speaker enroll --server https://<servidor> --code ABCD-EFGH
 
 set -euo pipefail
 
@@ -68,5 +68,5 @@ ip="$(hostname -I | awk '{print $1}')"
 echo
 echo "TrueCentral Speaker $("$APP_DIR/truecentral-speaker" version) instalado y corriendo."
 echo "Página del equipo: http://$ip:8088"
-echo "Enrolar por consola: sudo truecentral-speaker enroll --server http://<servidor>:5090 --code <código>"
+echo "Enrolar por consola: sudo truecentral-speaker enroll --server https://<servidor> --code <código>"
 echo "Registro: journalctl -u $SERVICE -f"

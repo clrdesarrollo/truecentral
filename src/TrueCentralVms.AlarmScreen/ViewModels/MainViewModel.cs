@@ -312,7 +312,7 @@ public partial class MainViewModel : ObservableObject
     {
         var url = ManualUrl?.Trim();
         if (string.IsNullOrWhiteSpace(url)) return;
-        if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) url = "http://" + url;
+        if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) url = "https://" + url;
 
         _link.UseServer(url);
         StatusText = "Servidor fijado a mano: " + url;

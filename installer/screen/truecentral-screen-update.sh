@@ -27,7 +27,7 @@ if [[ -z "$SERVER" || -z "$TOKEN" ]]; then
     exit 0
 fi
 
-INFO=$(curl -sf --max-time 20 -H "X-Screen-Token: $TOKEN" "$SERVER/api/screen/client/version") || {
+INFO=$(curl -skf --max-time 20 -H "X-Screen-Token: $TOKEN" "$SERVER/api/screen/client/version") || {
     log "El servidor no respondió; se reintenta mañana."
     exit 0
 }
@@ -49,7 +49,7 @@ fi
 
 log "Actualizando de $CURRENT a $LATEST"
 rm -rf "$STAGING" && mkdir -p "$STAGING"
-curl -sf --max-time 600 -H "X-Screen-Token: $TOKEN" -o "$STAGING/paquete.tar.gz" "$SERVER$URL"
+curl -skf --max-time 600 -H "X-Screen-Token: $TOKEN" -o "$STAGING/paquete.tar.gz" "$SERVER$URL"
 
 if [[ -n "$SHA" ]]; then
     echo "$SHA  $STAGING/paquete.tar.gz" | sha256sum -c - >/dev/null || {

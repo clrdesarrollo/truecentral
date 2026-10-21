@@ -257,7 +257,7 @@ echo " Pantallas de alarma, y desde ahí arranca sola — también después de u
 echo " corte de luz."
 echo
 echo " Si el servidor está en otra subred el broadcast no llega: en la misma"
-echo " pantalla se puede escribir su dirección (http://IP:5090)."
+echo " pantalla se puede escribir su dirección (https://IP)."
 echo
 echo " Recomendado para producción: arrancar desde SSD por USB, o dejar el"
 echo " sistema de archivos en overlay. La SD se corrompe con los cortes de luz."

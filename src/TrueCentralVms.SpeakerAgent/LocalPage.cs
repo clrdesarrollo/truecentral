@@ -69,7 +69,7 @@ internal static class LocalPage
       <p style="margin:0;color:var(--muted);font-size:13px">En TrueCentral: <b>Parlantes IP → Agregar parlante → TrueCentral Speaker</b>; al guardar aparece un código de 8 caracteres que vale una vez y por 15 minutos.</p>
       <form id="enroll-form">
         <label for="server">Servidor</label>
-        <input id="server" placeholder="http://192.168.1.10:5090" required>
+        <input id="server" placeholder="https://192.168.1.10" required>
         <label for="code">Código de enrolamiento</label>
         <input id="code" placeholder="ABCD-EFGH" autocomplete="off" required style="text-transform:uppercase;letter-spacing:2px">
         <div class="row">

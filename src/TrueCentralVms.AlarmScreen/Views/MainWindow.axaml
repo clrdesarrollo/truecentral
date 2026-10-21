@@ -164,7 +164,7 @@
         <TextBlock Text="Si el servidor está en otra subred, escriba su dirección:"
                    FontSize="14" Foreground="#78909C" HorizontalAlignment="Center" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-          <TextBox Grid.Column="0" Text="{Binding ManualUrl}" Watermark="http://192.168.1.50:5090" FontSize="18" />
+          <TextBox Grid.Column="0" Text="{Binding ManualUrl}" Watermark="https://192.168.1.50" FontSize="18" />
           <Button Grid.Column="1" Classes="primary" Content="USAR" Command="{Binding UseManualUrlCommand}" />
         </Grid>
       </StackPanel>

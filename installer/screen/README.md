@@ -36,7 +36,7 @@ la pantalla sin apagado, el permiso para reiniciar desde el panel y la actualiza
 (04:17, registro en `~/.local/state/truecentral-pantalla/update.log`).
 
 Al arrancar, la Pi busca el servidor por UDP 5094 (no cruza VLANs: si no lo encuentra, en
-la misma pantalla se escribe `http://IP:5090`) y muestra un código de 6 dígitos. Se aprueba
+la misma pantalla se escribe `https://IP`) y muestra un código de 6 dígitos. Se aprueba
 en el panel web, **Dispositivos → Pantallas de alarma**. Desde ahí arranca sola.
 
 La configuración y la credencial viven en `~/.config/TrueCentralPantalla/config.json`:
