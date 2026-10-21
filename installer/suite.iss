@@ -640,6 +640,27 @@ begin
   RunHidden(SysTool('icacls.exe'), '"' + Dir + '\*" /reset /T /C /Q');
 end;
 
+// La configuración del servidor también queda solo para SYSTEM y
+// Administradores: appsettings.Production.json trae la API key del servidor de
+// licencias y appsettings.Local.json (y su .bak) puede traerla (servidores a los
+// que se les puso a mano). El resto de {app} sigue legible para todos; quien lee estos
+// archivos es el servicio (LocalSystem) y el Watchdog, que corre elevado.
+// Va en cada instalación: el archivo que una actualización reemplaza nace con la
+// ACL heredada de la carpeta. Sin (OI)(CI): son archivos (ver TightenDataAcl).
+procedure TightenConfigFileAcl(const FileName: string);
+begin
+  if FileExists(FileName) then
+    RunHidden(SysTool('icacls.exe'),
+      '"' + FileName + '" /inheritance:r /grant:r *S-1-5-18:F /grant:r *S-1-5-32-544:F /Q');
+end;
+
+procedure TightenConfigAcl();
+begin
+  TightenConfigFileAcl(ExpandConstant('{app}\appsettings.Production.json'));
+  TightenConfigFileAcl(ExpandConstant('{app}\appsettings.Local.json'));
+  TightenConfigFileAcl(ExpandConstant('{app}\appsettings.Local.json.bak'));
+end;
+
 // ---------------------------------------------------------------------------
 // Avance visible de la instalación
 //
@@ -977,6 +998,10 @@ begin
     TightenDataAcl();
     ShowStep(1, 'Comprobando el puerto de la base de datos', '', -1);
     ConfigurePgPort();   // antes de arrancar: el clúster nace en el puerto elegido
+    // Después de ConfigurePgPort, que puede reescribir appsettings.Local.json y
+    // dejar su .bak.
+    ShowStep(1, 'Protegiendo la configuración del servidor', 'La API key de licencias queda solo para el sistema y los administradores', -1);
+    TightenConfigAcl();
     // Antes de arrancar el servidor: su servicio ISUP necesita los puertos que
     // ocupaba la receptora anterior.
     ShowStep(2, 'Revisando componentes anteriores', '', -1);
