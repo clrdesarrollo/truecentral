@@ -26,15 +26,16 @@ async function renderCertificate() {
     <div class="${c.custom ? "info-box" : "warn-box"}" style="margin-bottom:12px">
       ${c.custom
         ? `<b>Certificado cargado.</b> El servidor se presenta con el certificado de su organización.`
-        : `<b>Certificado propio del servidor.</b> Las conexiones van cifradas, pero los navegadores muestran un aviso porque no
-           conocen a quien lo emitió. Para quitar el aviso, instale el certificado como confiable en los equipos que usan el
-           panel (botón <i>Descargar certificado</i>) o cargue uno emitido por la CA de su organización.`}
+        : `<b>Certificado propio del servidor.</b> Lo emite la CA propia de este servidor. Las conexiones van cifradas, pero
+           hasta que esa CA se instale como raíz de confianza en los equipos que usan el panel, los navegadores avisan que no
+           la conocen (y ese aviso no distingue al servidor de un impostor). Instálela (ver abajo) o cargue un certificado
+           emitido por la CA de su organización.`}
     </div>
     ${daysLeft < 30 ? `<div class="error-box" style="margin-bottom:12px">Vence en ${Math.max(daysLeft, 0)} día(s).</div>` : ""}
     <div class="toolbar">
       <h3>Certificado en uso</h3>
       <div class="row-actions">
-        <button class="btn ghost" id="cert-download">Descargar certificado</button>
+        <button class="btn ghost" id="cert-download-server">Descargar certificado</button>
         ${canManage && c.custom ? `<button class="btn ghost" id="cert-remove">Volver al propio</button>` : ""}
       </div>
     </div>
@@ -48,9 +49,33 @@ async function renderCertificate() {
           <div class="muted" style="font-size:12px">La que muestran el cliente de escritorio, las pantallas y los agentes al conectarse por primera vez.</div></td></tr>
         <tr><th>Huella del certificado (SHA-256)</th><td><code class="cert-fp">${esc(certFingerprint(c.sha256))}</code>
           <div class="muted" style="font-size:12px">La que muestra el navegador en los detalles del certificado.</div></td></tr>
+        ${c.excludedNames.length ? `<tr><th>Fuera del certificado</th><td><span class="muted">${c.excludedNames.map(esc).join(", ")}
+          — la CA propia solo firma los nombres de este equipo y direcciones privadas.</span></td></tr>` : ""}
         <tr><th>Puertos</th><td>HTTPS ${c.httpsPort}${c.httpPort > 0
           ? ` · HTTP ${c.httpPort} <span class="muted">(solo equipos sin TLS: paneles de alarma y terminales ISUP)</span>` : ""}</td></tr>
       </table>
+    </div>
+    <div class="toolbar" style="margin-top:18px">
+      <h3>CA propia del servidor</h3>
+      <div class="row-actions"><button class="btn" id="cert-download-ca">Descargar CA</button></div>
+    </div>
+    <div class="card" style="max-width:900px">
+      <table class="kv">
+        <tr><th>Nombre</th><td>${esc(c.authority.subject)}</td></tr>
+        <tr><th>Vence</th><td>${esc(formatDate(c.authority.notAfter))}</td></tr>
+        <tr><th>Huella (SHA-256)</th><td><code class="cert-fp">${esc(certFingerprint(c.authority.sha256))}</code></td></tr>
+      </table>
+      <p style="margin-bottom:6px">Instálela como <b>entidad de certificación raíz de confianza</b> en cada equipo que use el panel o
+        el cliente de escritorio. Después de instalarla, compruebe que la huella coincida con la de arriba.</p>
+      <ul class="muted" style="margin-top:0">
+        <li>Un equipo: doble clic en el archivo → <i>Instalar certificado</i> → <i>Equipo local</i> → almacén
+          <i>Entidades de certificación raíz de confianza</i>. O, como administrador:
+          <code>certutil -addstore Root truecentral-ca-….cer</code></li>
+        <li>Toda la organización: directiva de grupo → <i>Configuración del equipo › Directivas › Configuración de Windows ›
+          Configuración de seguridad › Directivas de clave pública › Entidades de certificación raíz de confianza</i> → Importar.</li>
+        <li>Es segura de instalar: solo puede firmar para los nombres de este servidor, <i>localhost</i> y direcciones IP privadas,
+          así que no sirve para suplantar ningún otro sitio.</li>
+      </ul>
     </div>
     ${canManage ? `
     <div class="toolbar" style="margin-top:18px"><h3>Cargar el certificado de su organización</h3></div>
@@ -67,9 +92,11 @@ async function renderCertificate() {
       <button class="btn" id="cert-upload">Cargar y usar</button>
     </div>` : ""}`;
 
-  $("#cert-download").addEventListener("click", () => {
-    window.location.href = `/api/system/certificate/download?access_token=${encodeURIComponent(Api.token)}`;
-  });
+  const download = (kind) => {
+    window.location.href = `/api/system/certificate/download?kind=${kind}&access_token=${encodeURIComponent(Api.token)}`;
+  };
+  $("#cert-download-server").addEventListener("click", () => download("server"));
+  $("#cert-download-ca").addEventListener("click", () => download("ca"));
 
   $("#cert-remove")?.addEventListener("click", async () => {
     if (!confirm("¿Quitar el certificado cargado y volver al propio del servidor?\n\nLos navegadores volverán a mostrar el aviso y los equipos que solo confiaban en el cargado pedirán volver a confiar.")) return;

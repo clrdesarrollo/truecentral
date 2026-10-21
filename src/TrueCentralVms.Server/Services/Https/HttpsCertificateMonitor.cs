@@ -22,11 +22,22 @@ public sealed class HttpsCertificateMonitor(
             await audit.LogSystemAsync("system", "https-certificate-warning", detail: warning);
         }
 
+        string? lastExcluded = null;
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 var added = certificates.RefreshSelfSigned();
+                // Nombres que la CA propia no puede firmar (IP pública, nombre agregado después de crearla).
+                string excluded = string.Join(", ", certificates.ExcludedNames);
+                if (excluded.Length > 0 && excluded != lastExcluded)
+                {
+                    string detail = $"El certificado propio no incluye {excluded}: la CA del servidor solo firma sus nombres de origen " +
+                                    "y direcciones privadas. Para entrar por esos nombres cargue un certificado de su organización.";
+                    logger.LogWarning("HTTPS: {Detail}", detail);
+                    await audit.LogSystemAsync("system", "https-certificate-warning", detail: detail);
+                }
+                lastExcluded = excluded;
                 if (added.Count > 0)
                 {
                     string detail = $"Certificado HTTPS propio vuelto a emitir con la misma llave (los clientes no deben volver a confiar): {string.Join(", ", added)}.";

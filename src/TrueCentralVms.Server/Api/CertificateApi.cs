@@ -34,15 +34,26 @@ public static class CertificateApi
                 sha256 = ServerCertificateManager.CertificateFingerprint(cert),
                 httpsPort = ports.HttpsPort,
                 httpPort = ports.HttpPort,
+                // CA propia: la que se instala como raíz de confianza en los equipos de la organización.
+                authority = new
+                {
+                    subject = certificates.Authority.Subject,
+                    notAfter = certificates.Authority.NotAfter,
+                    sha256 = ServerCertificateManager.CertificateFingerprint(certificates.Authority),
+                },
+                excludedNames = certificates.ExcludedNames,
             });
         });
 
-        // Solo la parte pública (.cer), para instalarla como confiable en los navegadores de la red.
-        app.MapGet("/api/system/certificate/download", (HttpContext ctx, ServerCertificateManager certificates) =>
+        // Solo partes públicas (.cer). kind=ca (por omisión): la CA propia, para instalarla como raíz de confianza en los
+        // equipos de la organización; kind=server: el certificado que se presenta ahora.
+        app.MapGet("/api/system/certificate/download", (HttpContext ctx, string? kind, ServerCertificateManager certificates) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
-            return Results.File(certificates.Current.Export(X509ContentType.Cert), "application/pkix-cert",
-                $"truecentral-{Environment.MachineName.ToLowerInvariant()}.cer");
+            string machine = Environment.MachineName.ToLowerInvariant();
+            return kind == "server"
+                ? Results.File(certificates.Current.Export(X509ContentType.Cert), "application/pkix-cert", $"truecentral-{machine}.cer")
+                : Results.File(certificates.Authority.Export(X509ContentType.Cert), "application/pkix-cert", $"truecentral-ca-{machine}.cer");
         });
 
         app.MapPost("/api/system/certificate", async (HttpContext ctx, ServerCertificateManager certificates,
