@@ -439,6 +439,7 @@ app.MapAccessRecordsApi();
 app.MapDeviceMaintenanceApi();
 app.MapWorkflowsApi();
 app.MapAlarmScreensApi();
+app.MapDashboardApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);
 app.MapHub<AlarmScreenHub>(AlarmScreenProtocol.HubPath);
