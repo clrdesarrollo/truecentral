@@ -69,10 +69,6 @@ async function renderAlarmPanels() {
 
   const isAdmin = Perms.can("alarms.configure");
   $("#view").innerHTML = `
-    <div class="toolbar">
-      <h3>Paneles de alarma <span class="muted" style="font-weight:normal;font-size:12px">(el estado se actualiza solo)</span></h3>
-      ${isAdmin ? `<button class="btn" id="btn-alarm-new">Agregar panel</button>` : ""}
-    </div>
     ${panels.length === 0 ? `
       <div class="info-box">
         Aún no hay paneles de alarma. ${isAdmin
@@ -107,6 +103,7 @@ async function renderAlarmPanels() {
         </tbody>
       </table></div>`}`;
 
+  setPageActions(isAdmin ? `<button class="btn" id="btn-alarm-new">Agregar panel</button>` : "");
   $("#btn-alarm-new")?.addEventListener("click", () => alarmPanelModal(null));
   $$("#view .btn-edit").forEach((b) => b.addEventListener("click", (e) => {
     const id = Number(e.target.closest("tr").dataset.id);

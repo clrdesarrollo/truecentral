@@ -6,7 +6,7 @@
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
   <link rel="stylesheet" href="vendor/mdi/css/materialdesignicons.min.css?v=1">
-  <link rel="stylesheet" href="styles.css?v=59">
+  <link rel="stylesheet" href="styles.css?v=61">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -160,8 +160,12 @@
       <!-- Aviso de licencia (prueba por vencer, gracia, restricción): lo llena license.js -->
       <div id="license-banner" class="license-banner hidden"></div>
       <div class="page-titles">
-        <h2 id="page-title">Panel</h2>
-        <ol class="breadcrumb" id="breadcrumb" aria-label="Ubicación en el menú"></ol>
+        <div class="page-titles-text">
+          <h2 id="page-title">Panel</h2>
+          <ol class="breadcrumb" id="breadcrumb" aria-label="Ubicación en el menú"></ol>
+        </div>
+        <!-- Acciones principales de la página, a la altura del título (setPageActions en app.js) -->
+        <div class="page-actions" id="page-actions"></div>
       </div>
       <main id="view"><!-- lo llena app.js --></main>
     </div>
@@ -178,7 +182,7 @@
   <!-- walls.js va ANTES: app.js referencia sus funciones al armar las rutas. -->
   <script src="walls.js?v=6"></script>
   <script src="isup.js?v=3"></script>
-  <script src="alarms.js?v=14"></script>
+  <script src="alarms.js?v=16"></script>
   <script src="speakers.js?v=13"></script>
   <script src="io-modules.js?v=2"></script>
   <script src="alarm-screens.js?v=2"></script>
@@ -212,6 +216,6 @@
   <script src="playback.js?v=3"></script>
   <script src="roles.js?v=3"></script>
   <script src="dashboard.js?v=3"></script>
-  <script src="app.js?v=74"></script>
+  <script src="app.js?v=75"></script>
 </body>
 </html>

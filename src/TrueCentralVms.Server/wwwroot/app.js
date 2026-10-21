@@ -2352,7 +2352,13 @@ function showBreadcrumb(link) {
 }
 
 /** Suelta lo que la página actual dejó corriendo: sondeos, hub, sonidos y menús. */
+/** Acciones principales de la página (botones), en la cabecera a la altura del título. */
+function setPageActions(html) {
+  $("#page-actions").innerHTML = html || "";
+}
+
 function leaveCurrentPage() {
+  setPageActions("");            // las acciones son de la página que se deja
   clearInterval(sessionsTimer);  // el sondeo de sesiones vive solo en su página
   dashboardLeave();              // ídem el refresco y el reloj del panel de inicio
   clearInterval(wallsTimer);     // ídem el del estado de los muros
