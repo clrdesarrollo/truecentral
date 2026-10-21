@@ -127,9 +127,17 @@ begin
     'Where-Object { $_.Path -like ''' + ExpandConstant('{app}') + '\*'' } | Stop-Process -Force"');
 end;
 
+// Texto del paso y su detalle bajo la barra (la instalación nunca queda muda).
+procedure ShowStep(const Caption, Detail: string);
+begin
+  WizardForm.StatusLabel.Caption := Caption;
+  WizardForm.FilenameLabel.Caption := Detail;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+  WizardForm.PreparingLabel.Caption := 'Cerrando el cliente de escritorio si está abierto...';
   KillClientTools();
 end;
 
@@ -191,13 +199,16 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    ShowStep('Guardando el servidor de confianza...', 'Dirección y llave del servidor del que se descargó este instalador');
     RememberServerFromFileName();
+    ShowStep('Configurando el firewall de Windows...', 'Puerto 8554: proyección de pantalla hacia el muro de video');
     RunHidden(SysTool('netsh.exe'), 'advfirewall firewall delete rule name="CLR TrueCentral VMS Client MediaMTX"');
     // El decodificador inicia la conexión RTSP hacia este equipo (puerto 8554):
     // sin esta regla, la proyección de pantalla no llega al muro de video.
     RunHidden(SysTool('netsh.exe'),
       'advfirewall firewall add rule name="CLR TrueCentral VMS Client MediaMTX" dir=in action=allow protocol=TCP localport=8554 program="'
       + ExpandConstant('{app}') + '\tools\mediamtx\mediamtx.exe" profile=any');
+    ShowStep('Cliente de escritorio instalado', '');
   end;
 end;
 

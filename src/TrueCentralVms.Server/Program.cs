@@ -311,10 +311,16 @@ if (app.Services.GetService<IHostLifetime>() is EarlyServiceLifetime earlyLifeti
 // ---------------------------------------------------------------------------
 // Base de datos: iniciar PostgreSQL embebido y aplicar migraciones
 // ---------------------------------------------------------------------------
+// Etapas del arranque para quien espera afuera (el instalador): /api/health responde recién al final.
+var startup = new StartupStatus(postgres.DataRoot, app.Logger);
+AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+    startup.Failed(e.ExceptionObject as Exception ?? new Exception("Error desconocido al iniciar."));
+startup.Report("database", 1, "Iniciando la base de datos");
 await postgres.StartAsync(app.Logger);
 // El certificado HTTPS vive en el directorio de datos: recién ahora (initdb exige encontrarlo vacío).
 if (app.Services.GetService<ServerCertificateManager>() is { } httpsCertificates)
 {
+    startup.Report("certificate", 1, "Preparando el certificado HTTPS", "La primera vez se genera la llave del servidor");
     // Con el acceso desde Internet encendido, la dirección pública también va en el certificado propio.
     var wanAccess = app.Services.GetRequiredService<TrueCentralVms.Server.Services.Network.WanAccessService>();
     httpsCertificates.ExtraNames = () => wanAccess.Enabled ? [wanAccess.PublicHost] : [];
@@ -328,9 +334,22 @@ using (var scope = app.Services.CreateScope())
     // Versión nueva sobre una base existente: respaldo ANTES de migrar, para poder volver si algo sale mal.
     var pendingMigrations = (await db.Database.GetPendingMigrationsAsync()).ToList();
     if (pendingMigrations.Count > 0 && (await db.Database.GetAppliedMigrationsAsync()).Any())
+    {
+        startup.Report("backup", 2, "Respaldando la base de datos antes de actualizar", "Preparando el respaldo");
         await app.Services.GetRequiredService<TrueCentralVms.Server.Services.Backup.BackupService>()
-            .BackupBeforeUpdateAsync(pendingMigrations, CancellationToken.None);
-    await db.Database.MigrateAsync();
+            .BackupBeforeUpdateAsync(pendingMigrations, CancellationToken.None, startup.BackupProgress());
+    }
+    // De a una, para poder mostrar cuál va (MigrateAsync las aplica todas sin avisar).
+    var migrator = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions
+        .GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db);
+    for (int i = 0; i < pendingMigrations.Count; i++)
+    {
+        string migration = pendingMigrations[i];
+        startup.Report("migrate", 3, "Actualizando la estructura de la base de datos",
+            $"{i + 1} de {pendingMigrations.Count}: {migration[(migration.IndexOf('_') + 1)..]}", i * 100 / pendingMigrations.Count);
+        await migrator.MigrateAsync(migration);
+    }
+    await db.Database.MigrateAsync(); // sin pendientes no hace nada; queda como red de seguridad
 
     // Control de acceso: el horario 24/7 tiene que existir desde el principio,
     // porque es el que se ofrece por omisión al crear el primer nivel de acceso.
@@ -347,6 +366,8 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(
             "Sistema sin inicializar: abra {Url} EN ESTA MÁQUINA para crear el primer administrador.", webPorts.HttpsUrl("localhost"));
 }
+startup.Report("services", 4, "Iniciando los servicios", "Video, cerco, alarmas, control de acceso y demás");
+app.Lifetime.ApplicationStarted.Register(startup.Ready);
 
 // Regla por puerto: el interno (loopback) solo atiende lo suyo; el HTTP sin
 // cifrar solo a los equipos sin TLS, redirige las páginas a HTTPS y rechaza el
