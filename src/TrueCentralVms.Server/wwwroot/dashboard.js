@@ -192,6 +192,8 @@ function dashboardHtml(d) {
       ${dbHealthHtml(d)}
       ${dbEquipmentHtml(d, a)}
       ${dbFeedHtml(d)}
+      ${dbOfflineHtml(d)}
+      ${d.hotspots ? dbHotspotsHtml(d) : ""}
     </div>
     <div class="db-updated"><i class="mdi mdi-refresh" aria-hidden="true"></i>Actualizado ${new Date(d.generatedAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · se refresca cada 30 s</div>
   </div>`;
@@ -281,7 +283,8 @@ function dbBarsSvg(d, width) {
   const max = dbNiceMax(Math.max(1, ...totals));
   const plotH = H - B - T, slot = (W - L) / act.hours, bw = Math.max(4, slot * 0.62);
   const y = (v) => T + plotH - (v / max) * plotH;
-  const ticks = [0, max / 2, max];
+  // Con escalas chicas la mitad no es entera y el eje repetiría "1, 1".
+  const ticks = max >= 4 ? [0, max / 2, max] : [0, max];
   const start = new Date(act.from);
   let out = ticks.map((t) => `<line class="grid-line" x1="${L}" x2="${W}" y1="${y(t)}" y2="${y(t)}"/>
     <text class="axis" x="${L - 6}" y="${y(t) + 3.5}" text-anchor="end">${Math.round(t)}</text>`).join("");
@@ -439,7 +442,7 @@ function dbEquipmentHtml(d, a) {
 function dbFeedHtml(d) {
   if (!d.activity) return "";
   return `
-  <section class="db-card span-4">
+  <section class="db-card span-4 db-feed-card">
     <div class="db-card-head"><h4><i class="mdi mdi-format-list-bulleted" aria-hidden="true"></i>Últimos eventos</h4>${Perms.can("events.attend") ? `<a href="#/event-center">Centro de eventos →</a>` : ""}</div>
     ${d.feed.length ? `<ul class="db-feed">${d.feed.map((f) => `
       <li class="db-src-${f.source}">
@@ -447,6 +450,60 @@ function dbFeedHtml(d) {
         <span class="db-feed-body"><b title="${esc(f.title)}">${esc(f.title || "Evento")}</b><span title="${esc(f.detail)}">${esc(f.detail || "")}</span></span>
         <time datetime="${f.at}" title="${esc(formatDate(f.at))}">${dbAgo(f.at)}</time>
       </li>`).join("")}</ul>` : `<div class="db-empty"><i class="mdi mdi-check-circle-outline" style="font-size:28px;color:var(--ok)"></i><br>Sin eventos relevantes recientes.</div>`}
+  </section>`;
+}
+
+// ---------------------------------------------------------------------------
+// Requieren atención: equipos sin conexión, lo caído hace menos primero
+// ---------------------------------------------------------------------------
+const DB_KIND_ICON = {
+  video: "mdi-harddisk", camera: "mdi-camcorder", access: "mdi-account-card-details", alarm: "mdi-security-home",
+  fence: "mdi-flash", intercom: "mdi-phone-classic", speaker: "mdi-bullhorn", io: "mdi-toggle-switch",
+};
+
+function dbOfflineHtml(d) {
+  const o = d.offline;
+  const more = o.total - o.items.length;
+  return `
+  <section class="db-card span-4">
+    <div class="db-card-head">
+      <h4><i class="mdi mdi-lan-disconnect" aria-hidden="true"></i>Requieren atención</h4>
+      ${o.total ? `<span class="tag off">${o.total} sin conexión</span>` : ""}
+    </div>
+    ${o.total ? `<ul class="db-list">${o.items.map((x) => `
+      <li><a href="${x.href}">
+        <span class="db-list-ico off"><i class="mdi ${DB_KIND_ICON[x.kind] || "mdi-lan-disconnect"}" aria-hidden="true"></i></span>
+        <span class="db-list-body"><b title="${esc(x.name)}">${esc(x.name)}</b><span title="${esc(x.detail)}">${esc(x.detail)}</span></span>
+        <span class="db-list-side">${x.lastSeenAt
+          ? `<time datetime="${x.lastSeenAt}" title="Última vez en línea: ${esc(formatDate(x.lastSeenAt))}">${dbAgo(x.lastSeenAt)}</time>`
+          : `<span class="muted">sin registro</span>`}</span>
+      </a></li>`).join("")}</ul>
+      ${more > 0 ? `<div class="db-list-more">y ${more} ${dbPlural(more, "equipo más", "equipos más")} sin conexión</div>` : ""}`
+    : `<div class="db-empty db-all-ok"><i class="mdi mdi-check-circle-outline" aria-hidden="true"></i><b>Todo en línea</b>Ningún equipo ha perdido la conexión.</div>`}
+  </section>`;
+}
+
+// ---------------------------------------------------------------------------
+// Puntos más activos de las últimas 24 h: dónde se concentra lo que pasa
+// ---------------------------------------------------------------------------
+const DB_SOURCE_COLOR = { alarm: "var(--danger)", fence: "var(--warn)", access: "var(--accent)", plate: "var(--violet)" };
+
+function dbHotspotsHtml(d) {
+  const list = d.hotspots;
+  const max = Math.max(1, ...list.map((h) => h.count));
+  return `
+  <section class="db-card span-4">
+    <div class="db-card-head"><h4><i class="mdi mdi-radar" aria-hidden="true"></i>Puntos más activos · 24 h</h4></div>
+    ${list.length ? `<ol class="db-rank">${list.map((h, k) => `
+      <li><a href="${h.href}" class="db-src-${h.source}">
+        <span class="db-rank-pos">${k + 1}</span>
+        <span class="db-rank-body">
+          <span class="top"><b title="${esc(h.name)}">${esc(h.name || "—")}</b><span class="count">${h.count.toLocaleString("es-CL")}</span></span>
+          <span class="db-rank-bar"><i style="width:${((h.count / max) * 100).toFixed(1)}%;background:${DB_SOURCE_COLOR[h.source] || "var(--accent)"}"></i></span>
+          <span class="sub"><i class="mdi ${DB_SOURCE_ICON[h.source] || "mdi-information"}" aria-hidden="true"></i>${esc(h.detail || "")}${h.denied ? ` · <span class="bad">${h.denied} ${dbPlural(h.denied, "rechazo", "rechazos")}</span>` : ""}</span>
+        </span>
+      </a></li>`).join("")}</ol>`
+    : `<div class="db-empty db-all-ok quiet"><i class="mdi mdi-radar" aria-hidden="true"></i><b>Sin actividad</b>No hubo eventos en las últimas 24 horas.</div>`}
   </section>`;
 }
 

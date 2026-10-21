@@ -2240,6 +2240,7 @@ const routes = {
   "#/backups": renderBackups,
   "#/certificate": renderCertificate,
   "#/account": renderAccount,
+  "#/wan": renderWan,
   "#/license": renderLicense,
 };
 

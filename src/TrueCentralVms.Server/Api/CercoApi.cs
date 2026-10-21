@@ -59,6 +59,10 @@ public static class CercoApi
         if (string.IsNullOrEmpty(host) || host is "localhost" or "127.0.0.1" || host == "::1")
             host = ServerLanIp() ?? host;
         string hint = !string.IsNullOrWhiteSpace(pub) ? pub! : $"ws://{host}:{port}/panel";
+        // Acceso desde Internet con cercos: la dirección pública y el puerto que reenvía el router.
+        var wan = ctx.RequestServices.GetRequiredService<Services.Network.WanAccessService>();
+        if (string.IsNullOrWhiteSpace(pub) && wan.Has(Services.Network.WanAccessService.ScenarioCerco))
+            hint = $"ws://{wan.PublicHost}:{wan.PublicPort("cerco")}/panel";
         return new CercoPanelCredentialsDto(panel.DeviceId, code, hint, panel.EnrollExpiresAt.Value);
     }
 

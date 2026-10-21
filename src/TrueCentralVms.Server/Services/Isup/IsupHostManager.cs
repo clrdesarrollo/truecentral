@@ -17,7 +17,7 @@ namespace TrueCentralVms.Server.Services.Isup;
 /// en la configuración de MediaMTX) llevan otro token, <see cref="MediaToken"/>, que solo abre video. Ambos cambian en cada arranque.
 /// </summary>
 public sealed class IsupHostManager(EmbeddedPostgres postgres, IConfiguration config, IServiceScopeFactory scopes,
-    ILogger<IsupHostManager> logger) : IHostedService
+    Network.WanAccessService wan, ILogger<IsupHostManager> logger) : IHostedService
 {
     /// <summary>Nombre del ajuste en SystemBlobs: "true" = se aceptan equipos ISUP 2.0/4.0 (lo enciende un usuario desde el panel).</summary>
     public const string AllowLegacySetting = "isup.allow-legacy";
@@ -62,6 +62,9 @@ public sealed class IsupHostManager(EmbeddedPostgres postgres, IConfiguration co
             var o = new IsupHostOptions();
             var s = config.GetSection("Isup");
             o.PublicAddress = s["PublicAddress"] ?? "";
+            // Equipos ISUP desde Internet: se anuncia la dirección pública (los de la LAN también la usan: el router
+            // tiene que permitir que se llegue a ella desde adentro, «NAT loopback»).
+            if (wan.Has(Network.WanAccessService.ScenarioIsup)) o.PublicAddress = wan.PublicHost;
             // Se lee a mano: el binder de configuración AGREGA a un arreglo con valores iniciales en vez de reemplazarlo.
             var ports = s.GetSection("RegistrationPorts").GetChildren().Select(c => int.TryParse(c.Value, out var p) ? p : 0).Where(p => p > 0).ToArray();
             if (ports.Length > 0) o.RegistrationPorts = ports;
@@ -102,6 +105,14 @@ public sealed class IsupHostManager(EmbeddedPostgres postgres, IConfiguration co
         var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
         string? stored = db.SystemBlobs.Where(b => b.Name == AllowLegacySetting).Select(b => b.Data).FirstOrDefault();
         return stored is null ? null : stored == "true";
+    }
+
+    /// <summary>Relanza el servicio ISUP para que tome la configuración nueva (los equipos se vuelven a registrar solos).</summary>
+    public async Task RestartAsync(CancellationToken ct)
+    {
+        if (!Enabled) return;
+        await StopAsync(ct);
+        await StartAsync(ct);
     }
 
     /// <summary>Guarda el ajuste y relanza el servicio ISUP para que lo aplique (los equipos se vuelven a registrar solos).</summary>

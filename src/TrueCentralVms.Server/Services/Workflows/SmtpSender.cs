@@ -84,6 +84,8 @@ public sealed class SmtpSender(
             _ => SecureSocketOptions.None,
         };
 
+        // El servidor de correo lo escribe un administrador: nunca el propio equipo (SSRF hacia servicios internos).
+        if (await OutboundAddressPolicy.CheckHostAsync(settings.Host, ct) is { } refused) return refused;
         using var client = new SmtpClient { Timeout = 30_000 };
         if (settings.AllowInvalidCertificate)
             client.ServerCertificateValidationCallback = (_, _, _, _) => true;

@@ -64,6 +64,8 @@ public static class Permissions
     public const string SystemLicense = "system.license";
     public const string SystemBackup = "system.backup";
     public const string SystemCertificate = "system.certificate";
+    public const string SystemNetwork = "system.network";
+    public const string RemoteAccess = "remote.access";
 
     /// <summary>Un permiso del catálogo.</summary>
     /// <param name="Requires">Permisos que este supone (se agregan solos al marcarlo).</param>
@@ -173,6 +175,12 @@ public static class Permissions
             [], Sensitive: true),
         new(SystemCertificate, "Sistema y seguridad", "Certificado HTTPS",
             "Cargar o quitar el certificado con que el servidor se presenta por HTTPS.", [], Sensitive: true),
+        new(SystemNetwork, "Sistema y seguridad", "Acceso desde Internet",
+            "Encender o apagar el acceso desde Internet y definir la dirección pública, las redes locales y los puertos.", [],
+            Sensitive: true),
+        new(RemoteAccess, "Sistema y seguridad", "Entrar desde Internet",
+            "Iniciar sesión y operar desde fuera de las redes locales (con el acceso desde Internet encendido). Sin él, el usuario solo entra desde la red local.",
+            [], Sensitive: true),
     ];
 
     private static readonly Dictionary<string, Definition> ByKey = All.ToDictionary(d => d.Key);

@@ -361,6 +361,8 @@ public static class WorkflowsApi
         {
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out var session) is { } failure) return failure;
             if (Validate(request, engine) is { } invalid) return Error(invalid);
+            if (await OutOfScopeAsync(ctx, WorkflowResourceScope.References(request), db, audit, request.Name.Trim(), "crear", ct) is { } outOfScope)
+                return outOfScope;
             if (await db.Workflows.AnyAsync(w => w.Name == request.Name.Trim(), ct))
                 return Error("Ya existe una automatización con ese nombre.");
             if (license.Deny(LicenseFeatures.ModuleAutomation, request.Enabled ? LicenseFeatures.AutomationRules : null,
@@ -400,6 +402,11 @@ public static class WorkflowsApi
 
             var workflow = await db.Workflows.Include(w => w.Actions).FirstOrDefaultAsync(w => w.Id == id, ct);
             if (workflow is null) return Results.NotFound();
+            // Solo lo que se AGREGA: lo que ya tenía (p. ej. armado por un administrador) se puede conservar.
+            var added = WorkflowResourceScope.References(request);
+            added.ExceptWith(WorkflowResourceScope.References(workflow.Actions));
+            if (await OutOfScopeAsync(ctx, added, db, audit, workflow.Name, "modificar", ct) is { } outOfScope)
+                return outOfScope;
             if (await db.Workflows.AnyAsync(w => w.Name == request.Name.Trim() && w.Id != id, ct))
                 return Error("Ya existe otra automatización con ese nombre.");
 
@@ -510,6 +517,10 @@ public static class WorkflowsApi
             if (license.Deny(LicenseFeatures.ModuleAutomation, null, 0) is { } denied)
                 return await license.DenyAsync(ctx, denied, "workflow", source.Name);
 
+            if (await OutOfScopeAsync(ctx, WorkflowResourceScope.References(source.Actions), db, audit, source.Name, "duplicar", ct)
+                is { } outOfScope)
+                return outOfScope;
+
             string baseName = $"{source.Name} (copia)";
             string name = baseName;
             for (int n = 2; await db.Workflows.AnyAsync(w => w.Name == name, ct); n++)
@@ -557,9 +568,15 @@ public static class WorkflowsApi
 
         // Prueba manual: ejecuta las acciones DE VERDAD con un evento de ejemplo.
         app.MapPost("/api/workflows/{id:int}/test", async (HttpContext ctx, int id, WorkflowEngine engine,
-            AuditService audit, CancellationToken ct) =>
+            VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out var session) is { } failure) return failure;
+            // Probar a mano es ejecutarla ahora: exige alcance sobre todo lo que toca.
+            var tested = await db.Workflows.AsNoTracking().Include(w => w.Actions).FirstOrDefaultAsync(w => w.Id == id, ct);
+            if (tested is null) return Results.NotFound();
+            if (await OutOfScopeAsync(ctx, WorkflowResourceScope.References(tested.Actions), db, audit, tested.Name, "probar", ct)
+                is { } outOfScope)
+                return outOfScope;
             var run = await engine.TestAsync(id, session.Username, ct);
             if (run is null) return Results.NotFound();
 
@@ -938,6 +955,23 @@ public static class WorkflowsApi
     // ------------------------------------------------------------------
     // Validación y volcado
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// 403 si la automatización usa recursos fuera del alcance de quien la arma (queda en la bitácora); null = permitido.
+    /// </summary>
+    private static async Task<IResult?> OutOfScopeAsync(HttpContext ctx, IEnumerable<string> references, VmsDbContext db,
+        AuditService audit, string workflowName, string verb, CancellationToken ct)
+    {
+        if (ctx.Items["scope"] is not UserScope scope) return null;
+        var denied = await WorkflowResourceScope.DeniedAsync(scope, references, db, ct);
+        if (denied.Count == 0) return null;
+        string list = string.Join(", ", denied);
+        await audit.LogAsync(ctx, "workflows", "workflow-scope-denied", targetType: "workflow", targetName: workflowName,
+            detail: $"Rechazado: intentó {verb} la automatización '{workflowName}' con recursos fuera de su alcance: {list}.",
+            success: false, data: new { Denied = denied });
+        return Error($"La automatización usa recursos fuera de su alcance: {list}. Quítelos o pida a un administrador que la arme.",
+            StatusCodes.Status403Forbidden);
+    }
 
     private static string? Validate(WorkflowWriteDto request, WorkflowEngine engine)
     {
