@@ -85,6 +85,13 @@ echo "==> Dependencias de audio y utilidades"
 sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends alsa-utils mpg123 unclutter curl
 
+# Sin pipewire-alsa, aplay abre el primer HDMI en crudo y no el del monitor (comprobado en una Pi 4
+# con trixie: "audio open error 524" y la alarma muda). Con él, el "default" de ALSA va a PipeWire,
+# que elige la salida conectada. Solo en imágenes con PipeWire.
+if apt-cache show pipewire-alsa >/dev/null 2>&1; then
+    sudo apt-get install -y --no-install-recommends pipewire-alsa
+fi
+
 echo "==> Instalando la aplicación en $APP_DIR"
 
 # Reinstalar sobre una pantalla que ya está andando: parar el servicio antes de tocar los
