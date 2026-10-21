@@ -2241,6 +2241,7 @@ const routes = {
   "#/isup": renderIsupStatus,
   "#/mail": renderMailSettings,
   "#/backups": renderBackups,
+  "#/certificate": renderCertificate,
   "#/license": renderLicense,
 };
 

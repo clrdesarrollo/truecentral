@@ -7,9 +7,10 @@
       "runtimeArgs": [
         "-NoProfile",
         "-Command",
-        "Set-Location src/TrueCentralVms.Server; dotnet run"
+        "$env:Web__HttpsPort='5090'; $env:Web__HttpPort='0'; $env:Web__InternalPort='5098'; Set-Location src/TrueCentralVms.Server; dotnet run"
       ],
-      "port": 5090
+      "port": 5090,
+      "url": "https://localhost:5090"
     },
     {
       "name": "server-dev",
@@ -17,9 +18,10 @@
       "runtimeArgs": [
         "-NoProfile",
         "-Command",
-        "$env:Urls='http://localhost:5093'; $env:Database__PgPort='25492'; $env:Database__PgDataDir='../../build/pgdata-dev'; $env:Streaming__RtspPort='8664'; $env:Streaming__ApiPort='9921'; $env:Streaming__ServerPort='5093'; $env:Alarms__Receiver__Enabled='false'; $env:Isup__Enabled='false'; $env:Cerco__Receiver__Enabled='false'; $env:Cerco__Firmware__Enabled='false'; Set-Location src/TrueCentralVms.Server; dotnet run --no-build"
+        "$env:Web__HttpsPort='5093'; $env:Web__HttpPort='0'; $env:Web__InternalPort='5095'; $env:Database__PgPort='25492'; $env:Database__PgDataDir='../../build/pgdata-dev'; $env:Streaming__RtspPort='8664'; $env:Streaming__ApiPort='9921'; $env:Alarms__Receiver__Enabled='false'; $env:Isup__Enabled='false'; $env:Cerco__Receiver__Enabled='false'; $env:Cerco__Firmware__Enabled='false'; Set-Location src/TrueCentralVms.Server; dotnet run --no-build"
       ],
-      "port": 5093
+      "port": 5093,
+      "url": "https://localhost:5093"
     },
     {
       "name": "server-test",
@@ -27,9 +29,10 @@
       "runtimeArgs": [
         "-NoProfile",
         "-Command",
-        "$env:Urls='http://localhost:5097'; $env:Database__PgPort='25492'; $env:Database__PgDataDir='../../build/pgdata-dev'; $env:Streaming__RtspPort='8674'; $env:Streaming__ApiPort='9931'; $env:Streaming__ServerPort='5097'; $env:Alarms__Receiver__Enabled='false'; $env:Isup__Enabled='false'; $env:Cerco__Receiver__Enabled='false'; $env:Cerco__Firmware__Enabled='false'; Set-Location src/TrueCentralVms.Server; dotnet run --no-build"
+        "$env:Web__HttpsPort='5097'; $env:Web__HttpPort='0'; $env:Web__InternalPort='5096'; $env:Database__PgPort='25492'; $env:Database__PgDataDir='../../build/pgdata-dev'; $env:Streaming__RtspPort='8674'; $env:Streaming__ApiPort='9931'; $env:Alarms__Receiver__Enabled='false'; $env:Isup__Enabled='false'; $env:Cerco__Receiver__Enabled='false'; $env:Cerco__Firmware__Enabled='false'; Set-Location src/TrueCentralVms.Server; dotnet run --no-build"
       ],
-      "port": 5097
+      "port": 5097,
+      "url": "https://localhost:5097"
     },
     {
       "name": "template",
@@ -51,9 +54,10 @@
       "runtimeArgs": [
         "-NoProfile",
         "-Command",
-        "Set-Location 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\bin2'; & 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\bin2\\TrueCentralVms.Server.exe' --Urls=http://127.0.0.1:6871 --Database:PgPort=26871 '--Database:PgDataDir=C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\pgdata' '--Database:PgBinDir=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\tools\\postgres\\pgsql\\bin' --Streaming:RtspPort=8871 --Streaming:ApiPort=9871 --Streaming:WebRtcPort=9872 --Streaming:WebRtcIcePort=8873 --Streaming:ServerPort=6871 --Alarms:Receiver:Enabled=false --Alarms:LocalReceiver:Enabled=false --Isup:Enabled=false --Cerco:Receiver:Enabled=false --Cerco:Firmware:Enabled=false --Licensing:ServerUrl= '--webroot=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\src\\TrueCentralVms.Server\\wwwroot'"
+        "Set-Location 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\bin2'; & 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\bin2\\TrueCentralVms.Server.exe' --Web:HttpsPort=6871 --Web:HttpPort=0 --Web:InternalPort=6870 --Database:PgPort=26871 '--Database:PgDataDir=C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\pgdata' '--Database:PgBinDir=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\tools\\postgres\\pgsql\\bin' --Streaming:RtspPort=8871 --Streaming:ApiPort=9871 --Streaming:WebRtcPort=9872 --Streaming:WebRtcIcePort=8873 --Alarms:Receiver:Enabled=false --Alarms:LocalReceiver:Enabled=false --Isup:Enabled=false --Cerco:Receiver:Enabled=false --Cerco:Firmware:Enabled=false --Licensing:ServerUrl= '--webroot=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\src\\TrueCentralVms.Server\\wwwroot'"
       ],
-      "port": 6871
+      "port": 6871,
+      "url": "https://localhost:6871"
     },
     {
       "name": "demo-camaras",
@@ -73,9 +77,10 @@
       "runtimeArgs": [
         "-NoProfile",
         "-Command",
-        "Set-Location 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\dbbuild\\bin'; & 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\dbbuild\\bin\\TrueCentralVms.Server.exe' --Urls=http://127.0.0.1:6871 --Database:PgPort=26871 '--Database:PgDataDir=C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\pgdata' '--Database:PgBinDir=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\tools\\postgres\\pgsql\\bin' --Streaming:RtspPort=8871 --Streaming:ApiPort=9871 --Streaming:WebRtcPort=9872 --Streaming:WebRtcIcePort=8873 --Streaming:ServerPort=6871 --Alarms:Receiver:Enabled=false --Alarms:LocalReceiver:Enabled=false --Isup:Enabled=false --Cerco:Receiver:Enabled=false --Cerco:Firmware:Enabled=false --Licensing:ServerUrl= '--webroot=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\src\\TrueCentralVms.Server\\wwwroot'"
+        "Set-Location 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\dbbuild\\bin'; & 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\dbbuild\\bin\\TrueCentralVms.Server.exe' --Web:HttpsPort=6871 --Web:HttpPort=0 --Web:InternalPort=6870 --Database:PgPort=26871 '--Database:PgDataDir=C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\pgdata' '--Database:PgBinDir=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\tools\\postgres\\pgsql\\bin' --Streaming:RtspPort=8871 --Streaming:ApiPort=9871 --Streaming:WebRtcPort=9872 --Streaming:WebRtcIcePort=8873 --Alarms:Receiver:Enabled=false --Alarms:LocalReceiver:Enabled=false --Isup:Enabled=false --Cerco:Receiver:Enabled=false --Cerco:Firmware:Enabled=false --Licensing:ServerUrl= '--webroot=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\src\\TrueCentralVms.Server\\wwwroot'"
       ],
-      "port": 6871
+      "port": 6871,
+      "url": "https://localhost:6871"
     }
   ]
 }

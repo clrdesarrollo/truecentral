@@ -387,6 +387,10 @@ public static class AuditCatalog
             new("service-autorestart-changed", "Auto-reinicio de servicio cambiado"),
             new("server-restart-requested", "Reinicio completo del servidor solicitado"),
             new("client-installer-downloaded", "Instalador del cliente de escritorio descargado"),
+            new("https-certificate-uploaded", "Certificado HTTPS cargado"),
+            new("https-certificate-removed", "Certificado HTTPS cargado quitado (vuelve el propio)"),
+            new("https-certificate-renewed", "Certificado HTTPS propio vuelto a emitir"),
+            new("https-certificate-warning", "Aviso del certificado HTTPS (vencido, por vencer o ilegible)"),
         ]),
     ];
 

@@ -570,18 +570,18 @@ public sealed class IsupService : BackgroundService, IIsupGateway
         return (d.Content, d.ContentType);
     }
 
-    /// <summary>Base de las URL que descargan los equipos: Isup:DownloadBaseUrl, o la dirección pública del ISUP con el puerto del panel.</summary>
+    /// <summary>
+    /// Base de las URL que descargan los equipos: Isup:DownloadBaseUrl, o la dirección pública del ISUP con el puerto HTTP sin
+    /// cifrar (Web:HttpPort): los terminales no validan un certificado propio ni siguen una redirección a HTTPS.
+    /// </summary>
     public string DownloadBaseUrl
     {
         get
         {
             if (_config["Isup:DownloadBaseUrl"] is { Length: > 0 } explicitBase) return explicitBase.TrimEnd('/');
             var host = _host.Options.PublicAddress is { Length: > 0 } a ? a : _hostPublicAddress ?? "127.0.0.1";
-            int port = 5090;
-            var urls = _config["Urls"] ?? "";
-            var m = System.Text.RegularExpressions.Regex.Match(urls, @"http://[^;]*?:(\d+)");
-            if (m.Success) port = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
-            return $"http://{host}:{port}";
+            var ports = Https.WebPorts.From(_config);
+            return ports.HttpUrl(host) ?? ports.HttpsUrl(host);
         }
     }
 }

@@ -63,6 +63,7 @@ public static class Permissions
     public const string SystemServices = "system.services";
     public const string SystemLicense = "system.license";
     public const string SystemBackup = "system.backup";
+    public const string SystemCertificate = "system.certificate";
 
     /// <summary>Un permiso del catálogo.</summary>
     /// <param name="Requires">Permisos que este supone (se agregan solos al marcarlo).</param>
@@ -170,6 +171,8 @@ public static class Permissions
         new(SystemBackup, "Sistema y seguridad", "Respaldos",
             "Configurar los respaldos y su contraseña, respaldar a pedido, probarlos y descargarlos (un respaldo contiene toda la información del sistema).",
             [], Sensitive: true),
+        new(SystemCertificate, "Sistema y seguridad", "Certificado HTTPS",
+            "Cargar o quitar el certificado con que el servidor se presenta por HTTPS.", [], Sensitive: true),
     ];
 
     private static readonly Dictionary<string, Definition> ByKey = All.ToDictionary(d => d.Key);

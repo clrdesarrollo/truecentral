@@ -5,8 +5,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
@@ -45,7 +43,6 @@ public sealed partial class AlarmScreenService(
     IServiceScopeFactory scopeFactory,
     WorkflowStore store,
     AuditService audit,
-    IServer server,
     IConfiguration config,
     IHostEnvironment environment,
     ILogger<AlarmScreenService> logger) : BackgroundService
@@ -670,7 +667,7 @@ public sealed partial class AlarmScreenService(
     private string BaseUrlFor(IPAddress client)
     {
         if (config["AlarmScreens:PublicUrl"] is { Length: > 0 } publicUrl) return publicUrl.TrimEnd('/');
-        return $"http://{LocalAddressTowards(client)}:{ListeningPort()}";
+        return Https.WebPorts.From(config).HttpsUrl(LocalAddressTowards(client));
     }
 
     /// <summary>
@@ -690,15 +687,6 @@ public sealed partial class AlarmScreenService(
         {
             return "127.0.0.1";
         }
-    }
-
-    private int ListeningPort()
-    {
-        foreach (string address in server.Features.Get<IServerAddressesFeature>()?.Addresses ?? [])
-            if (Uri.TryCreate(address.Replace("*", "localhost").Replace("+", "localhost").Replace("[::]", "localhost"),
-                    UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttp)
-                return uri.Port;
-        return 5090;
     }
 
     // ------------------------------------------------------------------
