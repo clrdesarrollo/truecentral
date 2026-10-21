@@ -62,3 +62,5 @@ build/publish/
 # Datos del IsupHost cuando el servidor corre desde el código (isup-options.json, sdklog)
 src/TrueCentralVms.Server/isup/
 **/build/tmp-migrador/
+# Documento de revisión local (no es parte del producto)
+/revision.pdf
