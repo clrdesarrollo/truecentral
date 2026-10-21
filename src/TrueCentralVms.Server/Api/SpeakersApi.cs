@@ -311,6 +311,8 @@ public static class SpeakersApi
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
             int? previousLocation = speaker.LocationId;
 
+            if (!viaIsup && string.IsNullOrEmpty(request.Password) && !StoredPassword.CanReuse(speaker.Host, request.Host))
+                return Error(StoredPassword.RetypeMessage);
             string password = viaIsup ? ""
                 : !string.IsNullOrEmpty(request.Password) ? request.Password
                 : speaker.PasswordCiphertext.Length > 0 ? protector.Unprotect(speaker.PasswordCiphertext)
@@ -453,7 +455,10 @@ public static class SpeakersApi
             {
                 string? password = request.Password;
                 if (string.IsNullOrEmpty(password) && existing is { PasswordCiphertext.Length: > 0 })
+                {
+                    if (!StoredPassword.CanReuse(existing.Host, request.Host)) return Error(StoredPassword.RetypeMessage);
                     password = protector.Unprotect(existing.PasswordCiphertext);
+                }
                 if (string.IsNullOrEmpty(password)) return Error("La contraseña del parlante es obligatoria.");
                 conn = new SpeakerConnectionInfo(request.Host.Trim(), request.Port, request.UseHttps, request.Username, password);
                 where = $"{request.Host.Trim()}:{request.Port}";

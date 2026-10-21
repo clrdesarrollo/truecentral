@@ -68,6 +68,19 @@ public static class StreamingAuthApi
                 return Results.Unauthorized();
             }
 
+            // API de control: solo el propio servidor, desde loopback y con
+            // el secreto por arranque (ver MediaMtxManager.ApiHttp).
+            if (action == "api")
+            {
+                if (ip is "127.0.0.1" or "::1" && GetString("user") == Services.MediaMtxManager.ApiUser &&
+                    CryptographicOperations.FixedTimeEquals(
+                        System.Text.Encoding.UTF8.GetBytes(GetString("password")),
+                        System.Text.Encoding.UTF8.GetBytes(mtx.PublishSecret)))
+                    return Results.Ok();
+                logger.LogWarning("MediaMTX: llamada a la API de control rechazada (ip {Ip}).", ip);
+                return Results.Unauthorized();
+            }
+
             if (action != "read")
             {
                 logger.LogWarning("MediaMTX: acción '{Action}' rechazada (ruta '{Path}', ip {Ip}).", action, path, ip);

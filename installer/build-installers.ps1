@@ -160,7 +160,7 @@ if ($buildSuite) {
         Assert-File (Join-Path $repo "tools\postgres\pgsql\bin\$crt") `
             "PostgreSQL no arrancara en un equipo sin el redistribuible de Visual C++. Ejecute build\setup-binaries.ps1 para copiarlo junto a los binarios."
     }
-    Assert-File (Join-Path $repo 'tools\mediamtx\mediamtx.exe') "Copie MediaMTX v1.20 en tools\mediamtx. $setupHint"
+    Assert-File (Join-Path $repo 'tools\mediamtx\mediamtx.exe') "Copie MediaMTX v1.21.2 en tools\mediamtx. $setupHint"
     Assert-File (Join-Path $repo 'tools\ffmpeg\bin\ffmpeg.exe') "Copie FFmpeg (build de gyan.dev) en tools\ffmpeg. $setupHint"
 }
 if ($buildAgent) {

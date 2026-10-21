@@ -61,14 +61,17 @@ async function fetchAgent(baseUrl, path, options = {}, timeoutMs = 1500) {
     });
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
-    if (!res.ok) throw new Error(data?.error || `Error ${res.status} del complemento`);
+    if (!res.ok) throw Object.assign(new Error(data?.error || `Error ${res.status} del complemento`), { data });
     return data;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Busca el complemento en los puertos conocidos; null si no está instalado o no corre. */
+/**
+ * Busca el complemento en los puertos conocidos; null si no está instalado o no corre. Si está pero todavía no
+ * atiende a este panel (el usuario debe aprobar el sitio en el aviso del complemento), devuelve { blocked: mensaje }.
+ */
 async function findEnrollAgent(force = false) {
   if (enrollAgent && !force) {
     try {
@@ -78,6 +81,7 @@ async function findEnrollAgent(force = false) {
       enrollAgent = null;   // se cerró: volver a buscarlo
     }
   }
+  let blocked = null;
   for (const port of ENROLL_AGENT_PORTS) {
     const baseUrl = `http://127.0.0.1:${port}`;
     try {
@@ -86,11 +90,12 @@ async function findEnrollAgent(force = false) {
         enrollAgent = { baseUrl, status };
         return enrollAgent;
       }
-    } catch {
-      // Puerto sin complemento: seguir con el siguiente.
+    } catch (err) {
+      // El complemento contestó pero no atiende a este sitio; si no, puerto sin complemento: seguir con el siguiente.
+      if (err.data && "approvalPending" in err.data) blocked ??= err.data.error;
     }
   }
-  return null;
+  return blocked ? { blocked } : null;
 }
 
 /** Bloque de descarga del instalador (lo publica el propio servidor). */
@@ -198,6 +203,16 @@ function fingerprintCaptureDialog(personName, fingerNumber, fingerName, onCaptur
     agent = await findEnrollAgent(true);
     if (!box || !box.isConnected) return;
 
+    if (agent?.blocked) {
+      box.className = "enroll-agent warn";
+      box.innerHTML = `
+        <b>El complemento no atiende todavía a este panel.</b>
+        <div class="muted" style="font-size:12px;margin-top:4px">${esc(agent.blocked)}</div>
+        <button class="btn ghost" id="en-retry" style="margin-top:8px">Buscar de nuevo</button>`;
+      agent = null;
+      $("#en-retry", root)?.addEventListener("click", detectAgent);
+      return;
+    }
     if (!agent) {
       box.className = "enroll-agent warn";
       box.innerHTML = `

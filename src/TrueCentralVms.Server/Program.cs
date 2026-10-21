@@ -63,6 +63,7 @@ builder.Services.AddDbContext<VmsDbContext>(o => o.UseNpgsql(EF.IsDesignTime
     : postgres.ConnectionString));
 
 builder.Services.AddSingleton<TokenService>();
+builder.Services.AddSingleton(_ => new LoginThrottle());
 // Alcance por ubicación de cada usuario (qué recursos ve y opera) y el hub
 // que entrega los eventos según ese alcance.
 builder.Services.AddSingleton<UserScopeService>();

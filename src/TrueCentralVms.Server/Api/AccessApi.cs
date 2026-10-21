@@ -315,6 +315,8 @@ public static class AccessApi
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
             int? previousLocation = device.LocationId;
 
+            if (!viaIsup && device.PasswordCiphertext.Length > 0 && string.IsNullOrEmpty(request.Password) && !StoredPassword.CanReuse(device.Host, request.Host))
+                return Error(StoredPassword.RetypeMessage);
             string password = viaIsup ? ""
                 : string.IsNullOrEmpty(request.Password) ? protector.Unprotect(device.PasswordCiphertext) : request.Password;
             string username = viaIsup ? "" : request.Username;
@@ -478,8 +480,11 @@ public static class AccessApi
             {
                 string? password = request.Password;
                 if (string.IsNullOrEmpty(password) && deviceId is int existingId &&
-                    await db.AccessDevices.FindAsync([existingId], ct) is { } existing)
+                    await db.AccessDevices.FindAsync([existingId], ct) is { } existing && existing.PasswordCiphertext.Length > 0)
+                {
+                    if (!StoredPassword.CanReuse(existing.Host, request.Host)) return Error(StoredPassword.RetypeMessage);
                     password = protector.Unprotect(existing.PasswordCiphertext);
+                }
                 if (string.IsNullOrEmpty(password) && drivers.Find(request.DriverKey)!.AuthMode == AccessAuthMode.UserPassword)
                     return Error("La contraseña del equipo es obligatoria.");
                 string host = request.Host.Trim();

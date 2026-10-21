@@ -21,11 +21,17 @@ public sealed record StartEnrollRequest(string? ReaderId, int? CollectTimes, int
 /// capacidades que se agreguen (decodificación de video, lectores de tarjeta…)
 /// se anuncian en <c>/api/control/status</c> para que el panel las descubra.
 ///
-/// Escucha solo en loopback: nada de la red puede alcanzarlo.
+/// Escucha solo en loopback: nada de la red puede alcanzarlo. Pero cualquier página abierta en este equipo sí puede
+/// llamarlo desde el navegador, así que solo atiende a los orígenes que aprobó el usuario (ver
+/// <see cref="WebControlSettings.AllowedOrigins"/>) y solo con Host 127.0.0.1/localhost (contra DNS rebinding).
 /// </summary>
 public sealed class WebControlHost(WebControlSettings settings, FingerprintService fingerprint, Action<string> log)
 {
     private WebApplication? _app;
+    private readonly HashSet<string> _pending = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Pregunta al usuario si un origen nuevo puede usar el complemento (true = aprobar). Sin esto, se rechaza.</summary>
+    public Func<string, Task<bool>>? ApproveOrigin { get; set; }
 
     public int Port { get; private set; }
     public string BaseUrl => $"http://127.0.0.1:{Port}";
@@ -40,17 +46,37 @@ public sealed class WebControlHost(WebControlSettings settings, FingerprintServi
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, Port));
-        builder.Services.AddCors(o => o.AddDefaultPolicy(policy =>
-        {
-            // Sin credenciales: al panel le basta con que le dejen leer las
-            // respuestas desde su propio origen.
-            if (settings.AllowedOrigins.Contains("*")) policy.AllowAnyOrigin();
-            else policy.WithOrigins(settings.AllowedOrigins);
-            policy.AllowAnyHeader().AllowAnyMethod();
-        }));
+        // CORS abierto solo para que el panel pueda LEER el rechazo (y pedir la aprobación): quién puede usar el
+        // complemento lo decide el filtro de orígenes de abajo. Sin credenciales.
+        builder.Services.AddCors(o => o.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
         var app = builder.Build();
         app.UseCors();
+        app.Use(async (ctx, next) =>
+        {
+            // DNS rebinding: un sitio que hace resolver su propio nombre a 127.0.0.1 llega con ese nombre en Host.
+            if (ctx.Request.Host.Host is not ("127.0.0.1" or "localhost"))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+            string? origin = ctx.Request.Headers.Origin.FirstOrDefault();
+            if (origin is not null && !OriginAllowed(origin))
+            {
+                bool denied = origin == "null" || IsDenied(origin);
+                if (!denied) RequestApproval(origin);
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await ctx.Response.WriteAsJsonAsync(new
+                {
+                    error = denied
+                        ? $"El complemento de este equipo no atiende a {origin} (fue rechazado). Para permitirlo, agréguelo en {WebControlSettings.FilePath} y reinicie el complemento."
+                        : $"El complemento pide permiso para atender a {origin}: acepte el aviso que apareció en este equipo y vuelva a intentarlo.",
+                    approvalPending = !denied,
+                });
+                return;
+            }
+            await next();
+        });
         MapEndpoints(app);
 
         await app.StartAsync();
@@ -132,6 +158,41 @@ public sealed class WebControlHost(WebControlSettings settings, FingerprintServi
             var (ok, message) = fingerprint.TestReader(
                 string.IsNullOrWhiteSpace(request?.ReaderId) ? FingerprintReaders.AutoId : request!.ReaderId!);
             return ok ? Results.Ok(new { ok, message }) : Results.BadRequest(new { error = message });
+        });
+    }
+
+    private bool OriginAllowed(string origin)
+    {
+        lock (settings)
+            return settings.AllowedOrigins.Contains("*")
+                || settings.AllowedOrigins.Contains(origin.TrimEnd('/'), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private bool IsDenied(string origin)
+    {
+        lock (settings) return settings.DeniedOrigins.Contains(origin.TrimEnd('/'), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Pregunta una sola vez por origen (los sondeos del panel llegan seguidos) y guarda la respuesta.</summary>
+    private void RequestApproval(string origin)
+    {
+        origin = origin.TrimEnd('/');
+        lock (_pending) if (!_pending.Add(origin)) return;
+        _ = Task.Run(async () =>
+        {
+            bool ok;
+            try { ok = ApproveOrigin is { } ask && await ask(origin); }
+            catch (Exception ex)
+            {
+                // Sin respuesta no se guarda nada: el próximo intento vuelve a preguntar.
+                log($"No se pudo preguntar por {origin}: {ex.Message}");
+                lock (_pending) _pending.Remove(origin);
+                return;
+            }
+            lock (settings) (ok ? settings.AllowedOrigins : settings.DeniedOrigins).Add(origin);
+            settings.Save(log);
+            log(ok ? $"Origen aprobado: {origin}." : $"Origen rechazado: {origin}.");
+            lock (_pending) _pending.Remove(origin);
         });
     }
 

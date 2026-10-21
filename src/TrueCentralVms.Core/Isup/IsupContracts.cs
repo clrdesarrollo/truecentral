@@ -30,6 +30,12 @@ public sealed class IsupHostOptions
     public int[] RegistrationPorts { get; set; } = [7660, 7661];
     /// <summary>Alarmas de los equipos ISUP 5.0 (MQTT).</summary>
     public int AlarmPort { get; set; } = 7662;
+    /// <summary>
+    /// ¿Se aceptan equipos ISUP 2.0/4.0? Esas versiones no prueban la clave ISUP al registrarse: basta conocer el ID
+    /// para hacerse pasar por el equipo (recibir sus órdenes e inyectar alarmas). Apagado, solo entra ISUP 5.0 y no se
+    /// escucha el puerto de alarmas 2.0/4.0. Encendido, igual nunca se reemplaza a un equipo 5.0 que está en línea.
+    /// </summary>
+    public bool AllowLegacy { get; set; }
     /// <summary>Alarmas de los equipos ISUP 2.0/4.0 (TCP y UDP). 0 = no se escucha.</summary>
     public int LegacyAlarmPort { get; set; } = 7663;
     /// <summary>Video en vivo (el equipo se conecta aquí a entregar el flujo que se le pidió).</summary>

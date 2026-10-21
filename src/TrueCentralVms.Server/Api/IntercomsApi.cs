@@ -304,6 +304,8 @@ public static class IntercomsApi
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
             int? previousLocation = intercom.LocationId;
 
+            if (!viaIsup && string.IsNullOrEmpty(request.Password) && !StoredPassword.CanReuse(intercom.Host, request.Host))
+                return Error(StoredPassword.RetypeMessage);
             string password = viaIsup ? ""
                 : !string.IsNullOrEmpty(request.Password) ? request.Password
                 : intercom.PasswordCiphertext.Length > 0 ? protector.Unprotect(intercom.PasswordCiphertext)
@@ -458,7 +460,10 @@ public static class IntercomsApi
             {
                 string? password = request.Password;
                 if (string.IsNullOrEmpty(password) && existing is { PasswordCiphertext.Length: > 0 })
+                {
+                    if (!StoredPassword.CanReuse(existing.Host, request.Host)) return Error(StoredPassword.RetypeMessage);
                     password = protector.Unprotect(existing.PasswordCiphertext);
+                }
                 if (string.IsNullOrEmpty(password)) return Error("La contraseña del frente es obligatoria.");
                 host = request.Host.Trim();
                 conn = new IntercomConnectionInfo(host, request.Port, request.HttpPort, request.Username, password, request.RtspPort);
@@ -655,7 +660,8 @@ public static class IntercomsApi
         app.Map("/api/intercoms/{id:int}/voice", async (HttpContext ctx, int id, IntercomService service, AuditService audit,
             ILoggerFactory loggers) =>
         {
-            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            // Hablar y escuchar por el frente es atender la citofonía: el alcance solo dice SOBRE QUÉ frentes, no si puede.
+            if (ApiSecurity.Require(ctx, Permissions.IntercomAnswer, out var session) is { } failure) return failure;
             if (!ctx.WebSockets.IsWebSocketRequest) return Error("Este recurso solo acepta WebSocket.", StatusCodes.Status400BadRequest);
             if (!(await ctx.ScopeAsync(session)).CanOperateIntercom(id))
                 return await ctx.OutOfScopeAsync(session, "intercom", id.ToString(), null, "hablar por");

@@ -22,7 +22,6 @@ public sealed class SessionAccounting(
     ILogger<SessionAccounting> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(5);
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -122,7 +121,7 @@ public sealed class SessionAccounting(
         {
             try
             {
-                using var response = await _http.GetAsync(mtx.ApiBaseUrl + endpoint, ct);
+                using var response = await mtx.ApiHttp.GetAsync(mtx.ApiBaseUrl + endpoint, ct);
                 if (!response.IsSuccessStatusCode) return null;
                 using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
                 if (json.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)

@@ -28,4 +28,9 @@ public sealed record IsupStatusDto(
     string? PublicAddress,
     IReadOnlyList<IsupListenerState> Listeners,
     IReadOnlyList<IsupDeviceDto> Devices,
-    IReadOnlyList<IsupRejection> Rejections);
+    IReadOnlyList<IsupRejection> Rejections,
+    /// <summary>¿Se aceptan equipos ISUP 2.0/4.0 (sin clave)? Apagado por omisión; se enciende con confirmación del riesgo.</summary>
+    bool AllowLegacy = false);
+
+/// <summary>Encender o apagar la compatibilidad ISUP 2.0/4.0. Encender exige <paramref name="Confirm"/> = "HABILITAR".</summary>
+public sealed record IsupLegacyRequestDto(bool Enabled, string? Confirm = null);

@@ -256,7 +256,7 @@ if ($missing -gt 0) {
     Write-Host "  - SDK de SADP         : SADP SDK x64 de Hikvision -> Resources\ (o instale iVMS-4200, que lo trae)"
     Write-Host "                          solo hace falta para el complemento de enrolamiento, no para el servidor"
     Write-Host "  - PostgreSQL portable : https://www.enterprisedb.com/download-postgresql-binaries -> tools\postgres\pgsql"
-    Write-Host "  - MediaMTX v1.20      : https://github.com/bluenviron/mediamtx/releases -> tools\mediamtx"
+    Write-Host "  - MediaMTX v1.21.2    : https://github.com/bluenviron/mediamtx/releases -> tools\mediamtx"
     Write-Host "  - SDK ISUP 5.0        : ISUP SDK de Hikvision (Win64, carpeta lib64 con HCISUPCMS.dll y HCAapSDKCom\) -> Resources\"
     Write-Host "  - FFmpeg para Flyleaf : asset del release de FlyleafLib con la MISMA versión que el paquete NuGet"
     Write-Host "                          https://github.com/SuRGeoNix/Flyleaf/releases -> carpeta FFmpeg\ -> tools\ffmpeg-flyleaf"

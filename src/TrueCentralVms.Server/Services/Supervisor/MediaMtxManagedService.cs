@@ -9,7 +9,6 @@ namespace TrueCentralVms.Server.Services.Supervisor;
 /// </summary>
 public sealed class MediaMtxManagedService(MediaMtxManager manager) : IManagedService
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(3) };
 
     public string Id => "mediamtx";
     public string Name => "Media server (MediaMTX)";
@@ -28,7 +27,7 @@ public sealed class MediaMtxManagedService(MediaMtxManager manager) : IManagedSe
             string detail = $"PID {manager.ProcessId}, RTSP :{manager.RtspPort} (TCP), API 127.0.0.1:{manager.ApiPort}";
             try
             {
-                using var response = await Http.GetAsync($"{manager.ApiBaseUrl}/v3/config/global/get", ct);
+                using var response = await manager.ApiHttp.GetAsync($"{manager.ApiBaseUrl}/v3/config/global/get", ct);
                 if (response.IsSuccessStatusCode)
                     return ServiceHealth.Ok(detail);
                 return ServiceHealth.Down($"La API de control de MediaMTX respondió {(int)response.StatusCode}.");

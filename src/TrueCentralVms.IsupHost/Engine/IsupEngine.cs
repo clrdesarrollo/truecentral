@@ -170,7 +170,7 @@ public sealed partial class IsupEngine : IDisposable
         AddListener("Alarmas (ISUP 5.0)", options.AlarmPort, _hAlarm >= 0, _hAlarm >= 0 ? null : $"error {Isup.NET_EALARM_GetLastError()}");
 
         // ISUP 2.0/4.0: alarmas por TCP y, salvo que se les indique otra cosa, por UDP en el mismo puerto.
-        if (options.LegacyAlarmPort > 0)
+        if (options.AllowLegacy && options.LegacyAlarmPort > 0)
         {
             var tcp = new NET_EHOME_ALARM_LISTEN_PARAM { fnMsgCb = Marshal.GetFunctionPointerForDelegate(_alarmCb), byProtocolType = 0 };
             Isup.SetIp(ref tcp.struAddress, "0.0.0.0", (ushort)options.LegacyAlarmPort);
@@ -186,7 +186,9 @@ public sealed partial class IsupEngine : IDisposable
         if (options.PictureServerPort > 0) StartPictureServer(options, logDir);
 
         Emit($"Servidor ISUP listo. Registro {string.Join("/", options.RegistrationPorts)}, video {options.StreamPort}, reproducción {options.PlaybackPort}, " +
-             $"voz {options.VoicePort}, alarmas {options.AlarmPort} (5.0) y {options.LegacyAlarmPort} (2.0/4.0), imágenes {options.PictureServerPort}. " +
+             $"voz {options.VoicePort}, alarmas {options.AlarmPort} (5.0)" +
+             (options.AllowLegacy ? $" y {options.LegacyAlarmPort} (2.0/4.0)" : "; equipos ISUP 2.0/4.0 NO admitidos (sin clave)") +
+             $", imágenes {options.PictureServerPort}. " +
              $"Dirección que se anuncia a los equipos: {_publicIp}. SDK CMS 0x{Isup.NET_ECMS_GetBuildVersion():X8}, stream 0x{Isup.NET_ESTREAM_GetBuildVersion():X8}.");
         return null;
     }
@@ -380,6 +382,22 @@ public sealed partial class IsupEngine : IDisposable
                     }
                     // Sin el intercambio de 5.0 (AUTH/DAS) y con versión distinta de 5.x se trata como ISUP 2.0/4.0.
                     bool legacy = !version.StartsWith('5');
+                    if (legacy)
+                    {
+                        // 2.0/4.0 no prueba la clave: con solo el ID, cualquiera se haría pasar por el equipo.
+                        if (!_options.AllowLegacy)
+                        {
+                            Reject(id, $"se registra con ISUP {version} (sin clave), y este servidor solo acepta ISUP 5.0 " +
+                                       "(configure el equipo en ISUP 5.0 o habilite Isup:AllowLegacy)");
+                            return 0;
+                        }
+                        if (_registrations.TryGetValue(id, out var live) && !live.Legacy && _userByDevice.ContainsKey(id))
+                        {
+                            Reject(id, $"intento de registro ISUP {version} (sin clave) con el ID de un equipo en línea por ISUP 5.0" +
+                                       $"{(address.Length > 0 ? $" desde {address}" : "")}: se rechaza para no reemplazarlo");
+                            return 0;
+                        }
+                    }
                     var reg = new Registration(id, address, legacy, version, firmware, serial, fullSerial, name, DateTimeOffset.Now);
                     _registrations[id] = reg;
                     _userByDevice[id] = lUserID;

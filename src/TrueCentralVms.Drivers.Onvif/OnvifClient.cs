@@ -249,9 +249,7 @@ internal sealed class OnvifClient : IDisposable
         string? uri = Descend(response, "GetStreamUriResponse", "MediaUri", "Uri")?.Value.Trim();
         if (uri is null) return null;
         // Igual que el XAddr: conservar ruta/puerto pero forzar el host configurado.
-        if (Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
-            return $"rtsp://{_host}:{(parsed.IsDefaultPort ? 554 : parsed.Port)}{parsed.PathAndQuery}";
-        return uri;
+        return RebaseRtsp(uri);
     }
 
     public async Task<string?> GetSnapshotUriAsync(string profileToken, CancellationToken ct)
@@ -402,9 +400,21 @@ internal sealed class OnvifClient : IDisposable
             """, withAuth: true, ct);
         string? uri = Descend(response, "GetReplayUriResponse", "Uri")?.Value.Trim();
         if (string.IsNullOrEmpty(uri)) return null;
-        return Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
-            ? $"rtsp://{_host}:{(parsed.IsDefaultPort ? 554 : parsed.Port)}{parsed.PathAndQuery}"
-            : uri;
+        return RebaseRtsp(uri);
+    }
+
+    /// <summary>
+    /// URL RTSP que informa el equipo, con el host configurado en vez del suyo. Lo que no sea una URL rtsp/rtsps
+    /// bien formada se descarta: la cadena es del equipo (o de quien intercepte el ONVIF, que va en claro) y termina
+    /// en el yml de MediaMTX y en la línea de FFmpeg, donde un salto de línea o una comilla inyectaría órdenes.
+    /// </summary>
+    private string? RebaseRtsp(string uri)
+    {
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)) return null;
+        if (parsed.Scheme is not ("rtsp" or "rtsps")) return null;
+        string pathAndQuery = parsed.PathAndQuery;
+        if (pathAndQuery.Any(c => char.IsControl(c) || char.IsWhiteSpace(c) || c is '"' or '\'' or '\\' or '`')) return null;
+        return $"rtsp://{_host}:{(parsed.IsDefaultPort ? 554 : parsed.Port)}{pathAndQuery}";
     }
 
     private static DateTime? ParseUtc(string? value) =>

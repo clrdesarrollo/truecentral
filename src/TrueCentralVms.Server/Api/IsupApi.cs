@@ -58,7 +58,28 @@ public static class IsupApi
             return Results.Ok(new IsupStatusDto(host.Enabled, host.IsRunning && status is not null,
                 host.Enabled && !host.IsRunning ? host.LastError ?? "El servicio ISUP no está en ejecución." : null,
                 status?.PublicAddress, status?.Listeners ?? [], devices.OrderBy(d => d.DeviceId, StringComparer.Ordinal).ToList(),
-                status?.Rejections ?? []));
+                status?.Rejections ?? [], host.AllowLegacy));
+        });
+
+        // Compatibilidad ISUP 2.0/4.0: esas versiones no prueban la clave al registrarse (basta el ID para suplantar al
+        // equipo). Apagada por omisión; encenderla exige escribir HABILITAR, y el cambio relanza el servicio ISUP.
+        app.MapPut("/api/isup/legacy", async (HttpContext ctx, IsupLegacyRequestDto request, IsupHostManager host, AuditService audit,
+            CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.SystemServices, out _) is { } failure) return failure;
+            if (request.Enabled && !string.Equals(request.Confirm?.Trim(), "HABILITAR", StringComparison.Ordinal))
+            {
+                await audit.LogAsync(ctx, "isup", "legacy-enabled", detail:
+                    "Intentó habilitar los equipos ISUP 2.0/4.0 sin confirmar el riesgo.", success: false);
+                return Results.BadRequest(new { error = "Para habilitarlo escriba HABILITAR, confirmando que conoce el riesgo." });
+            }
+            if (request.Enabled == host.AllowLegacy) return Results.NoContent();
+            await host.SetAllowLegacyAsync(request.Enabled, ct);
+            await audit.LogAsync(ctx, "isup", request.Enabled ? "legacy-enabled" : "legacy-disabled", detail: request.Enabled
+                ? "Habilitó los equipos ISUP 2.0/4.0, confirmando el riesgo: se registran sin probar su clave (con solo el ID " +
+                  "se puede suplantar a un equipo). Se abrió el puerto de alarmas 2.0/4.0 y se relanzó el servicio ISUP."
+                : "Deshabilitó los equipos ISUP 2.0/4.0: solo se aceptan equipos ISUP 5.0. Se relanzó el servicio ISUP.");
+            return Results.NoContent();
         });
 
         // Reconectar: el servidor da de baja la conexión del equipo y este vuelve a registrarse solo (útil tras cambiar algo en él).

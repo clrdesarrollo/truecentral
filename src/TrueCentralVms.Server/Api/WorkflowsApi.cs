@@ -341,7 +341,8 @@ public static class WorkflowsApi
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out _) is { } failure) return failure;
             var workflows = await db.Workflows.AsNoTracking().Include(w => w.Actions)
                 .OrderBy(w => w.Name).ToListAsync(ct);
-            return Results.Ok(workflows.Select(WorkflowMapper.ToDto));
+            bool showHookKey = ApiSecurity.Has(ctx, Permissions.WorkflowsManage);
+            return Results.Ok(workflows.Select(w => showHookKey ? WorkflowMapper.ToDto(w) : WorkflowMapper.WithoutHookKey(WorkflowMapper.ToDto(w))));
         });
 
         app.MapGet("/api/workflows/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, CancellationToken ct) =>
@@ -349,7 +350,10 @@ public static class WorkflowsApi
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out _) is { } failure) return failure;
             var workflow = await db.Workflows.AsNoTracking().Include(w => w.Actions)
                 .FirstOrDefaultAsync(w => w.Id == id, ct);
-            return workflow is null ? Results.NotFound() : Results.Ok(WorkflowMapper.ToDto(workflow));
+            if (workflow is null) return Results.NotFound();
+            // La clave del webhook es su credencial: solo la ve quien puede administrar automatizaciones.
+            var dto = WorkflowMapper.ToDto(workflow);
+            return Results.Ok(ApiSecurity.Has(ctx, Permissions.WorkflowsManage) ? dto : WorkflowMapper.WithoutHookKey(dto));
         });
 
         app.MapPost("/api/workflows", async (HttpContext ctx, WorkflowWriteDto request, VmsDbContext db, LicenseService license,
@@ -785,6 +789,10 @@ public static class WorkflowsApi
                 settings = new SmtpSettings { Id = 1 };
                 db.SmtpSettings.Add(settings);
             }
+            // La contraseña guardada no viaja a otro servidor de correo (lo mismo que con los equipos).
+            if (string.IsNullOrEmpty(request.Password) && settings.PasswordCiphertext is { Length: > 0 }
+                && !StoredPassword.CanReuse(settings.Host, request.Host))
+                return Error("Cambió el servidor de correo: escriba de nuevo la contraseña. La guardada no se envía a otro servidor.");
             settings.Enabled = request.Enabled;
             settings.Host = request.Host.Trim();
             settings.Port = request.Port;

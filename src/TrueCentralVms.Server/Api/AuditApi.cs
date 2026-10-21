@@ -198,11 +198,17 @@ public static class AuditApi
     private static string? ClientMachine(HttpContext ctx) =>
         ctx.Request.Headers.TryGetValue("X-TCVMS-Client", out var value) ? value.ToString() : null;
 
-    /// <summary>Campo CSV: comillas dobladas y sin saltos de línea.</summary>
+    /// <summary>
+    /// Campo CSV: comillas dobladas, sin saltos de línea y sin inyección de fórmulas. La bitácora guarda textos que
+    /// escribe cualquiera (el usuario de un login fallido, sin sesión): uno que empiece con = + - @ se ejecutaría como
+    /// fórmula al abrir el archivo en Excel. Se le antepone un apóstrofo, que Excel muestra como texto.
+    /// </summary>
     private static string Csv(string? value)
     {
         if (string.IsNullOrEmpty(value)) return "";
         string clean = value.Replace("\r", " ").Replace("\n", " ");
+        string lead = clean.TrimStart(' ');
+        if (lead.Length > 0 && "=+-@\t".Contains(lead[0])) clean = "'" + clean;
         return $"\"{clean.Replace("\"", "\"\"")}\"";
     }
 }
