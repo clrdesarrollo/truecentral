@@ -103,6 +103,10 @@ public sealed class LicenseServerClient
 
         if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
             return LicenseServerResult.Unreachable("El servidor de licencias rechazó la API key del producto (Licensing:ApiKey).");
+        // Límite de peticiones por IP del servidor de licencias: como sin
+        // conexión, la licencia sigue en gracia.
+        if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            return LicenseServerResult.Unreachable("El servidor de licencias recibió demasiadas consultas desde esta red; intente de nuevo en unos minutos.");
         if (!response.IsSuccessStatusCode)
             return LicenseServerResult.Unreachable($"El servidor de licencias respondió HTTP {(int)response.StatusCode}.");
 
