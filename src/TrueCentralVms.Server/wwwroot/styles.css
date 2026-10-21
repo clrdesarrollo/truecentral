@@ -2684,3 +2684,11 @@ table.kv td { padding: 8px 0; vertical-align: top; }
 table.kv tr + tr th, table.kv tr + tr td { border-top: 1px solid var(--border); }
 table.kv .tag { margin: 0 4px 4px 0; }
 .cert-fp { font-size: 12px; word-break: break-all; }
+
+/* ---- Sistema → Acceso desde Internet ---- */
+.wan-scenarios { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+.wan-scenario { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+.wan-scenario:has(input:checked) { border-color: var(--accent); background: rgba(var(--accent-rgb), .06); }
+.wan-scenario input { margin-top: 3px; }
+.wan-scenario b { display: block; }
+.wan-scenario .muted { display: block; font-size: 12px; }

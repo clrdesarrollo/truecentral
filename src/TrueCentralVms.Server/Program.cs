@@ -74,6 +74,8 @@ builder.Services.AddSingleton(protector);
 // sondas de salud. Ver WebPorts y la regla por puerto más abajo.
 var webPorts = WebPorts.From(builder.Configuration);
 builder.Services.AddSingleton(webPorts);
+// Acceso desde Internet (dirección pública, redes locales, escenarios y puertos).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Network.WanAccessService>();
 if (!EF.IsDesignTime)
 {
     var certificates = new ServerCertificateManager(postgres, protector, builder.Configuration);
@@ -302,7 +304,13 @@ var app = builder.Build();
 // ---------------------------------------------------------------------------
 await postgres.StartAsync(app.Logger);
 // El certificado HTTPS vive en el directorio de datos: recién ahora (initdb exige encontrarlo vacío).
-app.Services.GetService<ServerCertificateManager>()?.Initialize();
+if (app.Services.GetService<ServerCertificateManager>() is { } httpsCertificates)
+{
+    // Con el acceso desde Internet encendido, la dirección pública también va en el certificado propio.
+    var wanAccess = app.Services.GetRequiredService<TrueCentralVms.Server.Services.Network.WanAccessService>();
+    httpsCertificates.ExtraNames = () => wanAccess.Enabled ? [wanAccess.PublicHost] : [];
+    httpsCertificates.Initialize();
+}
 app.Lifetime.ApplicationStopped.Register(() => postgres.Stop(app.Logger));
 
 using (var scope = app.Services.CreateScope())
@@ -397,8 +405,23 @@ app.Use(async (context, next) =>
         context.Items["token"] = token;
         // Alcance y permisos de sus roles (en memoria): las guardas
         // ApiSecurity.Require los consultan sin volver a la base.
-        context.Items["scope"] = await context.RequestServices.GetRequiredService<UserScopeService>()
+        var userScope = await context.RequestServices.GetRequiredService<UserScopeService>()
             .ForUserAsync(session.UserId, context.RequestAborted);
+        context.Items["scope"] = userScope;
+        // Desde fuera de las redes locales solo opera quien tiene «Entrar desde Internet» (cerrar sesión siempre se puede).
+        var wan = context.RequestServices.GetRequiredService<TrueCentralVms.Server.Services.Network.WanAccessService>();
+        if (wan.IsRemote(context.Connection.RemoteIpAddress) && !userScope.Has(TrueCentralVms.Core.Domain.Permissions.RemoteAccess)
+            && !context.Request.Path.StartsWithSegments("/api/auth/logout"))
+        {
+            var audit = context.RequestServices.GetRequiredService<AuditService>();
+            if (audit.ShouldLog($"remote-denied:{session.UserId}", TimeSpan.FromMinutes(10)))
+                await audit.LogAsync(context, "auth", "request-remote-denied", targetType: "user", targetName: session.Username,
+                    detail: $"Rechazado: '{session.Username}' intentó operar desde Internet ({context.Connection.RemoteIpAddress}) sin el permiso «Entrar desde Internet».",
+                    success: false);
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { error = "Su usuario no tiene permitido entrar desde Internet: conéctese desde la red local." });
+            return;
+        }
     }
     else if (context.Request.Path.StartsWithSegments(VmsHubContract.HubPath))
     {
@@ -479,6 +502,7 @@ app.MapDiscoveryApi();
 app.MapSystemApi();
 app.MapBackupApi();
 app.MapCertificateApi();
+app.MapWanApi();
 app.MapLicenseApi();
 app.MapDecodersApi();
 app.MapWallsApi();

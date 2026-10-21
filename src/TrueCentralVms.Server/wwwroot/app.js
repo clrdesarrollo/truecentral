@@ -2242,6 +2242,7 @@ const routes = {
   "#/mail": renderMailSettings,
   "#/backups": renderBackups,
   "#/certificate": renderCertificate,
+  "#/wan": renderWan,
   "#/license": renderLicense,
 };
 

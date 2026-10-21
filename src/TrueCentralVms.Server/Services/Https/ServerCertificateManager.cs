@@ -97,6 +97,9 @@ public sealed class ServerCertificateManager
     /// <summary>Nombres del equipo que la CA no puede firmar (IP pública, nombre nuevo): quedan fuera del certificado.</summary>
     public IReadOnlyList<string> ExcludedNames { get; private set; } = [];
 
+    /// <summary>Nombres extra que deben ir en el certificado propio (la dirección pública del acceso desde Internet).</summary>
+    public Func<IEnumerable<string>>? ExtraNames { get; set; }
+
     /// <summary>Lo que se dejó en el log al arrancar (si el cargado venció, etc.).</summary>
     public string? StartupWarning { get; private set; }
 
@@ -362,6 +365,7 @@ public sealed class ServerCertificateManager
         }
         catch (SocketException) { /* sin DNS: alcanza con el nombre corto */ }
         if (_config["Streaming:PublicHost"] is { Length: > 0 } publicHost) names.Add(publicHost.Trim());
+        foreach (string extra in ExtraNames?.Invoke() ?? []) if (extra.Trim().Length > 0) names.Add(extra.Trim());
 
         // Solo IPv4 (y el loopback IPv6): las IPv6 globales cambian solas (direcciones temporales) y nadie
         // escribe una IPv6 en la barra del navegador.
