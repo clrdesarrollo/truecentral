@@ -128,6 +128,8 @@ async function renderWorkflowEditor() {
     id, lists, readOnly,
     name: workflow?.name ?? "",
     description: workflow?.description ?? "",
+    // Nueva desde un grupo del listado: nace en ese grupo.
+    group: workflow ? (workflow.group ?? "") : (params.get("group") ?? ""),
     enabled: workflow ? workflow.enabled : true,
     triggerType: workflow?.triggerType ?? catalog.triggers[0].key,
     cooldownSeconds: workflow?.cooldownSeconds ?? 60,
@@ -178,6 +180,9 @@ function wfeRenderShell() {
         <button class="btn ghost" id="wfe-back" title="Volver al listado">← Volver</button>
         <input id="wfe-name" class="wfe-name" maxlength="128" placeholder="Nombre de la automatización" value="${esc(wfEd.name)}" ${ro}>
         <input id="wfe-description" class="wfe-description" maxlength="512" placeholder="Descripción (opcional)" value="${esc(wfEd.description)}" ${ro}>
+        <input id="wfe-group" class="wfe-group" maxlength="64" list="wfe-groups" placeholder="Grupo (opcional)" autocomplete="off"
+               title="Grupo en el que aparece en el listado (escriba uno existente o uno nuevo)" value="${esc(wfEd.group)}" ${ro}>
+        <datalist id="wfe-groups">${(wfGroupsCache || []).map((g) => `<option value="${esc(g)}">`).join("")}</datalist>
         <label class="wfe-inline" title="Tiempo mínimo entre dos ejecuciones: un sensor que rebota no ejecuta veinte veces">
           Mínimo entre ejecuciones <input id="wfe-cooldown" type="number" min="0" max="86400" value="${wfEd.cooldownSeconds}" ${ro}> s
         </label>
@@ -229,6 +234,7 @@ function wfeRenderShell() {
   $("#wfe-back").addEventListener("click", () => { location.hash = "#/workflows"; });
   $("#wfe-name").addEventListener("input", (e) => { wfEd.name = e.target.value; });
   $("#wfe-description").addEventListener("input", (e) => { wfEd.description = e.target.value; });
+  $("#wfe-group").addEventListener("input", (e) => { wfEd.group = e.target.value; });
   $("#wfe-cooldown").addEventListener("change", (e) => { wfEd.cooldownSeconds = Number(e.target.value) || 0; });
   $("#wfe-enabled").addEventListener("change", (e) => { wfEd.enabled = e.target.checked; });
   $("#wfe-layout").addEventListener("click", () => { wfeAutoLayout(true); wfeFit(); });
@@ -1072,7 +1078,8 @@ function wfeConditionsForm(container, node, isTrigger) {
 
       case "webhook":
         if (isTrigger) {
-          const url = `${location.origin}/api/workflows/hook/${c.hookKey || "(se genera al guardar)"}`;
+          // Solo lectura: el servidor no entrega la clave (es la credencial de la llamada).
+          const url = `${location.origin}/api/workflows/hook/${c.hookKey || (wfEd.readOnly ? "(clave oculta)" : "(se genera al guardar)")}`;
           field("URL que debe llamar el otro sistema (POST)", `
             <div style="display:flex;gap:6px;align-items:center">
               <input id="wfe-hookurl" readonly value="${esc(url)}" style="flex:1;font-size:12px">
@@ -1531,6 +1538,7 @@ function wfePayload() {
   return {
     name: wfEd.name.trim(),
     description: wfEd.description.trim() || null,
+    group: wfEd.group.trim(),
     enabled: wfEd.enabled,
     triggerType: wfEd.triggerType,
     cooldownSeconds: wfEd.cooldownSeconds,

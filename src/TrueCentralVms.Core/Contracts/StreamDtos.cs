@@ -48,3 +48,14 @@ public sealed record RecordingSegmentDto(DateTime Start, DateTime End, string Ki
 /// </summary>
 public sealed record PlaybackRequestDto(int DeviceId, int RtspChannel, DateTime StartLocal, DateTime EndLocal,
     double Speed = 1);
+
+/// <summary>Reproducción en el panel web: el mismo rango que <see cref="PlaybackRequestDto"/> más la oferta SDP del navegador.</summary>
+public sealed record PlaybackWebRtcOfferDto(int DeviceId, int RtspChannel, DateTime StartLocal, DateTime EndLocal,
+    double Speed, string Offer);
+
+/// <summary>
+/// Respuesta WebRTC de una reproducción. <paramref name="Path"/> es la ruta
+/// de MediaMTX (para preguntar por qué falló); <paramref name="ExactSeek"/>
+/// false = el equipo reproduce desde el inicio de su grabación (ONVIF).
+/// </summary>
+public sealed record PlaybackWebRtcAnswerDto(string Answer, string Session, string Path, bool ExactSeek);

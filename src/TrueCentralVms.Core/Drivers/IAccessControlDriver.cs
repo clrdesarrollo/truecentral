@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using TrueCentralVms.Core.Contracts;
 
 namespace TrueCentralVms.Core.Drivers;
@@ -83,6 +84,14 @@ public sealed record AccessEventPage(IReadOnlyList<AccessEventRecord> Events, lo
 /// <summary>Un tramo horario de un día de la semana, en minutos desde medianoche.</summary>
 public sealed record AccessTimeSegment(int Day, int StartMinutes, int EndMinutes)
 {
+    /// <summary>
+    /// "Día" de los tramos de feriado de un horario (0-6 son domingo a
+    /// sábado). Un tramo de feriado de largo cero (inicio = fin) marca "sin
+    /// acceso en feriados"; sin tramos de este día, el horario ignora los
+    /// feriados (rige como un día normal).
+    /// </summary>
+    public const int HolidayDay = 7;
+
     /// <summary>El tramo como lo escriben los equipos ("08:30:00").</summary>
     public static string Hhmmss(int minutes) => $"{minutes / 60:00}:{minutes % 60:00}:00";
 }
@@ -94,10 +103,39 @@ public sealed record AccessTimeSegment(int Day, int StartMinutes, int EndMinutes
 /// </summary>
 public sealed record AccessWeekPlan(int Number, string Name, IReadOnlyList<AccessTimeSegment> Segments)
 {
+    /// <summary>
+    /// Feriados que rigen para este horario: la PRÓXIMA ocurrencia de cada uno
+    /// (fechas concretas, ya calculadas por el servidor). Solo viene cuando el
+    /// horario no ignora los feriados; null no se serializa, así la huella de
+    /// los horarios sin feriados no cambia.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<AccessHolidayDate>? Holidays { get; init; }
+
+    /// <summary>Qué hace el horario en un feriado, según sus tramos del día <see cref="AccessTimeSegment.HolidayDay"/>.</summary>
+    [JsonIgnore]
+    public AccessHolidayMode HolidayMode =>
+        !Segments.Any(s => s.Day == AccessTimeSegment.HolidayDay) ? AccessHolidayMode.Normal
+        : HolidaySegments.Count == 0 ? AccessHolidayMode.Closed
+        : AccessHolidayMode.Special;
+
+    /// <summary>Tramos que rigen en un feriado (vacío si es "sin acceso" o "como día normal").</summary>
+    [JsonIgnore]
+    public IReadOnlyList<AccessTimeSegment> HolidaySegments =>
+        Segments.Where(s => s.Day == AccessTimeSegment.HolidayDay && s.EndMinutes > s.StartMinutes)
+            .OrderBy(s => s.StartMinutes).ToList();
+
     /// <summary>Cubre los siete días completos: no hace falta restringir nada en el equipo.</summary>
     public bool IsAllDay => Enumerable.Range(0, 7).All(day =>
         Segments.Any(s => s.Day == day && s.StartMinutes <= 0 && s.EndMinutes >= 24 * 60 - 1));
 }
+
+/// <summary>
+/// Un feriado ya resuelto a fechas: la próxima ocurrencia (de <paramref name="Start"/>
+/// a <paramref name="End"/>, ambos incluidos). <paramref name="Yearly"/> dice si
+/// se repite cada año (el servidor vuelve a escribirlo cuando pasa).
+/// </summary>
+public sealed record AccessHolidayDate(string Name, DateOnly Start, DateOnly End, bool Yearly);
 
 /// <summary>Derecho de una persona sobre UNA puerta de UN equipo: por dónde pasa y en qué horario.</summary>
 public sealed record AccessDoorRight(int DoorNumber, AccessWeekPlan Plan);
@@ -107,7 +145,21 @@ public sealed record AccessDoorRight(int DoorNumber, AccessWeekPlan Plan);
 /// de enrolamiento, en base64, y el número de dedo (1 a 10), que es como las
 /// numeran los equipos.
 /// </summary>
-public sealed record AccessFingerprintData(int Number, string Template);
+public sealed record AccessFingerprintData(int Number, string Template,
+    [property: JsonIgnore] string Format = AccessFingerprintFormats.Hikvision);
+
+/// <summary>
+/// Formatos de plantilla de huella. Las marcas no se entienden entre sí: una
+/// plantilla va solo a los equipos de su formato (ver
+/// <see cref="IAccessControlDriver.FingerprintFormat"/>).
+/// </summary>
+public static class AccessFingerprintFormats
+{
+    /// <summary>Lector USB DS-K1F820/800 y terminales Hikvision.</summary>
+    public const string Hikvision = "hikvision";
+    /// <summary>ZKFinger v10 (terminales MA, controladoras inBio/C3 con FR1200).</summary>
+    public const string ZkV10 = "zk-v10";
+}
 
 /// <summary>
 /// El equipo dijo, al recibir una huella, que no tiene dónde guardarla: ningún
@@ -194,6 +246,20 @@ public interface IAccessControlDriver
     /// </summary>
     bool SupportsFingerprintSync => false;
 
+    /// <summary>Formato de plantilla de huella que entiende el equipo (<see cref="AccessFingerprintFormats"/>).</summary>
+    string FingerprintFormat => AccessFingerprintFormats.Hikvision;
+
+    /// <summary>
+    /// Sabe LEER las huellas que tiene el equipo de una persona (las enroladas
+    /// en su propio menú), para traerlas al VMS.
+    /// </summary>
+    bool SupportsFingerprintImport => false;
+
+    /// <summary>Huellas que el equipo tiene de la persona, en su formato; vacío si no tiene.</summary>
+    Task<IReadOnlyList<AccessFingerprintData>> ReadFingerprintsAsync(AccessConnectionInfo info, string employeeNo,
+        CancellationToken ct = default) =>
+        throw new DriverException("Este equipo no permite leer las huellas que tiene guardadas.");
+
     /// <summary>
     /// Sabe bajar el rostro al equipo. Va aparte de
     /// <see cref="SupportsFingerprintSync"/> porque son terminales distintos:
@@ -275,6 +341,18 @@ public interface IAccessControlDriver
     /// <summary>Borra la persona del equipo (perdió el permiso o se dio de baja). Que no esté no es error.</summary>
     Task RemovePersonAsync(AccessConnectionInfo info, string employeeNo, CancellationToken ct = default) =>
         throw new DriverException("Este equipo no admite administrar personas desde el VMS.");
+
+    /// <summary>
+    /// El equipo tiene UN calendario de feriados para todos sus horarios (ZKTeco
+    /// C3) en vez de uno por horario (Hikvision, que los recibe en
+    /// <see cref="AccessWeekPlan.Holidays"/>). El servidor se lo escribe aparte
+    /// con <see cref="ApplyHolidayCalendarAsync"/>.
+    /// </summary>
+    bool UsesDeviceHolidayCalendar => false;
+
+    /// <summary>Deja en el equipo exactamente estos feriados (vacío = ninguno).</summary>
+    Task ApplyHolidayCalendarAsync(AccessConnectionInfo info, IReadOnlyList<AccessHolidayDate> holidays,
+        CancellationToken ct = default) => Task.CompletedTask;
 
     /// <summary>Sube un horario semanal a su ranura del equipo, antes de que las personas lo referencien.</summary>
     Task ApplyWeekPlanAsync(AccessConnectionInfo info, AccessWeekPlan plan, CancellationToken ct = default) =>

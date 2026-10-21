@@ -149,6 +149,7 @@ async function renderIsupStatus() {
         </tr>`).join("")}
       </tbody>
     </table></div>`}
+    ${isupLegacyHtml(s, canManage)}
     <div class="toolbar" style="margin-top:14px"><h3>Intentos rechazados</h3></div>
     ${s.rejections.length === 0 ? `<div class="muted">Ningún equipo desconocido intentó conectarse.</div>` : `
     <div class="info-box">Equipos que llaman al servidor pero no están dados de alta en el VMS (o traen otra clave). Para
@@ -172,10 +173,73 @@ async function renderIsupStatus() {
     catch (err) { toast(err.error, true); }
   }));
 
+  wireIsupLegacy();
+
   clearInterval(isupTimer);
   isupTimer = setInterval(() => {
+    if ($("#isup-legacy .dz-confirm:not(.hidden)")) return;   // no borrar la confirmación a medio escribir
     if (location.hash !== "#/isup" || $("#app-shell").classList.contains("hidden")) { clearInterval(isupTimer); return; }
     if ($("#modal-backdrop") && !$("#modal-backdrop").classList.contains("hidden")) return;
     renderIsupStatus();
   }, 10000);
+}
+
+/**
+ * Compatibilidad ISUP 2.0/4.0. Esas versiones se registran sin probar su clave: con solo conocer el ID, cualquiera
+ * en internet se hace pasar por el equipo. Viene apagada; encenderla exige escribir HABILITAR (zona de riesgo).
+ */
+function isupLegacyHtml(s, canManage) {
+  const on = s.allowLegacy;
+  return `
+    <div class="danger-zone" id="isup-legacy" style="margin-top:14px">
+      <h4>Equipos ISUP 2.0/4.0 (compatibilidad)</h4>
+      <div class="dz-item">
+        <div class="dz-row">
+          <div>
+            <b>${on ? `<span class="tag operator">Habilitado</span>` : `<span class="tag on">Deshabilitado</span>`}
+              Aceptar equipos que se conectan con ISUP 2.0 o 4.0</b>
+            <div class="dz-help">Solo para equipos antiguos que no tienen ISUP 5.0. Si el equipo lo permite, configúrelo en ISUP 5.0 con su clave.</div>
+            <div class="dz-help"><span class="dz-risk">Riesgo:</span> ISUP 2.0/4.0 no prueba la clave del equipo al registrarse.
+              Con solo conocer su ID, alguien desde internet puede hacerse pasar por él: recibir sus órdenes, mostrar video falso
+              e inyectar o tapar alarmas. Aun habilitado, un equipo conectado por ISUP 5.0 nunca se reemplaza por uno 2.0/4.0.</div>
+          </div>
+          ${canManage ? (on
+            ? `<button class="btn" type="button" id="isup-legacy-off">Deshabilitar</button>`
+            : `<button class="btn dz-open" type="button">Habilitar…</button>`) : ""}
+        </div>
+        <div class="dz-confirm hidden">
+          <label>Para confirmar que conoce el riesgo, escriba <b>HABILITAR</b>:</label>
+          <div class="dz-confirm-row">
+            <input class="dz-input" autocomplete="off" spellcheck="false" placeholder="HABILITAR">
+            <button class="btn danger dz-go" type="button" disabled>Entiendo el riesgo: habilitar</button>
+            <button class="btn ghost dz-cancel" type="button">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function wireIsupLegacy() {
+  const zone = $("#isup-legacy");
+  if (!zone) return;
+  const confirmBox = zone.querySelector(".dz-confirm");
+  const input = zone.querySelector(".dz-input");
+  const go = zone.querySelector(".dz-go");
+  const send = async (enabled, btn) => {
+    btn.disabled = true;
+    try {
+      await Api.put("/api/isup/legacy", { enabled, confirm: enabled ? input.value.trim() : null });
+      toast(enabled ? "Equipos ISUP 2.0/4.0 habilitados. El servicio ISUP se reinició."
+                    : "Equipos ISUP 2.0/4.0 deshabilitados. El servicio ISUP se reinició.");
+      renderIsupStatus();
+    } catch (err) {
+      toast(err.error ?? "No se pudo cambiar el ajuste.", true);
+      btn.disabled = false;
+    }
+  };
+  zone.querySelector(".dz-open")?.addEventListener("click", () => { confirmBox.classList.remove("hidden"); input.focus(); });
+  zone.querySelector(".dz-cancel").addEventListener("click", () => { confirmBox.classList.add("hidden"); input.value = ""; go.disabled = true; });
+  input.addEventListener("input", () => { go.disabled = input.value.trim() !== "HABILITAR"; });
+  go.addEventListener("click", () => send(true, go));
+  zone.querySelector("#isup-legacy-off")?.addEventListener("click", (e) => send(false, e.target));
 }

@@ -8,7 +8,7 @@ using TrueCentralVms.Server.Data;
 namespace TrueCentralVms.Server.Services;
 
 /// <summary>
-/// Orquestador del media server embebido (MediaMTX v1.20, proceso hijo).
+/// Orquestador del media server embebido (MediaMTX v1.21.2, proceso hijo).
 ///
 /// El servidor genera mediamtx.runtime.yml con UNA ruta por canal habilitado y
 /// perfil (ch/{deviceId}/{rtspChannel}/{main|sub}) cuyo source es la URL RTSP
@@ -90,7 +90,7 @@ public sealed partial class MediaMtxManager(
         {
             logger.LogError(
                 "No se encontró tools\\mediamtx\\mediamtx.exe: el streaming en vivo queda deshabilitado. " +
-                "Copie MediaMTX v1.20 a tools\\mediamtx (junto al ejecutable o en la raíz del repositorio).");
+                "Copie MediaMTX v1.21.2 a tools\\mediamtx (junto al ejecutable o en la raíz del repositorio).");
             return;
         }
 
@@ -523,14 +523,16 @@ public sealed partial class MediaMtxManager(
                 pprof: no
                 playback: no
 
-                # Toda lectura se autoriza contra el servidor TrueCentral (tokens
-                # de corta vida). La API queda excluida: solo escucha en loopback.
+                # Todo se autoriza contra el servidor TrueCentral: las lecturas
+                # con tokens de corta vida y la API de control con el secreto
+                # por arranque que solo conoce el servidor (nada excluido: una
+                # página web abierta en este equipo no puede llamar a la API,
+                # GHSA-w334-5mp5-h897). Ningún navegador habla directo con la
+                # API ni con la señalización WebRTC: sin orígenes permitidos.
                 authMethod: http
                 authHTTPAddress: http://127.0.0.1:{config.GetValue("Streaming:ServerPort", 5090)}/api/streaming/auth
-                authHTTPExclude:
-                - action: api
-                - action: metrics
-                - action: pprof
+                authHTTPExclude: []
+                apiAllowOrigins: []
 
                 rtsp: yes
                 rtspAddress: :{RtspPort}
@@ -589,6 +591,13 @@ public sealed partial class MediaMtxManager(
                                 logger.LogWarning("MediaMTX: sin ruta para '{Device}' canal {Channel}: {Error}", device.Name, channel.RtspChannel, ex.Message);
                                 continue;
                             }
+                            if (!IsSafeSource(source))
+                            {
+                                logger.LogWarning("MediaMTX: se descarta la URL de '{Device}' canal {Channel}: no es una URL RTSP válida " +
+                                    "(caracteres de control, espacios o comillas). Revise el host del equipo o la URL que informa.",
+                                    device.Name, channel.RtspChannel);
+                                continue;
+                            }
                             // Equipo conectado por ISUP: el video lo entrega el servicio ISUP como MPEG-PS por HTTP local, que
                             // MediaMTX no sabe leer; FFmpeg lo toma bajo demanda y lo publica en la ruta.
                             if (Core.Isup.IsupGateway.IsMediaSource(source))
@@ -628,7 +637,7 @@ public sealed partial class MediaMtxManager(
                             }
                             else
                             {
-                                yml.AppendLine($"    source: {source}");
+                                yml.AppendLine($"    source: {YamlQuote(source)}");
                             }
                             pathCount++;
                         }
@@ -655,6 +664,11 @@ public sealed partial class MediaMtxManager(
                             logger.LogWarning("MediaMTX: sin ruta para el frente '{Name}': {Error}", intercom.Name, ex.Message);
                             break;
                         }
+                        if (!IsSafeSource(source))
+                        {
+                            logger.LogWarning("MediaMTX: se descarta la URL del frente '{Name}': no es una URL RTSP válida.", intercom.Name);
+                            break;
+                        }
                         // Frente conectado por ISUP: su video lo entrega el servicio ISUP y lo publica FFmpeg.
                         if (Core.Isup.IsupGateway.IsMediaSource(source))
                         {
@@ -665,7 +679,7 @@ public sealed partial class MediaMtxManager(
                         else
                         {
                             yml.AppendLine($"  {name}:");
-                            yml.AppendLine($"    source: {source}");
+                            yml.AppendLine($"    source: {YamlQuote(source)}");
                         }
                         pathCount++;
                     }
@@ -711,6 +725,7 @@ public sealed partial class MediaMtxManager(
             webrtcAddress: 127.0.0.1:{WebRtcPort}
             webrtcEncryption: no
             webrtcTrustedProxies: ['127.0.0.1', '::1']
+            webrtcAllowOrigins: []
             webrtcLocalUDPAddress: :{WebRtcIcePort}
             webrtcLocalTCPAddress: :{WebRtcIcePort}
             webrtcIPsFromInterfaces: yes
@@ -764,7 +779,7 @@ public sealed partial class MediaMtxManager(
 
     /// <summary>Ubica ffmpeg.exe una sola vez; sin él, los canales marcados
     /// con proxy caen al pull directo (y se avisa una vez en el log).</summary>
-    private string? ResolveFfmpeg()
+    internal string? ResolveFfmpeg()
     {
         _ffmpegPath ??= FindFfmpeg();
         if (_ffmpegPath is null && !_ffmpegWarned)
@@ -777,7 +792,25 @@ public sealed partial class MediaMtxManager(
         return _ffmpegPath;
     }
 
-    private static readonly HttpClient ApiHttp = new() { Timeout = TimeSpan.FromSeconds(3) };
+    /// <summary>Usuario con el que el servidor se presenta ante la API de control (la clave es <see cref="PublishSecret"/>).</summary>
+    public const string ApiUser = "tcvms-server";
+
+    private HttpClient? _apiHttp;
+
+    /// <summary>
+    /// Cliente de la API de control de MediaMTX, ya autenticado con el secreto
+    /// por arranque (el callback /api/streaming/auth lo exige para la acción
+    /// "api"). Lo comparten el supervisor y el conteo de sesiones.
+    /// </summary>
+    public HttpClient ApiHttp => _apiHttp ??= CreateApiHttp();
+
+    private HttpClient CreateApiHttp()
+    {
+        var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic",
+            Convert.ToBase64String(Encoding.UTF8.GetBytes($"{ApiUser}:{PublishSecret}")));
+        return http;
+    }
 
     // ------------------------------------------------------------------
     // Rutas dinámicas de reproducción (pb-...): cada concesión de playback
@@ -1051,6 +1084,19 @@ public sealed partial class MediaMtxManager(
             return false; // MediaMTX ya la había cerrado o se reinició
         }
     }
+
+    /// <summary>
+    /// ¿Se puede escribir esta URL de origen en el yml y en la línea de FFmpeg? Viene de datos que no controla el
+    /// sistema (la URL que informó la cámara por ONVIF, el host editable del equipo): un salto de línea agregaría
+    /// claves al yml (runOnDemand = un comando que MediaMTX ejecuta) y una comilla o un espacio, argumentos a FFmpeg.
+    /// </summary>
+    /// <summary>Escalar YAML entre comillas simples (la comilla se dobla): nunca abre una clave nueva.</summary>
+    private static string YamlQuote(string value) => $"'{value.Replace("'", "''")}'";
+
+    internal static bool IsSafeSource(string source) =>
+        Uri.TryCreate(source, UriKind.Absolute, out var uri)
+        && uri.Scheme is "rtsp" or "rtsps" or "http"
+        && !source.Any(c => char.IsControl(c) || char.IsWhiteSpace(c) || c is '"' or '\'' or '\\' or '`');
 
     /// <summary>Inserta usuario:contraseña (URL-encoded) en una URL RTSP guardada sin credenciales.</summary>
     private static string InjectCredentials(string rtspUrl, DeviceConnectionInfo conn)

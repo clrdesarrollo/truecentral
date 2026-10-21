@@ -90,6 +90,7 @@ public sealed class ServiceSupervisor : BackgroundService
     private static IEnumerable<IManagedService> BuildCatalog(IServiceProvider sp, IConfiguration config, ILoggerFactory loggers)
     {
         yield return new PostgresManagedService(sp.GetRequiredService<EmbeddedPostgres>(), loggers.CreateLogger<PostgresManagedService>());
+        yield return new BackupManagedService(sp.GetRequiredService<Backup.BackupService>());
         yield return new MediaMtxManagedService(sp.GetRequiredService<MediaMtxManager>());
         yield return new IsupManagedService(sp.GetRequiredService<Isup.IsupHostManager>(), sp.GetRequiredService<Isup.IsupService>());
         yield return new HostedServiceAdapter("device-monitor", "Monitor de dispositivos",

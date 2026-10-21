@@ -11,7 +11,24 @@ public static class WorkflowMapper
         WorkflowJson.Conditions(workflow.ConditionsJson), workflow.CooldownSeconds,
         workflow.LastRunAt, workflow.RunCount, workflow.CreatedAt, workflow.CreatedBy,
         workflow.Actions.OrderBy(a => a.Order).Select(ToDto).ToList(),
-        WorkflowGraph.ToDto(workflow), DisabledByLicense: workflow.DisabledByLicense);
+        WorkflowGraph.ToDto(workflow), DisabledByLicense: workflow.DisabledByLicense, Group: workflow.GroupName);
+
+    /// <summary>
+    /// La misma automatización sin la clave de su URL de llamada externa. La clave es la credencial del webhook
+    /// (anónimo): quien solo puede ver automatizaciones no debe poder dispararlas, y menos las que abren puertas
+    /// o desarman paneles fuera de su alcance.
+    /// </summary>
+    public static WorkflowDto WithoutHookKey(WorkflowDto dto) => dto.Conditions.HookKey is null ? dto : dto with
+    {
+        Conditions = dto.Conditions with { HookKey = null },
+        Graph = dto.Graph with
+        {
+            Nodes = dto.Graph.Nodes.Select(n => n.Conditions?.HookKey is null ? n : n with
+            {
+                Conditions = n.Conditions with { HookKey = null },
+            }).ToList(),
+        },
+    };
 
     public static WorkflowActionDto ToDto(WorkflowAction action) => new(
         action.Id, action.Order, action.Type, action.Enabled, action.ContinueOnError, action.DelaySeconds,

@@ -42,7 +42,7 @@ public partial class App : Application
 
         _settings = WebControlSettings.Load(Log);
         Fingerprint = new FingerprintService(Log);
-        Host = new WebControlHost(_settings, Fingerprint, Log);
+        Host = new WebControlHost(_settings, Fingerprint, Log) { ApproveOrigin = AskOriginAsync };
 
         CreateTrayIcon();
 
@@ -63,6 +63,22 @@ public partial class App : Application
         }
         _window?.RefreshStatus();
     }
+
+    /// <summary>
+    /// Aviso de la primera vez que un sitio web pide usar el lector: solo el panel del servidor TrueCentral debe poder
+    /// hacerlo (otra página leería las huellas que se capturan). La respuesta queda guardada.
+    /// </summary>
+    private Task<bool> AskOriginAsync(string origin) => Dispatcher.InvokeAsync(() =>
+    {
+        Log($"El sitio {origin} pide usar el complemento.");
+        return MessageBox.Show(
+            $"El sitio web\n\n    {origin}\n\npide usar el lector de huellas de este equipo.\n\n" +
+            "Permítalo solo si es la dirección del panel de su servidor CLR TrueCentral VMS. " +
+            "Cualquier otro sitio podría leer las huellas que se capturen.\n\n¿Permitir a este sitio?",
+            "CLR TrueCentral VMS — Complemento de enrolamiento",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No,
+            System.Windows.MessageBoxOptions.DefaultDesktopOnly) == MessageBoxResult.Yes;
+    }).Task;
 
     private void CreateTrayIcon()
     {

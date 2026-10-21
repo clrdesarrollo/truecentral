@@ -26,6 +26,7 @@ public partial class WallLayoutsWindow : Window
         _api = api;
         _wall = wall;
         InitializeComponent();
+        DarkChrome.Apply(this);
         TitleText.Text = $"Layouts de \"{wall.Name}\"";
         SaveRow.Visibility = CanManage ? Visibility.Visible : Visibility.Collapsed;
         Loaded += async (_, _) =>
@@ -119,7 +120,7 @@ public partial class WallLayoutsWindow : Window
         if (sender is not Button { Tag: int id } button) return;
 
         string name = (button.DataContext as LayoutListItem)?.Name ?? "seleccionado";
-        if (MessageBox.Show(this,
+        if (AppMessageBox.Show(this,
                 $"¿Eliminar el layout \"{name}\"? Esta acción no se puede deshacer.",
                 "Eliminar layout", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;

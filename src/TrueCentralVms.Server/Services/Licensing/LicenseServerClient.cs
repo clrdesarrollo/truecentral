@@ -63,14 +63,19 @@ public sealed class LicenseServerClient
         }, ct);
 
     /// <summary>
-    /// ¿El código es una expansión vigente de esta licencia base? No activa
-    /// nada: la expansión llega en el archivo de la base al revalidar.
+    /// Ingreso de una expansión en esta instalación. Si se vendió suelta («por
+    /// canjear»), el servidor la liga en este momento a la licencia base de
+    /// este equipo (exige la base activada aquí, por eso va el equipo); si ya
+    /// estaba ligada, confirma que sea de esta base y esté vigente. Los cupos
+    /// llegan en el archivo de la base al revalidar.
     /// </summary>
-    public Task<LicenseServerResult> CheckAddonAsync(string addonCode, string activationCode, CancellationToken ct) =>
+    public Task<LicenseServerResult> CheckAddonAsync(string addonCode, string activationCode, string hardwareId,
+        CancellationToken ct) =>
         PostAsync("/api/v1/licenses/addon/", new
         {
             addon_code = addonCode,
             activation_code = activationCode,
+            hardware_id = hardwareId,
         }, ct);
 
     private async Task<LicenseServerResult> PostAsync(string path, object body, CancellationToken ct)

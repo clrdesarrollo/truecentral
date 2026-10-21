@@ -278,11 +278,6 @@
                                Foreground="{StaticResource TextBrush}">
                         TrueCentral <Run Foreground="{StaticResource AccentBrush}">VMS</Run>
                     </TextBlock>
-                    <!-- Consola: a qué servidor está conectado este puesto, a la vista -->
-                    <TextBlock Margin="12,1,0,0" VerticalAlignment="Center" FontSize="12"
-                               FontStretch="SemiCondensed" Foreground="{StaticResource MutedBrush}"
-                               Visibility="{x:Static services:ClientTheme.ConsoleOnly}"
-                               Text="{Binding ServerLabel, StringFormat=Consola de operación · {0}}"/>
                 </StackPanel>
 
                 <!-- Botones de ventana -->

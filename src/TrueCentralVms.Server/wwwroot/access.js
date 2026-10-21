@@ -33,6 +33,7 @@ const ACCESS_BRANDS = {
   "hikvision-isapi": "Hikvision",
   "dahua-http": "Dahua",
   "zkteco-tcp": "ZKTeco",
+  "zkteco-c3": "ZKTeco",
 };
 const accessBrandOf = (driverKey) => ACCESS_BRANDS[driverKey] ?? driverKey;
 
@@ -150,7 +151,8 @@ async function renderAccessDevices() {
     <div id="access-online">
       ${scanReady ? "" : `<div class="info-box">Sondeando el segmento de red del servidor…
         Solo se listan equipos de <b>control de acceso compatibles</b>: Hikvision DS-K (SADP), Dahua ASI/ASC/ASG
-        (DHDiscover) y ZKTeco (protocolo propio, puerto 4370). Las cámaras, los videoporteros y las alarmas se
+        (DHDiscover), terminales ZKTeco (protocolo propio, puerto 4370) y controladoras ZKTeco inBio/C3 (búsqueda C3, UDP 65535).
+        Las cámaras, los videoporteros y las alarmas se
         administran en sus propias páginas.</div>`}
     </div>` : ""}`;
 
@@ -483,11 +485,17 @@ const ACD_TABS = [
   { key: "connection", label: "Conexión" },
   { key: "doors", label: "Puertas" },
   { key: "readers", label: "Lectores" },
+  // Parámetros de la controladora entera (antipassback, interbloqueo…): solo
+  // los drivers que los informan como bloque "device".
+  { key: "controller", label: "Controladora", drivers: ["zkteco-c3"] },
   { key: "capabilities", label: "Capacidades" },
   { key: "maintenance", label: "Hora y mantenimiento" },
 ];
 
 let acdState = null;
+
+/** Pestañas que corresponden a este equipo (algunas son solo de ciertos drivers). */
+const acdTabsOf = (device) => ACD_TABS.filter((t) => !t.drivers || t.drivers.includes(device.driverKey));
 
 async function renderAccessDevicePage() {
   $("#page-title").textContent = "Control de acceso";
@@ -503,7 +511,7 @@ async function renderAccessDevicePage() {
       ? "Ese equipo ya no existe (se eliminó o está fuera de su alcance)." : err.error)}</div>`;
     return;
   }
-  const tab = ACD_TABS.some((t) => t.key === params.get("tab")) ? params.get("tab") : "connection";
+  const tab = acdTabsOf(device).some((t) => t.key === params.get("tab")) ? params.get("tab") : "connection";
   acdState = { id, device, tab, settings: null, settingsError: null, loadingSettings: false };
   acdDrawPage();
 }
@@ -536,7 +544,7 @@ function acdDrawPage() {
       </div>
     </div>
     <div class="res-tabs" role="tablist">
-      ${ACD_TABS.map((t) => `
+      ${acdTabsOf(d).map((t) => `
         <button type="button" role="tab" class="res-tab${t.key === tab ? " on" : ""}" data-tab="${t.key}"
                 aria-selected="${t.key === tab}">${t.label}</button>`).join("")}
     </div>
@@ -575,7 +583,8 @@ async function acdDrawTab() {
   switch (acdState.tab) {
     case "doors":
     case "readers":
-      await acdDrawSettings(body, acdState.tab === "doors" ? "door" : "reader");
+    case "controller":
+      await acdDrawSettings(body, { doors: "door", readers: "reader", controller: "device" }[acdState.tab]);
       break;
     case "capabilities":
       await acdDrawCapabilities(body);
@@ -658,6 +667,7 @@ async function acdDrawConnection(body) {
   const driver0 = drivers.find((x) => x.key === d.driverKey) ?? drivers[0];
 
   body.innerHTML = `
+    ${d.holidayNote ? `<div class="warn-box acd-narrow" style="margin-bottom:12px">${esc(d.holidayNote)}</div>` : ""}
     <form id="acd-form" class="acd-narrow">
       <fieldset ${isAdmin ? "" : "disabled"} class="acd-fieldset">
       <div id="ac-modal-error"></div>
@@ -826,7 +836,7 @@ async function acdDrawSettings(body, kind) {
   if (!state.settings) {
     body.innerHTML = `<div class="muted">Leyendo la configuración del equipo… (puede tardar unos segundos)</div>`;
     await acdLoadSettings();
-    if (acdState !== state || !["doors", "readers"].includes(state.tab)) return;
+    if (acdState !== state || !["doors", "readers", "controller"].includes(state.tab)) return;
   }
   if (state.settingsError) {
     const err = state.settingsError;
@@ -838,13 +848,15 @@ async function acdDrawSettings(body, kind) {
   }
   const sections = state.settings.sections.filter((s) => s.kind === kind);
   const intro = kind === "door"
-    ? "Parámetros de cada puerta tal como están en el equipo: se leen al abrir esta pestaña y se escriben al guardar. Son los mismos que muestra la página web del equipo o HikCentral."
+    ? "Parámetros de cada puerta tal como están en el equipo: se leen al abrir esta pestaña y se escriben al guardar. Son los mismos que muestra la página web del equipo o el software del fabricante."
+    : kind === "device"
+    ? "Parámetros de la controladora entera. El antipassback y el interbloqueo que se fijan acá los aplica la propia controladora entre SUS puertas y lectores, al instante y aunque se corte la red."
     : "Parámetros de cada lector del equipo. Un terminal trae su propio lector (rostro, tarjeta, huella según el modelo) y una entrada para un lector externo; una controladora, los lectores cableados a ella.";
   body.innerHTML = `
     <p class="muted res-tab-intro">${intro}${Perms.can("access.configure") ? "" : " Cambiarlos requiere el permiso Equipos de acceso."}</p>
     ${state.settings.notes.length ? `<div class="info-box">${state.settings.notes.map(esc).join("<br>")}</div>` : ""}
     ${sections.length ? sections.map(acdSectionHtml).join("")
-      : `<div class="info-box">El equipo no informó ${kind === "door" ? "puertas" : "lectores"} configurables.</div>`}`;
+      : `<div class="info-box">El equipo no informó ${kind === "door" ? "puertas" : kind === "device" ? "parámetros generales" : "lectores"} configurables.</div>`}`;
   sections.forEach((s) => acdBindSection(s));
 }
 

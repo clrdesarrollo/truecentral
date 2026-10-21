@@ -46,6 +46,7 @@ public partial class WallAssignDialog : Window
         _cameras = cameras;
         _current = current;
         InitializeComponent();
+        DarkChrome.Apply(this);
 
         HeaderText.Text = header;
 
@@ -89,7 +90,7 @@ public partial class WallAssignDialog : Window
     {
         if (SelectedCamera is null)
         {
-            MessageBox.Show(this, "Seleccione un canal.", "Canal", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show(this, "Seleccione un canal.", "Canal", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         DialogResult = true;

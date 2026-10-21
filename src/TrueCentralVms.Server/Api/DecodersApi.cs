@@ -282,6 +282,8 @@ public static class DecodersApi
             if (await db.Decoders.AnyAsync(d => d.Id != id && d.Host == request.Host && d.Port == request.Port, ct))
                 return Error("Ya existe otro decodificador con esa dirección y puerto.", StatusCodes.Status409Conflict);
 
+            if (string.IsNullOrEmpty(request.Password) && !StoredPassword.CanReuse(decoder.Host, request.Host))
+                return Error(StoredPassword.RetypeMessage);
             string password = string.IsNullOrEmpty(request.Password)
                 ? protector.Unprotect(decoder.PasswordCiphertext)
                 : request.Password;

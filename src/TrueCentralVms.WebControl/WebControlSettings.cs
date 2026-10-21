@@ -15,11 +15,16 @@ public sealed class WebControlSettings
     public int[] Ports { get; set; } = [5081, 25471, 25472];
 
     /// <summary>
-    /// Orígenes web autorizados a usar el agente ("*" = cualquiera). El agente
-    /// solo escucha en 127.0.0.1, así que el riesgo se limita a páginas
-    /// abiertas en este mismo equipo; restrinja aquí si quiere fijar el panel.
+    /// Orígenes web (panel de un servidor TrueCentral, p. ej. "https://vms.empresa.cl") autorizados a usar el agente.
+    /// Aunque el agente escucha solo en 127.0.0.1, CUALQUIER página abierta en este equipo puede llamarlo desde el
+    /// navegador: sin esta lista, un sitio cualquiera leería las huellas que se capturan. Un origen que no está aquí
+    /// lo aprueba (o rechaza) el usuario la primera vez, en un aviso del complemento, y queda guardado. "*" = cualquiera
+    /// (solo para pruebas).
     /// </summary>
-    public string[] AllowedOrigins { get; set; } = ["*"];
+    public List<string> AllowedOrigins { get; set; } = [];
+
+    /// <summary>Orígenes que el usuario rechazó en el aviso: no se vuelve a preguntar por ellos.</summary>
+    public List<string> DeniedOrigins { get; set; } = [];
 
     /// <summary>
     /// Segundos de espera del dedo antes de abandonar la captura (máximo 60 que
@@ -35,6 +40,20 @@ public sealed class WebControlSettings
     public static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "CLRTrueCentralVMS", "web-control.json");
+
+    /// <summary>Guarda los ajustes (las aprobaciones de orígenes). Un error queda en la actividad, no corta la captura.</summary>
+    public void Save(Action<string> log)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex)
+        {
+            log($"No se pudo guardar {FilePath}: {ex.Message}.");
+        }
+    }
 
     public static WebControlSettings Load(Action<string> log)
     {

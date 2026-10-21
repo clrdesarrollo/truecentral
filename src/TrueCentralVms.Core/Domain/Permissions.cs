@@ -62,6 +62,7 @@ public static class Permissions
     public const string SessionsManage = "sessions.manage";
     public const string SystemServices = "system.services";
     public const string SystemLicense = "system.license";
+    public const string SystemBackup = "system.backup";
 
     /// <summary>Un permiso del catálogo.</summary>
     /// <param name="Requires">Permisos que este supone (se agregan solos al marcarlo).</param>
@@ -166,6 +167,9 @@ public static class Permissions
             "Detener, iniciar y reiniciar los servicios y el servidor.", [], Sensitive: true),
         new(SystemLicense, "Sistema y seguridad", "Licencia",
             "Activar, renovar y desactivar la licencia del sistema.", [], Sensitive: true),
+        new(SystemBackup, "Sistema y seguridad", "Respaldos",
+            "Configurar los respaldos y su contraseña, respaldar a pedido, probarlos y descargarlos (un respaldo contiene toda la información del sistema).",
+            [], Sensitive: true),
     ];
 
     private static readonly Dictionary<string, Definition> ByKey = All.ToDictionary(d => d.Key);

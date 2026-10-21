@@ -173,7 +173,7 @@ Type: files; Name: "{app}\screen-packages\truecentral-screen-*-linux-arm64.tar.g
 ; Servidor publicado (self-contained). Se excluyen los restos de desarrollo
 ; que el SDK Web arrastra como contenido (ajustes locales, configuración
 ; generada de MediaMTX, logs).
-Source: "{#ServerPublish}\*"; DestDir: "{app}"; Excludes: "*.pdb,appsettings.Development.json,appsettings.Local.json,mediamtx.runtime.yml*,*.log,pgdata\*,anpr\*,workflows\*"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ServerPublish}\*"; DestDir: "{app}"; Excludes: "*.pdb,appsettings.Development.json,appsettings.Local.json,mediamtx.runtime.yml*,*.log,pgdata\*,anpr\*,workflows\*,backups\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ProductionConfig}"; DestDir: "{app}"; DestName: "appsettings.Production.json"; Flags: ignoreversion
 ; Ajustes del equipo: solo la primera vez; las actualizaciones no lo tocan.
 Source: "config\appsettings.Local.json"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall
@@ -996,8 +996,11 @@ begin
                    '  - el receptor de paneles de alarma, con su historial y los paneles' #13#10 +
                    '    que tenga registrados;' #13#10 +
                    '  - el cliente de escritorio y el complemento de enrolamiento;' #13#10 +
-                   '  - las reglas de firewall y las preferencias de los operadores.' #13#10#13#10 +
-                   'NO se puede deshacer y NO queda copia de la base de datos.' #13#10#13#10 +
+                   '  - las reglas de firewall y las preferencias de los operadores;' #13#10 +
+                   '  - los RESPALDOS guardados en este equipo (carpeta backups). Los que' #13#10 +
+                   '    estén en el segundo destino configurado NO se borran.' #13#10#13#10 +
+                   'NO se puede deshacer y NO queda copia de la base de datos en este equipo.' #13#10 +
+                   'Si quiere conservar un respaldo, cópielo antes a otro lugar.' #13#10#13#10 +
                    'Si lo que quiere es ACTUALIZAR el sistema, cancele: ejecute el instalador' #13#10 +
                    'de la versión nueva encima de esta, que conserva todos los datos.' #13#10#13#10 +
                    '¿Desea continuar?',
@@ -1054,8 +1057,9 @@ begin
     if FileExists(Uninstaller) then
       Exec(Uninstaller, '/VERYSILENT /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    // Datos del sistema: base de datos, fotos, matrículas, workflows, licencia
-    // y registros.
+    // Datos del sistema: base de datos, fotos, matrículas, workflows, licencia,
+    // registros y los respaldos locales (borrado total, decisión 2026-10-20; el
+    // segundo destino de los respaldos no se toca).
     DelTree(DataDir(), True, True, True);
 
     // Copias del estado de licencia en el registro (las escribe el servicio,

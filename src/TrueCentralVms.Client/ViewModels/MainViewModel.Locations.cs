@@ -1,3 +1,4 @@
+using TrueCentralVms.Client.Views;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
@@ -285,12 +286,12 @@ public partial class MainViewModel
         }
         if (preview.Items.Count == 0)
         {
-            MessageBox.Show(owner, preview.Message, verb, MessageBoxButton.OK, MessageBoxImage.Information);
+            AppMessageBox.Show(owner, preview.Message, verb, MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         string list = string.Join("\n", preview.Items.Take(15).Select(i => $"• {i.Area} ({i.Panel})")) +
                       (preview.Items.Count > 15 ? $"\n… y {preview.Items.Count - 15} más" : "");
-        if (MessageBox.Show(owner, $"{preview.Message}\n\n{list}\n\n¿Continuar?", $"{verb} · {location.Name}",
+        if (AppMessageBox.Show(owner, $"{preview.Message}\n\n{list}\n\n¿Continuar?", $"{verb} · {location.Name}",
                 MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
             return;
 
@@ -301,14 +302,14 @@ public partial class MainViewModel
             StatusMessage = result.Message;
             var failed = result.Items.Where(i => !i.Success).ToList();
             if (failed.Count > 0)
-                MessageBox.Show(owner,
+                AppMessageBox.Show(owner,
                     result.Message + "\n\n" + string.Join("\n", failed.Select(f => $"• {f.Area} ({f.Panel}): {f.Error}")),
                     $"{verb} · {location.Name}", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (ApiException ex)
         {
             StatusMessage = ex.Message;
-            MessageBox.Show(owner, ex.Message, $"{verb} · {location.Name}", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppMessageBox.Show(owner, ex.Message, $"{verb} · {location.Name}", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 }

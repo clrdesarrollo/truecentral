@@ -34,8 +34,15 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 builder.Host.UseWindowsService(o => o.ServiceName = ServiceSupervisor.WindowsServiceName);
 // El apagado ordenado incluye detener PostgreSQL embebido (pg_ctl stop): darle
-// margen antes de que el host (o el SCM) corte el proceso.
-builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(60));
+// margen antes de que el host (o el SCM) corte el proceso. Los servicios se
+// detienen en paralelo: el apagado dura lo que el más lento y no la suma de
+// todos (con muchos equipos la suma pasaba el tope; ver ShutdownWatch).
+builder.Services.Configure<HostOptions>(o =>
+{
+    o.ShutdownTimeout = TimeSpan.FromSeconds(
+        Math.Clamp(builder.Configuration.GetValue("Host:ShutdownTimeoutSeconds", 60), 1, 300));
+    o.ServicesStopConcurrently = true;
+});
 
 // Ajustes propios de cada instalación (puerto, rutas...). El instalador nunca
 // sobreescribe este archivo, así que los cambios sobreviven a las actualizaciones.
@@ -48,6 +55,13 @@ builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, relo
 // servidor lo inicia/detiene solo. La cadena de conexión queda disponible
 // recién después de StartAsync (más abajo), antes del primer uso del contexto.
 var postgres = new EmbeddedPostgres(builder.Configuration, builder.Environment.ContentRootPath);
+
+// Restauración de un respaldo por consola (con el servicio detenido): no levanta el servidor.
+if (TrueCentralVms.Server.Services.Backup.BackupRestore.IsRequested(args))
+{
+    Environment.ExitCode = await TrueCentralVms.Server.Services.Backup.BackupRestore.RunAsync(args, postgres, builder.Configuration);
+    return;
+}
 builder.Services.AddSingleton(postgres);
 // En tiempo de diseño (dotnet ef migrations add) el host se construye sin
 // PostgreSQL iniciado: la cadena es un marcador, solo se necesita el modelo.
@@ -56,6 +70,7 @@ builder.Services.AddDbContext<VmsDbContext>(o => o.UseNpgsql(EF.IsDesignTime
     : postgres.ConnectionString));
 
 builder.Services.AddSingleton<TokenService>();
+builder.Services.AddSingleton(_ => new LoginThrottle());
 // Alcance por ubicación de cada usuario (qué recursos ve y opera) y el hub
 // que entrega los eventos según ese alcance.
 builder.Services.AddSingleton<UserScopeService>();
@@ -69,6 +84,10 @@ builder.Services.AddSingleton<SystemMetrics>();
 builder.Services.AddSingleton<AuditService>();
 builder.Services.AddSingleton<AuditRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AuditRetentionService>());
+
+// Respaldos cifrados: diario, antes de cada actualización y a pedido (Sistema → Respaldos).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Backup.BackupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Backup.BackupService>());
 
 // Licenciamiento contra el servidor central de licencias de CLRobotics:
 // archivo .lic firmado (verificación sin conexión) + heartbeat en línea con
@@ -121,9 +140,11 @@ builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionAccessDriver
 builder.Services.AddSingleton<IAccessControlDriverFactory, HikvisionIsupAccessDriverFactory>();
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaAccessDriverFactory>();
 builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.ZkTeco.ZkTecoAccessDriverFactory>();
+builder.Services.AddSingleton<IAccessControlDriverFactory, TrueCentralVms.Drivers.ZkTeco.C3AccessDriverFactory>();
 builder.Services.AddSingleton<AccessDriverRegistry>();
 // Configuración propia de los equipos (puertas y lectores), por marca.
 builder.Services.AddSingleton<IAccessDeviceSettingsProvider, HikvisionAccessSettingsProvider>();
+builder.Services.AddSingleton<IAccessDeviceSettingsProvider, TrueCentralVms.Drivers.ZkTeco.C3AccessSettingsProvider>();
 builder.Services.AddSingleton<AccessControlService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessControlService>());
 // El padrón (personas, credenciales, horarios y niveles) lo escribe el
@@ -150,6 +171,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>())
 // Módulos de E/S: drivers, registro y servicio (una conexión por módulo, sondeo
 // de entradas y órdenes a los relés).
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Adam.AdamIoDriverFactory>();
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.ZkTeco.C3IoDriverFactory>();
 builder.Services.AddSingleton<IoModuleDriverRegistry>();
 builder.Services.AddSingleton<IoModuleService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IoModuleService>());
@@ -259,6 +281,11 @@ app.Lifetime.ApplicationStopped.Register(() => postgres.Stop(app.Logger));
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+    // Versión nueva sobre una base existente: respaldo ANTES de migrar, para poder volver si algo sale mal.
+    var pendingMigrations = (await db.Database.GetPendingMigrationsAsync()).ToList();
+    if (pendingMigrations.Count > 0 && (await db.Database.GetAppliedMigrationsAsync()).Any())
+        await app.Services.GetRequiredService<TrueCentralVms.Server.Services.Backup.BackupService>()
+            .BackupBeforeUpdateAsync(pendingMigrations, CancellationToken.None);
     await db.Database.MigrateAsync();
 
     // Control de acceso: el horario 24/7 tiene que existir desde el principio,
@@ -389,6 +416,7 @@ app.MapStreamingAuthApi();
 app.MapPlaybackApi();
 app.MapDiscoveryApi();
 app.MapSystemApi();
+app.MapBackupApi();
 app.MapLicenseApi();
 app.MapDecodersApi();
 app.MapWallsApi();
@@ -411,6 +439,7 @@ app.MapAccessRecordsApi();
 app.MapDeviceMaintenanceApi();
 app.MapWorkflowsApi();
 app.MapAlarmScreensApi();
+app.MapDashboardApi();
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);
 app.MapHub<AlarmScreenHub>(AlarmScreenProtocol.HubPath);
@@ -462,4 +491,14 @@ _ = Task.Run(async () =>
     }
 });
 
-app.Run();
+ShutdownWatch.Attach(app);
+try
+{
+    app.Run();
+}
+catch (Exception ex) when (ShutdownWatch.IsShutdownTimeout(ex))
+{
+    // El apagado superó el tope, pero ya se detuvo todo lo que se pudo
+    // (PostgreSQL incluido) y ShutdownWatch dejó constancia de quién se
+    // demoró: se sale limpio en vez de caerse.
+}

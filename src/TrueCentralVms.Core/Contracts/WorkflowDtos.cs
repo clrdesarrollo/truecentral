@@ -365,7 +365,9 @@ public sealed record WorkflowDto(
     /// <summary>El diagrama completo (siempre presente: las automatizaciones antiguas se convierten a una línea recta).</summary>
     WorkflowGraphDto Graph,
     /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
-    bool DisabledByLicense = false);
+    bool DisabledByLicense = false,
+    /// <summary>Grupo en el que se ordena en el panel; null = sin grupo.</summary>
+    string? Group = null);
 
 /// <summary>
 /// Alta/edición. Si viene <paramref name="Graph"/>, las acciones salen de sus
@@ -380,7 +382,15 @@ public sealed record WorkflowWriteDto(
     WorkflowConditionsDto? Conditions,
     int CooldownSeconds,
     IReadOnlyList<WorkflowActionWriteDto>? Actions = null,
-    WorkflowGraphDto? Graph = null);
+    WorkflowGraphDto? Graph = null,
+    /// <summary>Grupo; null = no cambiarlo (clientes antiguos), "" = sacarla de su grupo.</summary>
+    string? Group = null);
+
+/// <summary>Mover varias automatizaciones a un grupo (Group vacío o null = sin grupo).</summary>
+public sealed record WorkflowGroupAssignDto(IReadOnlyList<int> Ids, string? Group);
+
+/// <summary>Renombrar un grupo completo (To vacío o null = disolverlo: quedan sin grupo).</summary>
+public sealed record WorkflowGroupRenameDto(string From, string? To);
 
 /// <summary>Resultado de un paso (acción, condición o espera) dentro de una ejecución.</summary>
 public sealed record WorkflowRunStepDto(

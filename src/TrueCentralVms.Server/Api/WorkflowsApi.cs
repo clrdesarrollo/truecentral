@@ -341,7 +341,8 @@ public static class WorkflowsApi
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out _) is { } failure) return failure;
             var workflows = await db.Workflows.AsNoTracking().Include(w => w.Actions)
                 .OrderBy(w => w.Name).ToListAsync(ct);
-            return Results.Ok(workflows.Select(WorkflowMapper.ToDto));
+            bool showHookKey = ApiSecurity.Has(ctx, Permissions.WorkflowsManage);
+            return Results.Ok(workflows.Select(w => showHookKey ? WorkflowMapper.ToDto(w) : WorkflowMapper.WithoutHookKey(WorkflowMapper.ToDto(w))));
         });
 
         app.MapGet("/api/workflows/{id:int}", async (HttpContext ctx, int id, VmsDbContext db, CancellationToken ct) =>
@@ -349,7 +350,10 @@ public static class WorkflowsApi
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out _) is { } failure) return failure;
             var workflow = await db.Workflows.AsNoTracking().Include(w => w.Actions)
                 .FirstOrDefaultAsync(w => w.Id == id, ct);
-            return workflow is null ? Results.NotFound() : Results.Ok(WorkflowMapper.ToDto(workflow));
+            if (workflow is null) return Results.NotFound();
+            // La clave del webhook es su credencial: solo la ve quien puede administrar automatizaciones.
+            var dto = WorkflowMapper.ToDto(workflow);
+            return Results.Ok(ApiSecurity.Has(ctx, Permissions.WorkflowsManage) ? dto : WorkflowMapper.WithoutHookKey(dto));
         });
 
         app.MapPost("/api/workflows", async (HttpContext ctx, WorkflowWriteDto request, VmsDbContext db, LicenseService license,
@@ -367,6 +371,7 @@ public static class WorkflowsApi
             {
                 Name = request.Name.Trim(),
                 Description = Clean(request.Description),
+                GroupName = CleanGroup(request.Group),
                 Enabled = request.Enabled,
                 TriggerType = request.TriggerType,
                 ConditionsJson = WorkflowJson.Serialize(NormalizeConditions(request)),
@@ -403,6 +408,8 @@ public static class WorkflowsApi
 
             workflow.Name = request.Name.Trim();
             workflow.Description = Clean(request.Description);
+            string? groupBefore = workflow.GroupName;
+            if (request.Group is not null) workflow.GroupName = CleanGroup(request.Group);
             if (!workflow.Enabled && request.Enabled
                 && license.Deny(LicenseFeatures.ModuleAutomation, LicenseFeatures.AutomationRules,
                     await db.Workflows.CountAsync(w => w.Enabled && w.Id != id, ct)) is { } denied)
@@ -427,9 +434,51 @@ public static class WorkflowsApi
                 detail: $"Modificó la automatización '{workflow.Name}': antes {before}; ahora " +
                         $"{(workflow.Enabled ? "activa" : "pausada")}, {workflow.Actions.Count} acción(es) " +
                         $"({ActionSummary(workflow, engine)}), disparador {TriggerLabel(workflow.TriggerType)}" +
-                        (request.Graph is not null ? $", diagrama de {request.Graph.Nodes.Count} pasos." : "."),
-                data: new { workflow.TriggerType, workflow.Enabled, Conditions = request.Conditions });
+                        (request.Graph is not null ? $", diagrama de {request.Graph.Nodes.Count} pasos" : "") +
+                        (groupBefore != workflow.GroupName ? $"; grupo {GroupLabel(groupBefore)} → {GroupLabel(workflow.GroupName)}." : "."),
+                data: new { workflow.TriggerType, workflow.Enabled, Conditions = request.Conditions, Group = workflow.GroupName });
             return Results.Ok(WorkflowMapper.ToDto(workflow));
+        });
+
+        // Grupos: solo ordenan el listado del panel (el motor no los mira).
+        app.MapPost("/api/workflows/group", async (HttpContext ctx, WorkflowGroupAssignDto request, VmsDbContext db,
+            AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out _) is { } failure) return failure;
+            var ids = (request.Ids ?? []).Distinct().ToList();
+            if (ids.Count == 0) return Error("Elija al menos una automatización.");
+            string? group = CleanGroup(request.Group);
+            var workflows = await db.Workflows.Where(w => ids.Contains(w.Id)).ToListAsync(ct);
+            if (workflows.Count == 0) return Results.NotFound();
+            foreach (var w in workflows) { w.GroupName = group; w.UpdatedAt = DateTime.UtcNow; }
+            await db.SaveChangesAsync(ct);
+            string names = string.Join(", ", workflows.Select(w => $"'{w.Name}'").Take(10)) + (workflows.Count > 10 ? "…" : "");
+            await audit.LogAsync(ctx, "workflows", "workflow-group-changed",
+                targetType: "workflow", targetId: string.Join(",", workflows.Select(w => w.Id)),
+                targetName: group ?? "Sin grupo",
+                detail: $"Movió {workflows.Count} automatización(es) a {GroupLabel(group)}: {names}.",
+                data: new { Ids = workflows.Select(w => w.Id), Group = group });
+            return Results.Ok(new { moved = workflows.Count, group });
+        });
+
+        app.MapPost("/api/workflows/group/rename", async (HttpContext ctx, WorkflowGroupRenameDto request, VmsDbContext db,
+            AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out _) is { } failure) return failure;
+            string? from = CleanGroup(request.From);
+            if (from is null) return Error("Indique el grupo a renombrar.");
+            string? to = CleanGroup(request.To);
+            var workflows = await db.Workflows.Where(w => w.GroupName == from).ToListAsync(ct);
+            if (workflows.Count == 0) return Results.NotFound();
+            foreach (var w in workflows) { w.GroupName = to; w.UpdatedAt = DateTime.UtcNow; }
+            await db.SaveChangesAsync(ct);
+            await audit.LogAsync(ctx, "workflows", "workflow-group-renamed",
+                targetType: "workflow-group", targetId: from, targetName: from,
+                detail: to is null
+                    ? $"Disolvió el grupo '{from}': sus {workflows.Count} automatización(es) quedaron sin grupo."
+                    : $"Renombró el grupo '{from}' a '{to}' ({workflows.Count} automatización(es)).",
+                data: new { From = from, To = to, Count = workflows.Count });
+            return Results.Ok(new { renamed = workflows.Count, group = to });
         });
 
         app.MapDelete("/api/workflows/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
@@ -476,6 +525,7 @@ public static class WorkflowsApi
             {
                 Name = name,
                 Description = source.Description,
+                GroupName = source.GroupName,
                 Enabled = false,
                 TriggerType = source.TriggerType,
                 ConditionsJson = WorkflowJson.Serialize(conditions),
@@ -739,6 +789,10 @@ public static class WorkflowsApi
                 settings = new SmtpSettings { Id = 1 };
                 db.SmtpSettings.Add(settings);
             }
+            // La contraseña guardada no viaja a otro servidor de correo (lo mismo que con los equipos).
+            if (string.IsNullOrEmpty(request.Password) && settings.PasswordCiphertext is { Length: > 0 }
+                && !StoredPassword.CanReuse(settings.Host, request.Host))
+                return Error("Cambió el servidor de correo: escriba de nuevo la contraseña. La guardada no se envía a otro servidor.");
             settings.Enabled = request.Enabled;
             settings.Host = request.Host.Trim();
             settings.Port = request.Port;
@@ -942,6 +996,15 @@ public static class WorkflowsApi
         }
         return conditions;
     }
+
+    /// <summary>Nombre de grupo normalizado (espacios, máx. 64); null = sin grupo.</summary>
+    private static string? CleanGroup(string? group)
+    {
+        string text = string.Join(' ', (group ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return text.Length == 0 ? null : text.Length > 64 ? text[..64].TrimEnd() : text;
+    }
+
+    private static string GroupLabel(string? group) => group is null ? "sin grupo" : $"el grupo '{group}'";
 
     /// <summary>Vuelca las acciones: desde el diagrama si viene, o la lista lineal (clientes antiguos).</summary>
     private static void Apply(Workflow workflow, WorkflowWriteDto request,

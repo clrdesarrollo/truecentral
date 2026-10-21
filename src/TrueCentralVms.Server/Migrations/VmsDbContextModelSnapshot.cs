@@ -62,6 +62,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AppliedHolidayHash")
+                        .HasColumnType("text");
+
                     b.Property<string>("CapabilityProfileJson")
                         .HasColumnType("text");
 
@@ -88,6 +91,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<string>("FirmwareVersion")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
+
+                    b.Property<string>("HolidayNote")
+                        .HasColumnType("text");
 
                     b.Property<string>("Host")
                         .IsRequired()
@@ -387,6 +393,13 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("hikvision");
+
                     b.Property<int>("Number")
                         .HasColumnType("integer");
 
@@ -403,10 +416,45 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AccessPersonId", "Number")
+                    b.HasIndex("AccessPersonId", "Number", "Format")
                         .IsUnique();
 
                     b.ToTable("AccessFingerprints");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessHoliday", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Yearly")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartDate");
+
+                    b.ToTable("AccessHolidays");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessLevel", b =>
@@ -661,6 +709,13 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
+
+                    b.Property<string>("HolidayMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Normal");
 
                     b.Property<bool>("IsBuiltIn")
                         .HasColumnType("boolean");
@@ -3251,6 +3306,10 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<string>("GraphJson")
                         .HasColumnType("text");
+
+                    b.Property<string>("GroupName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime?>("LastRunAt")
                         .HasColumnType("timestamp with time zone");

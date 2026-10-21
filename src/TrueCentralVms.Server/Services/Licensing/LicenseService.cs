@@ -201,6 +201,8 @@ public sealed class LicenseService : BackgroundService
                  // Liberar puestos de cliente: justo lo que hace falta cuando
                  // la licencia no da para que entre alguien más.
                  || path.StartsWithSegments("/api/system/desktop-seats")
+                 // Respaldar es la seguridad de los datos del cliente: nunca depende de la licencia.
+                 || path.StartsWithSegments("/api/system/backups")
                  || path.StartsWithSegments("/api/streaming")
                  || path.StartsWithSegments("/api/audit/client-event"));
     }
@@ -251,13 +253,13 @@ public sealed class LicenseService : BackgroundService
 
     private LicenseStatusDto ToDto(LicenseSnapshot s, IReadOnlyDictionary<string, int> usage)
     {
-        var modules = LicenseFeatures.Modules.Concat(LicenseFeatures.BaseQuotas).Select(m => new LicenseModuleDto(
+        var modules = LicenseFeatures.BaseQuotas.Concat(LicenseFeatures.Modules).Select(m => new LicenseModuleDto(
             m.Name, m.ModuleKey,
             Enabled: s.Operational && (m.ModuleKey is null || s.Features.IsEnabled(m.ModuleKey)),
             m.QuotaKey,
             Quota: m.QuotaKey is null ? null : s.Features.Quota(m.QuotaKey),
             InUse: m.QuotaKey is null ? null : usage.GetValueOrDefault(m.QuotaKey),
-            m.Unit)).ToList();
+            m.Unit, m.Area)).ToList();
         var addons = (s.Payload?.Addons ?? []).Select(a => new LicenseAddonDto(
             a.LicenseKey, a.Package, LicensePayload.ParseUtc(a.ExpiresAt), SummarizeAddon(a))).ToList();
         return new LicenseStatusDto(
@@ -265,7 +267,85 @@ public sealed class LicenseService : BackgroundService
             s.Payload?.LicenseKey, s.Payload?.Customer?.Name, s.Payload?.Package,
             s.Payload?.IssuedAtUtc, s.ExpiresUtc, s.LastValidatedUtc, s.NextValidationUtc, s.GraceEndsUtc,
             s.DaysRemaining, HardwareIdentifier, Environment.MachineName, ServerVersion,
-            Server.IsConfigured, Server.ServerUrl, modules, addons);
+            Server.IsConfigured, Server.ServerUrl, modules, addons, BuildCodes(s.Payload));
+    }
+
+    /// <summary>
+    /// Códigos instalados: la base y cada expansión con lo que aporta. El .lic
+    /// trae las características EFECTIVAS (base + expansiones) y, aparte, las
+    /// propias de cada expansión; lo de la base es la diferencia (los enteros
+    /// se restan; un módulo es de la base si ninguna expansión lo trae).
+    /// </summary>
+    private static IReadOnlyList<LicenseCodeDto> BuildCodes(LicensePayload? payload)
+    {
+        if (payload is null) return [];
+        var baseValues = new Dictionary<string, (int? Number, bool? Flag)>();
+        foreach (var (key, element) in payload.Features)
+        {
+            if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out int n))
+            {
+                int fromAddons = payload.Addons.Sum(a => a.Features.TryGetValue(key, out var v)
+                    && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out int x) ? x : 0);
+                baseValues[key] = (Math.Max(0, n - fromAddons), null);
+            }
+            else if (element.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                bool fromAddon = payload.Addons.Any(a => a.Features.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.True);
+                baseValues[key] = (null, element.ValueKind == JsonValueKind.True && !fromAddon);
+            }
+        }
+
+        var codes = new List<LicenseCodeDto>
+        {
+            new(payload.LicenseKey, "Base", payload.Package, payload.IssuedAtUtc, payload.ExpiresAtUtc,
+                SummarizeItems(CodeItems(baseValues, includeEmptyQuotas: true)), CodeItems(baseValues, includeEmptyQuotas: true)),
+        };
+        foreach (var addon in payload.Addons)
+        {
+            var values = new Dictionary<string, (int? Number, bool? Flag)>();
+            foreach (var (key, element) in addon.Features)
+            {
+                if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out int n)) values[key] = (n, null);
+                else if (element.ValueKind is JsonValueKind.True or JsonValueKind.False) values[key] = (null, element.ValueKind == JsonValueKind.True);
+            }
+            codes.Add(new LicenseCodeDto(addon.LicenseKey, "Expansion", addon.Package, null,
+                LicensePayload.ParseUtc(addon.ExpiresAt), SummarizeAddon(addon), CodeItems(values, includeEmptyQuotas: false)));
+        }
+        return codes;
+    }
+
+    /// <summary>
+    /// Lo que aporta un código, en el orden y con los nombres del catálogo de
+    /// presentación. Una expansión muestra solo lo que suma; la base, también
+    /// los cupos en cero de sus módulos incluidos.
+    /// </summary>
+    private static IReadOnlyList<LicenseCodeItemDto> CodeItems(
+        IReadOnlyDictionary<string, (int? Number, bool? Flag)> values, bool includeEmptyQuotas)
+    {
+        var items = new List<LicenseCodeItemDto>();
+        var shownModules = new HashSet<string>();
+        foreach (var m in LicenseFeatures.BaseQuotas.Concat(LicenseFeatures.Modules))
+        {
+            bool moduleOn = m.ModuleKey is not null && values.TryGetValue(m.ModuleKey, out var mv) && mv.Flag == true;
+            string? quota = null;
+            if (m.QuotaKey is not null && values.TryGetValue(m.QuotaKey, out var q) && q.Number is { } n
+                && (n > 0 || (includeEmptyQuotas && (m.ModuleKey is null || moduleOn))))
+                quota = includeEmptyQuotas ? $"{n} {m.Unit}" : $"+{n} {m.Unit}";
+            // El módulo y su cupo van en una sola fila ("Incluido · 32 canales de video").
+            if (moduleOn && shownModules.Add(m.ModuleKey!))
+                items.Add(new LicenseCodeItemDto(m.Area, m.Name, quota is null ? IncludedLabel : $"{IncludedLabel} · {quota}"));
+            else if (quota is not null)
+                items.Add(new LicenseCodeItemDto(m.Area, m.Name, quota));
+        }
+        return items;
+    }
+
+    private const string IncludedLabel = "Incluido";
+
+    private static string SummarizeItems(IReadOnlyList<LicenseCodeItemDto> items)
+    {
+        int modules = items.Count(i => i.Value.StartsWith(IncludedLabel, StringComparison.Ordinal));
+        return modules == 0 ? "—" : $"{modules} módulo(s)";
     }
 
     private static string SummarizeAddon(LicenseAddon addon)
@@ -400,14 +480,27 @@ public sealed class LicenseService : BackgroundService
     }
 
     /// <summary>Archivo de solicitud (.req) para activar un equipo sin internet desde el backoffice de CLRobotics.</summary>
-    public LicenseActivationRequestDto BuildActivationRequest(string activationCode)
+    public LicenseActivationRequestDto BuildActivationRequest(string activationCode) =>
+        BuildActivationRequest([activationCode]);
+
+    /// <summary>
+    /// Solicitud (.req) para una lista de códigos: el archivo se sube en la
+    /// licencia BASE del backoffice (su .lic ya trae las expansiones ligadas),
+    /// así que <c>activation_code</c> es la base instalada o, si aún no hay, el
+    /// primer código. Los demás van en <c>addon_codes</c> para que soporte
+    /// sepa qué expansiones espera el cliente (el servidor de licencias no lo lee).
+    /// </summary>
+    public LicenseActivationRequestDto BuildActivationRequest(IEnumerable<string?> codes)
     {
-        activationCode = NormalizeCode(activationCode);
+        var list = codes.Select(NormalizeCode).Where(c => c.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        string activationCode = _payload?.LicenseKey ?? list.FirstOrDefault() ?? "";
+        var addonCodes = list.Where(c => !string.Equals(c, activationCode, StringComparison.OrdinalIgnoreCase)).ToList();
         var request = new
         {
             schema_version = LicensingConstants.ActivationRequestSchema,
             product = LicenseFeatures.ProductCode,
             activation_code = activationCode,
+            addon_codes = addonCodes.Count > 0 ? addonCodes : null,
             hardware_id = HardwareIdentifier,
             hostname = Environment.MachineName,
             os_info = OsInfo(),
@@ -457,7 +550,7 @@ public sealed class LicenseService : BackgroundService
                 "licencia base, que ya la incluye.");
 
         string baseCode = _state.ActivationCode ?? payload.LicenseKey;
-        var check = await Server.CheckAddonAsync(code, baseCode, ct);
+        var check = await Server.CheckAddonAsync(code, baseCode, HardwareIdentifier, ct);
         if (!check.Reachable)
             return LicenseOperationResult.Fail(check.Message);
         if (!check.Success || check.Valid != true)
@@ -470,6 +563,60 @@ public sealed class LicenseService : BackgroundService
         return arrived
             ? LicenseOperationResult.Ok($"Expansión {code} aplicada: {check.Summary ?? "cupos actualizados"}.")
             : LicenseOperationResult.Fail($"La expansión {code} es válida, pero el archivo de licencia todavía no la trae. Intente «Revalidar ahora» en unos minutos.");
+    }
+
+    /// <summary>
+    /// Ingreso único en línea: la licencia base y sus expansiones en una sola
+    /// lista, en cualquier orden. Sin base instalada, la base es el primer
+    /// código que el servidor de licencias acepta activar; el resto (y los que
+    /// no eran base) se suman como expansiones. Con base instalada, su propio
+    /// código revalida y los demás se suman como expansiones.
+    /// </summary>
+    public async Task<LicenseApplyResultDto> ApplyCodesAsync(IEnumerable<string?> rawCodes, CancellationToken ct)
+    {
+        var codes = rawCodes.Select(NormalizeCode).Where(c => c.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (codes.Count == 0)
+            return new LicenseApplyResultDto(false, "Ingrese al menos un código.", []);
+        if (!Server.IsConfigured)
+            return new LicenseApplyResultDto(false,
+                "Este servidor no está conectado al servidor de licencias: elija «Sin internet» para activarla con archivos.", []);
+
+        var results = new Dictionary<string, LicenseApplyItemDto>(StringComparer.OrdinalIgnoreCase);
+        string? baseCode = _payload?.LicenseKey;
+        if (baseCode is null)
+        {
+            foreach (string code in codes)
+            {
+                var activation = await ActivateOnlineAsync(code, ct);
+                results[code] = new LicenseApplyItemDto(code, activation.Success ? "Base" : null, activation.Success, activation.Message, "activate");
+                if (activation.Success) { baseCode = _payload?.LicenseKey ?? code; break; }
+            }
+            if (baseCode is null)
+                return new LicenseApplyResultDto(false,
+                    "Ninguno de los códigos se pudo activar como licencia base. Una expansión se suma a una licencia ya activa: ingrese también el código de la licencia base.",
+                    codes.Select(c => results[c]).ToList());
+        }
+
+        foreach (string code in codes)
+        {
+            if (results.TryGetValue(code, out var done) && done.Success) continue;
+            if (string.Equals(code, baseCode, StringComparison.OrdinalIgnoreCase))
+            {
+                var refresh = await RefreshAsync(ct);
+                results[code] = new LicenseApplyItemDto(code, "Base", refresh.Success,
+                    refresh.Success ? $"Licencia base {code} revalidada." : refresh.Message, "refresh");
+                continue;
+            }
+            var addon = await AddAddonAsync(code, ct);
+            results[code] = new LicenseApplyItemDto(code, addon.Success ? "Expansion" : null, addon.Success, addon.Message, "addon");
+        }
+
+        var items = codes.Select(c => results[c]).ToList();
+        int ok = items.Count(i => i.Success);
+        string message = ok == items.Count
+            ? (items.Count == 1 ? items[0].Message : $"Se aplicaron los {items.Count} códigos.")
+            : $"Se aplicaron {ok} de {items.Count} códigos; revise el detalle de cada uno.";
+        return new LicenseApplyResultDto(ok == items.Count, message, items);
     }
 
     /// <summary>

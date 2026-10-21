@@ -68,6 +68,19 @@ public static class StreamingAuthApi
                 return Results.Unauthorized();
             }
 
+            // API de control: solo el propio servidor, desde loopback y con
+            // el secreto por arranque (ver MediaMtxManager.ApiHttp).
+            if (action == "api")
+            {
+                if (ip is "127.0.0.1" or "::1" && GetString("user") == Services.MediaMtxManager.ApiUser &&
+                    CryptographicOperations.FixedTimeEquals(
+                        System.Text.Encoding.UTF8.GetBytes(GetString("password")),
+                        System.Text.Encoding.UTF8.GetBytes(mtx.PublishSecret)))
+                    return Results.Ok();
+                logger.LogWarning("MediaMTX: llamada a la API de control rechazada (ip {Ip}).", ip);
+                return Results.Unauthorized();
+            }
+
             if (action != "read")
             {
                 logger.LogWarning("MediaMTX: acción '{Action}' rechazada (ruta '{Path}', ip {Ip}).", action, path, ip);
@@ -87,6 +100,11 @@ public static class StreamingAuthApi
                 return Results.Unauthorized();
             }
 
+            // Lector = relé MSE del propio servidor (panel web, H.265 con
+            // B-frames): la sesión es del navegador cuya IP trae la concesión.
+            string viewerIp = grant.ViewerIp ?? ip;
+            if (grant.ViewerIp is not null) fromWeb = true;
+
             // DESCRIBE y PLAY llegan como callbacks separados: solo el primero
             // por token crea la fila de auditoría (los demás solo autorizan).
             if (!streamTokens.TryMarkSessionRecorded(token))
@@ -101,14 +119,14 @@ public static class StreamingAuthApi
                 DeviceName = grant.DeviceName,
                 RtspChannel = grant.RtspChannel,
                 Profile = grant.Profile,
-                ClientIp = ip,
+                ClientIp = viewerIp,
                 Path = path,
                 MtxSessionId = mtxId,
             });
             await db.SaveChangesAsync();
             if (fromWeb) streamTokens.MarkWebSession(mtxId);
             logger.LogInformation("Streaming: {User} comenzó a ver {Device} canal {Channel} ({Profile}) desde {Ip}{Origin}.",
-                grant.Username, grant.DeviceName, grant.RtspChannel, grant.Profile, ip, fromWeb ? " (panel web)" : "");
+                grant.Username, grant.DeviceName, grant.RtspChannel, grant.Profile, viewerIp, fromWeb ? " (panel web)" : "");
 
             // El inicio de reproducción de grabaciones se audita en su propio
             // endpoint (con el rango pedido); aquí solo el vivo.
@@ -117,7 +135,7 @@ public static class StreamingAuthApi
                     targetType: "intercom", targetId: viewedIntercom.ToString(), targetName: grant.DeviceName,
                     detail: $"Comenzó a ver la cámara del frente de citofonía '{grant.DeviceName}' " +
                             $"({(grant.Profile == "main" ? "stream principal" : "stream secundario")}).",
-                    userId: grant.UserId, username: grant.Username, clientIp: ip, origin: fromWeb ? "web" : "client");
+                    userId: grant.UserId, username: grant.Username, clientIp: viewerIp, origin: fromWeb ? "web" : "client");
             else if (grant.Profile is "main" or "sub")
                 await audit.LogSystemAsync("live", "view-started",
                     targetType: "channel", targetId: $"{grant.DeviceId}/{grant.RtspChannel}",
@@ -125,7 +143,7 @@ public static class StreamingAuthApi
                     detail: $"Comenzó a ver '{grant.DeviceName}' canal {grant.RtspChannel} " +
                             $"({(grant.Profile == "main" ? "stream principal" : "stream secundario")})" +
                             (fromWeb ? " desde el panel web." : "."),
-                    userId: grant.UserId, username: grant.Username, clientIp: ip, origin: fromWeb ? "web" : "client");
+                    userId: grant.UserId, username: grant.Username, clientIp: viewerIp, origin: fromWeb ? "web" : "client");
 
             await SessionAccounting.BroadcastActiveSessionsAsync(db, hub);
             return Results.Ok();

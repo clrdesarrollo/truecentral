@@ -14,6 +14,9 @@ public class Workflow
     public string Name { get; set; } = "";
     public string? Description { get; set; }
 
+    /// <summary>Grupo para ordenarlas en el panel (texto libre, p. ej. "Casa matriz · Accesos"); null = sin grupo.</summary>
+    public string? GroupName { get; set; }
+
     /// <summary>Pausada = el motor la ignora (no borra el historial).</summary>
     public bool Enabled { get; set; } = true;
     /// <summary>

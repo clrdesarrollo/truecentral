@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Server.Data.Entities;
 
 namespace TrueCentralVms.Server.Data;
@@ -58,6 +58,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<AccessDoor> AccessDoors => Set<AccessDoor>();
     public DbSet<AccessSchedule> AccessSchedules => Set<AccessSchedule>();
     public DbSet<AccessPlanSlot> AccessPlanSlots => Set<AccessPlanSlot>();
+    public DbSet<AccessHoliday> AccessHolidays => Set<AccessHoliday>();
     public DbSet<AccessScheduleSegment> AccessScheduleSegments => Set<AccessScheduleSegment>();
     public DbSet<AccessLevel> AccessLevels => Set<AccessLevel>();
     public DbSet<AccessLevelDoor> AccessLevelDoors => Set<AccessLevelDoor>();
@@ -439,7 +440,15 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         {
             e.Property(s => s.Name).HasMaxLength(128);
             e.Property(s => s.Description).HasMaxLength(512);
+            e.Property(s => s.HolidayMode).HasConversion<string>().HasMaxLength(16)
+                .HasDefaultValue(TrueCentralVms.Core.Contracts.AccessHolidayMode.Normal);
             e.HasIndex(s => s.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessHoliday>(e =>
+        {
+            e.Property(h => h.Name).HasMaxLength(128);
+            e.HasIndex(h => h.StartDate);
         });
 
         modelBuilder.Entity<AccessPlanSlot>(e =>
@@ -532,12 +541,15 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         modelBuilder.Entity<AccessFingerprint>(e =>
         {
             e.Property(f => f.Source).HasMaxLength(128);
+            e.Property(f => f.Format).HasMaxLength(16)
+                .HasDefaultValue(TrueCentralVms.Core.Drivers.AccessFingerprintFormats.Hikvision);
             e.HasOne(f => f.AccessPerson)
                 .WithMany(p => p.Fingerprints)
                 .HasForeignKey(f => f.AccessPersonId)
                 .OnDelete(DeleteBehavior.Cascade);
-            // Un dedo por persona: volver a capturar el mismo reemplaza la anterior.
-            e.HasIndex(f => new { f.AccessPersonId, f.Number }).IsUnique();
+            // Un dedo por persona Y formato: volver a capturar el mismo reemplaza
+            // la anterior, y el mismo dedo puede estar para Hikvision y ZKTeco.
+            e.HasIndex(f => new { f.AccessPersonId, f.Number, f.Format }).IsUnique();
         });
 
         modelBuilder.Entity<AccessFace>(e =>
@@ -709,6 +721,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         {
             e.Property(w => w.Name).HasMaxLength(128);
             e.Property(w => w.Description).HasMaxLength(512);
+            e.Property(w => w.GroupName).HasMaxLength(64);
             e.Property(w => w.TriggerType).HasMaxLength(32);
             e.Property(w => w.CreatedBy).HasMaxLength(64);
             e.HasIndex(w => w.Name).IsUnique();

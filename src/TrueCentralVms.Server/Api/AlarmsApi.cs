@@ -267,6 +267,8 @@ public static class AlarmsApi
             int? previousLocation = panel.LocationId;
             panel.LocationId = locationId;
 
+            if (!viaIsup && string.IsNullOrEmpty(request.Password) && !StoredPassword.CanReuse(panel.Host, request.Host))
+                return Error(StoredPassword.RetypeMessage);
             string password = viaIsup ? ""
                 : string.IsNullOrEmpty(request.Password) ? protector.Unprotect(panel.PasswordCiphertext) : request.Password;
             if (!viaIsup && password.Length == 0) return Error("La contraseña del panel es obligatoria.");
@@ -409,7 +411,10 @@ public static class AlarmsApi
                 string? password = request.Password;
                 if (string.IsNullOrEmpty(password) && panelId is int existingId &&
                     await db.AlarmPanels.FindAsync([existingId], ct) is { } existing)
+                {
+                    if (!StoredPassword.CanReuse(existing.Host, request.Host)) return Error(StoredPassword.RetypeMessage);
                     password = protector.Unprotect(existing.PasswordCiphertext);
+                }
                 if (string.IsNullOrEmpty(password))
                     return Error("La contraseña del panel es obligatoria.");
                 conn = new AlarmConnectionInfo(request.Host.Trim(), request.Port, request.UseHttps, request.Username, password);

@@ -427,6 +427,8 @@ public static class DevicesApi
             int? previousLocation = device.LocationId;
             device.LocationId = locationId;
 
+            if (!viaIsup && string.IsNullOrEmpty(request.Password) && !StoredPassword.CanReuse(device.Host, request.Host))
+                return Error(StoredPassword.RetypeMessage);
             string password = viaIsup ? ""
                 : !string.IsNullOrEmpty(request.Password) ? request.Password
                 : device.PasswordCiphertext.Length > 0 ? protector.Unprotect(device.PasswordCiphertext)
@@ -623,7 +625,10 @@ public static class DevicesApi
             {
                 string? password = request.Password;
                 if (string.IsNullOrEmpty(password) && existing is { PasswordCiphertext.Length: > 0 })
+                {
+                    if (!StoredPassword.CanReuse(existing.Host, request.Host)) return Error(StoredPassword.RetypeMessage);
                     password = protector.Unprotect(existing.PasswordCiphertext);
+                }
                 if (string.IsNullOrEmpty(password))
                     return Error("La contraseña del dispositivo es obligatoria.");
                 conn = new DeviceConnectionInfo(request.Host.Trim(), request.SdkPort, request.Username, password);

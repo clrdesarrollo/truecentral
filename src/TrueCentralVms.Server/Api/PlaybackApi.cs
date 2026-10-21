@@ -162,97 +162,101 @@ public static class PlaybackApi
         {
             if (ApiSecurity.Require(ctx, Permissions.PlaybackView, out var session) is { } failure) return failure;
 
-            if (!mtx.IsRunning)
-                return Results.Json(new { error = "El servicio de streaming no está disponible en el servidor." },
+            var grant = await PrepareGrantAsync(ctx, session, request, db, drivers, protector, streamTokens, mtx, relays, audit, ct);
+            if (grant.Failure is not null) return grant.Failure;
+            string url = StreamsApi.PublicRtspUrl(ctx, config, mtx, grant.Path, grant.Token);
+            return Results.Ok(new StreamGrantDto(url, grant.Token, grant.ExpiresAt, grant.ExactSeek));
+        });
+
+        // ------------------------------------------------------------------
+        // Reproducción en el panel web (WebRTC/WHEP): la MISMA concesión que
+        // el RTSP del cliente de escritorio (permiso, alcance, ruta dinámica,
+        // auditoría) y luego la oferta del navegador a la señalización local
+        // de MediaMTX, como la vista en vivo web. Saltar en la línea de tiempo
+        // o cambiar la velocidad es otra solicitud (otra ruta).
+        // ------------------------------------------------------------------
+        app.MapPost("/api/playback/webrtc", async (HttpContext ctx, PlaybackWebRtcOfferDto request, VmsDbContext db,
+            DriverRegistry drivers, CredentialProtector protector, StreamTokenService streamTokens,
+            MediaMtxManager mtx, Services.Rtsp.PlaybackRelayManager relays, AuditService audit,
+            ILogger<Program> logger, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.PlaybackView, out var session) is { } failure) return failure;
+
+            if (!mtx.WebRtcEnabled)
+                return Results.Json(new { error = "El video del panel web está deshabilitado en este servidor (Streaming:WebRtcIcePort = 0)." },
                     statusCode: StatusCodes.Status503ServiceUnavailable);
+            if (string.IsNullOrWhiteSpace(request.Offer) || request.Offer.Length > 64 * 1024 || !request.Offer.StartsWith("v=0"))
+                return Results.Json(new { error = "Oferta WebRTC inválida." }, statusCode: StatusCodes.Status400BadRequest);
 
-            if (request.EndLocal <= request.StartLocal ||
-                request.EndLocal - request.StartLocal > TimeSpan.FromHours(24))
-                return Results.Json(new { error = "El rango de reproducción es inválido (máximo 24 horas)." },
-                    statusCode: StatusCodes.Status422UnprocessableEntity);
+            var range = new PlaybackRequestDto(request.DeviceId, request.RtspChannel, request.StartLocal, request.EndLocal,
+                request.Speed <= 0 ? 1 : request.Speed);
+            var grant = await PrepareGrantAsync(ctx, session, range, db, drivers, protector, streamTokens, mtx, relays, audit, ct);
+            if (grant.Failure is not null) return grant.Failure;
 
-            var channel = await db.Channels.Include(c => c.Device)
-                .FirstOrDefaultAsync(c => c.DeviceId == request.DeviceId && c.RtspChannel == request.RtspChannel, ct);
-            if (channel is null) return Results.NotFound();
-            if (!channel.Enabled)
-                return Results.Json(new { error = "El canal está deshabilitado." },
-                    statusCode: StatusCodes.Status422UnprocessableEntity);
-            if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
-                return await ctx.OutOfScopeAsync(session, "channel", $"{request.DeviceId}/{request.RtspChannel}",
-                    $"{channel.Device.Name} · {channel.Name}", "reproducir grabaciones de");
-
-            var device = channel.Device;
-            if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
-                return Results.Json(new { error = "El driver del equipo no está disponible." },
-                    statusCode: StatusCodes.Status422UnprocessableEntity);
-
-            var conn = DeviceConnections.Of(device, protector);
-            string? source;
+            var remote = ctx.Connection.RemoteIpAddress;
+            string? clientIp = remote is null ? null : (remote.IsIPv4MappedToIPv6 ? remote.MapToIPv4() : remote).ToString();
+            MediaMtxManager.WhepAnswer answer;
             try
             {
-                source = await driver.ResolvePlaybackUrlAsync(conn, device.RtspPort, request.RtspChannel,
-                    request.StartLocal, request.EndLocal, ct);
+                answer = await mtx.WhepOfferAsync(grant.Path, grant.Token, request.Offer, clientIp, ct);
             }
-            catch (DriverException ex)
+            catch (Exception ex) when ((ex is HttpRequestException or TaskCanceledException) && !ct.IsCancellationRequested)
             {
-                return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status422UnprocessableEntity);
+                logger.LogWarning("WebRTC: la señalización de MediaMTX no respondió para '{Path}': {Message}", grant.Path, ex.Message);
+                return Results.Json(new { error = "El equipo no entregó la grabación a tiempo. Reintente en unos segundos." },
+                    statusCode: StatusCodes.Status504GatewayTimeout);
             }
-            if (source is null)
-                return Results.Json(new { error = "Este equipo aún no soporta reproducción remota desde el VMS." },
-                    statusCode: StatusCodes.Status422UnprocessableEntity);
 
-            // Nombre plano y único: cada espectador/rango tiene su propia ruta.
-            // Lleva el id del espectador porque al montar la ruta se cierran
-            // las hermanas —mismo prefijo— para que el equipo libere la sesión
-            // anterior de ESE canal sin tocar la de otro operador.
-            string path = $"pb-{device.Id}-{request.RtspChannel}-{session.UserId}-" +
-                          Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
+            if (answer.Status is 200 or 201 && answer.SessionUrl is { } sessionUrl)
+                return Results.Ok(new PlaybackWebRtcAnswerDto(answer.Body,
+                    mtx.RegisterWhepSession(session.UserId, sessionUrl), grant.Path, grant.ExactSeek));
 
-            // A 1× manda MediaMTX, que pulsa el equipo (camino de siempre).
-            // A otra velocidad el servidor toma la sesión RTSP para poder
-            // pedirle al equipo que entregue más rápido (cabecera Scale), y
-            // publica él mismo en la ruta.
-            double speed = request.Speed;
-            bool accelerated = speed > 0 && Math.Abs(speed - 1) > 0.01;
-            // Por ISUP el equipo entrega la grabación por su conexión con el servidor, sin la cabecera Scale del RTSP.
-            if (accelerated && Core.Isup.IsupGateway.IsMediaSource(source))
-                return Results.Json(new { error = "Los equipos conectados por ISUP se reproducen solo a velocidad normal (1×)." },
-                    statusCode: StatusCodes.Status422UnprocessableEntity);
-            if (accelerated)
-            {
-                if (!await mtx.AddPublishPathAsync(path, ct))
-                    return Results.Json(new { error = "No se pudo preparar la ruta de reproducción en el media server." },
-                        statusCode: StatusCodes.Status503ServiceUnavailable);
-                if (!await relays.StartAsync(path, source, speed, mtx.PublishUrlFor(path), ct))
-                    return Results.Json(
-                        new { error = $"El equipo no aceptó reproducir a {speed:0.##}×." },
-                        statusCode: StatusCodes.Status422UnprocessableEntity);
-            }
-            else if (!await mtx.AddPlaybackPathAsync(path, source, ct))
-            {
-                return Results.Json(new { error = "No se pudo preparar la ruta de reproducción en el media server." },
+            // Lo accionable es lo que contestó el EQUIPO (sin sesiones libres, rango sin video…).
+            string reason = StreamsApi.WhepErrorText(answer.Body);
+            string message = mtx.LastSourceError(grant.Path) is { } source
+                ? source.Code == 453
+                    ? "El grabador no puede entregar otra reproducción simultánea (sin ancho de banda disponible). Cierre algún canal e intente de nuevo."
+                    : $"El equipo rechazó la reproducción: {source.Code} {source.Reason}."
+                : reason.Contains("codec", StringComparison.OrdinalIgnoreCase)
+                    ? StreamsApi.TranslateWhepError(answer.Status, reason)
+                    : reason.Contains("no stream is available", StringComparison.OrdinalIgnoreCase) ||
+                      reason.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+                        ? "El equipo no entregó video para ese instante (sin grabación, equipo ocupado o sin respuesta)."
+                        : StreamsApi.TranslateWhepError(answer.Status, reason);
+            logger.LogInformation("WebRTC: MediaMTX rechazó la reproducción '{Path}' para {User} ({Status}): {Reason}",
+                grant.Path, session.Username, answer.Status, reason);
+            // Nunca 401: el panel lo tomaría como sesión vencida y llevaría al ingreso.
+            return Results.Json(new { error = message, detail = reason },
+                statusCode: answer.Status is 400 or 404 ? StatusCodes.Status422UnprocessableEntity : StatusCodes.Status502BadGateway);
+        });
+
+        // ------------------------------------------------------------------
+        // Reproducción en el panel web por MSE (WebSocket con MP4
+        // fragmentado): para grabaciones H.265 con B-frames, que WebRTC no
+        // admite. Misma concesión y auditoría; FFmpeg lee la ruta de un solo
+        // uso y la reempaqueta sin recodificar.
+        // ------------------------------------------------------------------
+        app.MapGet("/api/playback/mse", async (HttpContext ctx, int deviceId, int rtspChannel, DateTime start, DateTime end,
+            double? speed, VmsDbContext db, DriverRegistry drivers, CredentialProtector protector,
+            StreamTokenService streamTokens, MediaMtxManager mtx, Services.Rtsp.PlaybackRelayManager relays,
+            AuditService audit, ILogger<Program> logger, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.PlaybackView, out var session) is { } failure) return failure;
+            if (!ctx.WebSockets.IsWebSocketRequest)
+                return Results.Json(new { error = "Se esperaba una conexión WebSocket." }, statusCode: StatusCodes.Status400BadRequest);
+            if (mtx.ResolveFfmpeg() is not { } ffmpeg)
+                return Results.Json(new { error = "El servidor no tiene FFmpeg (tools\\ffmpeg) para entregar este video al navegador." },
                     statusCode: StatusCodes.Status503ServiceUnavailable);
-            }
 
-            var (token, grant) = streamTokens.Issue(session.UserId, session.Username, path,
-                device.Id, device.Name, request.RtspChannel, "playback");
-            string host = config["Streaming:PublicHost"] is { Length: > 0 } configured
-                ? configured
-                : ctx.Request.Host.Host;
-            string url = $"rtsp://{host}:{mtx.RtspPort}/{path}?token={token}";
+            var range = new PlaybackRequestDto(deviceId, rtspChannel, start, end, speed is > 0 ? speed.Value : 1);
+            var grant = await PrepareGrantAsync(ctx, session, range, db, drivers, protector, streamTokens, mtx, relays, audit, ct,
+                StreamsApi.ViewerIp(ctx));
+            if (grant.Failure is not null) return grant.Failure;
 
-            // Cada salto de la línea de tiempo pide una concesión nueva: se
-            // audita una reproducción por usuario/canal cada 2 min, con el
-            // instante pedido en esa primera concesión.
-            if (audit.ShouldLog($"pbplay:{session.UserId}:{device.Id}:{request.RtspChannel}", TimeSpan.FromMinutes(2)))
-                await audit.LogAsync(ctx, "playback", "play",
-                    targetType: "channel", targetId: $"{device.Id}/{request.RtspChannel}",
-                    targetName: $"{device.Name} · {channel.Name}",
-                    detail: $"Reprodujo grabaciones de '{device.Name}' canal {request.RtspChannel} " +
-                            $"desde el {request.StartLocal:dd-MM-yyyy HH:mm:ss}" +
-                            (accelerated ? $" a {speed:0.##}×." : "."),
-                    data: new { request.StartLocal, request.EndLocal, request.Speed });
-            return Results.Ok(new StreamGrantDto(url, token, grant.ExpiresAt, driver.SupportsExactPlaybackSeek));
+            using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
+            await MseRelay.RunAsync(ws, ffmpeg, $"rtsp://127.0.0.1:{mtx.RtspPort}/{grant.Path}?token={grant.Token}",
+                $"{grant.Path} ({session.Username})", logger, ctx.RequestAborted);
+            return Results.Empty;
         });
 
         // ------------------------------------------------------------------
@@ -480,6 +484,111 @@ public static class PlaybackApi
     /// sin recortar, la línea de tiempo del cliente recibe un tramo que no
     /// cabe en el día que está dibujando.
     /// </summary>
+
+    private sealed record PlaybackGrant(IResult? Failure, string Path = "", string Token = "",
+        DateTime ExpiresAt = default, bool ExactSeek = true);
+
+    /// <summary>
+    /// Validaciones de una reproducción (rango, canal habilitado, alcance),
+    /// ruta dinámica en MediaMTX con la URL de reproducción del fabricante
+    /// (o el relé con Scale si la velocidad no es 1×), token de corta vida y
+    /// auditoría. La comparten el RTSP del cliente de escritorio y el WebRTC
+    /// del panel web.
+    /// </summary>
+    private static async Task<PlaybackGrant> PrepareGrantAsync(HttpContext ctx, SessionInfo session,
+        PlaybackRequestDto request, VmsDbContext db, DriverRegistry drivers, CredentialProtector protector,
+        StreamTokenService streamTokens, MediaMtxManager mtx, Services.Rtsp.PlaybackRelayManager relays,
+        AuditService audit, CancellationToken ct, string? viewerIp = null)
+    {
+        if (!mtx.IsRunning)
+            return new PlaybackGrant(Results.Json(new { error = "El servicio de streaming no está disponible en el servidor." },
+                statusCode: StatusCodes.Status503ServiceUnavailable));
+
+        if (request.EndLocal <= request.StartLocal ||
+            request.EndLocal - request.StartLocal > TimeSpan.FromHours(24))
+            return new PlaybackGrant(Results.Json(new { error = "El rango de reproducción es inválido (máximo 24 horas)." },
+                statusCode: StatusCodes.Status422UnprocessableEntity));
+
+        var channel = await db.Channels.Include(c => c.Device)
+            .FirstOrDefaultAsync(c => c.DeviceId == request.DeviceId && c.RtspChannel == request.RtspChannel, ct);
+        if (channel is null) return new PlaybackGrant(Results.NotFound());
+        if (!channel.Enabled)
+            return new PlaybackGrant(Results.Json(new { error = "El canal está deshabilitado." },
+                statusCode: StatusCodes.Status422UnprocessableEntity));
+        if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
+            return new PlaybackGrant(await ctx.OutOfScopeAsync(session, "channel", $"{request.DeviceId}/{request.RtspChannel}",
+                $"{channel.Device.Name} · {channel.Name}", "reproducir grabaciones de"));
+
+        var device = channel.Device;
+        if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
+            return new PlaybackGrant(Results.Json(new { error = "El driver del equipo no está disponible." },
+                statusCode: StatusCodes.Status422UnprocessableEntity));
+
+        var conn = DeviceConnections.Of(device, protector);
+        string? source;
+        try
+        {
+            source = await driver.ResolvePlaybackUrlAsync(conn, device.RtspPort, request.RtspChannel,
+                request.StartLocal, request.EndLocal, ct);
+        }
+        catch (DriverException ex)
+        {
+            return new PlaybackGrant(Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status422UnprocessableEntity));
+        }
+        if (source is null)
+            return new PlaybackGrant(Results.Json(new { error = "Este equipo aún no soporta reproducción remota desde el VMS." },
+                statusCode: StatusCodes.Status422UnprocessableEntity));
+
+        // Nombre plano y único: cada espectador/rango tiene su propia ruta.
+        // Lleva el id del espectador porque al montar la ruta se cierran
+        // las hermanas —mismo prefijo— para que el equipo libere la sesión
+        // anterior de ESE canal sin tocar la de otro operador.
+        string path = $"pb-{device.Id}-{request.RtspChannel}-{session.UserId}-" +
+                      Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
+
+        // A 1× manda MediaMTX, que pulsa el equipo (camino de siempre).
+        // A otra velocidad el servidor toma la sesión RTSP para poder
+        // pedirle al equipo que entregue más rápido (cabecera Scale), y
+        // publica él mismo en la ruta.
+        double speed = request.Speed;
+        bool accelerated = speed > 0 && Math.Abs(speed - 1) > 0.01;
+        // Por ISUP el equipo entrega la grabación por su conexión con el servidor, sin la cabecera Scale del RTSP.
+        if (accelerated && Core.Isup.IsupGateway.IsMediaSource(source))
+            return new PlaybackGrant(Results.Json(new { error = "Los equipos conectados por ISUP se reproducen solo a velocidad normal (1×)." },
+                statusCode: StatusCodes.Status422UnprocessableEntity));
+        if (accelerated)
+        {
+            if (!await mtx.AddPublishPathAsync(path, ct))
+                return new PlaybackGrant(Results.Json(new { error = "No se pudo preparar la ruta de reproducción en el media server." },
+                    statusCode: StatusCodes.Status503ServiceUnavailable));
+            if (!await relays.StartAsync(path, source, speed, mtx.PublishUrlFor(path), ct))
+                return new PlaybackGrant(Results.Json(
+                    new { error = $"El equipo no aceptó reproducir a {speed:0.##}×." },
+                    statusCode: StatusCodes.Status422UnprocessableEntity));
+        }
+        else if (!await mtx.AddPlaybackPathAsync(path, source, ct))
+        {
+            return new PlaybackGrant(Results.Json(new { error = "No se pudo preparar la ruta de reproducción en el media server." },
+                statusCode: StatusCodes.Status503ServiceUnavailable));
+        }
+
+        var (token, grant) = streamTokens.Issue(session.UserId, session.Username, path,
+            device.Id, device.Name, request.RtspChannel, "playback", viewerIp: viewerIp);
+
+        // Cada salto de la línea de tiempo pide una concesión nueva: se
+        // audita una reproducción por usuario/canal cada 2 min, con el
+        // instante pedido en esa primera concesión.
+        if (audit.ShouldLog($"pbplay:{session.UserId}:{device.Id}:{request.RtspChannel}", TimeSpan.FromMinutes(2)))
+            await audit.LogAsync(ctx, "playback", "play",
+                targetType: "channel", targetId: $"{device.Id}/{request.RtspChannel}",
+                targetName: $"{device.Name} · {channel.Name}",
+                detail: $"Reprodujo grabaciones de '{device.Name}' canal {request.RtspChannel} " +
+                        $"desde el {request.StartLocal:dd-MM-yyyy HH:mm:ss}" +
+                        (accelerated ? $" a {speed:0.##}×." : "."),
+                data: new { request.StartLocal, request.EndLocal, request.Speed });
+        return new PlaybackGrant(null, path, token, grant.ExpiresAt, driver.SupportsExactPlaybackSeek);
+    }
+
     private static List<RecordingSegment> ClipToDay(List<RecordingSegment> segments, DateTime day)
     {
         var from = day;

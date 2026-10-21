@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=47">
+  <link rel="stylesheet" href="vendor/mdi/css/materialdesignicons.min.css?v=1">
+  <link rel="stylesheet" href="styles.css?v=56">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -25,30 +26,59 @@
 
   <!-- Aplicación -->
   <div id="app-shell" class="shell hidden">
-    <aside class="sidebar">
-      <div class="brand small">
-        <div class="brand-mark logo"><img src="logo.png" alt=""></div>
-        <span>TrueCentral <span class="accent">VMS</span></span>
+    <header class="topbar">
+      <a href="#/" class="topbar-brand" title="Panel">
+        <span class="brand-mark logo"><img src="logo.png" alt=""></span>
+        <span class="brand-text">TrueCentral <span class="accent">VMS</span></span>
+      </a>
+      <div class="topbar-left">
+        <!-- Contrae el menú lateral a íconos; en pantallas angostas y en las
+             páginas a pantalla completa (editor de automatizaciones) lo muestra u oculta. -->
+        <button type="button" class="topbar-icon" id="btn-menu" title="Mostrar u ocultar el menú" aria-label="Menú" aria-expanded="false"><i class="mdi mdi-menu" aria-hidden="true"></i></button>
       </div>
+      <div class="topbar-user">
+        <button type="button" class="user-menu-toggle" id="btn-user-menu" aria-haspopup="menu" aria-expanded="false">
+          <span id="current-user"></span><span class="caret" aria-hidden="true"></span>
+        </button>
+        <div class="user-menu hidden" id="user-menu" role="menu">
+          <div class="user-menu-scope hidden" id="user-scope"><!-- alcance por ubicación (app.js) --></div>
+          <button type="button" role="menuitem" id="btn-download-client"><i class="mdi mdi-download" aria-hidden="true"></i> Descargar el cliente</button>
+          <button type="button" role="menuitem" id="btn-download-addon"><i class="mdi mdi-download" aria-hidden="true"></i> Descargar el complemento</button>
+          <button type="button" role="menuitem" id="btn-about"><i class="mdi mdi-information-outline" aria-hidden="true"></i> Acerca de</button>
+          <button type="button" role="menuitem" id="btn-logout" class="danger"><i class="mdi mdi-logout" aria-hidden="true"></i> Cerrar sesión</button>
+        </div>
+      </div>
+    </header>
+    <aside class="sidebar">
       <nav id="nav">
-        <a href="#/" data-route="dashboard">Panel</a>
-        <a href="#/workflows" data-route="workflows" data-module="module_automation" data-perm="workflows.view">Automatizaciones</a>
-        <a href="#/sounds" data-route="sounds" data-needs-license data-perm="sounds.manage">Biblioteca de sonidos</a>
+        <a href="#/" data-route="dashboard"><i class="mdi mdi-gauge" aria-hidden="true"></i><span class="nav-text">Panel</span></a>
+        <div class="nav-group" data-group="automation">
+          <button type="button" class="nav-toggle">
+            <i class="mdi mdi-sitemap" aria-hidden="true"></i><span class="nav-text">Automatización</span><span class="caret" aria-hidden="true"></span>
+          </button>
+          <div class="nav-children">
+            <a href="#/workflows" data-route="workflows" data-module="module_automation" data-perm="workflows.view">Automatizaciones</a>
+            <a href="#/workflow-alerts" data-route="workflow-alerts" data-module="module_automation" data-perm="events.attend">Alertas</a>
+            <a href="#/workflow-runs" data-route="workflow-runs" data-module="module_automation" data-perm="workflows.view">Ejecuciones</a>
+          </div>
+        </div>
+        <a href="#/sounds" data-route="sounds" data-needs-license data-perm="sounds.manage"><i class="mdi mdi-library-music" aria-hidden="true"></i><span class="nav-text">Biblioteca de sonidos</span></a>
 
-        <div class="nav-divider">Aplicaciones</div>
-        <a href="#/live" data-route="live" data-module="module_video" data-perm="live.view">Vista en vivo</a>
-        <a href="#/alarms" data-route="alarms" data-module="module_alarms" data-perm="alarms.monitor">Alarmas</a>
-        <a href="#/cerco" data-route="cerco" data-module="module_fence" data-perm="cerco.monitor">Cerco eléctrico</a>
-        <a href="#/event-center" data-route="event-center" data-needs-license data-perm="events.attend">Centro de eventos</a>
-        <a href="#/videowall" data-route="videowall" data-module="module_videowall" data-perm="wall.operate">Videowall</a>
-        <a href="#/intercom-console" data-route="intercom-console" data-module="module_intercom" data-perm="intercom.answer">Citofonía</a>
-        <a href="#/anpr" data-route="anpr" data-module="module_anpr" data-perm="anpr.view">ANPR</a>
+        <div class="nav-divider"><span class="nav-text">Aplicaciones</span></div>
+        <a href="#/live" data-route="live" data-module="module_video" data-perm="live.view"><i class="mdi mdi-video" aria-hidden="true"></i><span class="nav-text">Vista en vivo</span></a>
+        <a href="#/playback" data-route="playback" data-module="module_playback" data-perm="playback.view"><i class="mdi mdi-history" aria-hidden="true"></i><span class="nav-text">Reproducción</span></a>
+        <a href="#/alarms" data-route="alarms" data-module="module_alarms" data-perm="alarms.monitor"><i class="mdi mdi-shield" aria-hidden="true"></i><span class="nav-text">Alarmas</span></a>
+        <a href="#/cerco" data-route="cerco" data-module="module_fence" data-perm="cerco.monitor"><i class="mdi mdi-flash" aria-hidden="true"></i><span class="nav-text">Cerco eléctrico</span></a>
+        <a href="#/event-center" data-route="event-center" data-needs-license data-perm="events.attend"><i class="mdi mdi-bell-ring" aria-hidden="true"></i><span class="nav-text">Centro de eventos</span></a>
+        <a href="#/videowall" data-route="videowall" data-module="module_videowall" data-perm="wall.operate"><i class="mdi mdi-monitor-multiple" aria-hidden="true"></i><span class="nav-text">Videowall</span></a>
+        <a href="#/intercom-console" data-route="intercom-console" data-module="module_intercom" data-perm="intercom.answer"><i class="mdi mdi-deskphone" aria-hidden="true"></i><span class="nav-text">Citofonía</span></a>
+        <a href="#/anpr" data-route="anpr" data-module="module_anpr" data-perm="anpr.view"><i class="mdi mdi-car" aria-hidden="true"></i><span class="nav-text">ANPR</span></a>
 
-        <div class="nav-divider">Configuración</div>
+        <div class="nav-divider"><span class="nav-text">Configuración</span></div>
 
         <div class="nav-group" data-group="devices">
           <button type="button" class="nav-toggle">
-            <span class="caret" aria-hidden="true"></span><span>Dispositivos</span>
+            <i class="mdi mdi-server-network" aria-hidden="true"></i><span class="nav-text">Dispositivos</span><span class="caret" aria-hidden="true"></span>
           </button>
           <div class="nav-children">
             <a href="#/devices" data-route="devices" data-module="module_video|module_anpr" data-perm="devices.manage">Fuentes de video</a>
@@ -62,7 +92,7 @@
             <a href="#/device-maintenance" data-route="device-maintenance" data-needs-license data-perm="maintenance.view">Hora y mantenimiento</a>
             <div class="nav-group" data-group="videowall">
               <button type="button" class="nav-toggle">
-                <span class="caret" aria-hidden="true"></span><span>Videowalls</span>
+                <span class="nav-text">Videowalls</span><span class="caret" aria-hidden="true"></span>
               </button>
               <div class="nav-children">
                 <a href="#/decoders" data-route="decoders" data-module="module_videowall" data-perm="devices.manage">Decodificadores</a>
@@ -71,11 +101,11 @@
             </div>
           </div>
         </div>
-        <a href="#/resources" data-route="resources" data-needs-license>Recursos</a>
+        <a href="#/resources" data-route="resources" data-needs-license><i class="mdi mdi-file-tree" aria-hidden="true"></i><span class="nav-text">Recursos</span></a>
 
         <div class="nav-group" data-group="access">
           <button type="button" class="nav-toggle">
-            <span class="caret" aria-hidden="true"></span><span>Control de acceso</span>
+            <i class="mdi mdi-key-variant" aria-hidden="true"></i><span class="nav-text">Control de acceso</span><span class="caret" aria-hidden="true"></span>
           </button>
           <div class="nav-children">
             <a href="#/access-monitor" data-route="access-monitor" data-module="module_access" data-perm="access.monitor">Monitoreo</a>
@@ -88,7 +118,7 @@
 
         <div class="nav-group" data-group="security">
           <button type="button" class="nav-toggle">
-            <span class="caret" aria-hidden="true"></span><span>Seguridad</span>
+            <i class="mdi mdi-account-key" aria-hidden="true"></i><span class="nav-text">Seguridad</span><span class="caret" aria-hidden="true"></span>
           </button>
           <div class="nav-children">
             <a href="#/users" data-route="users" data-perm="users.manage">Usuarios</a>
@@ -99,7 +129,7 @@
 
         <div class="nav-group" data-group="streaming">
           <button type="button" class="nav-toggle">
-            <span class="caret" aria-hidden="true"></span><span>Streaming</span>
+            <i class="mdi mdi-access-point-network" aria-hidden="true"></i><span class="nav-text">Streaming</span><span class="caret" aria-hidden="true"></span>
           </button>
           <div class="nav-children">
             <a href="#/sessions" data-route="sessions" data-module="module_video" data-perm="sessions.manage">Sesiones</a>
@@ -108,43 +138,29 @@
 
         <div class="nav-group" data-group="system">
           <button type="button" class="nav-toggle">
-            <span class="caret" aria-hidden="true"></span><span>Sistema</span>
+            <i class="mdi mdi-settings" aria-hidden="true"></i><span class="nav-text">Sistema</span><span class="caret" aria-hidden="true"></span>
           </button>
           <div class="nav-children">
             <a href="#/services" data-route="services">Servicios</a>
             <a href="#/isup" data-route="isup" data-needs-license data-perm="system.services">Conexión ISUP</a>
+            <a href="#/mail" data-route="mail" data-module="module_automation" data-perm="workflows.manage">Correo saliente</a>
+            <a href="#/backups" data-route="backups" data-perm="system.backup">Respaldos</a>
             <a href="#/license" data-route="license">Licencia</a>
           </div>
         </div>
       </nav>
       <div class="sidebar-footer">
         <span id="conn-dot" class="dot ok" title="Conexión con el servidor"></span>
-        <span id="conn-text" class="muted">Conectado</span>
+        <span id="conn-text" class="nav-text">Conectado</span>
       </div>
     </aside>
     <div class="main">
-      <header class="topbar">
-        <div class="topbar-left">
-          <!-- Solo a la vista en las páginas a pantalla completa (editor de
-               automatizaciones), donde el menú lateral parte oculto. -->
-          <button type="button" class="btn ghost topbar-menu" id="btn-menu" title="Mostrar u ocultar el menú" aria-label="Menú" aria-expanded="false">&#9776;</button>
-          <h2 id="page-title">Panel</h2>
-        </div>
-        <div class="topbar-user">
-          <button type="button" class="user-menu-toggle" id="btn-user-menu" aria-haspopup="menu" aria-expanded="false">
-            <span id="current-user"></span><span class="caret" aria-hidden="true"></span>
-          </button>
-          <div class="user-menu hidden" id="user-menu" role="menu">
-            <div class="user-menu-scope hidden" id="user-scope"><!-- alcance por ubicación (app.js) --></div>
-            <button type="button" role="menuitem" id="btn-download-client">&#10515; Descargar el cliente</button>
-            <button type="button" role="menuitem" id="btn-download-addon">&#10515; Descargar el complemento</button>
-            <button type="button" role="menuitem" id="btn-about">&#9432; Acerca de</button>
-            <button type="button" role="menuitem" id="btn-logout" class="danger">Cerrar sesión</button>
-          </div>
-        </div>
-      </header>
       <!-- Aviso de licencia (prueba por vencer, gracia, restricción): lo llena license.js -->
       <div id="license-banner" class="license-banner hidden"></div>
+      <div class="page-titles">
+        <h2 id="page-title">Panel</h2>
+        <ol class="breadcrumb" id="breadcrumb" aria-label="Ubicación en el menú"></ol>
+      </div>
       <main id="view"><!-- lo llena app.js --></main>
     </div>
   </div>
@@ -159,21 +175,23 @@
   <script src="api.js?v=2"></script>
   <!-- walls.js va ANTES: app.js referencia sus funciones al armar las rutas. -->
   <script src="walls.js?v=6"></script>
-  <script src="isup.js?v=2"></script>
+  <script src="isup.js?v=3"></script>
   <script src="alarms.js?v=14"></script>
   <script src="speakers.js?v=13"></script>
   <script src="io-modules.js?v=2"></script>
   <script src="alarm-screens.js?v=1"></script>
   <script src="intercoms.js?v=7"></script>
-  <script src="access.js?v=11"></script>
-  <script src="maintenance.js?v=2"></script>
-  <script src="enroll.js?v=1"></script>
-  <script src="access-catalog.js?v=17"></script>
+  <script src="access.js?v=12"></script>
+  <script src="maintenance.js?v=3"></script>
+  <script src="enroll.js?v=2"></script>
+  <script src="access-catalog.js?v=19"></script>
   <script src="access-monitor.js?v=7"></script>
-  <script src="workflows.js?v=20"></script>
-  <script src="workflow-editor.js?v=10"></script>
+  <script src="workflows.js?v=22"></script>
+  <script src="mail-settings.js?v=1"></script>
+  <script src="backups.js?v=1"></script>
+  <script src="workflow-editor.js?v=12"></script>
   <script src="services.js?v=2"></script>
-  <script src="license.js?v=4"></script>
+  <script src="license.js?v=6"></script>
   <script src="anpr.js?v=3"></script>
   <script src="alarm-monitor.js?v=4"></script>
   <script src="event-center.js?v=3"></script>
@@ -185,8 +203,11 @@
   <script src="cerco-alarm.js?v=5"></script>
   <script src="resources.js?v=9"></script>
   <!-- live.js va DESPUÉS de resources.js: usa sus íconos de ubicación. -->
-  <script src="live.js?v=2"></script>
+  <script src="live.js?v=4"></script>
+  <!-- playback.js usa LvSession y utilidades de live.js. -->
+  <script src="playback.js?v=3"></script>
   <script src="roles.js?v=3"></script>
-  <script src="app.js?v=62"></script>
+  <script src="dashboard.js?v=3"></script>
+  <script src="app.js?v=71"></script>
 </body>
 </html>

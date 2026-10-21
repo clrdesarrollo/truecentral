@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using TrueCentralVms.Core.Isup;
+using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Server.Data;
+using TrueCentralVms.Server.Data.Entities;
 
 namespace TrueCentralVms.Server.Services.Isup;
 
@@ -14,8 +16,13 @@ namespace TrueCentralVms.Server.Services.Isup;
 /// Seguridad: la API del host escucha solo en 127.0.0.1 y exige <see cref="Token"/>. Las URL de video que lee ffmpeg (y que quedan
 /// en la configuración de MediaMTX) llevan otro token, <see cref="MediaToken"/>, que solo abre video. Ambos cambian en cada arranque.
 /// </summary>
-public sealed class IsupHostManager(EmbeddedPostgres postgres, IConfiguration config, ILogger<IsupHostManager> logger) : IHostedService
+public sealed class IsupHostManager(EmbeddedPostgres postgres, IConfiguration config, IServiceScopeFactory scopes,
+    ILogger<IsupHostManager> logger) : IHostedService
 {
+    /// <summary>Nombre del ajuste en SystemBlobs: "true" = se aceptan equipos ISUP 2.0/4.0 (lo enciende un usuario desde el panel).</summary>
+    public const string AllowLegacySetting = "isup.allow-legacy";
+
+    private bool? _allowLegacy;
     private Process? _process;
     private volatile bool _stopping;
     private volatile bool _restartPending;
@@ -59,6 +66,7 @@ public sealed class IsupHostManager(EmbeddedPostgres postgres, IConfiguration co
             var ports = s.GetSection("RegistrationPorts").GetChildren().Select(c => int.TryParse(c.Value, out var p) ? p : 0).Where(p => p > 0).ToArray();
             if (ports.Length > 0) o.RegistrationPorts = ports;
             o.AlarmPort = s.GetValue("AlarmPort", o.AlarmPort);
+            o.AllowLegacy = AllowLegacy;
             o.LegacyAlarmPort = s.GetValue("LegacyAlarmPort", o.LegacyAlarmPort);
             o.StreamPort = s.GetValue("StreamPort", o.StreamPort);
             o.PlaybackPort = s.GetValue("PlaybackPort", o.PlaybackPort);
@@ -67,6 +75,51 @@ public sealed class IsupHostManager(EmbeddedPostgres postgres, IConfiguration co
             o.CommandTimeoutMs = s.GetValue("CommandTimeoutMs", o.CommandTimeoutMs);
             return o;
         }
+    }
+
+    /// <summary>
+    /// ¿Se aceptan equipos ISUP 2.0/4.0? Esas versiones no prueban la clave al registrarse, así que viene apagado: lo
+    /// enciende un usuario desde Sistema → Conexión ISUP, confirmando el riesgo. Sin ajuste guardado manda Isup:AllowLegacy.
+    /// </summary>
+    public bool AllowLegacy
+    {
+        get
+        {
+            if (_allowLegacy is { } known) return known;
+            try { return (_allowLegacy = LoadAllowLegacySetting() ?? config.GetValue("Isup:AllowLegacy", false)).Value; }
+            catch (Exception ex)
+            {
+                // Sin base todavía: lo seguro es no aceptar 2.0/4.0, sin recordarlo (se relee en el próximo arranque del host).
+                logger.LogWarning(ex, "No se pudo leer el ajuste ISUP 2.0/4.0: se rechazan esos equipos hasta poder leerlo.");
+                return false;
+            }
+        }
+    }
+
+    private bool? LoadAllowLegacySetting()
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+        string? stored = db.SystemBlobs.Where(b => b.Name == AllowLegacySetting).Select(b => b.Data).FirstOrDefault();
+        return stored is null ? null : stored == "true";
+    }
+
+    /// <summary>Guarda el ajuste y relanza el servicio ISUP para que lo aplique (los equipos se vuelven a registrar solos).</summary>
+    public async Task SetAllowLegacyAsync(bool allow, CancellationToken ct)
+    {
+        using (var scope = scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var row = await db.SystemBlobs.FirstOrDefaultAsync(b => b.Name == AllowLegacySetting, ct);
+            if (row is null) db.SystemBlobs.Add(row = new SystemBlob { Name = AllowLegacySetting });
+            row.Data = allow ? "true" : "false";
+            row.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        _allowLegacy = allow;
+        if (!Enabled) return;
+        await StopAsync(ct);
+        await StartAsync(ct);
     }
 
     public Task StartAsync(CancellationToken ct)

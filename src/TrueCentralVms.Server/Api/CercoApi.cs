@@ -101,7 +101,8 @@ public static class CercoApi
     private static string Csv(string? value)
     {
         string v = value ?? "";
-        if (v.Length > 0 && "=+-@".Contains(v[0])) v = "'" + v;
+        string lead = v.TrimStart(' ');
+        if (lead.Length > 0 && "=+-@\t\r".Contains(lead[0])) v = "'" + v;
         return v.IndexOfAny([';', '"', '\n', '\r']) >= 0 ? "\"" + v.Replace("\"", "\"\"") + "\"" : v;
     }
 

@@ -143,12 +143,19 @@ public static partial class DiscoveryApi
                 if (seenIps.Contains(d.Ip)) continue;   // ya lo anunció su marca
                 Add(d.Ip, d.Mac, new
                 {
-                    d.Ip, Brand = "ZKTeco", DriverKey = "zkteco-tcp",
+                    d.Ip, Brand = "ZKTeco", d.DriverKey,
                     CommandPort = d.Port, HttpPort = d.Port,
                     // Sin la clave de comunicación de fábrica el equipo no se
                     // identifica: se lista igual, con lo que se sabe de él.
                     Model = d.Model.Length > 0 ? d.Model : "ZKTeco (sin identificar)",
-                    d.Serial, d.Mac, Activated = true, Category = "Terminal",
+                    d.Serial, d.Mac, Activated = true,
+                    // El protocolo C3 lo hablan controladoras (inBio, C3) y terminales (MA500).
+                    Category = TrueCentralVms.Drivers.ZkTeco.C3AccessDriver.IsController(d.Model) ? "Controladora" : "Terminal",
+                    // Un equipo fuera de la subred del servidor (con ruta hacia él)
+                    // se lista igual, avisando que no se alcanza hasta cambiarle la IP.
+                    d.SubnetMask, d.Gateway, Reachable = IsInLocalSubnet(d.Ip),
+                    // Las de protocolo C3 cambian de red por su MAC, sin clave (ZkDiscovery.ChangeNetworkAsync).
+                    CanChangeIp = d.DriverKey == "zkteco-c3", Dhcp = false,
                 });
             }
 
@@ -377,7 +384,9 @@ public static partial class DiscoveryApi
 
             bool hikvision = string.Equals(request.Brand, "Hikvision", StringComparison.OrdinalIgnoreCase);
             bool dahua = string.Equals(request.Brand, "Dahua", StringComparison.OrdinalIgnoreCase);
-            string brand = hikvision ? "Hikvision" : "Dahua";
+            // ZKTeco: controladoras y terminales del protocolo C3 (inBio, C3, MA500).
+            bool zkteco = string.Equals(request.Brand, "ZKTeco", StringComparison.OrdinalIgnoreCase);
+            string brand = hikvision ? "Hikvision" : zkteco ? "ZKTeco" : "Dahua";
             bool dhcp = request.Dhcp;
             string mac = (request.Mac ?? "").Trim();
             string target = mac;
@@ -396,9 +405,13 @@ public static partial class DiscoveryApi
             }
             const int Invalid = StatusCodes.Status422UnprocessableEntity;
 
-            if (!hikvision && !dahua) return await Reject(Invalid, "Solo se puede cambiar la IP de equipos Dahua y Hikvision.");
+            if (!hikvision && !dahua && !zkteco)
+                return await Reject(Invalid, "Solo se puede cambiar la IP de equipos Dahua, Hikvision y ZKTeco (C3).");
             if (mac.Length == 0) return await Reject(Invalid, "Falta la MAC del equipo.");
-            if (string.IsNullOrEmpty(request.Password)) return await Reject(Invalid, "Falta la contraseña del equipo.");
+            // La orden de ZKTeco no lleva clave, ni DHCP, ni DNS.
+            if (!zkteco && string.IsNullOrEmpty(request.Password)) return await Reject(Invalid, "Falta la contraseña del equipo.");
+            if (zkteco && dhcp) return await Reject(Invalid, "Los equipos ZKTeco C3 se configuran con IP fija.");
+            if (zkteco) dns1 = dns2 = "";
 
             IPAddress ipAddress = IPAddress.None;
             if (!dhcp)
@@ -447,6 +460,24 @@ public static partial class DiscoveryApi
                 (oldIp, model, httpPort) = (dahuaDevice.Ip, dahuaDevice.Model, dahuaDevice.HttpPort);
                 ipsInUse = found.Select(d => d.Ip).ToList();
             }
+            else if (zkteco)
+            {
+                var found = await ZkDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, ct: ct);
+                var device = found.FirstOrDefault(d => d.DriverKey == "zkteco-c3" && SameMac(d.Mac, mac));
+                if (device is null)
+                {
+                    // Recién cambiada de red, la controladora tarda en volver a
+                    // contestar la búsqueda (inBio480): una segunda vuelta.
+                    await Task.Delay(TimeSpan.FromSeconds(3), ct);
+                    found = await ZkDiscovery.ScanAsync(TimeSpan.FromSeconds(4), logger, ct: ct);
+                    device = found.FirstOrDefault(d => d.DriverKey == "zkteco-c3" && SameMac(d.Mac, mac));
+                }
+                if (device is null)
+                    return await Reject(StatusCodes.Status404NotFound,
+                        "El equipo ya no responde en la red. Vuelva a buscar e intente de nuevo.");
+                (oldIp, model, httpPort) = (device.Ip, device.Model, device.Port);
+                ipsInUse = found.Select(d => d.Ip).ToList();
+            }
             else
             {
                 var found = await SadpDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, ct);
@@ -478,6 +509,20 @@ public static partial class DiscoveryApi
                     request.Password!, ct);
                 changeError = result.Success ? null : result.Error ?? "error desconocido";
             }
+            else if (zkteco)
+            {
+                // Una controladora en otra subred aplica el cambio pero su "sí"
+                // puede no volver: sin respuesta, se acepta si ya aparece en la IP nueva.
+                bool accepted = await ZkDiscovery.ChangeNetworkAsync(mac, newIp, mask, gateway, ct);
+                changeError = accepted ? null : "la controladora no respondió a la orden";
+                if (!accepted)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                    if ((await ZkDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, ipAddress, ct: ct))
+                        .Any(x => SameMac(x.Mac, mac) && x.Ip == newIp))
+                        changeError = null;
+                }
+            }
             else
             {
                 var result = await HikvisionSadp.ChangeNetworkAsync(mac, request.Password!, dhcp, newIp, mask, gateway, ct);
@@ -501,12 +546,33 @@ public static partial class DiscoveryApi
                 string? seen = dahua
                     ? (await DahuaDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, dhcp ? null : ipAddress, ct))
                         .FirstOrDefault(x => string.Equals(x.Mac, mac, StringComparison.OrdinalIgnoreCase))?.Ip
+                    : zkteco
+                    ? (await ZkDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, ipAddress, ct: ct))
+                        .FirstOrDefault(x => SameMac(x.Mac, mac))?.Ip
                     : (await SadpDiscovery.ScanAsync(TimeSpan.FromSeconds(3), logger, ct))
                         .FirstOrDefault(x => HikvisionSadp.NormalizeMac(x.Mac) == HikvisionSadp.NormalizeMac(mac))?.Ip;
                 if (seen is not null && (dhcp ? seen != oldIp || attempt >= 2 : seen == newIp)) finalIp = seen;
             }
             bool confirmed = finalIp is not null;
             string ip = finalIp ?? (dhcp ? oldIp : newIp);
+
+            // Una ZKTeco C3 informa la IP nueva en la búsqueda al instante, pero
+            // su red la toma recién 20-40 s después (inBio480): se espera a que
+            // atienda en ella para que "Agregar ahora" no falle.
+            if (zkteco && confirmed && IsInLocalSubnet(ip))
+            {
+                confirmed = false;
+                var until = DateTime.UtcNow.AddSeconds(60);
+                while (!confirmed && DateTime.UtcNow < until)
+                {
+                    using var client = new System.Net.Sockets.TcpClient();
+                    using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    attempt.CancelAfter(TimeSpan.FromSeconds(2));
+                    try { await client.ConnectAsync(ip, httpPort, attempt.Token); confirmed = true; }
+                    catch (Exception ex) when (ex is System.Net.Sockets.SocketException or OperationCanceledException && !ct.IsCancellationRequested)
+                    { await Task.Delay(TimeSpan.FromSeconds(3), ct); }
+                }
+            }
             bool reachable = IsInLocalSubnet(ip);
 
             // Los DNS no viajan en el cambio por multicast: se aplican por la
@@ -534,7 +600,8 @@ public static partial class DiscoveryApi
             // servidor (el equipo de fábrica arranca con otra zona y otra hora).
             bool timeSynced = false;
             string? timeError = null, timeNote = null;
-            if (request.SyncTime)
+            // ZKTeco no tiene API web: su hora se ajusta al agregarlo (Hora y mantenimiento).
+            if (request.SyncTime && !zkteco)
             {
                 if (!reachable || !confirmed)
                     timeError = "El equipo no quedó accesible desde este servidor: ajuste la fecha y la hora desde el propio equipo.";
@@ -560,6 +627,10 @@ public static partial class DiscoveryApi
             });
         });
     }
+
+    /// <summary>MAC iguales sin importar separadores ni mayúsculas (cada búsqueda las escribe distinto).</summary>
+    private static bool SameMac(string a, string b) =>
+        string.Equals(a.Replace(":", "").Replace("-", ""), b.Replace(":", "").Replace("-", ""), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// ¿Hay algo en esa IP? Ping de 1 s y, si no contesta y la IP está en una

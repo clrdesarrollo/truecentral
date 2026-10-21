@@ -47,6 +47,8 @@ src/TrueCentralVms.Server/anpr/
 # Fotos y sonidos de las automatizaciones (datos de runtime; la base guarda solo rutas)
 /workflows/
 src/TrueCentralVms.Server/workflows/
+# Respaldos cifrados (.tcbak) de la instalación de desarrollo
+src/TrueCentralVms.Server/backups/
 # Salida del servidor cuando se lanza redirigiendo la consola
 src/TrueCentralVms.Server/*.log
 # Publicacion intermedia de los instaladores (installer/build-installers.ps1)
@@ -60,3 +62,5 @@ build/publish/
 # Datos del IsupHost cuando el servidor corre desde el código (isup-options.json, sdklog)
 src/TrueCentralVms.Server/isup/
 **/build/tmp-migrador/
+# Documento de revisión local (no es parte del producto)
+/revision.pdf

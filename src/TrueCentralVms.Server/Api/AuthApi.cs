@@ -13,8 +13,11 @@ public static class AuthApi
     {
         app.MapPost("/api/auth/login", async (HttpContext ctx, LoginRequest request, VmsDbContext db,
             TokenService tokens, PasswordGovernance passwords, AuditService audit, LicenseService license,
-            ILogger<Program> logger) =>
+            LoginThrottle throttle, ILogger<Program> logger) =>
         {
+            if (string.IsNullOrEmpty(request.Username) || request.Password is null)
+                return Results.Json(new { error = "Indique usuario y contraseña." }, statusCode: StatusCodes.Status400BadRequest);
+
             // Servidor "desactivado": sin usuarios no hay login; hay que
             // completar la configuración inicial desde la máquina del servidor.
             if (!await db.Users.AnyAsync())
@@ -22,15 +25,18 @@ public static class AuthApi
                     new { error = "El sistema no está inicializado. Complete la configuración inicial desde la máquina del servidor.", setupRequired = true },
                     statusCode: StatusCodes.Status503ServiceUnavailable);
 
+            if (await ThrottledAsync(ctx, request.Username, throttle, audit, "login-throttled") is { } throttled) return throttled;
             var user = await db.Users.FirstOrDefaultAsync(u => u.Username == request.Username && u.Enabled);
-            if (user is null || !PasswordHasher.Verify(request.Password, user.PasswordHash, user.PasswordSalt))
+            if (!PasswordMatches(user, request.Password))
             {
                 logger.LogWarning("Auth: login rechazado para '{Username}' desde {Ip}.",
                     request.Username, ctx.Connection.RemoteIpAddress);
-                await audit.LogAsAsync(ctx, null, request.Username ?? "", null, "auth", "login-failed",
+                await audit.LogAsAsync(ctx, user?.Id, request.Username, user?.Role, "auth", "login-failed",
                     detail: "Usuario o contraseña incorrectos.", success: false);
+                await RecordFailureAsync(ctx, request.Username, user, throttle, audit);
                 return Results.Json(new { error = "Usuario o contraseña incorrectos." }, statusCode: StatusCodes.Status401Unauthorized);
             }
+            throttle.RecordSuccess(request.Username);
 
             if (passwords.IsExpired(user))
             {
@@ -99,11 +105,21 @@ public static class AuthApi
         // Cambio de clave autenticado por la clave actual: funciona también con
         // la clave vencida (es el camino de renovación) y sin token previo.
         app.MapPost("/api/auth/change-password", async (HttpContext ctx, ChangePasswordRequest request, VmsDbContext db,
-            TokenService tokens, PasswordGovernance passwords, AuditService audit) =>
+            TokenService tokens, PasswordGovernance passwords, AuditService audit, LoginThrottle throttle) =>
         {
+            if (string.IsNullOrEmpty(request.Username) || request.CurrentPassword is null || request.NewPassword is null)
+                return Results.Json(new { error = "Indique usuario, contraseña actual y contraseña nueva." }, statusCode: StatusCodes.Status400BadRequest);
+            // Prueba una contraseña sin sesión, igual que el ingreso: mismo freno y misma bitácora.
+            if (await ThrottledAsync(ctx, request.Username, throttle, audit, "password-change-throttled") is { } throttled) return throttled;
             var user = await db.Users.FirstOrDefaultAsync(u => u.Username == request.Username && u.Enabled);
-            if (user is null || !PasswordHasher.Verify(request.CurrentPassword, user.PasswordHash, user.PasswordSalt))
+            if (!PasswordMatches(user, request.CurrentPassword))
+            {
+                await audit.LogAsAsync(ctx, user?.Id, request.Username, user?.Role, "auth", "password-change-failed",
+                    detail: "Cambio de contraseña rechazado: usuario o contraseña actual incorrectos.", success: false);
+                await RecordFailureAsync(ctx, request.Username, user, throttle, audit);
                 return Results.Json(new { error = "Usuario o contraseña incorrectos." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+            throttle.RecordSuccess(request.Username);
 
             if (await passwords.ValidateNewPasswordAsync(db, user.Id, request.NewPassword) is { } error)
                 return Results.Json(new { error }, statusCode: StatusCodes.Status422UnprocessableEntity);
@@ -162,5 +178,44 @@ public static class AuthApi
             ApiSecurity.CurrentSession(ctx) is { } s
                 ? Results.Ok(new { s.ExpiresAt })
                 : Results.Unauthorized());
+    }
+
+    // Hash de relleno para usuarios que no existen: se calcula igual el PBKDF2, para que el tiempo de respuesta no
+    // delate qué nombres de usuario existen.
+    private static readonly (string Hash, string Salt) DummyPassword = PasswordHasher.Hash(Guid.NewGuid().ToString("N"));
+
+    private static bool PasswordMatches([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] Data.Entities.User? user, string password)
+    {
+        if (user is not null) return PasswordHasher.Verify(password, user.PasswordHash, user.PasswordSalt);
+        PasswordHasher.Verify(password, DummyPassword.Hash, DummyPassword.Salt);
+        return false;
+    }
+
+    /// <summary>429 si la cuenta o la IP están bloqueadas por intentos fallidos (y lo deja en la bitácora).</summary>
+    private static async Task<IResult?> ThrottledAsync(HttpContext ctx, string username, LoginThrottle throttle, AuditService audit,
+        string action)
+    {
+        if (throttle.LockedFor(username, ctx.Connection.RemoteIpAddress) is not { } left) return null;
+        await audit.LogAsAsync(ctx, null, username, null, "auth", action,
+            detail: $"Intento rechazado sin probar la contraseña: hay un bloqueo vigente por intentos fallidos (quedan {LoginThrottle.Describe(left)}).",
+            success: false);
+        ctx.Response.Headers.RetryAfter = ((int)Math.Ceiling(left.TotalSeconds)).ToString();
+        return Results.Json(new { error = $"Demasiados intentos fallidos. Espere {LoginThrottle.Describe(left)} antes de volver a intentarlo." },
+            statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
+    private static async Task RecordFailureAsync(HttpContext ctx, string username, Data.Entities.User? user, LoginThrottle throttle,
+        AuditService audit)
+    {
+        if (Random.Shared.Next(50) == 0) throttle.Prune();
+        if (throttle.RecordFailure(username, ctx.Connection.RemoteIpAddress) is not { } locked) return;
+        string what = locked == "IP"
+            ? $"la IP {ctx.Connection.RemoteIpAddress} ({LoginThrottle.MaxIpFailures} intentos fallidos)"
+            : locked == "cuenta"
+                ? $"la cuenta «{username}» ({LoginThrottle.MaxAccountFailures} intentos fallidos seguidos)"
+                : $"la cuenta «{username}» y la IP {ctx.Connection.RemoteIpAddress}";
+        await audit.LogAsAsync(ctx, user?.Id, username, user?.Role, "auth", "login-locked",
+            detail: $"Se bloqueó {what} por {LoginThrottle.Describe(LoginThrottle.LockTime)}: posible ataque de fuerza bruta.",
+            success: false);
     }
 }

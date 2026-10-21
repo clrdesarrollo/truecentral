@@ -1597,6 +1597,8 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             $"/ISAPI/AccessControl/UserRightWeekPlanCfg/{plan.Number}?format=json", weekBody,
             "el horario semanal", ct);
 
+        string holidayGroup = await ApplyHolidaysAsync(client, plan, ct);
+
         string templateBody = JsonSerializer.Serialize(new
         {
             UserRightPlanTemplate = new
@@ -1604,12 +1606,86 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 enable = true,
                 templateName = PlanLabel(plan.Name, MaxPlanNameBytes),
                 weekPlanNo = plan.Number,
-                holidayGroupNo = "",
+                holidayGroupNo = holidayGroup,
             },
         });
         _ = await WriteAsync(client, HttpMethod.Put,
             $"/ISAPI/AccessControl/UserRightPlanTemplate/{plan.Number}?format=json", templateBody,
             "la plantilla de horario", ct);
+    }
+
+    /// <summary>Planes de feriado que se reservan por horario (el equipo guarda 1024: 64 grupos × 16).</summary>
+    private const int HolidaysPerPlan = 16;
+    /// <summary>Grupos de feriado del equipo: un horario con feriados usa el grupo de su mismo número.</summary>
+    private const int MaxHolidayGroups = 64;
+    /// <summary>Última fecha que aceptan los planes de feriado.</summary>
+    private static readonly DateOnly MaxHolidayDate = new(2037, 12, 31);
+
+    /// <summary>
+    /// Feriados del horario. En Hikvision cuelgan de cada plantilla: un GRUPO
+    /// (mismo número que el horario) que lista PLANES de feriado, cada uno con
+    /// sus fechas y los tramos de ese día (ninguno habilitado = sin acceso). Al
+    /// horario N le tocan los planes (N-1)×16+1 a N×16; los que sobran se
+    /// apagan para que no quede un feriado viejo. Devuelve el número de grupo
+    /// para la plantilla, o vacío si el horario ignora los feriados.
+    /// </summary>
+    private static async Task<string> ApplyHolidaysAsync(HikvisionIsapiClient client, AccessWeekPlan plan, CancellationToken ct)
+    {
+        var holidays = (plan.Holidays ?? []).Where(h => h.Start <= MaxHolidayDate).Take(HolidaysPerPlan).ToList();
+        if (plan.HolidayMode == AccessHolidayMode.Normal || holidays.Count == 0) return "";
+        if (plan.Number > MaxHolidayGroups)
+            throw new DriverException(
+                $"El horario {plan.Number} tiene feriados, pero el equipo solo tiene {MaxHolidayGroups} grupos de feriado. " +
+                "Junte horarios para usar menos ranuras.");
+
+        var segments = plan.HolidaySegments.Take(SegmentsPerDay).ToList();
+        var planNumbers = new List<int>();
+        for (int i = 0; i < HolidaysPerPlan; i++)
+        {
+            int number = (plan.Number - 1) * HolidaysPerPlan + i + 1;
+            var holiday = i < holidays.Count ? holidays[i] : null;
+            var days = Enumerable.Range(1, SegmentsPerDay).Select(id =>
+            {
+                var segment = holiday is not null && id <= segments.Count ? segments[id - 1] : null;
+                return new
+                {
+                    id,
+                    enable = segment is not null,
+                    TimeSegment = new
+                    {
+                        beginTime = AccessTimeSegment.Hhmmss(segment?.StartMinutes ?? 0),
+                        endTime = segment is null ? "00:00:00" : EndTime(segment.EndMinutes),
+                    },
+                };
+            }).ToList();
+            var end = holiday is null ? MaxHolidayDate : (holiday.End > MaxHolidayDate ? MaxHolidayDate : holiday.End);
+            string body = JsonSerializer.Serialize(new
+            {
+                UserRightHolidayPlanCfg = new
+                {
+                    enable = holiday is not null,
+                    beginDate = (holiday?.Start ?? new DateOnly(2000, 1, 1)).ToString("yyyy-MM-dd"),
+                    endDate = end.ToString("yyyy-MM-dd"),
+                    HolidayPlanCfg = days,
+                },
+            });
+            _ = await WriteAsync(client, HttpMethod.Put,
+                $"/ISAPI/AccessControl/UserRightHolidayPlanCfg/{number}?format=json", body, "un feriado", ct);
+            if (holiday is not null) planNumbers.Add(number);
+        }
+
+        string groupBody = JsonSerializer.Serialize(new
+        {
+            UserRightHolidayGroupCfg = new
+            {
+                enable = true,
+                groupName = PlanLabel($"Feriados {plan.Name}", MaxPlanNameBytes),
+                holidayPlanNo = string.Join(",", planNumbers),
+            },
+        });
+        _ = await WriteAsync(client, HttpMethod.Put,
+            $"/ISAPI/AccessControl/UserRightHolidayGroupCfg/{plan.Number}?format=json", groupBody, "el grupo de feriados", ct);
+        return plan.Number.ToString();
     }
 
     /// <summary>1439 (el último minuto del día) se escribe 23:59:59, que es como el equipo dice "hasta el final".</summary>

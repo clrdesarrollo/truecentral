@@ -65,38 +65,46 @@ public static class LicenseFeatures
     public const string ModuleAutomation = "module_automation";
     public const string AutomationRules = "automation_rules";
 
+    // Áreas en que se agrupan módulos y cupos en las pantallas de licencia.
+    public const string AreaPlatform = "Plataforma";
+    public const string AreaVideo = "Video";
+    public const string AreaIntrusion = "Intrusión y perímetro";
+    public const string AreaAccess = "Control de acceso";
+    public const string AreaAudio = "Audio y comunicación";
+    public const string AreaAutomation = "Automatización";
+
     /// <summary>
     /// Catálogo de presentación: módulo → nombre, clave del cupo asociado
-    /// (null si el módulo no tiene cupo) y unidad del cupo. El orden es el de
-    /// las pantallas de licencia del panel y del cliente.
+    /// (null si el módulo no tiene cupo), unidad del cupo y área. El orden es
+    /// el de las pantallas de licencia del panel y del cliente.
     /// </summary>
     public static readonly IReadOnlyList<LicenseModuleInfo> Modules =
     [
-        new(ModuleVideo, "Video en vivo", VideoChannels, "canales de video"),
-        new(ModulePlayback, "Reproducción remota", null, null),
-        new(ModuleAnpr, "Reconocimiento de patentes", AnprChannels, "fuentes ANPR"),
-        new(ModuleAlarms, "Paneles de alarma", AlarmPanels, "paneles"),
-        new(ModuleFence, "Cerco eléctrico", FencePanels, "paneles de cerco"),
-        new(ModuleAccess, "Control de acceso", AccessDoors, "puertas"),
-        new(ModuleVideowall, "Muro de video", Videowalls, "muros"),
-        new(ModuleVideowall, "Decodificadores de muro", VideowallDecoders, "decodificadores"),
-        new(ModuleSpeakers, "Parlantes IP", SpeakerChannels, "parlantes"),
-        new(ModuleIntercom, "Citofonía", IntercomDevices, "frentes"),
-        new(ModuleIo, "Módulos de E/S", IoModules, "módulos"),
-        new(ModuleAlarmScreens, "Pantallas de alarma", AlarmScreens, "pantallas"),
-        new(ModuleAutomation, "Automatizaciones", AutomationRules, "reglas"),
+        new(ModuleVideo, "Video en vivo", VideoChannels, "canales de video", AreaVideo),
+        new(ModulePlayback, "Reproducción remota", null, null, AreaVideo),
+        new(ModuleAnpr, "Reconocimiento de patentes", AnprChannels, "fuentes ANPR", AreaVideo),
+        new(ModuleVideowall, "Muro de video", Videowalls, "muros", AreaVideo),
+        new(ModuleVideowall, "Decodificadores de muro", VideowallDecoders, "decodificadores", AreaVideo),
+        new(ModuleAlarms, "Paneles de alarma", AlarmPanels, "paneles", AreaIntrusion),
+        new(ModuleFence, "Cerco eléctrico", FencePanels, "paneles de cerco", AreaIntrusion),
+        new(ModuleAlarmScreens, "Pantallas de alarma", AlarmScreens, "pantallas", AreaIntrusion),
+        new(ModuleAccess, "Control de acceso", AccessDoors, "puertas", AreaAccess),
+        new(ModuleSpeakers, "Parlantes IP", SpeakerChannels, "parlantes", AreaAudio),
+        new(ModuleIntercom, "Citofonía", IntercomDevices, "frentes", AreaAudio),
+        new(ModuleIo, "Módulos de E/S", IoModules, "módulos", AreaAutomation),
+        new(ModuleAutomation, "Automatizaciones", AutomationRules, "reglas", AreaAutomation),
     ];
 
     /// <summary>Cupos que no dependen de un módulo (siempre aplican).</summary>
     public static readonly IReadOnlyList<LicenseModuleInfo> BaseQuotas =
     [
-        new(null, "Usuarios del sistema", MaxUsers, "usuarios"),
-        new(null, "Clientes de escritorio simultáneos", MaxClientSessions, "clientes"),
+        new(null, "Usuarios del sistema", MaxUsers, "usuarios", AreaPlatform),
+        new(null, "Clientes de escritorio simultáneos", MaxClientSessions, "clientes", AreaPlatform),
     ];
 }
 
 /// <summary>Entrada del catálogo de presentación de módulos y cupos.</summary>
-public sealed record LicenseModuleInfo(string? ModuleKey, string Name, string? QuotaKey, string? Unit);
+public sealed record LicenseModuleInfo(string? ModuleKey, string Name, string? QuotaKey, string? Unit, string Area);
 
 /// <summary>Estado general del licenciamiento del servidor.</summary>
 public enum LicenseState
@@ -115,10 +123,38 @@ public enum LicenseState
 
 /// <summary>Un módulo o cupo con su valor licenciado y su uso actual.</summary>
 public sealed record LicenseModuleDto(
-    string Name, string? ModuleKey, bool Enabled, string? QuotaKey, int? Quota, int? InUse, string? Unit);
+    string Name, string? ModuleKey, bool Enabled, string? QuotaKey, int? Quota, int? InUse, string? Unit,
+    string Area = "");
 
 /// <summary>Expansión (add-on) sumada a la licencia base.</summary>
 public sealed record LicenseAddonDto(string LicenseKey, string? Package, DateTime? ExpiresAt, string Summary);
+
+/// <summary>
+/// Un código instalado (la licencia base o una de sus expansiones) con lo que
+/// aporta ESE código: <paramref name="Kind"/> es "Base" o "Expansion".
+/// </summary>
+public sealed record LicenseCodeDto(
+    string LicenseKey, string Kind, string? Package, DateTime? IssuedAt, DateTime? ExpiresAt,
+    string Summary, IReadOnlyList<LicenseCodeItemDto> Items);
+
+/// <summary>Lo que un código aporta en un módulo o cupo ("Incluido", "+16 canales de video").</summary>
+public sealed record LicenseCodeItemDto(string Area, string Name, string Value);
+
+/// <summary>
+/// Ingreso único de códigos: la licencia base y sus expansiones en una sola
+/// lista; el servidor reconoce cuál es cuál.
+/// </summary>
+public sealed record LicenseCodesRequest(string? ActivationCode = null, IReadOnlyList<string>? Codes = null);
+
+/// <summary>Resultado de aplicar una lista de códigos, uno por código.</summary>
+public sealed record LicenseApplyResultDto(bool Success, string Message, IReadOnlyList<LicenseApplyItemDto> Items);
+
+/// <summary>
+/// <paramref name="Kind"/>: "Base", "Expansion" o null si no se pudo reconocer.
+/// <paramref name="Step"/>: lo que se intentó con el código: "activate" (base
+/// nueva), "refresh" (la base ya instalada) o "addon" (expansión).
+/// </summary>
+public sealed record LicenseApplyItemDto(string Code, string? Kind, bool Success, string Message, string Step);
 
 /// <summary>
 /// Estado del licenciamiento para el panel y el cliente. <paramref name="Operational"/>
@@ -147,7 +183,8 @@ public sealed record LicenseStatusDto(
     bool OnlineConfigured,
     string? LicenseServerUrl,
     IReadOnlyList<LicenseModuleDto> Modules,
-    IReadOnlyList<LicenseAddonDto> Addons);
+    IReadOnlyList<LicenseAddonDto> Addons,
+    IReadOnlyList<LicenseCodeDto>? Codes = null);
 
 public sealed record LicenseActivateRequest(string ActivationCode);
 
