@@ -2647,3 +2647,14 @@ table.kv td { padding: 8px 0; vertical-align: top; }
 table.kv tr + tr th, table.kv tr + tr td { border-top: 1px solid var(--border); }
 table.kv .tag { margin: 0 4px 4px 0; }
 .cert-fp { font-size: 12px; word-break: break-all; }
+
+/* ---- Mi cuenta ---- */
+.account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; max-width: 1100px; align-items: start; }
+.account-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.account-head .mdi { font-size: 48px; line-height: 1; color: var(--muted); }
+.account-name { font-size: 18px; font-weight: 600; }
+.pw-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 16px; }
+.pw-pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); transition: background .15s, color .15s, border-color .15s; }
+.pw-pill::before { content: "\2022"; margin-right: 6px; }
+.pw-pill.ok { background: rgba(var(--ok-rgb, 22, 163, 74), .14); border-color: rgba(var(--ok-rgb, 22, 163, 74), .5); color: var(--ok-text); }
+.pw-pill.ok::before { content: "\2713"; }

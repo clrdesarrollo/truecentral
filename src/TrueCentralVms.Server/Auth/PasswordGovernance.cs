@@ -16,6 +16,9 @@ public sealed class PasswordGovernance(IConfiguration config)
 
     public bool ExpirationEnabled => MaxAgeDays > 0;
 
+    /// <summary>Hasta cuándo vale la clave del usuario (null = no vence).</summary>
+    public DateTime? ExpiresAt(User user) => ExpirationEnabled ? user.PasswordChangedAt.AddDays(MaxAgeDays) : null;
+
     /// <summary>La clave del usuario superó la vigencia configurada.</summary>
     public bool IsExpired(User user) =>
         ExpirationEnabled && user.PasswordChangedAt.AddDays(MaxAgeDays) < DateTime.UtcNow;

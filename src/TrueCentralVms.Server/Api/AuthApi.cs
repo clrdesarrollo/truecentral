@@ -161,6 +161,43 @@ public static class AuthApi
             return Results.Ok(new { s.UserId, s.Username, s.Role, s.ExpiresAt, Scope = dto, Permissions = permissions });
         });
 
+        // Mi cuenta: lo que el usuario conectado puede saber de sí mismo (roles,
+        // alcance, contraseña, sesión y últimos ingresos). Es su propia información:
+        // no se audita la consulta.
+        app.MapGet("/api/auth/account", async (HttpContext ctx, VmsDbContext db, PasswordGovernance passwords, CancellationToken ct) =>
+        {
+            if (ApiSecurity.CurrentSession(ctx) is not { } s) return Results.Unauthorized();
+            var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == s.UserId, ct);
+            if (user is null) return Results.Unauthorized();
+            var scope = await ctx.ScopeAsync(s);
+            var roles = await db.UserRoles.Where(ur => ur.UserId == s.UserId)
+                .Join(db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => r.Name).OrderBy(n => n).ToListAsync(ct);
+            var logins = await db.AuditEvents.AsNoTracking()
+                .Where(e => e.UserId == s.UserId && e.Category == "auth" && e.Action == "login")
+                .OrderByDescending(e => e.Timestamp).Take(2)
+                .Select(e => new { at = e.Timestamp, ip = e.ClientIp, origin = e.Origin }).ToListAsync(ct);
+            // Intentos fallidos con su nombre desde el ingreso anterior (señal de que alguien probó su clave).
+            DateTime since = logins.Count > 1 ? logins[1].at : user.CreatedAt;
+            int failed = await db.AuditEvents.AsNoTracking()
+                .CountAsync(e => e.Username == user.Username && e.Category == "auth" && e.Action == "login-failed" && e.Timestamp > since, ct);
+            return Results.Ok(new
+            {
+                user.Username,
+                isAdmin = scope.IsAdmin,
+                user.IsSuperAdmin,
+                roles,
+                user.CreatedAt,
+                restricted = !scope.Unrestricted,
+                scope = scope.Labels,
+                passwordChangedAt = user.PasswordChangedAt,
+                passwordExpiresAt = passwords.ExpiresAt(user),
+                sessionExpiresAt = s.ExpiresAt,
+                currentLogin = logins.FirstOrDefault(),
+                previousLogin = logins.Skip(1).FirstOrDefault(),
+                failedSincePrevious = failed,
+            });
+        });
+
         // Qué puede operar esta sesión: la interfaz deshabilita el resto (el
         // servidor valida igual cada orden). Cambia con el alcance del usuario y
         // con la ubicación de los recursos: los puestos lo releen con esos avisos.

@@ -2243,6 +2243,7 @@ const routes = {
   "#/mail": renderMailSettings,
   "#/backups": renderBackups,
   "#/certificate": renderCertificate,
+  "#/account": renderAccount,
   "#/license": renderLicense,
 };
 
@@ -2641,6 +2642,11 @@ $("#btn-download-addon").addEventListener("click", async () => {
 
 // "Acerca de": producto, fabricante, versión/build del servidor, plataforma y
 // estado de la licencia (lo que soporte pide primero).
+$("#btn-account").addEventListener("click", () => {
+  setUserMenu(false);
+  location.hash = "#/account";
+});
+
 $("#btn-about").addEventListener("click", async () => {
   setUserMenu(false);
   let a;

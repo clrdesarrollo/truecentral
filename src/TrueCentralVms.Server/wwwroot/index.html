@@ -6,7 +6,7 @@
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
   <link rel="stylesheet" href="vendor/mdi/css/materialdesignicons.min.css?v=1">
-  <link rel="stylesheet" href="styles.css?v=58">
+  <link rel="stylesheet" href="styles.css?v=59">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -42,6 +42,7 @@
         </button>
         <div class="user-menu hidden" id="user-menu" role="menu">
           <div class="user-menu-scope hidden" id="user-scope"><!-- alcance por ubicación (app.js) --></div>
+          <button type="button" role="menuitem" id="btn-account"><i class="mdi mdi-account-settings-variant" aria-hidden="true"></i> Mi cuenta</button>
           <button type="button" role="menuitem" id="btn-download-client"><i class="mdi mdi-download" aria-hidden="true"></i> Descargar el cliente</button>
           <button type="button" role="menuitem" id="btn-download-addon"><i class="mdi mdi-download" aria-hidden="true"></i> Descargar el complemento</button>
           <button type="button" role="menuitem" id="btn-about"><i class="mdi mdi-information-outline" aria-hidden="true"></i> Acerca de</button>
@@ -191,6 +192,7 @@
   <script src="mail-settings.js?v=1"></script>
   <script src="backups.js?v=1"></script>
   <script src="certificate.js?v=2"></script>
+  <script src="account.js?v=1"></script>
   <script src="workflow-editor.js?v=12"></script>
   <script src="services.js?v=2"></script>
   <script src="license.js?v=6"></script>
@@ -210,6 +212,6 @@
   <script src="playback.js?v=3"></script>
   <script src="roles.js?v=3"></script>
   <script src="dashboard.js?v=3"></script>
-  <script src="app.js?v=73"></script>
+  <script src="app.js?v=74"></script>
 </body>
 </html>
