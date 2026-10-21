@@ -363,6 +363,17 @@ public static class AuditCatalog
             new("legacy-enabled", "Equipos ISUP 2.0/4.0 (sin clave) habilitados"),
             new("legacy-disabled", "Equipos ISUP 2.0/4.0 deshabilitados"),
         ]),
+        new("backup", "Respaldos",
+        [
+            new("backup-created", "Respaldo creado"),
+            new("backup-failed", "Respaldo fallido"),
+            new("backup-secondary-failed", "Copia al segundo destino fallida"),
+            new("backup-verified", "Respaldo probado (restauración de prueba)"),
+            new("backup-downloaded", "Respaldo descargado"),
+            new("backup-settings-updated", "Configuración de respaldos modificada"),
+            new("backup-password-changed", "Contraseña de respaldo definida o cambiada"),
+            new("backup-restored", "Instalación restaurada desde un respaldo"),
+        ]),
         new("system", "Sistema",
         [
             new("server-started", "Servidor iniciado"),

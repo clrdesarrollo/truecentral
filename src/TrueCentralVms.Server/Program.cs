@@ -55,6 +55,13 @@ builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, relo
 // servidor lo inicia/detiene solo. La cadena de conexión queda disponible
 // recién después de StartAsync (más abajo), antes del primer uso del contexto.
 var postgres = new EmbeddedPostgres(builder.Configuration, builder.Environment.ContentRootPath);
+
+// Restauración de un respaldo por consola (con el servicio detenido): no levanta el servidor.
+if (TrueCentralVms.Server.Services.Backup.BackupRestore.IsRequested(args))
+{
+    Environment.ExitCode = await TrueCentralVms.Server.Services.Backup.BackupRestore.RunAsync(args, postgres, builder.Configuration);
+    return;
+}
 builder.Services.AddSingleton(postgres);
 // En tiempo de diseño (dotnet ef migrations add) el host se construye sin
 // PostgreSQL iniciado: la cadena es un marcador, solo se necesita el modelo.
@@ -77,6 +84,10 @@ builder.Services.AddSingleton<SystemMetrics>();
 builder.Services.AddSingleton<AuditService>();
 builder.Services.AddSingleton<AuditRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AuditRetentionService>());
+
+// Respaldos cifrados: diario, antes de cada actualización y a pedido (Sistema → Respaldos).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Backup.BackupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Backup.BackupService>());
 
 // Licenciamiento contra el servidor central de licencias de CLRobotics:
 // archivo .lic firmado (verificación sin conexión) + heartbeat en línea con
@@ -270,6 +281,11 @@ app.Lifetime.ApplicationStopped.Register(() => postgres.Stop(app.Logger));
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+    // Versión nueva sobre una base existente: respaldo ANTES de migrar, para poder volver si algo sale mal.
+    var pendingMigrations = (await db.Database.GetPendingMigrationsAsync()).ToList();
+    if (pendingMigrations.Count > 0 && (await db.Database.GetAppliedMigrationsAsync()).Any())
+        await app.Services.GetRequiredService<TrueCentralVms.Server.Services.Backup.BackupService>()
+            .BackupBeforeUpdateAsync(pendingMigrations, CancellationToken.None);
     await db.Database.MigrateAsync();
 
     // Control de acceso: el horario 24/7 tiene que existir desde el principio,
@@ -400,6 +416,7 @@ app.MapStreamingAuthApi();
 app.MapPlaybackApi();
 app.MapDiscoveryApi();
 app.MapSystemApi();
+app.MapBackupApi();
 app.MapLicenseApi();
 app.MapDecodersApi();
 app.MapWallsApi();

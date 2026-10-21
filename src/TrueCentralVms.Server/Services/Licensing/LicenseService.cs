@@ -201,6 +201,8 @@ public sealed class LicenseService : BackgroundService
                  // Liberar puestos de cliente: justo lo que hace falta cuando
                  // la licencia no da para que entre alguien más.
                  || path.StartsWithSegments("/api/system/desktop-seats")
+                 // Respaldar es la seguridad de los datos del cliente: nunca depende de la licencia.
+                 || path.StartsWithSegments("/api/system/backups")
                  || path.StartsWithSegments("/api/streaming")
                  || path.StartsWithSegments("/api/audit/client-event"));
     }
