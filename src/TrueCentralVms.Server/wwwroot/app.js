@@ -614,70 +614,7 @@ function renderChangePassword(username) {
 // ---------------------------------------------------------------------------
 // Vistas de la aplicación
 // ---------------------------------------------------------------------------
-async function renderDashboard() {
-  $("#page-title").textContent = "Panel";
-  let health = null;
-  try { health = await Api.get("/api/health"); } catch { /* la sonda periódica marca el estado */ }
-  let devices = [];
-  try { devices = await Api.get("/api/devices"); } catch { /* sin sesión aún */ }
-  let usersCount = "—";
-  let sessionsCount = "—";
-  if (Perms.can("users.manage|sessions.manage")) {
-    try { usersCount = (await Api.get("/api/users")).length; } catch { /* sin permiso */ }
-    try { sessionsCount = (await Api.get("/api/streams/active")).length; } catch { /* sin permiso */ }
-  }
-  let license = null;
-  try { license = await Api.get("/api/system/license"); } catch { /* sin sesión aún */ }
-  let servicesRunning = "—", servicesTotal = "—", servicesFailed = 0;
-  try {
-    const overview = await Api.get("/api/system/services");
-    const supervised = overview.services.filter((s) => s.state !== "Disabled");
-    servicesTotal = supervised.length;
-    servicesRunning = supervised.filter((s) => s.state === "Running").length;
-    servicesFailed = supervised.filter((s) => s.state === "Failed").length;
-  } catch { /* sin sesión aún */ }
-  const online = devices.filter((d) => d.status === "Online").length;
-  $("#view").innerHTML = `
-    <div class="cards">
-      <div class="card">
-        <div class="card-label">Estado del servidor</div>
-        <div class="card-value">${health ? "En línea" : "Sin conexión"}</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Versión</div>
-        <div class="card-value">${esc(health?.version ?? "—")}</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Dispositivos</div>
-        <div class="card-value">${devices.length}<span class="muted" style="font-size:13px"> (${online} en línea)</span></div>
-      </div>
-      ${Perms.can("sessions.manage") ? `
-      <div class="card">
-        <div class="card-label">Sesiones de video activas</div>
-        <div class="card-value">${esc(sessionsCount)}</div>
-      </div>` : ""}
-      ${license ? `
-      <a class="card" href="#/license" style="text-decoration:none;color:inherit">
-        <div class="card-label">Licencia</div>
-        <div class="card-value small">${licenseStateTag(license.state)}</div>
-        <div class="muted" style="font-size:12px">${esc(license.licenseKey || license.message || "")}</div>
-        ${license.warning ? `<div style="font-size:12px;color:${license.operational ? "#F59E0B" : "var(--danger)"}">${esc(license.warning)}</div>` : ""}
-      </a>` : ""}
-      <a class="card" href="#/services" style="text-decoration:none;color:inherit">
-        <div class="card-label">Servicios del servidor</div>
-        <div class="card-value" style="color:${servicesFailed ? "var(--danger)" : "inherit"}">${servicesRunning}<span class="muted" style="font-size:13px"> de ${servicesTotal} en ejecución</span></div>
-        ${servicesFailed ? `<div style="font-size:12px;color:var(--danger)">${servicesFailed} caído(s): revisar</div>` : ""}
-      </a>
-      <div class="card">
-        <div class="card-label">Usuarios</div>
-        <div class="card-value">${esc(usersCount)}</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Hora del servidor (UTC)</div>
-        <div class="card-value small">${health ? formatDate(health.time) : "—"}</div>
-      </div>
-    </div>`;
-}
+// renderDashboard (panel de inicio) vive en dashboard.js.
 
 // ---------------------------------------------------------------------------
 // Sesiones de streaming activas (quién ve qué) + expulsión
@@ -2279,12 +2216,15 @@ const routes = {
   "#/device-maintenance": renderDeviceMaintenance,
   "#/workflows": renderWorkflows,
   "#/workflows/edit": renderWorkflowEditor,
+  "#/workflow-alerts": renderWorkflowAlerts,
+  "#/workflow-runs": renderWorkflowRuns,
   "#/sounds": renderSounds,
   "#/anpr": renderAnpr,
   "#/alarms": renderAlarmMonitor,
   "#/cerco": renderCercoMonitor,
   "#/cerco-panels": renderCercoPanels,
   "#/live": renderLiveView,
+  "#/playback": renderPlayback,
   "#/event-center": renderEventCenter,
   "#/videowall": renderVideowall,
   "#/intercom-console": renderIntercomConsole,
@@ -2299,6 +2239,8 @@ const routes = {
   "#/audit": renderAudit,
   "#/services": renderServices,
   "#/isup": renderIsupStatus,
+  "#/mail": renderMailSettings,
+  "#/backups": renderBackups,
   "#/license": renderLicense,
 };
 
@@ -2369,9 +2311,47 @@ function keepNavVisible(el) {
     nav.scrollTop += Math.min(r.bottom - (box.bottom - margin), r.top - (box.top + margin));
 }
 
+/**
+ * Migas de pan bajo el título: el camino del enlace activo en el menú
+ * (Inicio › Configuración › Dispositivos › Fuentes de video). Los títulos de
+ * sección y los nodos no son páginas, así que solo Inicio es enlace.
+ */
+function showBreadcrumb(link) {
+  const ol = $("#breadcrumb");
+  if (!ol) return;
+  const trail = [];
+  if (link && link.getAttribute("href") !== "#/") {
+    // Título de sección: el último divisor antes del elemento de primer nivel.
+    let top = link;
+    while (top.parentElement && top.parentElement.id !== "nav") top = top.parentElement;
+    for (let el = top.previousElementSibling; el; el = el.previousElementSibling) {
+      if (el.classList.contains("nav-divider")) { trail.push(el.textContent.trim()); break; }
+    }
+    const groups = [];
+    for (let g = link.closest(".nav-group"); g; g = g.parentElement?.closest(".nav-group"))
+      groups.unshift(g.querySelector(":scope > .nav-toggle")?.textContent.trim());
+    trail.push(...groups.filter(Boolean), link.textContent.trim());
+  }
+  ol.replaceChildren();
+  const home = document.createElement("li");
+  if (trail.length) {
+    const a = document.createElement("a");
+    a.href = "#/";
+    a.textContent = "Inicio";
+    home.append(a);
+  } else home.textContent = "Inicio";
+  ol.append(home);
+  trail.forEach((text) => {
+    const li = document.createElement("li");
+    li.textContent = text;
+    ol.append(li);
+  });
+}
+
 /** Suelta lo que la página actual dejó corriendo: sondeos, hub, sonidos y menús. */
 function leaveCurrentPage() {
   clearInterval(sessionsTimer);  // el sondeo de sesiones vive solo en su página
+  dashboardLeave();              // ídem el refresco y el reloj del panel de inicio
   clearInterval(wallsTimer);     // ídem el del estado de los muros
   clearInterval(discoveryTimer); // ídem el de equipos en línea
   clearInterval(alarmsTimer);    // ídem el de paneles de alarma
@@ -2398,6 +2378,7 @@ function leaveCurrentPage() {
   document.getElementById("vw-menu")?.remove();
   intercomConsoleLeave();        // timbre, conversación y sondeo de la citofonía
   liveViewLeave();               // video en vivo (WebRTC), grabaciones locales, PTZ y voz
+  playbackLeave();              // reproducción de grabaciones (WebRTC) y su línea de tiempo
 }
 
 function navigate() {
@@ -2416,6 +2397,7 @@ function navigate() {
     if (on) active = a;
   });
   revealActiveNav(active);
+  showBreadcrumb(active);
   // Una página que sus roles no permiten (enlace guardado, historial, o le
   // quitaron el permiso estando en ella) no se dibuja: el servidor la
   // rechazaría a medias, solicitud por solicitud.
@@ -2584,9 +2566,29 @@ window.addEventListener("tcvms:unauthorized", () => {
   else renderLogin("Su sesión terminó. Ingrese de nuevo para seguir.", "warn");
 });
 
+// Botón ☰: en pantallas angostas y en las páginas a pantalla completa el menú
+// lateral se muestra encima del contenido (sidebar-open); en el resto se
+// contrae a una columna de íconos (sidebar-mini, recordado por navegador).
+const SIDEBAR_MINI_KEY = "tcvms.sidebar.mini";
+try { if (localStorage.getItem(SIDEBAR_MINI_KEY) === "1") $("#app-shell").classList.add("sidebar-mini"); } catch { /* sin almacenamiento */ }
 $("#btn-menu").addEventListener("click", () => {
-  const open = $("#app-shell").classList.toggle("sidebar-open");
-  $("#btn-menu").setAttribute("aria-expanded", String(open));
+  const shell = $("#app-shell");
+  const overlay = matchMedia("(max-width: 900px)").matches || !!$("#view.view-editor");
+  if (overlay) {
+    const open = shell.classList.toggle("sidebar-open");
+    $("#btn-menu").setAttribute("aria-expanded", String(open));
+    return;
+  }
+  const mini = shell.classList.toggle("sidebar-mini");
+  try { localStorage.setItem(SIDEBAR_MINI_KEY, mini ? "1" : "0"); } catch { /* modo privado */ }
+});
+// Con el menú encima del contenido, elegir una página o tocar fuera lo cierra.
+document.addEventListener("click", (e) => {
+  const shell = $("#app-shell");
+  if (!shell.classList.contains("sidebar-open") || e.target.closest("#btn-menu")) return;
+  if (e.target.closest(".sidebar") && !e.target.closest("#nav a")) return;
+  shell.classList.remove("sidebar-open");
+  $("#btn-menu").setAttribute("aria-expanded", "false");
 });
 
 // Menú del usuario: clic en el nombre despliega la lista; clic fuera o Esc la cierra.

@@ -30,7 +30,7 @@ function licenseUsageBar(m) {
   if (m.quota === null || m.quota === undefined) return `<span class="muted">—</span>`;
   const quota = m.quota, used = m.inUse || 0;
   const pct = quota > 0 ? Math.min(100, Math.round((used / quota) * 100)) : (used > 0 ? 100 : 0);
-  const color = !m.enabled ? "var(--muted)" : pct >= 100 ? "var(--danger)" : pct >= 80 ? "#F59E0B" : "var(--ok)";
+  const color = !m.enabled ? "var(--muted)" : pct >= 100 ? "var(--danger)" : pct >= 80 ? "var(--warn)" : "var(--ok)";
   return `
     <div style="display:flex;align-items:center;gap:10px;min-width:220px">
       <div style="flex:1;height:8px;border-radius:999px;background:rgba(139,152,165,.18);overflow:hidden">

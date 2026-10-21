@@ -159,7 +159,7 @@ function maintDraw() {
       </div>
       <div class="card">
         <div class="card-label">Equipos</div>
-        <div class="card-value" style="color:${bad ? "#F59E0B" : "var(--ok)"}">${count("ok")}
+        <div class="card-value" style="color:${bad ? "var(--warn-text)" : "var(--ok-text)"}">${count("ok")}
           <span class="muted" style="font-size:13px">de ${devices.length} en hora</span></div>
         <div class="muted" style="font-size:12px">${[
           bad ? `${bad} fuera de hora o de zona` : null,
