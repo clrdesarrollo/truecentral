@@ -32,7 +32,9 @@ public sealed class IsupManagedService(IsupHostManager manager, IsupService serv
             }
             int online = status.Devices.Count(d => d.Online);
             var closed = status.Listeners.Where(l => !l.Open).Select(l => $"{l.Name} ({l.Port})").ToList();
-            var detail = $"PID {manager.ProcessId}, {online} de {status.Devices.Count} equipo(s) en línea, dirección anunciada {status.PublicAddress}";
+            var detail = $"PID {manager.ProcessId}, {online} de {status.Devices.Count} equipo(s) en línea, " + (status.PerDeviceAddress
+                ? $"a cada equipo se le anuncia la IP por la que llega ({string.Join(", ", status.LocalAddresses ?? [])})"
+                : $"dirección anunciada {status.PublicAddress}");
             if (closed.Count > 0) detail += ". Puertos sin abrir: " + string.Join(", ", closed);
             return ServiceHealth.Ok(detail);
         }

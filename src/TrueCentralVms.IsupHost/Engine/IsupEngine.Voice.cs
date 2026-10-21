@@ -62,7 +62,7 @@ public sealed partial class IsupEngine
         if (_hVoice < 0) throw new IsupCommandException(-1, "El puerto de voz ISUP no está abierto en el servidor.");
         var session = new VoiceSession(deviceId, channel, userId);
         var input = new NET_EHOME_VOICE_TALK_IN { dwVoiceChan = (uint)Math.Max(1, channel), byBroadcast = (byte)(broadcast ? 1 : 0), byBroadLevel = 15, byBroadVolume = broadcast ? (byte)15 : (byte)0 };
-        Isup.SetIp(ref input.struStreamSever, _publicIp, (ushort)_options.VoicePort);
+        Isup.SetIp(ref input.struStreamSever, AddressFor(deviceId), (ushort)_options.VoicePort);
         var output = new NET_EHOME_VOICE_TALK_OUT();
         lock (GateOf(deviceId))
         {

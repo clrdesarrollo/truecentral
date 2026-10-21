@@ -99,7 +99,7 @@ public static class IsupEquipmentRules
                 return "El servicio ISUP del servidor no respondió a tiempo al consultar su estado; se vuelve a intentar en un momento.";
         }
         int port = status.Listeners.FirstOrDefault(l => l.Name == "Registro")?.Port ?? host.Options.RegistrationPorts.FirstOrDefault();
-        string setup = $"En el {noun}: plataforma ISUP 5.0 con servidor {status.PublicAddress}, puerto {port}, ID «{isupId}» y la misma clave.";
+        string setup = $"En el {noun}: plataforma ISUP 5.0 con servidor {ServerAddressHint(status, noun)}, puerto {port}, ID «{isupId}» y la misma clave.";
         // Quien llama aquí ya tiene el equipo en el VMS: un rechazo por «no dado de alta» es de antes de agregarlo (el directorio
         // se entrega en un instante y el equipo reintenta solo), así que no se muestra.
         var rejection = status.Rejections.FirstOrDefault(r => r.DeviceId == isupId && !r.Reason.Contains("no está dado de alta", StringComparison.Ordinal));
@@ -107,5 +107,21 @@ public static class IsupEquipmentRules
             return $"El {noun} intentó conectarse y fue rechazado: {rejection.Reason}. {setup}";
         return $"El {noun} todavía no se conectó al servidor por ISUP. {setup} El {noun} tiene que llegar a esa dirección " +
                "(misma red, VPN o puerto publicado en internet).";
+    }
+
+    /// <summary>
+    /// La dirección que hay que escribir en el equipo: la fija, o sin ella la IP de este servidor en la red del equipo (con varias redes
+    /// no se sabe cuál es antes de que se conecte, así que se nombran todas).
+    /// </summary>
+    public static string ServerAddressHint(IsupHostStatus status, string noun)
+    {
+        if (!status.PerDeviceAddress) return status.PublicAddress;
+        var locals = status.LocalAddresses ?? [];
+        return locals.Count switch
+        {
+            0 => status.PublicAddress,
+            1 => locals[0],
+            _ => $"la IP de este servidor en la red del {noun} ({string.Join(" o ", locals)})",
+        };
     }
 }

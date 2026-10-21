@@ -348,12 +348,13 @@ public sealed partial class IsupEngine
         {
             Thread.Sleep(6000);   // tiempo para que el SDK empuje el host y el equipo conecte por sí solo
             if (!_userByDevice.ContainsKey(id) || AlarmLinkUp(deviceIp)) return;
+            var announced = AddressFor(id);
             var root = ParseXml(IsapiText(id, "GET", "/ISAPI/Event/notification/httpHosts"));
             var host = root?.DescendantsAndSelf().Where(x => x.Name.LocalName == "HttpHostNotification")
-                .FirstOrDefault(h => Val(h, "ipAddress") == _publicIp && Val(h, "portNo") == _options.AlarmPort.ToString());
+                .FirstOrDefault(h => Val(h, "ipAddress") == announced && Val(h, "portNo") == _options.AlarmPort.ToString());
             if (host == null)
             {
-                Emit($"Alarmas de '{id}': su host de alarmas no apunta a este servidor ({_publicIp}:{_options.AlarmPort}); no se reinicia el enlace.");
+                Emit($"Alarmas de '{id}': su host de alarmas no apunta a este servidor ({announced}:{_options.AlarmPort}); no se reinicia el enlace.");
                 return;
             }
             var path = $"/ISAPI/Event/notification/httpHosts/{Val(host, "id")}";
@@ -364,7 +365,7 @@ public sealed partial class IsupEngine
             IsapiText(id, "PUT", path, shifted.ToString());
             Thread.Sleep(2500);
             var back = IsapiText(id, "PUT", path, original);   // siempre se devuelve al valor configurado
-            if (!IsapiOk(back)) { Emit($"AVISO: no se pudo devolver el host de alarmas de '{id}' a {_publicIp}:{_options.AlarmPort}; revíselo en el equipo."); return; }
+            if (!IsapiOk(back)) { Emit($"AVISO: no se pudo devolver el host de alarmas de '{id}' a {announced}:{_options.AlarmPort}; revíselo en el equipo."); return; }
             Thread.Sleep(4000);
             Emit(AlarmLinkUp(deviceIp) ? $"Alarmas de '{id}': enlace de alarmas abierto." : $"AVISO: el equipo '{id}' sigue sin abrir el enlace de alarmas.");
         }
