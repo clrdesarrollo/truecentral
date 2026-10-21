@@ -30,6 +30,52 @@
         "$env:Urls='http://localhost:5097'; $env:Database__PgPort='25492'; $env:Database__PgDataDir='../../build/pgdata-dev'; $env:Streaming__RtspPort='8674'; $env:Streaming__ApiPort='9931'; $env:Streaming__ServerPort='5097'; $env:Alarms__Receiver__Enabled='false'; $env:Isup__Enabled='false'; $env:Cerco__Receiver__Enabled='false'; $env:Cerco__Firmware__Enabled='false'; Set-Location src/TrueCentralVms.Server; dotnet run --no-build"
       ],
       "port": 5097
+    },
+    {
+      "name": "template",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8777",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "Resources/materialpro-bt5-v6/package"
+      ],
+      "port": 8777
+    },
+    {
+      "name": "server-ui",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "Set-Location 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\bin2'; & 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\bin2\\TrueCentralVms.Server.exe' --Urls=http://127.0.0.1:6871 --Database:PgPort=26871 '--Database:PgDataDir=C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\pgdata' '--Database:PgBinDir=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\tools\\postgres\\pgsql\\bin' --Streaming:RtspPort=8871 --Streaming:ApiPort=9871 --Streaming:WebRtcPort=9872 --Streaming:WebRtcIcePort=8873 --Streaming:ServerPort=6871 --Alarms:Receiver:Enabled=false --Alarms:LocalReceiver:Enabled=false --Isup:Enabled=false --Cerco:Receiver:Enabled=false --Cerco:Firmware:Enabled=false --Licensing:ServerUrl= '--webroot=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\src\\TrueCentralVms.Server\\wwwroot'"
+      ],
+      "port": 6871
+    },
+    {
+      "name": "demo-camaras",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\docs\\manual\\demo\\camaras.py",
+        "C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\docs\\manual\\demo\\demo.json",
+        "C:\\Users\\Jose\\AppData\\Local\\TrueCentralDemo",
+        "C:\\Users\\Jose\\AppData\\Local\\TrueCentralDemo\\tools\\ffmpeg\\bin\\ffmpeg.exe",
+        "C:\\Users\\Jose\\AppData\\Local\\TrueCentralDemo\\camaras\\mediamtx.exe"
+      ],
+      "port": 8901
+    },
+    {
+      "name": "server-dashboard",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "Set-Location 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\dbbuild\\bin'; & 'C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\dbbuild\\bin\\TrueCentralVms.Server.exe' --Urls=http://127.0.0.1:6871 --Database:PgPort=26871 '--Database:PgDataDir=C:\\Users\\Jose\\AppData\\Local\\Temp\\claude\\mp71\\pgdata' '--Database:PgBinDir=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\tools\\postgres\\pgsql\\bin' --Streaming:RtspPort=8871 --Streaming:ApiPort=9871 --Streaming:WebRtcPort=9872 --Streaming:WebRtcIcePort=8873 --Streaming:ServerPort=6871 --Alarms:Receiver:Enabled=false --Alarms:LocalReceiver:Enabled=false --Isup:Enabled=false --Cerco:Receiver:Enabled=false --Cerco:Firmware:Enabled=false --Licensing:ServerUrl= '--webroot=C:\\Users\\Jose\\Desktop\\CLRobotics\\dev\\CLRobotics TrueCentral\\src\\TrueCentralVms.Server\\wwwroot'"
+      ],
+      "port": 6871
     }
   ]
 }
