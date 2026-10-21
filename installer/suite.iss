@@ -310,7 +310,10 @@ begin
   if ServiceExists() then
   begin
     if Caption <> '' then
+    begin
       WizardForm.StatusLabel.Caption := Caption;
+      WizardForm.PreparingLabel.Caption := Caption;
+    end;
     RunHidden(SysTool('sc.exe'), 'stop {#ServiceName}');
     // Apagado ordenado: el servidor se da hasta 60 s (HostOptions.ShutdownTimeout,
     // incluye pg_ctl stop); aquí se espera hasta 2 min antes de forzar.
@@ -494,7 +497,7 @@ procedure ConfigurePgPort();
 var
   Existing, Port: Integer;
 begin
-  WizardForm.StatusLabel.Caption := 'Comprobando el puerto de la base de datos...';
+  // El texto del paso lo pone CurStepChanged (ShowStep).
 
   Existing := ExistingClusterPort();
   if Existing > 0 then
@@ -643,53 +646,178 @@ begin
   RunHidden(SysTool('icacls.exe'), '"' + Dir + '\*" /reset /T /C /Q');
 end;
 
+// ---------------------------------------------------------------------------
+// Avance visible de la instalación
+//
+// Después de copiar los archivos quedan pasos que pueden tardar minutos (sobre
+// todo el arranque del servidor en una actualización: respaldo completo de la
+// base y migraciones). Cada paso dice qué está haciendo, la barra avanza cuando
+// se puede medir y se anima cuando no, y se muestra el tiempo transcurrido: la
+// pantalla nunca queda quieta como si se hubiera colgado.
+// ---------------------------------------------------------------------------
+const
+  PostSteps = 6;   // pasos numerados después de copiar los archivos
+
+var
+  Summary: string;   // lo que se hizo, para la página final
+
+function GetTickCount(): DWord; external 'GetTickCount@kernel32.dll stdcall';
+
+procedure AddSummary(const Line: string);
+begin
+  Summary := Summary + #13#10 + '• ' + Line;
+end;
+
+// Texto del paso ("Paso 3 de 6 · ...") y detalle. Percent: 0..100 mueve la
+// barra; -1 la anima (no se puede medir).
+procedure ShowStep(Step: Integer; const Caption, Detail: string; Percent: Integer);
+begin
+  if Step > 0 then
+    WizardForm.StatusLabel.Caption := 'Paso ' + IntToStr(Step) + ' de ' + IntToStr(PostSteps) + ' · ' + Caption
+  else
+    WizardForm.StatusLabel.Caption := Caption;
+  WizardForm.FilenameLabel.Caption := Detail;
+  if Percent < 0 then
+    WizardForm.ProgressGauge.Style := npbstMarquee
+  else
+  begin
+    WizardForm.ProgressGauge.Style := npbstNormal;
+    WizardForm.ProgressGauge.Position := WizardForm.ProgressGauge.Min +
+      (WizardForm.ProgressGauge.Max - WizardForm.ProgressGauge.Min) * Percent div 100;
+  end;
+end;
+
+function Elapsed(StartTick: DWord): string;
+var
+  Seconds: Integer;
+begin
+  Seconds := (GetTickCount() - StartTick) div 1000;
+  if Seconds < 60 then
+    Result := IntToStr(Seconds) + ' s'
+  else
+    Result := IntToStr(Seconds div 60) + ' min ' + IntToStr(Seconds mod 60) + ' s';
+end;
+
+// Espera sin congelar la ventana: Exec atiende los mensajes mientras espera
+// (Sleep no, y la barra animada se detendría). ping -n 2 tarda ~1 s.
+procedure PauseOneSecond();
+begin
+  RunHidden(SysTool('ping.exe'), '-n 2 127.0.0.1');
+end;
+
+function StartupStatusFile(): string;
+begin
+  Result := DataDir() + '\startup-status.ini';
+end;
+
+function StartupValue(const Key: string): string;
+begin
+  Result := GetIniString('status', Key, '', StartupStatusFile());
+end;
+
 // Arranca el servicio y espera a que la API responda: en ese momento el
-// esquema ya fue creado/migrado por el servidor (las migraciones corren antes
-// de abrir el puerto HTTP).
+// esquema ya fue creado/migrado por el servidor. Mientras tanto el servidor
+// informa en qué etapa va en startup-status.ini (base, respaldo, migraciones,
+// servicios) y eso es lo que se muestra.
 procedure StartServiceAndVerify();
 var
-  I: Integer;
-  Healthy, Crashed: Boolean;
+  Healthy, Crashed, Stalled, SawBackup: Boolean;
+  StartTick, LastChangeTick: DWord;
+  Phase, Title, Detail, Updated, LastUpdated, Migrations: string;
+  Percent: Integer;
 begin
   Crashed := False;
-  WizardForm.StatusLabel.Caption := 'Iniciando el servicio {#ServiceName}...';
-  RunHidden(SysTool('sc.exe'), 'start {#ServiceName}');
-
   Healthy := False;
-  if FileExists(SysTool('curl.exe')) then
+  Stalled := False;
+  SawBackup := False;
+  Migrations := '';
+  // Un estado de un arranque anterior confundiría la lectura.
+  DeleteFile(StartupStatusFile());
+  ShowStep(5, 'Iniciando el servidor', 'Arrancando el servicio {#ServiceName}', -1);
+  RunHidden(SysTool('sc.exe'), 'start {#ServiceName}');
+  if not FileExists(SysTool('curl.exe')) then
+    exit;
+
+  StartTick := GetTickCount();
+  LastChangeTick := StartTick;
+  LastUpdated := '';
+  // Por el puerto interno (HTTP solo en loopback, sin certificado de por
+  // medio) y por 127.0.0.1 y no "localhost": resolver ::1 primero podría
+  // consumir el --max-time y el chequeo fallaría con el servicio sano.
+  while True do
   begin
-    WizardForm.StatusLabel.Caption := 'Esperando a que el servidor prepare la base de datos y responda...';
-    // Primer arranque: initdb + migraciones puede tardar; hasta 120 s.
-    // Por el puerto interno (HTTP solo en loopback, sin certificado de por
-    // medio) y por 127.0.0.1 y no "localhost": resolver ::1 primero podría
-    // consumir el --max-time y el chequeo fallaría con el servicio sano.
-    for I := 1 to 60 do
+    if RunHidden(SysTool('curl.exe'),
+         '--silent --fail --max-time 3 http://127.0.0.1:{#InternalPort}/api/health') = 0 then
     begin
-      if RunHidden(SysTool('curl.exe'),
-           '--silent --fail --max-time 5 http://127.0.0.1:{#InternalPort}/api/health') = 0 then
-      begin
-        Healthy := True;
-        break;
-      end;
-      // Si el servicio se cayó no tiene sentido seguir esperando dos minutos.
-      if not ServiceRunning() then
-      begin
-        Crashed := True;
-        break;
-      end;
-      Sleep(2000);
+      Healthy := True;
+      break;
     end;
-    if Crashed and not WizardSilent() then
-      MsgBox('El servicio se instaló, pero se detiene al arrancar.' #13#10#13#10 +
-             'Revise el Visor de eventos de Windows (Registro de aplicaciones, origen CLRTrueCentralVMS).' #13#10 +
-             'Causas habituales: el puerto {#HttpsPort} o el {#HttpPort} está ocupado por otro programa, o la base de datos' #13#10 +
-             'no pudo iniciarse (puerto {#PgPort} o permisos sobre ' + DataDir() + ').',
-             mbError, MB_OK)
-    else if not Healthy and not WizardSilent() then
-      MsgBox('El servicio se instaló y se inició, pero la API todavía no responde.'#13#10 +
-             'Revise el estado en el Visor de eventos de Windows o vuelva a abrir https://localhost en unos minutos.',
-             mbInformation, MB_OK);
+    if not ServiceRunning() then
+    begin
+      Crashed := True;
+      break;
+    end;
+
+    Phase := StartupValue('phase');
+    Title := StartupValue('title');
+    Detail := StartupValue('detail');
+    Percent := StrToIntDef(StartupValue('percent'), -1);
+    Updated := StartupValue('updated');
+    if Phase = 'backup' then
+      SawBackup := True;
+    if Phase = 'migrate' then
+      Migrations := Detail;
+    if Phase = 'error' then
+    begin
+      Crashed := True;
+      break;
+    end;
+    if Updated <> LastUpdated then
+    begin
+      LastUpdated := Updated;
+      LastChangeTick := GetTickCount();
+    end;
+
+    if Title = '' then
+      Title := 'Esperando a que el servidor inicie';
+    if Detail <> '' then
+      Detail := Detail + '  ·  ';
+    Detail := Detail + Elapsed(StartTick);
+    if (GetTickCount() - LastChangeTick) > 60000 then
+      Detail := Detail + '  ·  Sigue trabajando: con bases grandes este paso puede tardar varios minutos';
+    ShowStep(5, Title, Detail, Percent);
+
+    // Sin ninguna novedad del servidor en 10 minutos: algo se trabó.
+    if (GetTickCount() - LastChangeTick) > 600000 then
+    begin
+      Stalled := True;
+      break;
+    end;
+    PauseOneSecond();
   end;
+
+  if Healthy then
+  begin
+    AddSummary('El servidor quedó funcionando (inició en ' + Elapsed(StartTick) + ').');
+    if SawBackup then
+      AddSummary('Antes de actualizar se respaldó la base completa en ' + DataDir() + '\backups.');
+    if Migrations <> '' then
+      AddSummary('Se actualizó la estructura de la base de datos.');
+  end
+  else if Crashed and not WizardSilent() then
+    MsgBox('El servicio se instaló, pero se detiene al arrancar.' #13#10#13#10 +
+           StartupValue('title') + ': ' + StartupValue('detail') + #13#10#13#10 +
+           'Revise el Visor de eventos de Windows (Registro de aplicaciones, origen TrueCentralVms.Server).' #13#10 +
+           'Causas habituales: el puerto {#HttpsPort} o el {#HttpPort} está ocupado por otro programa, o la base de datos' #13#10 +
+           'no pudo iniciarse (puerto {#PgPort} o permisos sobre ' + DataDir() + ').',
+           mbError, MB_OK)
+  else if not WizardSilent() then
+    MsgBox('El servicio se instaló y sigue iniciando, pero lleva ' + Elapsed(LastChangeTick) + ' sin avanzar' +
+           ' (última etapa: ' + StartupValue('title') + ').' #13#10#13#10 +
+           'Puede seguir trabajando solo. Revise el Visor de eventos de Windows o abra https://localhost en unos minutos.',
+           mbInformation, MB_OK);
+  if Stalled then
+    AddSummary('El servidor seguía iniciando al cerrar el instalador.');
 end;
 
 // Cliente de escritorio en el mismo equipo: se instala con SU propio
@@ -698,6 +826,7 @@ procedure InstallClient();
 var
   Setup, Log: string;
   ResultCode: Integer;
+  StartTick: DWord;
 begin
 #ifdef HasClient
   if not WizardIsTaskSelected('installclient') then
@@ -706,13 +835,20 @@ begin
   if not FileExists(Setup) then
     exit;
   Log := DataDir() + '\logs\client-setup.log';
-  WizardForm.StatusLabel.Caption := 'Instalando el cliente de escritorio...';
+  StartTick := GetTickCount();
+  ShowStep(6, 'Instalando el cliente de escritorio',
+    'Se cierra el cliente si está abierto y se copian sus archivos (suele tardar menos de un minuto)', -1);
   if not Exec(Setup, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG="' + Log + '"', '',
               SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  begin
     if not WizardSilent() then
       MsgBox('El cliente de escritorio no se pudo instalar (código ' + IntToStr(ResultCode) + ').' #13#10 +
              'Puede instalarlo a mano desde ' + Setup + #13#10 + 'Detalle en ' + Log,
              mbError, MB_OK);
+    AddSummary('El cliente de escritorio NO se pudo instalar (detalle en ' + Log + ').');
+  end
+  else
+    AddSummary('Cliente de escritorio instalado (' + Elapsed(StartTick) + ').');
 #endif
 end;
 
@@ -820,7 +956,7 @@ begin
   end;
   if IprpManagedByUs() then
   begin
-    WizardForm.StatusLabel.Caption := 'Quitando la receptora de paneles anterior (Hik IP Receiver Pro)...';
+    ShowStep(2, 'Quitando la receptora de paneles anterior (Hik IP Receiver Pro)', 'Puede tardar hasta dos minutos', -1);
     UninstallIprp();
     DeleteFile(DataDir() + '\pgdata\tcvms-iprp.secret');
     exit;
@@ -836,19 +972,38 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  StartTick: DWord;
 begin
   if CurStep = ssPostInstall then
   begin
+    StartTick := GetTickCount();
+    AddSummary('Archivos de la versión {#AppVersion} copiados.');
+    ShowStep(1, 'Protegiendo la carpeta de datos', 'Solo el sistema y los administradores pueden leer la base y sus llaves', -1);
     TightenDataAcl();
+    ShowStep(1, 'Comprobando el puerto de la base de datos', '', -1);
     ConfigurePgPort();   // antes de arrancar: el clúster nace en el puerto elegido
     // Antes de arrancar el servidor: su servicio ISUP necesita los puertos que
     // ocupaba la receptora anterior.
+    ShowStep(2, 'Revisando componentes anteriores', '', -1);
     RetireIprp();
+    ShowStep(3, 'Registrando el servicio de Windows', '{#ServiceName}, inicio automático y reinicio ante fallas', -1);
     ConfigureService();
+    ShowStep(4, 'Configurando el firewall de Windows',
+      'HTTPS {#HttpsPort}, HTTP {#HttpPort} (equipos sin cifrado), video, alarmas, cerco e ISUP', -1);
     ConfigureFirewall();
     StartServiceAndVerify();
     InstallClient();
+    AddSummary('Tiempo total después de copiar: ' + Elapsed(StartTick) + '.');
+    ShowStep(0, 'Instalación terminada', '', 100);
   end;
+end;
+
+// Página final: qué se hizo y cuánto tardó, además del texto de siempre.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and (Summary <> '') then
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10 + Summary;
 end;
 
 // ---------------------------------------------------------------------------
