@@ -689,6 +689,11 @@ public sealed class ApiClient
         SendAsync<object?>(HttpMethod.Post, $"/api/devices/{deviceId}/channels/{channelNumber}/ptz",
             new PtzRequestDto(command, speed, stop), ct);
 
+    /// <summary>PTZ por velocidades (joystick): pan, tilt y zoom −1..1 a la vez; los tres en 0 detienen.</summary>
+    public Task PtzMoveAsync(int deviceId, int channelNumber, double pan, double tilt, double zoom, CancellationToken ct = default) =>
+        SendAsync<object?>(HttpMethod.Post, $"/api/devices/{deviceId}/channels/{channelNumber}/ptz/move",
+            new PtzMoveRequestDto(pan, tilt, zoom), ct);
+
     /// <summary>Operación sobre un preset PTZ (ir / guardar / borrar).</summary>
     public Task PtzPresetAsync(int deviceId, int channelNumber, PtzPresetAction action, int index, CancellationToken ct = default) =>
         SendAsync<object?>(HttpMethod.Post, $"/api/devices/{deviceId}/channels/{channelNumber}/ptz-preset",
@@ -841,6 +846,11 @@ public sealed class ApiClient
         if (response.Content.Headers.ContentType?.MediaType == "text/html")
             throw new ApiException(
                 "El servidor no reconoce esta función: probablemente tenga una versión más antigua que este cliente.");
+
+        // Órdenes sin respuesta (Results.Ok() del servidor: cuerpo vacío). Leerlo
+        // como JSON lanzaba JsonException aunque la orden se hubiera cumplido.
+        if (response.Content.Headers.ContentLength == 0)
+            return default!;
 
         return (await response.Content.ReadFromJsonAsync<T>(Json, ct))!;
     }

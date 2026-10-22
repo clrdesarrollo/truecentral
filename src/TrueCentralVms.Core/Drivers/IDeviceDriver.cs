@@ -90,6 +90,16 @@ public interface IDeviceDriver
         CancellationToken ct = default) => Task.FromResult(false);
 
     /// <summary>
+    /// Movimiento PTZ por velocidades, como lo pide un joystick: pan, tilt y
+    /// zoom en −1..1, los tres en la MISMA orden (0 detiene ese eje; los tres
+    /// en 0 detienen todo). Devuelve false si el driver o el equipo no lo
+    /// soportan: el servidor lo traduce entonces a órdenes de
+    /// <see cref="PtzControlAsync"/>. Implementación por defecto: sin soporte.
+    /// </summary>
+    Task<bool> PtzMoveAsync(DeviceConnectionInfo info, int channelNumber, double pan, double tilt, double zoom,
+        CancellationToken ct = default) => Task.FromResult(false);
+
+    /// <summary>
     /// Operación sobre un preset PTZ (ir, guardar o borrar; índice 1..300).
     /// Devuelve false si el driver o el canal no lo soportan.
     /// </summary>

@@ -196,6 +196,23 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
         return CHCNetSDK.NET_DVR_PTZControlWithSpeed_Other(userId, channelNumber, sdkCommand, stop ? 1 : 0, clampedSpeed);
     }, ct);
 
+    /// <summary>
+    /// ISAPI continuous (pan, tilt y zoom −100..100 en una orden) por la sesión
+    /// del SDK. Los domos y los canales analógicos lo aceptan; las cámaras IP
+    /// de un NVR o el PTZ coaxial de algunos DVR no: false y el servidor sigue
+    /// con las órdenes del SDK de <see cref="PtzControlAsync"/>.
+    /// </summary>
+    public Task<bool> PtzMoveAsync(DeviceConnectionInfo info, int channelNumber, double pan, double tilt, double zoom,
+        CancellationToken ct = default) => Task.Run(() =>
+    {
+        static int Scale(double v) => (int)Math.Round(Math.Clamp(v, -1, 1) * 100);
+        string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+                     "<PTZData version=\"2.0\" xmlns=\"http://www.hikvision.com/ver20/XMLSchema\">" +
+                     $"<pan>{Scale(pan)}</pan><tilt>{Scale(tilt)}</tilt><zoom>{Scale(zoom)}</zoom></PTZData>";
+        int userId = HikvisionSessionCache.GetOrLogin(info);
+        return IsapiPassthrough.Put(userId, $"/ISAPI/PTZCtrl/channels/{channelNumber}/continuous", xml);
+    }, ct);
+
     public Task<bool> PtzPresetAsync(DeviceConnectionInfo info, int channelNumber, PtzPresetAction action, int presetIndex,
         CancellationToken ct = default) => Task.Run(() =>
     {

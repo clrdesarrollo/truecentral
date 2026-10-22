@@ -434,4 +434,39 @@ internal static class NetSdk
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Ansi)]
     public static extern bool CLIENT_InitDevAccount(ref NET_IN_INIT_DEVICE_ACCOUNT pInitAccountIn,
         ref NET_OUT_INIT_DEVICE_ACCOUNT pInitAccountOut, uint dwWaitTime, string? szLocalIp);
+
+    // ------------------------------------------------------------------
+    // PTZ (DH_PTZ_ControlType y DH_EXTPTZ_ControlType). Canal desde 0 y
+    // velocidad 1..8. Parámetros como en la demo oficial
+    // RealPlayAndPTZControl: direcciones, zoom, foco e iris con la velocidad
+    // en param2; diagonales con la velocidad en param1 y param2; presets con
+    // el número en param2.
+    // ------------------------------------------------------------------
+
+    public const uint PtzUp = 0, PtzDown = 1, PtzLeft = 2, PtzRight = 3;
+    public const uint PtzZoomAdd = 4, PtzZoomDec = 5;
+    public const uint PtzFocusAdd = 6, PtzFocusDec = 7;
+    public const uint PtzApertureAdd = 8, PtzApertureDec = 9;
+    public const uint PtzPointMove = 10, PtzPointSet = 11, PtzPointDel = 12;
+    public const uint ExtPtzLeftTop = 0x20, ExtPtzRightTop = 0x21, ExtPtzLeftDown = 0x22, ExtPtzRightDown = 0x23;
+
+    /// <summary>DH_EXTPTZ_MOVE_CONTINUOUSLY (0x46): velocidades pan/tilt/zoom juntas, param4 = PTZ_CONTROL_CONTINUOUSLY.</summary>
+    public const uint ExtPtzMoveContinuously = 0x46;
+
+    /// <summary>PTZ_CONTROL_CONTINUOUSLY con su PTZ_SPEED_UNIT aplanado (112 bytes, alineación por defecto).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PTZ_CONTROL_CONTINUOUSLY
+    {
+        public float fPositionX;   // horizontal, −1..1
+        public float fPositionY;   // vertical, −1..1
+        public float fZoom;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] szSpeedReserve;
+        public int nTimeOut;       // segundos: el equipo se detiene solo si no llega otra orden
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 64)] public byte[] szReserve;
+    }
+
+    /// <summary>LONG de Windows = 32 bits; param4 depende de la orden (null en las básicas).</summary>
+    [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool CLIENT_DHPTZControlEx2(long lLoginID, int nChannelID, uint dwPTZCommand,
+        int lParam1, int lParam2, int lParam3, bool dwStop, IntPtr param4);
 }

@@ -291,6 +291,11 @@ motorizado que se controlan por el cable coaxial de un DVR, o por ONVIF a
 través del grabador: se pueden mover, pero el grabador no informa que tienen
 PTZ. La marca manual se conserva cuando se revalida el equipo.
 
+En los equipos Dahua agregados con el driver *Dahua (SDK nativo)* el PTZ
+siempre se marca a mano: el equipo no informa qué canales lo tienen. Sirve
+para domos IP, para las cámaras de un NVR y para las cámaras coaxiales (HDCVI)
+de un XVR.
+
 === Proxy: cámaras con error de reproducción
 
 Algunas cámaras anuncian su audio de una forma que el sistema no acepta, y el

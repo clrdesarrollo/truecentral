@@ -584,7 +584,12 @@ public partial class MainViewModel : ObservableObject
     private void OpenSettings()
     {
         var window = new Views.SettingsWindow(_settings, _api) { Owner = Application.Current.MainWindow };
-        if (window.ShowDialog() == true)
+        // Probar o asignar los botones del joystick no debe mover la cámara seleccionada.
+        if (Joystick is { } joystick) joystick.Paused = true;
+        bool saved;
+        try { saved = window.ShowDialog() == true; }
+        finally { if (Joystick is { } j) j.Paused = false; }
+        if (saved)
         {
             // El ajuste de imagen rige de inmediato en los cuadros existentes.
             foreach (var cell in Cells)
@@ -615,7 +620,16 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isPrecisionMode;
     [ObservableProperty] private string _ptzTargetName = "";
     [ObservableProperty] private int _ptzSpeed = 4;
+    /// <summary>Hay un joystick y mueve la cámara PTZ seleccionada (píldora JOYSTICK del panel).</summary>
+    [ObservableProperty] private bool _isJoystickActive;
     private ChannelNode? _ptzChannel;
+
+    /// <summary>Joystick PTZ de la Vista en Vivo (lo crea la vista al cargarse).</summary>
+    public JoystickPtzController? Joystick { get; set; }
+
+    /// <summary>Canal PTZ del cuadro seleccionado, si se puede mover; null si no.</summary>
+    public PtzTarget? CurrentPtzTarget => _ptzChannel is { } node && IsPtzAvailable
+        ? new PtzTarget(node.Device.Id, node.Channel.ChannelNumber, node.Channel.Id) : null;
 
     partial void OnSelectedCellChanged(VideoCellViewModel? oldValue, VideoCellViewModel? newValue)
     {
@@ -772,6 +786,29 @@ public partial class MainViewModel : ObservableObject
         }
         catch (ApiException ex)
         {
+            StatusMessage = $"PTZ: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Orden PTZ del joystick a un canal dado: velocidades (<paramref name="command"/>
+    /// null) o una orden de foco/iris. El "detener" debe llegar a la cámara que
+    /// se movía aunque la selección cambie, por eso no usa el cuadro actual.
+    /// </summary>
+    public async Task JoystickPtzAsync(PtzTarget target, double pan, double tilt, double zoom,
+        PtzCommand? command = null, int speed = 0, bool stop = false)
+    {
+        try
+        {
+            if (command is { } c)
+                await _api.PtzAsync(target.DeviceId, target.ChannelNumber, c, speed, stop);
+            else
+                await _api.PtzMoveAsync(target.DeviceId, target.ChannelNumber, pan, tilt, zoom);
+        }
+        catch (Exception ex)
+        {
+            // Nada se escapa: el joystick anota la orden como enviada y el
+            // próximo cambio (o el "detener") sigue su curso.
             StatusMessage = $"PTZ: {ex.Message}";
         }
     }

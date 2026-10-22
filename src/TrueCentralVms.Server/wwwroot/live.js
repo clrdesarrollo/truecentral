@@ -7,7 +7,8 @@
 // para maximizar (sube a principal y vuelve a secundario al restaurar),
 // arrastrar del árbol al cuadro y de un cuadro a otro, zoom digital, vistas
 // guardadas, pantalla completa, pantallas auxiliares (ventanas del
-// navegador), PTZ con teclado y el panel de parlantes IP.
+// navegador), PTZ con teclado y joystick (live-joystick.js) y el panel de
+// parlantes IP.
 //
 // El video llega por WebRTC: el navegador manda su oferta a
 // /api/streams/webrtc (mismas validaciones, alcance y auditoría que el RTSP
@@ -1308,6 +1309,7 @@ async function renderLiveView() {
           <div class="lv-panel-head">
             <span class="lv-cap lv-ptz-title">PTZ — <b id="lv-ptz-name" class="off">sin cámara PTZ</b></span>
             <span class="lv-pill" id="lv-precision" hidden title="Modo precisión: movimiento PTZ a velocidad mínima (suelte Shift para salir)">PRECISIÓN</span>
+            <span class="lv-pill" id="lv-joy-pill" hidden title="El joystick mueve la cámara PTZ seleccionada (Ajustes de este navegador)">JOYSTICK</span>
             <button type="button" class="lv-chev" id="lv-ptz-toggle" title="Minimizar / restaurar el control PTZ"></button>
           </div>
           <div class="lv-panel-body" id="lv-ptz-body">
@@ -1397,6 +1399,7 @@ function liveViewLeave() {
   lvStopPreview();
   if (lv.ptzHeld) lvPtzRelease();
   if (lv.keyHeld) { lvPtz(lv.keyHeld, true); lv.keyHeld = null; }
+  lvJoyStop();
   document.removeEventListener("keydown", lvOnKeyDown, true);
   document.removeEventListener("keyup", lvOnKeyUp, true);
   document.removeEventListener("pointerdown", lvOnOutsidePointer, true);
@@ -1469,8 +1472,8 @@ function lvWirePage() {
   });
   $("#lv-settings-btn").addEventListener("click", () => lvTogglePop("lv-settings-pop", lvRenderSettingsPop));
 
-  // PTZ.
-  if (!lv.aux) lvWirePtz();
+  // PTZ (panel, teclado y joystick).
+  if (!lv.aux) { lvWirePtz(); lvJoyStart(); }
 
   // Teclado (PTZ) y cierre de los desplegables con clic afuera.
   document.addEventListener("keydown", lvOnKeyDown, true);
@@ -1507,9 +1510,11 @@ function lvWirePage() {
 }
 
 function lvOnWindowBlur() {
-  // Una tecla o un botón sostenidos al cambiar de ventana no deben dejar la cámara moviéndose.
+  // Una tecla, un botón o el joystick sostenidos al cambiar de ventana no deben dejar la cámara moviéndose
+  // (el joystick sigue si está configurado para operar en segundo plano).
   if (lv.keyHeld) { lvPtz(lv.keyHeld, true); lv.keyHeld = null; }
   if (lv.ptzHeld) lvPtzRelease();
+  lvJoyOnBlur();
   lvSetPrecision(false);
 }
 
@@ -1583,7 +1588,8 @@ function lvRenderSettingsPop() {
       <span>Volver a abrir las cámaras de la última sesión al entrar</span></label>`}
     <div class="muted lv-small" style="margin-top:8px">Las capturas y grabaciones se guardan en la carpeta de descargas del navegador.</div>
     <div class="muted lv-small" style="margin-top:4px">H.265 en este navegador: por WebRTC ${lvHevc.webrtc ? "sí" : "no"};
-      por la entrega alternativa (sin audio) ${lvHevc.mse ? "sí" : "no"}.</div>`;
+      por la entrega alternativa (sin audio) ${lvHevc.mse ? "sí" : "no"}.</div>
+    ${lv.aux ? "" : lvJoySettingsHtml()}`;
   $("#lv-set-profile").addEventListener("change", (e) => { p.profile = e.target.value; lvSavePrefs(); });
   $("#lv-set-snap").addEventListener("change", (e) => { p.snapFormat = e.target.value; lvSavePrefs(); });
   $("#lv-set-fit").addEventListener("change", (e) => { p.fitDevice = e.target.checked; lvSavePrefs(); });
@@ -1592,6 +1598,7 @@ function lvRenderSettingsPop() {
     $("#lv-gridwrap").classList.toggle("stretch", p.stretch);
   });
   $("#lv-set-reopen")?.addEventListener("change", (e) => { p.reopen = e.target.checked; lvSavePrefs(); });
+  if (!lv.aux) lvJoyWireSettings();
 }
 
 // ---------------------------------------------------------------------------
@@ -2433,15 +2440,19 @@ function lvUpdatePtz() {
     el.disabled = !ok;
   });
   if (!ok && lv.ptzHeld) lvPtzRelease();
+  lvJoyUpdatePill();
 }
 
-/** Las órdenes van en fila: un "detener" nunca debe adelantarse a su "mover". */
 function lvPtz(command, stop, speed) {
   const ch = lvPtzTarget();
   if (!ch || !lvPtzAvailable()) return;
-  const body = { command, speed: speed ?? (lv.shift ? 1 : lv.prefs.ptzSpeed), stop };
-  lv.ptzChain = lv.ptzChain.then(() =>
-    Api.post(`/api/devices/${ch.deviceId}/channels/${ch.channelNumber}/ptz`, body)
+  lvPtzSend(ch, command, stop, speed ?? (lv.shift ? 1 : lv.prefs.ptzSpeed));
+}
+
+/** Las órdenes van en fila: un "detener" nunca debe adelantarse a su "mover". Resuelve al terminar la orden. */
+function lvPtzSend(ch, command, stop, speed) {
+  return lv.ptzChain = lv.ptzChain.then(() =>
+    Api.post(`/api/devices/${ch.deviceId}/channels/${ch.channelNumber}/ptz`, { command, speed, stop })
       .catch((err) => lvStatus(`PTZ: ${err.error}`, true)));
 }
 
