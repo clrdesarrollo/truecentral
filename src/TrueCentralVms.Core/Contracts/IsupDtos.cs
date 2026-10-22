@@ -33,7 +33,10 @@ public sealed record IsupStatusDto(
     IReadOnlyList<IsupRejection> Rejections,
     /// <summary>¿Se aceptan equipos ISUP 2.0/4.0 (sin clave)? Apagado por omisión; se enciende con confirmación del riesgo.</summary>
     bool AllowLegacy = false,
-    /// <summary>true si a cada equipo se le anuncia la IP de este servidor por la que llegó (sin dirección fija configurada).</summary>
+    /// <summary>
+    /// true si no hay dirección configurada (a cada equipo, la IP de este servidor por la que llegó). Con o sin ella, los equipos de
+    /// las redes del servidor reciben la IP de su misma red.
+    /// </summary>
     bool PerDeviceAddress = false,
     /// <summary>IPv4 de este servidor (sin adaptadores virtuales): con más de una, cada equipo apunta a la de su red.</summary>
     IReadOnlyList<string>? LocalAddresses = null);

@@ -37,6 +37,30 @@ public static class LocalNetwork
     /// <summary>IP local por la que sale (y entra, tras el NAT del router) el tráfico de internet.</summary>
     public static string InternetFacingIp() => RouteSourceIp("8.8.8.8") ?? Candidates().FirstOrDefault() ?? "127.0.0.1";
 
+    /// <summary>
+    /// IP de este equipo en la misma red (subred) que <paramref name="remote"/>, o null si no comparte red con ninguna interfaz
+    /// activa. Las direcciones sin DHCP (169.254.x) no cuentan.
+    /// </summary>
+    public static string? SameSubnetAddress(IPAddress remote)
+    {
+        if (remote.AddressFamily != AddressFamily.InterNetwork || remote.ToString().StartsWith("169.254.", StringComparison.Ordinal)) return null;
+        uint target = ToUInt(remote);
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+            foreach (var ua in nic.GetIPProperties().UnicastAddresses)
+            {
+                if (ua.Address.AddressFamily != AddressFamily.InterNetwork || ua.PrefixLength is <= 0 or > 32) continue;
+                if (ua.Address.ToString().StartsWith("169.254.", StringComparison.Ordinal)) continue;
+                uint mask = ua.PrefixLength == 32 ? uint.MaxValue : ~(uint.MaxValue >> ua.PrefixLength);
+                if ((ToUInt(ua.Address) & mask) == (target & mask)) return ua.Address.ToString();
+            }
+        }
+        return null;
+
+        static uint ToUInt(IPAddress ip) { var b = ip.GetAddressBytes(); return (uint)b[0] << 24 | (uint)b[1] << 16 | (uint)b[2] << 8 | b[3]; }
+    }
+
     /// <summary>La IP local que el sistema usaría para llegar a <paramref name="remoteIp"/> (sin enviar nada).</summary>
     public static string? RouteSourceIp(string remoteIp)
     {

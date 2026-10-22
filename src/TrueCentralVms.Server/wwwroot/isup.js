@@ -116,8 +116,10 @@ async function renderIsupStatus() {
     : `<span class="muted">—</span>`;
   const since = (d) => d.onlineSince ? new Date(d.onlineSince).toLocaleString("es-CL") : "—";
   const locals = s.localAddresses ?? [];
-  const serverAddress = !s.perDeviceAddress ? `<b>${esc(s.publicAddress ?? "—")}</b>`
-    : locals.length > 1 ? `<b>de este servidor en la red del equipo</b> (${locals.map((a) => `<b>${esc(a)}</b>`).join(" o ")})`
+  const localList = locals.map((a) => `<b>${esc(a)}</b>`).join(" o ");
+  const serverAddress = !s.perDeviceAddress
+    ? `<b>${esc(s.publicAddress ?? "—")}</b>${locals.length > 1 ? ` (o la de este servidor en la red del equipo: ${localList})` : ""}`
+    : locals.length > 1 ? `<b>de este servidor en la red del equipo</b> (${localList})`
     : `<b>${esc(locals[0] ?? s.publicAddress ?? "—")}</b>`;
   $("#view").innerHTML = `
     ${!s.enabled ? `<div class="error-box">El servicio ISUP está deshabilitado en la configuración (Isup:Enabled = false).</div>` : ""}
@@ -192,26 +194,24 @@ async function renderIsupStatus() {
 }
 
 /**
- * Aviso de un servidor con más de una red (cable y Wi-Fi, una red de cámaras, una VPN): cada equipo tiene que apuntar a la IP de
- * este servidor que está en SU red. Sin dirección fija, el servicio le contesta a cada uno por la IP por la que llegó; con una
- * dirección fija privada, los equipos de las otras redes no la alcanzan.
+ * Servidor con más de una red (cable y Wi-Fi, una red de cámaras, una VPN). Los equipos que están en una de sus redes reciben la IP
+ * del servidor en su misma red; los demás, la dirección configurada o, sin ella, la IP por la que llegaron. Las fotos de los eventos
+ * y de los rostros usan UNA sola dirección (la configurada o la de salida a internet), y eso es lo que hay que cuidar.
  */
 function isupNetworksWarningHtml(s) {
   const locals = s.localAddresses ?? [];
   if (!s.running || locals.length < 2) return "";
   const list = locals.map((a) => `<b>${esc(a)}</b>`).join(", ");
-  if (s.perDeviceAddress) {
-    return `<div class="warn-box">Este servidor tiene más de una red (${list}). A cada equipo se le anuncia la IP de este servidor
-      por la que llegó: en cada equipo configure la de su red (la columna «Servidor anunciado» muestra la que recibió). Un equipo
-      que se conecta desde internet necesita la dirección pública: defínala en Sistema → Acceso desde Internet.</div>`;
+  if (!s.perDeviceAddress) {
+    return `<div class="info-box">Este servidor tiene más de una red (${list}). Los equipos que están en una de ellas reciben la IP de
+      este servidor en su misma red; los de otras redes (internet, otras sedes), la dirección configurada <b>${esc(s.publicAddress)}</b>,
+      que es también la de las fotos de los eventos y de los rostros: tiene que alcanzarla todo equipo que suba o descargue fotos. La
+      columna «Servidor anunciado» muestra la que recibió cada equipo.</div>`;
   }
-  if (locals.includes(s.publicAddress)) {
-    return `<div class="warn-box">Este servidor tiene más de una red (${list}) y la dirección ISUP está fija en
-      <b>${esc(s.publicAddress)}</b> (Isup:PublicAddress): los equipos de las otras redes no la alcanzan. Si no hay equipos que se
-      conecten desde internet, quite Isup:PublicAddress de appsettings.Local.json y reinicie el servicio: a cada equipo se le
-      anunciará la IP por la que llegó.</div>`;
-  }
-  return "";
+  return `<div class="warn-box">Este servidor tiene más de una red (${list}). Los equipos reciben la IP de este servidor en su misma
+    red, o la IP por la que llegaron (columna «Servidor anunciado»). Las fotos de los eventos y de los rostros usan una sola dirección,
+    <b>${esc(s.publicAddress)}</b> (la de salida a internet): un equipo que no la alcanza no puede subir ni descargar fotos. En ese caso
+    fije en Isup:PublicAddress una IP de este servidor que alcancen todos los equipos.</div>`;
 }
 
 /**

@@ -95,8 +95,8 @@ public sealed partial class IsupEngine : IDisposable
         _nativeDir = nativeDir;
         _dataDir = dataDir;
         _configuredAddress = options.PublicAddress?.Trim() ?? "";
-        // Sin dirección configurada, la de salida a internet queda solo para el servidor de imágenes (una sola para todos) y para un
-        // equipo al que todavía no se le anunció la suya.
+        // La dirección general: la configurada o, sin ella, la de salida a internet. Es la del servidor de imágenes (una sola para todos)
+        // y la de un equipo al que todavía no se le anunció la suya (ver IsupEngine.Address).
         _publicIp = PerDeviceAddress ? LocalNetwork.InternetFacingIp() : _configuredAddress;
         var logDir = Path.Combine(dataDir, "sdklog");
         Directory.CreateDirectory(logDir);
@@ -192,9 +192,10 @@ public sealed partial class IsupEngine : IDisposable
              $"voz {options.VoicePort}, alarmas {options.AlarmPort} (5.0)" +
              (options.AllowLegacy ? $" y {options.LegacyAlarmPort} (2.0/4.0)" : "; equipos ISUP 2.0/4.0 NO admitidos (sin clave)") +
              $", imágenes {options.PictureServerPort}. " +
+             $"Los equipos de las redes de este servidor ({string.Join(", ", LocalNetwork.Candidates(includeVirtual: false))}) reciben la IP de su misma red; " +
              (PerDeviceAddress
-                 ? $"A cada equipo se le anuncia la IP de este servidor por la que llega (IP de este servidor: {string.Join(", ", LocalNetwork.Candidates(includeVirtual: false))}). "
-                 : $"Dirección que se anuncia a los equipos: {_configuredAddress} (configurada). ") +
+                 ? "los demás, la IP de este servidor por la que llegan. "
+                 : $"los demás, la dirección configurada {_configuredAddress} (también la de las fotos). ") +
              $"SDK CMS 0x{Isup.NET_ECMS_GetBuildVersion():X8}, stream 0x{Isup.NET_ESTREAM_GetBuildVersion():X8}.");
         return null;
     }
