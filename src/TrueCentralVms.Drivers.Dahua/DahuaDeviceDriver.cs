@@ -89,6 +89,67 @@ public sealed class DahuaDeviceDriver : IDeviceDriver
     }
 
     // ------------------------------------------------------------------
+    // PTZ por NetSDK (CLIENT_DHPTZControlEx2): domos IP, cámaras de un NVR
+    // y cámaras coaxiales (HDCVI) de un XVR. Sesión cacheada: el PTZ es
+    // interactivo y no tolera un login por orden.
+    // ------------------------------------------------------------------
+
+    public Task<bool> PtzControlAsync(DeviceConnectionInfo info, int channelNumber, PtzCommand command, int speed, bool stop,
+        CancellationToken ct = default) => Task.Run(() =>
+    {
+        (uint sdkCommand, bool diagonal) = command switch
+        {
+            PtzCommand.TiltUp => (NetSdk.PtzUp, false),
+            PtzCommand.TiltDown => (NetSdk.PtzDown, false),
+            PtzCommand.PanLeft => (NetSdk.PtzLeft, false),
+            PtzCommand.PanRight => (NetSdk.PtzRight, false),
+            PtzCommand.UpLeft => (NetSdk.ExtPtzLeftTop, true),
+            PtzCommand.UpRight => (NetSdk.ExtPtzRightTop, true),
+            PtzCommand.DownLeft => (NetSdk.ExtPtzLeftDown, true),
+            PtzCommand.DownRight => (NetSdk.ExtPtzRightDown, true),
+            PtzCommand.ZoomIn => (NetSdk.PtzZoomAdd, false),
+            PtzCommand.ZoomOut => (NetSdk.PtzZoomDec, false),
+            PtzCommand.FocusNear => (NetSdk.PtzFocusDec, false), // foco −: cerca
+            PtzCommand.FocusFar => (NetSdk.PtzFocusAdd, false),
+            PtzCommand.IrisOpen => (NetSdk.PtzApertureAdd, false),
+            PtzCommand.IrisClose => (NetSdk.PtzApertureDec, false),
+            _ => (uint.MaxValue, false),
+        };
+        if (sdkCommand == uint.MaxValue) return false;
+        // Velocidad 1..7 del VMS → 1..8 del NetSDK.
+        int sdkSpeed = Math.Clamp((int)Math.Round(speed * 8 / 7.0), 1, 8);
+        return WithSession(info, loginId => NetSdk.CLIENT_DHPTZControlEx2(loginId, channelNumber - 1, sdkCommand,
+            diagonal ? sdkSpeed : 0, sdkSpeed, 0, stop, IntPtr.Zero));
+    }, ct);
+
+    public Task<bool> PtzPresetAsync(DeviceConnectionInfo info, int channelNumber, PtzPresetAction action, int presetIndex,
+        CancellationToken ct = default) => Task.Run(() =>
+    {
+        uint sdkCommand = action switch
+        {
+            PtzPresetAction.Goto => NetSdk.PtzPointMove,
+            PtzPresetAction.Set => NetSdk.PtzPointSet,
+            PtzPresetAction.Clear => NetSdk.PtzPointDel,
+            _ => uint.MaxValue,
+        };
+        if (sdkCommand == uint.MaxValue) return false;
+        return WithSession(info, loginId => NetSdk.CLIENT_DHPTZControlEx2(loginId, channelNumber - 1, sdkCommand,
+            0, presetIndex, 0, false, IntPtr.Zero));
+    }, ct);
+
+    /// <summary>
+    /// Orden con la sesión cacheada; si el equipo la rechaza, UNA vez más con
+    /// login limpio (la sesión vence cuando el equipo se reinicia).
+    /// </summary>
+    private static bool WithSession(DeviceConnectionInfo info, Func<long, bool> call)
+    {
+        DahuaSdk.EnsureInitialized();
+        if (call(DahuaSessionCache.GetOrLogin(info))) return true;
+        DahuaSessionCache.Invalidate(info);
+        return call(DahuaSessionCache.GetOrLogin(info));
+    }
+
+    // ------------------------------------------------------------------
     // Reproducción remota: las grabaciones viven en el disco del equipo
     // (HDD del NVR/XVR o tarjeta SD de la cámara) y se consultan por SDK.
     // ------------------------------------------------------------------
