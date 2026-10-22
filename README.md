@@ -465,11 +465,13 @@ equipo, cada uno con su driver `hikvision-isup`:
 - **Dirección pública.** Detrás de NAT, `Isup:PublicAddress` debe ser la IP o
   el nombre con que los equipos llegan al servidor (se les anuncia al
   registrarse para alarmas, video y voz), con los puertos 7660-7667
-  publicados hacia el servidor. Vacía, a cada equipo se le anuncia la IP del
-  servidor por la que llegó: un servidor con dos redes (cable y Wi-Fi, red de
-  cámaras, VPN) atiende a los equipos de ambas. El servidor de imágenes (7667)
-  y las fotos de rostros por URL siguen usando una sola dirección: la de salida
-  a internet.
+  publicados hacia el servidor. Un equipo que está en una de las redes del
+  servidor (se conecta desde su propia IP, sin NAT) recibe siempre la IP del
+  servidor en su misma red, haya o no `PublicAddress`: un servidor con dos redes
+  (cable y Wi-Fi, red de cámaras, VPN) atiende directo a los equipos de ambas.
+  El servidor de imágenes (7667) y las fotos de rostros por URL usan una sola
+  dirección: `PublicAddress` o, sin ella, la de salida a internet; con dos
+  redes, fije en `PublicAddress` una IP que alcancen todos los equipos.
 - **Bitácora.** Conexiones, desconexiones y rechazos de cada equipo quedan en
   la categoría «Conexión ISUP»; la primera alarma de cada tipo de cada equipo
   queda en el registro del servidor, para ver el formato de un modelo nuevo.

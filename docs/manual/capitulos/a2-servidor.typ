@@ -142,11 +142,13 @@ límite.
   table.header[Ajuste][Por omisión][Qué controla],
   [`Isup` › `Enabled`], [true], [Servicio ISUP del servidor: con `false` ningún
     equipo puede conectarse por ISUP.],
-  [`Isup` › `PublicAddress`], [vacío], [IP o nombre con que los equipos llegan
-    al servidor, que se les anuncia al conectarse para las alarmas, el video y
-    la voz. Fíjelo cuando el servidor está detrás de un router (la IP pública o
-    el nombre DNS). Vacío = a cada equipo, la IP del servidor por la que llegó
-    (con dos redes, cada equipo recibe la de la suya).],
+  [`Isup` › `PublicAddress`], [vacío], [IP o nombre con que llegan al servidor
+    los equipos de fuera de sus redes, que se les anuncia al conectarse para las
+    alarmas, el video y la voz, y la de las fotos de los eventos y de los
+    rostros. Los equipos que están en una de las redes del servidor reciben
+    siempre la IP de su misma red. Fíjelo cuando el servidor está detrás de un
+    router (la IP pública o el nombre DNS) o tiene dos redes (una IP que alcancen
+    todos). Vacío = a cada equipo, la IP del servidor por la que llegó.],
   [`Isup` › `RegistrationPorts`], [`[7660, 7661]`], [Puertos de registro. El
     7661 es el que usaba la receptora de Hikvision de versiones anteriores:
     los paneles que reportaban a ella se conectan ahí sin tocarlos.],

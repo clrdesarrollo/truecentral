@@ -21,8 +21,9 @@ namespace TrueCentralVms.Core.Isup;
 public sealed class IsupHostOptions
 {
     /// <summary>
-    /// IP (o nombre) con que los equipos llegan al servidor, la misma para todos. Vacío = a cada equipo se le anuncia la IP de este
-    /// servidor por la que llegó (un servidor con dos redes tiene una IP en cada una).
+    /// IP (o nombre) con que llegan al servidor los equipos de FUERA de sus redes (internet, otra sede), y la del servidor de imágenes.
+    /// Un equipo que está en una de las redes del servidor recibe siempre la IP del servidor en su misma red. Vacío = a cada equipo se
+    /// le anuncia la IP de este servidor por la que llegó (un servidor con dos redes tiene una IP en cada una).
     /// </summary>
     public string PublicAddress { get; set; } = "";
     /// <summary>
