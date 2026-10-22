@@ -1436,10 +1436,11 @@ function lvWirePage() {
 }
 
 function lvOnWindowBlur() {
-  // Una tecla, un botón o el joystick sostenidos al cambiar de ventana no deben dejar la cámara moviéndose.
+  // Una tecla, un botón o el joystick sostenidos al cambiar de ventana no deben dejar la cámara moviéndose
+  // (el joystick sigue si está configurado para operar en segundo plano).
   if (lv.keyHeld) { lvPtz(lv.keyHeld, true); lv.keyHeld = null; }
   if (lv.ptzHeld) lvPtzRelease();
-  lvJoyRelease();
+  lvJoyOnBlur();
   lvSetPrecision(false);
 }
 

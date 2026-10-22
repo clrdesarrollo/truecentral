@@ -323,12 +323,15 @@ del cuadro seleccionado, sin instalar nada:
 Con el joystick conectado y una cámara PTZ seleccionada, el panel muestra la
 marca *JOYSTICK*. Actúa mientras alguna ventana del cliente está activa,
 también una pantalla auxiliar; si cambia a otro programa, la cámara se
-detiene. Si se corta la red mientras se mueve, el servidor la detiene a los 3
-segundos.
+detiene, salvo que marque *Mover la cámara aunque el cliente no esté en primer
+plano*: así el joystick sigue moviendo la cámara seleccionada mientras trabaja
+en otro programa, con la Vista en vivo abierta. Si se corta la red mientras se
+mueve, el servidor la detiene a los 3 segundos.
 
 En #menu("Configuración", "Joystick") se ve el joystick detectado, con sus
-ejes y botones en vivo, y se puede desactivar, *Invertir arriba y abajo* o
-*Invertir el zoom del giro*. #boton("Asignar botones…") abre la lista de
+ejes y botones en vivo, y se puede desactivar, *Invertir arriba y abajo*,
+*Invertir el zoom del giro* o dejarlo operar en segundo plano (la opción de
+arriba). #boton("Asignar botones…") abre la lista de
 acciones: elija #boton("Asignar") y apriete el botón del joystick que la hará.
 Hay acciones para zoom, foco e iris (mientras se sostiene el botón), el modo
 precisión, los dígitos del 0 al 9 para teclear el número de preset, *Ir al
@@ -659,6 +662,9 @@ detectado y permite:
 
 - Desactivarlo: *Mover la cámara PTZ seleccionada con el joystick*.
 - *Invertir arriba y abajo* e *Invertir el zoom del giro*.
+- *Mover la cámara aunque esta ventana no esté en primer plano*: sigue
+  actuando con el panel visible detrás de otra ventana, siempre que el
+  navegador entregue los datos del joystick en ese caso (no todos lo hacen).
 - #boton("Asignar botones…"): elija #boton("Asignar") en una acción y apriete
   el botón del joystick que la hará. Hay acciones para zoom, foco e iris
   (mientras se sostiene el botón), el modo precisión, los dígitos del 0 al 9,

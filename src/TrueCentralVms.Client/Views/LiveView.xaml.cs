@@ -23,9 +23,11 @@ public partial class LiveView : UserControl
             window.PreviewKeyDown += OnPtzKeyDown;
             window.PreviewKeyUp += OnPtzKeyUp;
             // Joystick PTZ: mueve la cámara seleccionada con la Vista en Vivo a
-            // la vista y alguna ventana del cliente activa (también una auxiliar).
-            _joystick = new JoystickPtzController(Vm, () => IsVisible &&
-                Application.Current.Windows.OfType<Window>().Any(w => w.IsActive));
+            // la vista y alguna ventana del cliente activa (también una
+            // auxiliar), o con el cliente detrás de otro programa si el
+            // joystick está configurado para seguir en segundo plano.
+            _joystick = new JoystickPtzController(Vm, inBackground => IsVisible &&
+                (inBackground || Application.Current.Windows.OfType<Window>().Any(w => w.IsActive)));
             Vm.Joystick = _joystick;
             window.Closed += (_, _) => _joystick?.Dispose();
         };

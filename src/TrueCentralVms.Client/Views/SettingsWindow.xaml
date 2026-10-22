@@ -242,6 +242,8 @@
                               Content="Invertir arriba y abajo"/>
                     <CheckBox x:Name="JoystickInvertZoomCheck" Style="{StaticResource DarkCheckBox}" Margin="0,8,0,0"
                               Content="Invertir el zoom del giro"/>
+                    <CheckBox x:Name="JoystickBackgroundCheck" Style="{StaticResource DarkCheckBox}" Margin="0,8,0,0"
+                              Content="Mover la cámara aunque el cliente no esté en primer plano"/>
                     <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
                         <Button Content="Asignar botones…" Style="{StaticResource GhostButton}" Padding="12,6"
                                 Click="OnJoystickButtonsClick"/>
@@ -250,7 +252,7 @@
                     </StackPanel>
                 </StackPanel>
                 <TextBlock Style="{StaticResource SettingHint}"
-                           Text="Sirve cualquier joystick que Windows reconozca como mando de juego. En la Vista en Vivo, la palanca mueve la cámara PTZ del cuadro seleccionado (más rápido cuanto más se inclina) y el giro hace zoom, a la vez. Actúa con una ventana del cliente activa y la detiene al soltar. Los ajustes se guardan por modelo de joystick; los botones, al asignarlos."/>
+                           Text="Sirve cualquier joystick que Windows reconozca como mando de juego. La palanca mueve la cámara PTZ del cuadro seleccionado y el giro hace zoom, a la vez; al soltar se detiene. Actúa con una ventana del cliente activa, o también detrás de otros programas si marca la última opción (con la Vista en Vivo abierta). Se guarda por modelo de joystick."/>
             </StackPanel>
 
             <!-- ============ RED ============ -->

@@ -69,7 +69,7 @@ function lvJoyConfig(id) {
   if (!lvJoy.cfgs) {
     try { lvJoy.cfgs = JSON.parse(localStorage.getItem(LV_JOY_KEY) || "{}") || {}; } catch { lvJoy.cfgs = {}; }
   }
-  return lvJoy.cfgs[id] ??= { enabled: true, invertY: false, invertZoom: false, buttons: {} };
+  return lvJoy.cfgs[id] ??= { enabled: true, invertY: false, invertZoom: false, background: false, buttons: {} };
 }
 
 function lvJoySave() {
@@ -129,6 +129,12 @@ function lvJoyRelease() {
   lvJoyHalt();
 }
 
+/** La ventana perdió el foco: se suelta, salvo que el joystick siga en segundo plano. */
+function lvJoyOnBlur() {
+  const pad = lvJoyPad();
+  if (!pad || !lvJoyConfig(pad.id).background) lvJoyRelease();
+}
+
 /** Detiene la cámara sin olvidar los botones: uno que sigue apretado no se dispara de nuevo al volver. */
 function lvJoyHalt() {
   if (lvJoy.precision) { lvJoy.precision = false; lvSetPrecision(false); }
@@ -153,7 +159,8 @@ function lvJoyTick() {
     return;
   }
   lvJoyUpdatePill(cfg);
-  const can = cfg.enabled && !document.hidden && document.hasFocus() && lvPtzAvailable() &&
+  // En segundo plano basta con que la página esté a la vista (otra ventana encima o enfocada no la detiene).
+  const can = cfg.enabled && !document.hidden && (cfg.background || document.hasFocus()) && lvPtzAvailable() &&
     $("#modal-backdrop").classList.contains("hidden");
   if (!can) { lvJoyHalt(); return; }
 
@@ -317,6 +324,8 @@ function lvJoySettingsHtml() {
       <span>Invertir arriba y abajo</span></label>
     <label class="lv-set-check"><input type="checkbox" id="lv-joy-invz" ${cfg.invertZoom ? "checked" : ""}>
       <span>Invertir el zoom del giro</span></label>
+    <label class="lv-set-check"><input type="checkbox" id="lv-joy-bg" ${cfg.background ? "checked" : ""}>
+      <span>Mover la cámara aunque esta ventana no esté en primer plano (si el navegador entrega el joystick)</span></label>
     <div style="margin-top:8px"><button type="button" class="btn ghost small" id="lv-joy-buttons">Asignar botones…</button>
       <span class="muted lv-small">${assigned ? `${assigned} asignados` : "ninguno asignado"}</span></div>`;
 }
@@ -334,6 +343,7 @@ function lvJoyWireSettings() {
   bind("#lv-joy-on", "enabled");
   bind("#lv-joy-invy", "invertY");
   bind("#lv-joy-invz", "invertZoom");
+  bind("#lv-joy-bg", "background");
   $("#lv-joy-buttons").addEventListener("click", () => { lvClosePops(); lvJoyOpenButtons(); });
 }
 

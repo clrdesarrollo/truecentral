@@ -43,7 +43,9 @@ public static class JoystickActions
 /// que el panel web: zona muerta, pasos de 0,05, renovación cada segundo (el
 /// servidor detiene la cámara si deja de oírla por 3 s), filtro del rebote del
 /// resorte y acciones de botones. Solo actúa con <c>canAct</c> verdadero
-/// (ventana activa y Vista en Vivo visible); si no, detiene la cámara.
+/// (Vista en Vivo visible y una ventana del cliente activa, salvo que el
+/// joystick esté configurado para seguir en segundo plano); si no, detiene la
+/// cámara.
 /// </summary>
 public sealed class JoystickPtzController : IDisposable
 {
@@ -57,7 +59,7 @@ public sealed class JoystickPtzController : IDisposable
     private sealed record Want(PtzTarget Target, double Pan, double Tilt, double Zoom, PtzCommand? Command = null, int Speed = 0);
 
     private readonly MainViewModel _vm;
-    private readonly Func<bool> _canAct;
+    private readonly Func<bool, bool> _canAct; // recibe si se permite actuar en segundo plano
     private readonly DispatcherTimer _timer;
     private bool[] _pressed = [];
     private Want? _want, _sent;
@@ -66,7 +68,7 @@ public sealed class JoystickPtzController : IDisposable
     private DateTime _stoppedAt = DateTime.MinValue, _pendingSince;
     private string _entry = "";
 
-    public JoystickPtzController(MainViewModel vm, Func<bool> canAct)
+    public JoystickPtzController(MainViewModel vm, Func<bool, bool> canAct)
     {
         _vm = vm;
         _canAct = canAct;
@@ -93,7 +95,7 @@ public sealed class JoystickPtzController : IDisposable
         _pressed = state.Buttons;
         var target = _vm.CurrentPtzTarget;
         _vm.IsJoystickActive = cfg.Enabled && target is not null;
-        if (!cfg.Enabled || target is null || !_canAct())
+        if (!cfg.Enabled || target is null || !_canAct(cfg.InBackground))
         {
             Halt();
             return;

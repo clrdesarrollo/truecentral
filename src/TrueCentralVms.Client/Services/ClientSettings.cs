@@ -90,6 +90,12 @@ public sealed class JoystickConfig
     public bool Enabled { get; set; } = true;
     public bool InvertY { get; set; }
     public bool InvertZoom { get; set; }
+    /// <summary>
+    /// Sigue moviendo la cámara aunque el cliente no esté en primer plano (el
+    /// operador trabaja en otro programa con el joystick dedicado). Apagado, el
+    /// joystick solo actúa con una ventana del cliente activa.
+    /// </summary>
+    public bool InBackground { get; set; }
     /// <summary>Acción de cada botón: índice desde 0 → clave de <c>JoystickActions</c> (las mismas del panel web).</summary>
     public Dictionary<int, string> Buttons { get; set; } = [];
 }

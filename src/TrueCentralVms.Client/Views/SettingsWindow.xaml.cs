@@ -84,6 +84,7 @@ public partial class SettingsWindow : Window
             JoystickEnabledCheck.IsChecked = config.Enabled;
             JoystickInvertYCheck.IsChecked = config.InvertY;
             JoystickInvertZoomCheck.IsChecked = config.InvertZoom;
+            JoystickBackgroundCheck.IsChecked = config.InBackground;
             UpdateJoystickButtonsText(config);
         }
         _joystick = state;
@@ -209,6 +210,7 @@ public partial class SettingsWindow : Window
             config.Enabled = JoystickEnabledCheck.IsChecked == true;
             config.InvertY = JoystickInvertYCheck.IsChecked == true;
             config.InvertZoom = JoystickInvertZoomCheck.IsChecked == true;
+            config.InBackground = JoystickBackgroundCheck.IsChecked == true;
         }
         // La apariencia rige desde el próximo arranque (los estilos se toman
         // al crear cada ventana): se avisa para que nadie la crea ignorada.
