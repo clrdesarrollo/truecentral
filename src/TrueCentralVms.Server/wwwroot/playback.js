@@ -32,6 +32,7 @@ const PB_KINDS = {
   Other: { label: "Otra", color: "#6B7280" },
 };
 const PB_DAY = 86400000;
+const PB_LOCK_MS = 10000; // tope del bloqueo de la línea de tiempo mientras abre un salto
 const PB_PREFS_KEY = "tcvms.playback";
 
 const pb = {
@@ -51,6 +52,7 @@ const pb = {
   paused: false,
   speed: 1,
   seq: 0,               // cada salto invalida las aperturas anteriores
+  lock: null,           // { seq, until }: línea de tiempo bloqueada mientras abre un salto
   zoom: 4,
   sel: null,            // { a, b } tramo marcado
   cut: false,           // modo recorte
@@ -692,11 +694,20 @@ async function pbSeek(t) {
   pb.playhead = t;
   pb.playing = true;
   pb.paused = false;
+  // Hasta que llegue la imagen nueva (o PB_LOCK_MS) la línea de tiempo no se
+  // puede volver a mover: el operador ve el cabezal quieto en la hora elegida.
+  pb.lock = { seq, until: Date.now() + PB_LOCK_MS };
   pbStatus(`Abriendo grabación de las ${pbHms(t)}…`);
   pbRenderToolbar();
   pbDraw();
   await Promise.all(cells.filter((c) => c.segments.length).map((c) => c.openAt(t, seq)));
+  if (pb.lock?.seq === seq) pb.lock = null;
   if (seq === pb.seq && pb.active && pbOpenCells().some((c) => c.session)) pbStatus("");
+}
+
+/** Salto en curso: la línea de tiempo no acepta clics ni arrastres (como mucho PB_LOCK_MS). */
+function pbTimelineLocked() {
+  return !!pb.lock && pb.lock.seq === pb.seq && Date.now() < pb.lock.until;
 }
 
 function pbTogglePause() {
@@ -759,7 +770,9 @@ async function pbSetDay(day) {
 function pbTick() {
   if (!pb.active) return;
   if (pb.playing) {
-    const cell = pbOpenCells().find((c) => c.position != null);
+    // Un cuadro que está abriendo sigue mostrando el tramo anterior hasta la
+    // primera imagen nueva: su posición haría retroceder el cabezal.
+    const cell = pbOpenCells().find((c) => !c.opening && c.position != null);
     if (cell) pb.playhead = cell.position;
     if (pb.playhead >= pb.day + PB_DAY - 1000) {
       pbStop();
@@ -823,6 +836,7 @@ function pbDraw() {
   const canvas = $("#pb-canvas");
   if (!canvas || !pb.active) return;
   const host = $("#pb-timeline");
+  host.classList.toggle("locked", pbTimelineLocked());
   const rows = pbOpenCells();
   const rowCount = Math.max(1, rows.length);
   const RULER = 22, ROWH = rowCount === 1 ? 26 : 13, PAD = 4;
@@ -920,7 +934,7 @@ function pbWireTimeline() {
   const host = $("#pb-timeline");
   host.title = "Clic o arrastre: reproducir desde esa hora · rueda: acercar/alejar · clic derecho: borrar la marca";
   host.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || !pbOpenCells().length) return;
+    if (e.button !== 0 || !pbOpenCells().length || pbTimelineLocked()) return;
     host.setPointerCapture(e.pointerId);
     const rect = host.getBoundingClientRect();
     pb.drag = { x0: e.clientX, t0: pbTimeAt(e.clientX - rect.left), center0: pb.playhead, moved: false };

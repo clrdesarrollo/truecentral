@@ -158,6 +158,15 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _isSelectionMode;
 
     /// <summary>
+    /// Línea de tiempo bloqueada mientras abre un salto: el operador ve la
+    /// aguja quieta en la hora elegida y no puede volver a moverla hasta que
+    /// llegue la imagen o pase <see cref="TimelineLockTime"/>.
+    /// </summary>
+    [ObservableProperty] private bool _isTimelineLocked;
+    private DateTime _timelineLockedUntil;
+    private static readonly TimeSpan TimelineLockTime = TimeSpan.FromSeconds(10);
+
+    /// <summary>
     /// Modo zoom digital: el puntero pasa a lupa y arrastrar sobre el video
     /// marca el área a acercar (sobre la imagen ya recibida del equipo).
     /// </summary>
@@ -305,9 +314,13 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
         _clock = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _clock.Tick += (_, _) =>
         {
-            if (Cells.FirstOrDefault(c => c.Playhead is not null)?.Playhead is { } time)
+            // Un cuadro que está abriendo sigue con el reloj del tramo anterior
+            // hasta su primera imagen: leerlo hacía retroceder la aguja.
+            if (Cells.FirstOrDefault(c => !c.IsOpening && c.Playhead is not null)?.Playhead is { } time)
                 Playhead = time;
             IsPlaying = Cells.Any(c => c.IsPlaying);
+            if (IsTimelineLocked && (!Cells.Any(c => c.IsOpening) || DateTime.UtcNow >= _timelineLockedUntil))
+                IsTimelineLocked = false;
         };
         _clock.Start();
     }
@@ -556,6 +569,9 @@ public partial class PlaybackViewModel : ObservableObject, IDisposable
 
         IsPaused = false;
         Playhead = localTime;
+        // Lo suelta el reloj de la aguja cuando ya no queda cuadro abriendo.
+        IsTimelineLocked = true;
+        _timelineLockedUntil = DateTime.UtcNow + TimelineLockTime;
         Status = $"Abriendo grabación de las {localTime:HH:mm:ss}…";
         var endOfDay = Date.Date.AddDays(1);
         await Task.WhenAll(Cells.Select(c => c.OpenAtAsync(localTime, endOfDay, Speed)));

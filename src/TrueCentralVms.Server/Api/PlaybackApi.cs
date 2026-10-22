@@ -268,7 +268,7 @@ public static class PlaybackApi
         app.MapGet("/api/playback/failure/{path}", (HttpContext ctx, string path, MediaMtxManager mtx) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.PlaybackView, out var session) is { } failure) return failure;
-            // La ruta es "pb-{equipo}-{canal}-{usuario}-{azar}": el motivo es de quien la pidió.
+            // La ruta es "pb-{equipo}-{canal}-{usuario}-{sesión}-{azar}": el motivo es de quien la pidió.
             if (session.Role != Core.Domain.Roles.Admin &&
                 path.Split('-') is { Length: >= 4 } parts && int.TryParse(parts[3], out int owner) && owner != session.UserId)
                 return Results.NotFound();
@@ -541,10 +541,13 @@ public static class PlaybackApi
                 statusCode: StatusCodes.Status422UnprocessableEntity));
 
         // Nombre plano y único: cada espectador/rango tiene su propia ruta.
-        // Lleva el id del espectador porque al montar la ruta se cierran
-        // las hermanas —mismo prefijo— para que el equipo libere la sesión
-        // anterior de ESE canal sin tocar la de otro operador.
-        string path = $"pb-{device.Id}-{request.RtspChannel}-{session.UserId}-" +
+        // Lleva al espectador —usuario y sesión de ingreso— porque al montar
+        // la ruta se cierran las hermanas (mismo prefijo) para que el equipo
+        // libere la sesión anterior de ESE canal sin tocar la de otro
+        // operador, ni la del mismo usuario abierta en otro lado: con el panel
+        // web y el cliente en la misma cuenta, cada salto en uno cortaba la
+        // reproducción del otro, que la mostraba como "Fin del tramo".
+        string path = $"pb-{device.Id}-{request.RtspChannel}-{session.UserId}-{ViewerKey(ctx)}-" +
                       Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
 
         // A 1× manda MediaMTX, que pulsa el equipo (camino de siempre).
@@ -589,6 +592,14 @@ public static class PlaybackApi
                 data: new { request.StartLocal, request.EndLocal, request.Speed });
         return new PlaybackGrant(null, path, token, grant.ExpiresAt, driver.SupportsExactPlaybackSeek);
     }
+
+    /// <summary>
+    /// Identifica la sesión de ingreso en el nombre de la ruta sin exponer el
+    /// token: los primeros 4 bytes de su SHA-256.
+    /// </summary>
+    private static string ViewerKey(HttpContext ctx) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ApiSecurity.CurrentToken(ctx) ?? "")), 0, 4)
+            .ToLowerInvariant();
 
     private static List<RecordingSegment> ClipToDay(List<RecordingSegment> segments, DateTime day)
     {
