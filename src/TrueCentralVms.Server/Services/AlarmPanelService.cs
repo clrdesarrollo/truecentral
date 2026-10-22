@@ -51,6 +51,8 @@ public sealed class AlarmPanelService(
         public string Fingerprint = "";
         /// <summary>El panel se conecta por ISUP (lo consulta el servicio ISUP, no el servidor directo).</summary>
         public bool IsIsup;
+        /// <summary>Ya se intentó leer modelo, serie y firmware con esta configuración (no se insiste en cada sondeo).</summary>
+        public bool IdentityRead;
         public string? LastError;
         public DateTime NextRetryAt = DateTime.MinValue;
         public DateTime NextPollAt = DateTime.MinValue;
@@ -379,6 +381,7 @@ public sealed class AlarmPanelService(
             {
                 await CloseAsync(panel.Id, worker);
                 worker.Fingerprint = fingerprint;
+                worker.IdentityRead = false;
                 worker.NextRetryAt = DateTime.MinValue;
                 worker.NextPollAt = DateTime.MinValue;
             }
@@ -518,6 +521,24 @@ public sealed class AlarmPanelService(
             worker.LastError = null;
             worker.NextRetryAt = DateTime.MinValue;
             bool wasDown = panel.Status != AlarmPanelStatus.Online;
+            // Modelo, serie y firmware se leían solo al agregar o editar el panel, y únicamente si ya estaba conectado: un panel ISUP
+            // que se registró después (o que venía de la receptora de Hikvision) quedaba sin ellos. Se leen al volver a estar en
+            // línea (el firmware puede haber cambiado) y, si faltan, una vez por configuración.
+            if (wasDown || (!worker.IdentityRead && string.IsNullOrEmpty(panel.Model) && string.IsNullOrEmpty(panel.SerialNumber)))
+            {
+                worker.IdentityRead = true;
+                try
+                {
+                    var identity = await factory.Create().ProbeAsync(ConnectionOf(panel), ct);
+                    panel.Model = identity.Model ?? panel.Model;
+                    panel.SerialNumber = identity.SerialNumber ?? panel.SerialNumber;
+                    panel.FirmwareVersion = identity.FirmwareVersion ?? panel.FirmwareVersion;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogInformation("Panel '{Name}': no se pudo leer su modelo, serie y firmware: {Error}", panel.Name, ex.Message);
+                }
+            }
             string structure = StructureOf(panel);
             var events = ApplyState(panel, state, worker);
             panel.Status = AlarmPanelStatus.Online;
