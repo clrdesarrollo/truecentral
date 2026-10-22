@@ -29,10 +29,17 @@ UPDATE_PUBKEY='-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAl4GE7kg370nxGnrJ05gOAnHJhoy817rU/Uq585IJUfo=
 -----END PUBLIC KEY-----'
 
-SERVER=$(grep -oP '"ServerUrl"\s*:\s*"\K[^"]+' "$CONFIG" 2>/dev/null || true)
-TOKEN=$(grep -oP '"DeviceToken"\s*:\s*"\K[^"]+' "$CONFIG" 2>/dev/null || true)
+# Un campo de texto del config.json, con sus escapes JSON deshechos: la app hasta la 0.5.26
+# escribía el «+» del Base64 como +, y la llave leída tal cual no calzaba nunca.
+config_value() {
+    grep -oP "\"$1\"\s*:\s*\"\K[^\"]+" "$CONFIG" 2>/dev/null \
+        | perl -pe 's/\\u([0-9A-Fa-f]{4})/chr(hex $1)/ge; s/\\\//\//g' || true
+}
+
+SERVER=$(config_value ServerUrl)
+TOKEN=$(config_value DeviceToken)
 # Llave del servidor fijada al emparejar: el paquete se ejecuta en la Pi, así que solo se baja del servidor de verdad.
-PIN=$(grep -oP '"PinnedServerKeyBase64"\s*:\s*"\K[^"]+' "$CONFIG" 2>/dev/null || true)
+PIN=$(config_value PinnedServerKeyBase64)
 CURL_TLS=(-k)
 if [[ -n "$PIN" ]]; then
     CURL_TLS=(-k --pinnedpubkey "sha256//$PIN")
@@ -47,7 +54,13 @@ if [[ -z "$SERVER" || -z "$TOKEN" ]]; then
 fi
 
 INFO=$(curl -sf "${CURL_TLS[@]}" --max-time 20 -H "X-Screen-Token: $TOKEN" "$SERVER/api/screen/client/version") || {
-    log "El servidor no respondió; se reintenta mañana."
+    rc=$?
+    if [[ $rc -eq 90 ]]; then
+        # curl 90 = la llave del servidor no es la fijada al emparejar (o no se leyó bien del config).
+        log "La llave del servidor no coincide con la fijada al emparejar; no se actualiza."
+    else
+        log "El servidor no respondió (curl $rc); se reintenta mañana."
+    fi
     exit 0
 }
 
