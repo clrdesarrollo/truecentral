@@ -125,6 +125,29 @@ public sealed class OnvifDeviceDriver : IDeviceDriver
         }
     }
 
+    /// <summary>ContinuousMove ya lleva pan, tilt y zoom juntos (velocidades −1..1 del espacio genérico).</summary>
+    public async Task<bool> PtzMoveAsync(DeviceConnectionInfo info, int channelNumber, double pan, double tilt, double zoom,
+        CancellationToken ct = default)
+    {
+        using var client = new OnvifClient(info.Host, info.Port, info.Username, info.Password);
+        await client.InitializeAsync(ct);
+        if (await ResolvePtzProfileAsync(client, info, ct) is not { } token)
+            return false;
+        try
+        {
+            if (pan == 0 && tilt == 0 && zoom == 0)
+                await client.PtzStopAsync(token, ct);
+            else
+                await client.ContinuousMoveAsync(token, pan, tilt, zoom, ct);
+            return true;
+        }
+        catch (DriverException)
+        {
+            PtzProfileCache.TryRemove($"{info.Host}:{info.Port}", out _);
+            throw;
+        }
+    }
+
     public async Task<bool> PtzPresetAsync(DeviceConnectionInfo info, int channelNumber, PtzPresetAction action, int presetIndex,
         CancellationToken ct = default)
     {

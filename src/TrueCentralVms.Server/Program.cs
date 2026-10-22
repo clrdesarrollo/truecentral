@@ -262,6 +262,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<VideoEventService>
 
 // Plano de media: MediaMTX embebido + tokens de streaming + contabilidad.
 builder.Services.AddSingleton<StreamTokenService>();
+// PTZ por velocidades (joystick): vía nativa o traducida y hombre muerto por canal.
+builder.Services.AddSingleton<PtzMover>();
 // Relés de reproducción acelerada (el servidor toma la sesión RTSP del equipo
 // para poder pedirle velocidad; a 1× no interviene).
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Rtsp.PlaybackRelayManager>();

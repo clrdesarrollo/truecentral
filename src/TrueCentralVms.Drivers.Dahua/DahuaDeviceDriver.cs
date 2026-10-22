@@ -138,6 +138,41 @@ public sealed class DahuaDeviceDriver : IDeviceDriver
     }, ct);
 
     /// <summary>
+    /// DH_EXTPTZ_MOVE_CONTINUOUSLY: pan, tilt y zoom en una orden, con un tope
+    /// de 3 s que el cliente renueva mientras se mueve (si el servidor se cae,
+    /// la cámara se detiene sola). Sin reintento con login: un false suele ser
+    /// "este equipo no lo soporta" (XVR coaxial, firmware viejo) y el servidor
+    /// sigue con las órdenes de <see cref="PtzControlAsync"/>.
+    /// </summary>
+    public Task<bool> PtzMoveAsync(DeviceConnectionInfo info, int channelNumber, double pan, double tilt, double zoom,
+        CancellationToken ct = default) => Task.Run(() =>
+    {
+        DahuaSdk.EnsureInitialized();
+        bool stop = pan == 0 && tilt == 0 && zoom == 0;
+        var move = new NetSdk.PTZ_CONTROL_CONTINUOUSLY
+        {
+            fPositionX = (float)Math.Clamp(pan, -1, 1),
+            fPositionY = (float)Math.Clamp(tilt, -1, 1),
+            fZoom = (float)Math.Clamp(zoom, -1, 1),
+            szSpeedReserve = new byte[32],
+            nTimeOut = 3,
+            szReserve = new byte[64],
+        };
+        IntPtr buffer = Marshal.AllocHGlobal(Marshal.SizeOf<NetSdk.PTZ_CONTROL_CONTINUOUSLY>());
+        try
+        {
+            Marshal.StructureToPtr(move, buffer, false);
+            long loginId = DahuaSessionCache.GetOrLogin(info);
+            return NetSdk.CLIENT_DHPTZControlEx2(loginId, channelNumber - 1, NetSdk.ExtPtzMoveContinuously,
+                0, 0, 0, stop, buffer);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }, ct);
+
+    /// <summary>
     /// Orden con la sesión cacheada; si el equipo la rechaza, UNA vez más con
     /// login limpio (la sesión vence cuando el equipo se reinicia).
     /// </summary>

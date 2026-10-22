@@ -3,16 +3,19 @@
 // Mueve la cámara PTZ del cuadro seleccionado en la ventana principal con un
 // joystick USB que Windows reconoce como mando de juego HID: el navegador lo
 // lee directo por la Gamepad API, sin el complemento local. La palanca
-// (ejes 0 y 1) mueve en 8 direcciones con velocidad 1–7 según cuánto se
-// incline; el giro (eje 2) hace zoom; los botones se asignan a acciones en
+// (ejes 0 y 1) mueve con velocidad proporcional a cuánto se incline y el giro
+// (eje 2) hace zoom, todo a la vez; los botones se asignan a acciones en
 // Ajustes de este navegador (se guarda por joystick, en este navegador).
 //
-// Usa las mismas órdenes que el panel y el teclado (/ptz, permiso live.ptz y
-// alcance), y UNA a la vez: en ONVIF cada orden lleva pan, tilt y zoom juntos
-// y "detener" corta todo, así que mover y hacer zoom a la vez no sería
-// confiable. Gana el botón sostenido, después la palanca y por último el giro.
-// Solo actúa con la ventana enfocada y visible, y se detiene al soltar, al
-// perder el foco, al abrir un diálogo o al salir de la vista.
+// La palanca y el giro viajan juntos como velocidades (pan, tilt y zoom en
+// −1..1) por /ptz/move: el servidor usa la orden nativa del equipo (ONVIF
+// ContinuousMove, ISAPI continuous de Hikvision por la SDK, MOVE_CONTINUOUSLY
+// de Dahua) o la traduce a órdenes de dirección y zoom. Mientras se mueve se
+// renueva cada segundo: sin noticias por 3 s el servidor detiene la cámara.
+// Foco e iris (botones) van por /ptz como en el panel. Permiso live.ptz y
+// alcance, como siempre. Solo actúa con la ventana enfocada y visible, y se
+// detiene al soltar, al perder el foco, al abrir un diálogo o al salir de la
+// vista.
 //
 // Depende de live.js (lv, lvPtzTarget, lvPtzAvailable, lvPtzSend…).
 
@@ -20,13 +23,12 @@ const LV_JOY_KEY = "tcvms.live.joystick";
 const LV_JOY_DEAD = 0.18;      // zona muerta de la palanca (fracción del recorrido)
 const LV_JOY_DEAD_ZOOM = 0.25; // el giro suele volver menos centrado
 const LV_JOY_GAP_MS = 80;      // pausa mínima entre órdenes seguidas (un cambio de velocidad no satura al equipo)
+const LV_JOY_KEEPALIVE_MS = 1000; // renovación del movimiento (hombre muerto del servidor: 3 s)
+const LV_JOY_PRECISION = 0.2;  // modo precisión: fracción de la velocidad
 // Al soltar, el resorte rebota y pasa un instante por la dirección contraria:
 // justo después de detenerse, un movimiento nuevo debe sostenerse un poco.
 const LV_JOY_SETTLE_MS = 300;
 const LV_JOY_HOLD_MS = 150;
-
-/** Sectores de 45° desde la derecha, en sentido antihorario (en la Gamepad API "arriba" es negativo). */
-const LV_JOY_DIRS = ["PanRight", "UpRight", "TiltUp", "UpLeft", "PanLeft", "DownLeft", "TiltDown", "DownRight"];
 
 /** Acciones de los botones. ptz: orden que dura mientras se sostiene; el resto se dispara al apretar. */
 const LV_JOY_ACTIONS = [
@@ -51,7 +53,8 @@ const lvJoy = {
   raf: 0,
   index: null,        // joystick en uso (navigator.getGamepads()[index])
   pressed: [],        // botones apretados en el cuadro anterior (flancos)
-  sent: null,         // última orden enviada { ch, command, speed }
+  sent: null,         // última orden enviada: { ch, pan, tilt, zoom } o { ch, command, speed } (foco, iris)
+  sentAt: 0,
   want: null,         // orden que corresponde al estado actual del joystick
   busy: false,
   stoppedAt: null,    // cuándo se soltó (rebote)
@@ -179,57 +182,76 @@ function lvJoyDebounce(want) {
   return now - lvJoy.pendingSince >= LV_JOY_HOLD_MS ? want : null;
 }
 
-/** Orden que corresponde al joystick: botón sostenido, palanca o giro (en ese orden). */
+/**
+ * Lo que corresponde al joystick: foco o iris sostenidos (una orden de /ptz,
+ * como en el panel), o las velocidades de pan, tilt y zoom juntas (palanca,
+ * giro y botones de zoom).
+ */
 function lvJoyDesired(pad, cfg, held) {
   const ch = lvPtzTarget();
   if (!ch) return null;
-  const slow = lvJoy.precision || lv.shift;
-  if (held) return { ch, command: held, speed: slow ? 1 : lv.prefs.ptzSpeed };
+  const scale = lvJoy.precision || lv.shift ? LV_JOY_PRECISION : 1;
+  if (held && !held.startsWith("Zoom")) return { ch, command: held, speed: scale < 1 ? 1 : lv.prefs.ptzSpeed };
   const x = pad.axes[0] ?? 0;
   const y = (pad.axes[1] ?? 0) * (cfg.invertY ? -1 : 1);
+  // Zona muerta radial: fuera de ella la velocidad crece de 0 a 1 con la inclinación.
   const mag = Math.min(1, Math.hypot(x, y));
-  if (mag > LV_JOY_DEAD) {
-    const sector = Math.round(Math.atan2(-y, x) / (Math.PI / 4));
-    return { ch, command: LV_JOY_DIRS[(sector + 8) % 8], speed: slow ? 1 : lvJoySpeed(mag, LV_JOY_DEAD) };
+  const k = mag > LV_JOY_DEAD ? (mag - LV_JOY_DEAD) / (1 - LV_JOY_DEAD) / mag : 0;
+  let zoom = 0;
+  if (held) {
+    zoom = (held === "ZoomIn" ? 1 : -1) * lv.prefs.ptzSpeed / 7;
+  } else if (pad.axes.length > 2) {
+    const z = (pad.axes[2] ?? 0) * (cfg.invertZoom ? -1 : 1);
+    if (Math.abs(z) > LV_JOY_DEAD_ZOOM) zoom = Math.sign(z) * Math.min(1, (Math.abs(z) - LV_JOY_DEAD_ZOOM) / (1 - LV_JOY_DEAD_ZOOM));
   }
-  const z = (pad.axes[2] ?? 0) * (cfg.invertZoom ? -1 : 1);
-  if (pad.axes.length > 2 && Math.abs(z) > LV_JOY_DEAD_ZOOM)
-    return { ch, command: z > 0 ? "ZoomIn" : "ZoomOut", speed: slow ? 1 : lvJoySpeed(Math.abs(z), LV_JOY_DEAD_ZOOM) };
-  return null;
-}
-
-/** Recorrido más allá de la zona muerta → velocidad 1..7 del equipo. */
-function lvJoySpeed(amount, dead) {
-  return 1 + Math.round(Math.min(1, (amount - dead) / (1 - dead)) * 6);
+  // Pasos de 0,05: un temblor de la mano no genera una orden por cuadro. En la Gamepad API "arriba" es negativo.
+  const q = (v) => Math.round(Math.max(-1, Math.min(1, v * scale)) * 20) / 20 || 0;
+  const move = { ch, pan: q(x * k), tilt: q(-y * k), zoom: q(zoom) };
+  return move.pan || move.tilt || move.zoom ? move : null;
 }
 
 const lvJoySame = (a, b) => (!a && !b) ||
-  (!!a && !!b && a.ch.id === b.ch.id && a.command === b.command && a.speed === b.speed);
+  (!!a && !!b && a.ch.id === b.ch.id && a.command === b.command && a.speed === b.speed &&
+    a.pan === b.pan && a.tilt === b.tilt && a.zoom === b.zoom);
 
 function lvJoySet(want) {
   lvJoy.want = want;
-  if (!lvJoy.busy && !lvJoySame(want, lvJoy.sent)) lvJoyFlush();
+  if (lvJoy.busy) return;
+  // Un movimiento sostenido se renueva: el servidor detiene la cámara si deja de oírlo.
+  const renew = lvJoy.sent?.pan !== undefined && performance.now() - lvJoy.sentAt >= LV_JOY_KEEPALIVE_MS;
+  if (renew || !lvJoySame(want, lvJoy.sent)) lvJoyFlush();
 }
 
 /**
  * Lleva la cámara al estado pedido con UNA orden en vuelo a la vez: lo que
- * cambió mientras tanto se resume en la orden siguiente (sin cola). El
- * "detener" va a la cámara que se estaba moviendo aunque la selección cambie.
+ * cambió mientras tanto se resume en la orden siguiente (sin cola). Lo que se
+ * estaba haciendo se detiene al cambiar de cámara o de tipo de orden, y el
+ * "detener" va a la cámara que se movía aunque la selección cambie.
  */
 async function lvJoyFlush() {
   lvJoy.busy = true;
   try {
-    while (!lvJoySame(lvJoy.want, lvJoy.sent)) {
+    let renew = !!lvJoy.sent && lvJoySame(lvJoy.want, lvJoy.sent);
+    while (renew || !lvJoySame(lvJoy.want, lvJoy.sent)) {
+      renew = false;
       const want = lvJoy.want, sent = lvJoy.sent;
       if (sent && (!want || want.ch.id !== sent.ch.id || want.command !== sent.command))
-        await lvPtzSend(sent.ch, sent.command, true, sent.speed);
-      if (want) await lvPtzSend(want.ch, want.command, false, want.speed);
+        await (sent.command ? lvPtzSend(sent.ch, sent.command, true, sent.speed) : lvJoyMoveSend({ ch: sent.ch, pan: 0, tilt: 0, zoom: 0 }));
+      if (want) await (want.command ? lvPtzSend(want.ch, want.command, false, want.speed) : lvJoyMoveSend(want));
       lvJoy.sent = want;
+      lvJoy.sentAt = performance.now();
       if (lvJoy.want) await new Promise((r) => setTimeout(r, LV_JOY_GAP_MS));
     }
   } finally {
     lvJoy.busy = false;
   }
+}
+
+/** Velocidades a /ptz/move, en la misma fila que las órdenes del panel y el teclado. */
+function lvJoyMoveSend(m) {
+  return lv.ptzChain = lv.ptzChain.then(() =>
+    Api.post(`/api/devices/${m.ch.deviceId}/channels/${m.ch.channelNumber}/ptz/move`, { pan: m.pan, tilt: m.tilt, zoom: m.zoom })
+      .catch((err) => lvStatus(`PTZ: ${err.error}`, true)));
 }
 
 function lvJoyAction(key) {

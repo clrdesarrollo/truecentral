@@ -612,10 +612,17 @@ reconozca como mando de juego, sin instalar nada.
   horario para acercar y al revés para alejar. Al soltarla, la cámara se
   detiene.
 
-El joystick da una orden a la vez: si inclina y gira la palanca al mismo
-tiempo, manda el movimiento. Solo actúa con la ventana del panel activa; si
-cambia a otra ventana, la cámara se detiene. El modo precisión
-(#tecla("Shift")) también vale para el joystick.
+Se puede mover y hacer zoom a la vez, con la velocidad tan fina como la
+inclinación. El servidor usa la vía de cada marca: la SDK en los equipos
+Hikvision y Dahua, y ONVIF en el resto. Si un equipo no admite el movimiento
+combinado (por ejemplo, el PTZ por coaxial de algunos grabadores), mueve igual,
+con las velocidades 1 a 7 del panel.
+
+Solo actúa con la ventana del panel activa; si cambia a otra ventana, la cámara
+se detiene. Si el navegador deja de responder o se corta la red mientras la
+cámara se mueve, el servidor la detiene a los 3 segundos. El modo precisión
+(#tecla("Shift")) también vale para el joystick: la cámara se mueve a un
+quinto de la velocidad.
 
 En *Ajustes de este navegador*, la sección *Joystick PTZ* muestra el joystick
 detectado y permite:

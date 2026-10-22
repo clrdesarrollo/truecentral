@@ -450,6 +450,21 @@ internal static class NetSdk
     public const uint PtzPointMove = 10, PtzPointSet = 11, PtzPointDel = 12;
     public const uint ExtPtzLeftTop = 0x20, ExtPtzRightTop = 0x21, ExtPtzLeftDown = 0x22, ExtPtzRightDown = 0x23;
 
+    /// <summary>DH_EXTPTZ_MOVE_CONTINUOUSLY (0x46): velocidades pan/tilt/zoom juntas, param4 = PTZ_CONTROL_CONTINUOUSLY.</summary>
+    public const uint ExtPtzMoveContinuously = 0x46;
+
+    /// <summary>PTZ_CONTROL_CONTINUOUSLY con su PTZ_SPEED_UNIT aplanado (112 bytes, alineación por defecto).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PTZ_CONTROL_CONTINUOUSLY
+    {
+        public float fPositionX;   // horizontal, −1..1
+        public float fPositionY;   // vertical, −1..1
+        public float fZoom;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] szSpeedReserve;
+        public int nTimeOut;       // segundos: el equipo se detiene solo si no llega otra orden
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 64)] public byte[] szReserve;
+    }
+
     /// <summary>LONG de Windows = 32 bits; param4 depende de la orden (null en las básicas).</summary>
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
     public static extern bool CLIENT_DHPTZControlEx2(long lLoginID, int nChannelID, uint dwPTZCommand,
