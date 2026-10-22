@@ -50,6 +50,14 @@ public sealed class TimelineBar : FrameworkElement
         nameof(SelectionMode), typeof(bool), typeof(TimelineBar),
         new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender, OnSelectionModeChanged));
 
+    /// <summary>
+    /// Salto en curso: no acepta clics ni arrastres hasta que abra la
+    /// grabación (la rueda sigue acercando y alejando).
+    /// </summary>
+    public static readonly DependencyProperty IsLockedProperty = DependencyProperty.Register(
+        nameof(IsLocked), typeof(bool), typeof(TimelineBar),
+        new FrameworkPropertyMetadata(false, OnIsLockedChanged));
+
     /// <summary>Densidad actual para mostrar junto a los botones − / + ("24 h", "10 min"…).</summary>
     public static readonly DependencyProperty SpanLabelProperty = DependencyProperty.Register(
         nameof(SpanLabel), typeof(string), typeof(TimelineBar), new PropertyMetadata("24 h"));
@@ -88,6 +96,12 @@ public sealed class TimelineBar : FrameworkElement
     {
         get => (bool)GetValue(SelectionModeProperty);
         set => SetValue(SelectionModeProperty, value);
+    }
+
+    public bool IsLocked
+    {
+        get => (bool)GetValue(IsLockedProperty);
+        set => SetValue(IsLockedProperty, value);
     }
 
     public string SpanLabel
@@ -212,10 +226,19 @@ public sealed class TimelineBar : FrameworkElement
         if (d is TimelineBar bar) bar.UpdateToolTip();
     }
 
+    private static void OnIsLockedChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not TimelineBar bar) return;
+        bar.Opacity = bar.IsLocked ? 0.75 : 1;
+        bar.UpdateToolTip();
+    }
+
     private void UpdateToolTip()
     {
-        Cursor = SelectionMode ? Cursors.Cross : Cursors.Hand;
-        ToolTip = SelectionMode
+        Cursor = IsLocked ? Cursors.AppStarting : SelectionMode ? Cursors.Cross : Cursors.Hand;
+        ToolTip = IsLocked
+            ? "Abriendo la grabación en el equipo…"
+            : SelectionMode
             ? "Modo recorte: arrastre para marcar el tramo a exportar · clic derecho borra la marca"
             : "Clic o arrastre: reproducir desde esa hora · rueda: acercar/alejar · clic derecho: borrar la marca";
     }
@@ -381,7 +404,7 @@ public sealed class TimelineBar : FrameworkElement
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
-        if (ActualWidth <= 0) return;
+        if (ActualWidth <= 0 || IsLocked) return;
         _dragStartX = e.GetPosition(this).X;
         _dragStartCenter = Center;
         _dragging = false;

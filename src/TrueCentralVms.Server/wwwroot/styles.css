@@ -2391,7 +2391,9 @@ table.grid tr[data-code]:hover td { background: var(--panel-2); }
 .pb-clock { flex: 1; text-align: center; font-size: 16px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pb-zoomlabel { min-width: 48px; text-align: center; font-size: 12px; color: var(--muted); }
 .pb-timeline { position: relative; border-radius: 6px; overflow: hidden; cursor: pointer; touch-action: none; user-select: none; }
-.pb-timeline canvas { display: block; }
+.pb-timeline canvas { display: block; transition: opacity .2s; }
+.pb-timeline.locked { cursor: progress; }
+.pb-timeline.locked canvas { opacity: .75; }
 .pb-chipdrag { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); background: #FF4D4D; color: #fff;
   font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 4px; pointer-events: none; }
 .pb-selrow { font-size: 12.5px; }

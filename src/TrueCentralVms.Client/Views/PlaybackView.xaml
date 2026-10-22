@@ -489,6 +489,7 @@
                                        Day="{Binding Playback.Date}"
                                        Playhead="{Binding Playback.Playhead}"
                                        SelectionMode="{Binding Playback.IsSelectionMode}"
+                                       IsLocked="{Binding Playback.IsTimelineLocked}"
                                        SelectionStart="{Binding Playback.SelectionStart}"
                                        SelectionEnd="{Binding Playback.SelectionEnd}"/>
                 </DockPanel>

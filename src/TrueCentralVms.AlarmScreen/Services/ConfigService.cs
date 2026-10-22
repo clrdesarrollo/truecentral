@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using TrueCentralVms.AlarmScreen.Models;
 
@@ -10,7 +11,13 @@ public static class ConfigService
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TrueCentralPantalla");
 
     private static readonly string FilePath = Path.Combine(AppDataDir, "config.json");
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+    // Sin escapar «+», «&», etc.: el script de actualización nocturna lee este archivo con grep, y el
+    // escape por omisión (+) le cambiaba la llave fijada del servidor. No es HTML, no hay riesgo.
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
     private static readonly object Gate = new();
 
     public static ClientConfig Load()

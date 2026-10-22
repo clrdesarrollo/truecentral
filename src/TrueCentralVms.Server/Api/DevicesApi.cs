@@ -821,6 +821,55 @@ public static class DevicesApi
         });
 
         // ------------------------------------------------------------------
+        // PTZ por velocidades (joystick): pan, tilt y zoom a la vez, −1..1.
+        // Mismo permiso, alcance y auditoría que /ptz. PtzMover elige la vía
+        // (orden nativa del driver o traducida a /ptz) y detiene la cámara si
+        // el cliente deja de renovar el movimiento.
+        // ------------------------------------------------------------------
+        app.MapPost("/api/devices/{id:int}/channels/{channelNumber:int}/ptz/move", async (HttpContext ctx, int id,
+            int channelNumber, PtzMoveRequestDto request, VmsDbContext db, DriverRegistry drivers,
+            CredentialProtector protector, AuditService audit, PtzMover mover, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.LivePtz, out var session) is { } failure) return failure;
+            if (!double.IsFinite(request.Pan) || !double.IsFinite(request.Tilt) || !double.IsFinite(request.Zoom))
+                return Error("Velocidades PTZ inválidas.");
+
+            var channel = await db.Channels.Include(c => c.Device)
+                .FirstOrDefaultAsync(c => c.DeviceId == id && c.ChannelNumber == channelNumber, ct);
+            if (channel is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanOperateChannel(channel.Id))
+                return await ctx.OutOfScopeAsync(session, "channel", $"{id}/{channelNumber}",
+                    $"{channel.Device.Name} · {channel.Name}", "mover el PTZ de");
+            if (!channel.SupportsPtz)
+                return Error("Este canal no tiene PTZ.");
+            var factory = drivers.Find(channel.Device.DriverKey);
+            if (factory is null)
+                return Error("Driver no disponible.");
+
+            double pan = Math.Clamp(request.Pan, -1, 1), tilt = Math.Clamp(request.Tilt, -1, 1), zoom = Math.Clamp(request.Zoom, -1, 1);
+            bool ok;
+            try
+            {
+                ok = await mover.MoveAsync(id, channelNumber, factory.Create(), DeviceConnections.Of(channel.Device, protector),
+                    pan, tilt, zoom, ct);
+            }
+            catch (DriverException ex)
+            {
+                return Error(ex.Message, StatusCodes.Status502BadGateway);
+            }
+
+            if ((pan != 0 || tilt != 0 || zoom != 0) && audit.ShouldLog($"ptz:{session.UserId}:{id}:{channelNumber}", TimeSpan.FromMinutes(2)))
+                await audit.LogAsync(ctx, "ptz", "ptz-moved",
+                    targetType: "channel", targetId: $"{id}/{channelNumber}",
+                    targetName: $"{channel.Device.Name} · {channel.Name}",
+                    detail: $"Operó el PTZ de '{channel.Device.Name}' canal {channelNumber}.",
+                    success: ok);
+            return ok
+                ? Results.Ok()
+                : Error("El equipo rechazó la orden PTZ.", StatusCodes.Status502BadGateway);
+        });
+
+        // ------------------------------------------------------------------
         // Presets PTZ: ir / guardar / borrar (índice 1..300)
         // ------------------------------------------------------------------
         app.MapPost("/api/devices/{id:int}/channels/{channelNumber:int}/ptz-preset", async (HttpContext ctx, int id,

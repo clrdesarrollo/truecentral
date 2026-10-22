@@ -309,6 +309,37 @@ Con una cámara PTZ seleccionada:
 El teclado no mueve la cámara mientras escribe en un campo de texto, como el
 buscador o el número de preset.
 
+=== Con un joystick
+
+Un joystick USB que Windows reconozca como mando de juego mueve la cámara PTZ
+del cuadro seleccionado, sin instalar nada:
+
+- incline la palanca hacia donde quiera mover la cámara, también en diagonal:
+  cuanto más la incline, más rápido se mueve;
+- gire la palanca en sentido horario para acercar y al revés para alejar; se
+  puede mover y hacer zoom a la vez;
+- al soltarla, la cámara se detiene.
+
+Con el joystick conectado y una cámara PTZ seleccionada, el panel muestra la
+marca *JOYSTICK*. Actúa mientras alguna ventana del cliente está activa,
+también una pantalla auxiliar; si cambia a otro programa, la cámara se
+detiene, salvo que marque *Mover la cámara aunque el cliente no esté en primer
+plano*: así el joystick sigue moviendo la cámara seleccionada mientras trabaja
+en otro programa, con la Vista en vivo abierta. Si se corta la red mientras se
+mueve, el servidor la detiene a los 3 segundos.
+
+En #menu("Configuración", "Joystick") se ve el joystick detectado, con sus
+ejes y botones en vivo, y se puede desactivar, *Invertir arriba y abajo*,
+*Invertir el zoom del giro* o dejarlo operar en segundo plano (la opción de
+arriba). #boton("Asignar botones…") abre la lista de
+acciones: elija #boton("Asignar") y apriete el botón del joystick que la hará.
+Hay acciones para zoom, foco e iris (mientras se sostiene el botón), el modo
+precisión, los dígitos del 0 al 9 para teclear el número de preset, *Ir al
+preset tecleado*, *Guardar la posición en el preset tecleado*, *Borrar el
+número tecleado*, el cuadro siguiente y el anterior, y maximizar. Los ajustes
+se guardan en este equipo, por modelo de joystick; los botones, apenas se
+asignan.
+
 #nota[Si una cámara PTZ no muestra el control PTZ, pida al administrador que
   la marque como PTZ (ver _Configuración_ al final de este capítulo).]
 
@@ -566,6 +597,9 @@ use el cliente.
   [Pantalla completa], [Es la del navegador: #tecla("Esc") sale.],
   [Ajustes], [Se cambian con el engranaje de la barra y quedan guardados en
     ese navegador.],
+  [Joystick PTZ], [Solo con la ventana principal activa (en el cliente vale
+    también una pantalla auxiliar). Sus opciones están en *Ajustes de este
+    navegador*: ver _Joystick PTZ_ más abajo.],
 )
 
 Si sus roles no incluyen *Mover cámaras PTZ*, el panel PTZ lo dice: «Sus roles
@@ -589,7 +623,59 @@ navegador*. Los cambios se guardan apenas los hace:
   [*Volver a abrir las cámaras de la última sesión al entrar*], [Al abrir la
     página, reabre lo que había en la grilla la última vez en este navegador.
     Solo en la ventana principal.],
+  [*Joystick PTZ*], [El joystick detectado y sus opciones (ver _Joystick PTZ_).
+    Solo en la ventana principal.],
 )
+
+=== Joystick PTZ
+
+#requiere("Mover cámaras PTZ")
+
+En la ventana principal, un joystick USB conectado a este equipo mueve la
+cámara PTZ del cuadro seleccionado. Sirve cualquier joystick que Windows
+reconozca como mando de juego, sin instalar nada.
+
++ Conecte el joystick y, con la Vista en vivo abierta, muévalo o apriete un
+  botón: el navegador lo detecta recién ahí, y la barra de estado dice
+  «Joystick conectado: …».
++ Seleccione el cuadro de la cámara PTZ. El panel PTZ muestra la marca
+  *JOYSTICK*.
++ Incline la palanca hacia donde quiera mover la cámara, también en diagonal:
+  cuanto más la incline, más rápido se mueve. Gire la palanca en sentido
+  horario para acercar y al revés para alejar. Al soltarla, la cámara se
+  detiene.
+
+Se puede mover y hacer zoom a la vez, con la velocidad tan fina como la
+inclinación. El servidor usa la vía de cada marca: la SDK en los equipos
+Hikvision y Dahua, y ONVIF en el resto. Si un equipo no admite el movimiento
+combinado (por ejemplo, el PTZ por coaxial de algunos grabadores), mueve igual,
+con las velocidades 1 a 7 del panel.
+
+Solo actúa con la ventana del panel activa; si cambia a otra ventana, la cámara
+se detiene. Si el navegador deja de responder o se corta la red mientras la
+cámara se mueve, el servidor la detiene a los 3 segundos. El modo precisión
+(#tecla("Shift")) también vale para el joystick: la cámara se mueve a un
+quinto de la velocidad.
+
+En *Ajustes de este navegador*, la sección *Joystick PTZ* muestra el joystick
+detectado y permite:
+
+- Desactivarlo: *Mover la cámara PTZ seleccionada con el joystick*.
+- *Invertir arriba y abajo* e *Invertir el zoom del giro*.
+- *Mover la cámara aunque esta ventana no esté en primer plano*: sigue
+  actuando con el panel visible detrás de otra ventana, siempre que el
+  navegador entregue los datos del joystick en ese caso (no todos lo hacen).
+- #boton("Asignar botones…"): elija #boton("Asignar") en una acción y apriete
+  el botón del joystick que la hará. Hay acciones para zoom, foco e iris
+  (mientras se sostiene el botón), el modo precisión, los dígitos del 0 al 9,
+  *Ir al preset tecleado*, *Guardar la posición en el preset tecleado*,
+  *Borrar el número tecleado*, el cuadro siguiente y el anterior, y
+  maximizar.
+
+Con los dígitos se arma el número de preset, como en un teclado PTZ. Por
+ejemplo, 1, 2 y el botón de *Ir al preset tecleado* llevan la cámara al preset
+12 («PTZ: moviéndose al preset 12.»). La configuración se guarda en ese
+navegador, por joystick.
 
 === Vistas guardadas en el navegador
 
@@ -622,11 +708,25 @@ Use Chrome, Edge o Firefox actualizados. Si el navegador no admite el video en
 vivo, la página muestra «Este navegador no admite WebRTC: use Chrome, Edge o
 Firefox actualizados para ver video en vivo.»
 
-Algunos navegadores no pueden mostrar cámaras configuradas en H.265. El cuadro
-lo dice y no reintenta: «Este navegador no puede reproducir el formato de
-video de la cámara por WebRTC (típicamente H.265 sin decodificación por
-hardware). Use Chrome actualizado, o configure el stream de la cámara en
-H.264.»
+Algunos navegadores no reciben por WebRTC las cámaras configuradas en H.265
+(Edge, por ejemplo). El panel lo resuelve solo, en este orden:
+
++ Abre la cámara por la *entrega alternativa*, si el navegador decodifica
+  H.265 en ese equipo. El cuadro avisa «H.265 por entrega alternativa: sin
+  audio en el panel web.»: la imagen llega con algo más de retardo y sin
+  audio. El navegador lo recuerda para las próximas veces.
++ Si no, abre el stream secundario, que suele venir en H.264. El cuadro avisa
+  «Se muestra el secundario: este navegador no reproduce el formato del
+  principal.» y no sube a principal al maximizarlo.
+
+Si ninguna de las dos sirve, el cuadro lo dice y no reintenta: «Este navegador
+no reproduce el formato de video de la cámara: típicamente H.265, que en este
+equipo no decodifica ni por WebRTC ni por la entrega alternativa (le falta
+decodificación por hardware). Use Chrome actualizado, configure el stream de la
+cámara en H.264 o use el cliente de escritorio.» Las grabaciones siguen el
+mismo camino, salvo el secundario. *Ajustes de este navegador* (el engranaje)
+dice qué admite el navegador en uso: «H.265 en este navegador: por WebRTC no; por la
+entrega alternativa (sin audio) sí.»
 
 #importante[Para hablar por los parlantes desde el navegador, el panel debe
   abrirse por HTTPS o desde el propio servidor (`http://localhost`). Si no, el

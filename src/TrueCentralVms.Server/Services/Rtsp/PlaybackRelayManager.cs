@@ -46,9 +46,9 @@ public sealed class PlaybackRelayManager(ILogger<PlaybackRelayManager> logger) :
     }
 
     /// <summary>
-    /// Cierra los relés del mismo dispositivo y canal. Las rutas se llaman
-    /// <c>pb-{dispositivo}-{canal}-{azar}</c>: comparar hasta el último guion
-    /// identifica al mismo canal sin arrastrar más estado.
+    /// Cierra los relés del mismo espectador sobre el mismo dispositivo y
+    /// canal. Las rutas se llaman <c>pb-{dispositivo}-{canal}-{usuario}-{sesión}-{azar}</c>:
+    /// comparar hasta el último guion los identifica sin arrastrar más estado.
     /// </summary>
     private async Task StopSiblingsAsync(string path)
     {

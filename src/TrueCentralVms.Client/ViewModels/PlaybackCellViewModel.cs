@@ -128,8 +128,11 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
             // fin de la reproducción: es el salto a otra hora.
             if (Volatile.Read(ref _pendingOpens) > 0) return;
             if (!IsPlaying) return;
+            // Con grabación más adelante no terminó el tramo: el equipo o el
+            // servidor cortaron la entrega (como en el panel web).
+            bool cut = Playhead is { } at && Segments.Any(s => s.End > at.AddSeconds(5));
             IsPlaying = false;
-            Status = "Fin del tramo.";
+            Status = cut ? "Se cortó la reproducción." : "Fin del tramo.";
         };
     }
 

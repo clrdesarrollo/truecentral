@@ -86,4 +86,50 @@ internal static class IsapiPassthrough
             Marshal.FreeHGlobal(statusPtr);
         }
     }
+
+    /// <summary>
+    /// PUT de una ruta ISAPI con cuerpo XML. true si el equipo la aceptó (el
+    /// SDK devuelve error ante un ResponseStatus distinto de OK).
+    /// </summary>
+    public static bool Put(int userId, string path, string xml)
+    {
+        byte[] url = Encoding.ASCII.GetBytes($"PUT {path}\r\n");
+        byte[] body = Encoding.UTF8.GetBytes(xml);
+        IntPtr urlPtr = Marshal.AllocHGlobal(url.Length);
+        IntPtr inPtr = Marshal.AllocHGlobal(body.Length);
+        IntPtr outPtr = Marshal.AllocHGlobal(4096);
+        IntPtr statusPtr = Marshal.AllocHGlobal(4096);
+        try
+        {
+            Marshal.Copy(url, 0, urlPtr, url.Length);
+            Marshal.Copy(body, 0, inPtr, body.Length);
+            var input = new NET_DVR_XML_CONFIG_INPUT
+            {
+                dwSize = (uint)Marshal.SizeOf<NET_DVR_XML_CONFIG_INPUT>(),
+                lpRequestUrl = urlPtr,
+                dwRequestUrlLen = (uint)url.Length,
+                lpInBuffer = inPtr,
+                dwInBufferSize = (uint)body.Length,
+                dwRecvTimeOut = 3000,
+                byRes = new byte[24],
+            };
+            var output = new NET_DVR_XML_CONFIG_OUTPUT
+            {
+                dwSize = (uint)Marshal.SizeOf<NET_DVR_XML_CONFIG_OUTPUT>(),
+                lpOutBuffer = outPtr,
+                dwOutBufferSize = 4096,
+                lpStatusBuffer = statusPtr,
+                dwStatusSize = 4096,
+                byRes = new byte[32],
+            };
+            return NET_DVR_STDXMLConfig(userId, ref input, ref output);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(urlPtr);
+            Marshal.FreeHGlobal(inPtr);
+            Marshal.FreeHGlobal(outPtr);
+            Marshal.FreeHGlobal(statusPtr);
+        }
+    }
 }

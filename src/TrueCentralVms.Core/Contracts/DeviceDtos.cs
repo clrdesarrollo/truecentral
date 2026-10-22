@@ -99,6 +99,13 @@ public sealed record ChannelBulkEnableResultDto(int Enabled, int LeftWithoutQuot
 /// <summary>Orden PTZ del cliente (Speed 1..7; Stop=true detiene el movimiento en curso).</summary>
 public sealed record PtzRequestDto(Drivers.PtzCommand Command, int Speed, bool Stop);
 
+/// <summary>
+/// Movimiento PTZ por velocidades (joystick): Pan, Tilt y Zoom en −1..1, a la
+/// vez; los tres en 0 detienen. Mientras se mueve, el cliente lo repite al
+/// menos cada segundo: sin noticias por 3 s el servidor detiene la cámara.
+/// </summary>
+public sealed record PtzMoveRequestDto(double Pan, double Tilt, double Zoom);
+
 /// <summary>Operación sobre un preset PTZ (índice 1..300).</summary>
 public sealed record PtzPresetRequestDto(Drivers.PtzPresetAction Action, int Index);
 
