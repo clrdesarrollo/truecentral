@@ -678,6 +678,14 @@ public sealed partial class HikvisionIsapiClient
         if (detail.Contains("deployExceedMax", StringComparison.OrdinalIgnoreCase))
             return $"El {noun} ya tiene ocupados sus cupos de suscripción a eventos: otro sistema está recibiendo sus " +
                    "eventos en vivo. Vea quién en la pestaña Capacidades del equipo (Suscripciones abiertas)." + Suffix(detail);
+        // 403 es también la respuesta a «Invalid Operation» (statusCode 4): solo es falta de permiso si el equipo lo dice (o no da
+        // motivo). Un área que ya estaba armada, por ejemplo, llegaba como «el usuario no tiene permiso».
+        bool permission = string.IsNullOrWhiteSpace(subStatus) || subStatus.Contains("privilege", StringComparison.OrdinalIgnoreCase)
+                          || subStatus.Contains("permission", StringComparison.OrdinalIgnoreCase);
+        if (status == HttpStatusCode.Forbidden && !permission)
+            return string.Equals(subStatus, "armedStatus", StringComparison.OrdinalIgnoreCase)
+                ? $"El {noun} rechazó la orden: el área ya está armada (para cambiar el modo de armado, desármela primero)." + Suffix(detail)
+                : $"El {noun} rechazó la orden." + Suffix(detail);
         return status switch
         {
             HttpStatusCode.Forbidden => $"El {noun} denegó la operación (el usuario no tiene permiso)." + Suffix(detail),

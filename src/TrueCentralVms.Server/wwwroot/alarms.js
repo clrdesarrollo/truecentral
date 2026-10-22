@@ -61,11 +61,84 @@ function armSummary(panel) {
   return `<span class="tag admin">Parcial (${armed}/${panel.areas.length})</span>${alarm}`;
 }
 
+// Último estado leído de cada panel de la lista: los botones de cada fila lo buscan aquí al hacer clic (el refresco lo actualiza).
+let alarmPanelsById = new Map();
+let alarmsRefreshing = false;
+
+/**
+ * Celdas de datos de la fila de un panel (todas menos la de acciones). El refresco las compara con las que están dibujadas y
+ * reemplaza solo las que cambiaron: así la lista se actualiza sin parpadear ni cerrar el estado que el usuario tiene abierto.
+ */
+function alarmRowCells(p) {
+  return [
+    `<td>${esc(p.name)}${p.disabledByLicense ? licenseWaitTag(p) : p.enabled ? "" : ` <span class="tag operator" title="Monitoreo desactivado">pausado</span>`}${locationLineHtml(p.location)}</td>`,
+    `<td class="muted" title="${esc(alarmAddressHint(p))}">${alarmAddress(p)}</td>`,
+    `<td>${esc(p.model ?? "—")}</td>`,
+    `<td class="muted">${esc(p.serialNumber ?? "—")}</td>`,
+    `<td class="muted">${esc(p.firmwareVersion ?? "—")}</td>`,
+    `<td>${p.areas.length}</td>`,
+    `<td>${p.zones.length}</td>`,
+    `<td>${armSummary(p)}</td>`,
+    `<td>${alarmStatusTag(p)}${p.lastError ? `<div class="muted" style="font-size:11px;max-width:220px" title="${esc(p.lastError)}">${esc(p.lastError)}</div>` : ""}</td>`,
+    `<td>${p.live ? `<span class="dot ok" title="Canal de eventos abierto"></span>` : `<span class="dot bad" title="Canal de eventos cerrado"></span>`}</td>`,
+  ];
+}
+
+/** El botón Estado abre y cierra el detalle: mientras está abierto se ve presionado y dice «Ocultar». */
+function setAlarmStateButton(button, open) {
+  button.classList.toggle("ghost", !open);
+  button.setAttribute("aria-pressed", String(open));
+  button.textContent = open ? "Ocultar" : "Estado";
+  button.title = open ? "Ocultar áreas y zonas" : "Ver áreas y zonas, armar y desarmar";
+}
+
+function toggleAlarmDetail(id) {
+  const detail = $(`#view tr[data-detail="${id}"]`);
+  const button = $(`#view tr[data-id="${id}"] .btn-state`);
+  if (!detail || !button) return;
+  const open = detail.classList.contains("hidden");
+  detail.classList.toggle("hidden", !open);
+  setAlarmStateButton(button, open);
+  if (open && alarmPanelsById.has(id)) renderAlarmDetail(alarmPanelsById.get(id));
+}
+
+/** Actualiza en su lugar la fila de un panel (solo las celdas que cambiaron) y su detalle si está abierto. */
+function updateAlarmPanel(p) {
+  alarmPanelsById.set(p.id, p);
+  const row = $(`#view tr[data-id="${p.id}"]`);
+  if (!row) return;
+  const cells = alarmRowCells(p);
+  cells.forEach((html, i) => { if (row._cells?.[i] !== html) row.children[i].outerHTML = html; });
+  row._cells = cells;
+  const detail = $(`#view tr[data-detail="${p.id}"]`);
+  if (detail && !detail.classList.contains("hidden")) renderAlarmDetail(p);
+}
+
+/**
+ * Refresco periódico por AJAX: lee la lista y cambia solo lo que cambió. Si se agregó, eliminó o reordenó un panel, redibuja la
+ * lista (conservando los detalles abiertos).
+ */
+async function refreshAlarmPanels() {
+  if (alarmsRefreshing || document.hidden) return;
+  alarmsRefreshing = true;
+  try {
+    let panels;
+    try { panels = await Api.get("/api/alarms/panels"); } catch { return; }   // se reintenta en el próximo ciclo
+    if (location.hash !== "#/alarm-panels") return;
+    const ids = $$("#view tr[data-id]").map((r) => Number(r.dataset.id));
+    if (ids.length !== panels.length || panels.some((p, i) => p.id !== ids[i])) { await renderAlarmPanels(); return; }
+    panels.forEach(updateAlarmPanel);
+  } finally { alarmsRefreshing = false; }
+}
+
 async function renderAlarmPanels() {
   $("#page-title").textContent = "Paneles de alarma";
+  // Al redibujar (panel agregado o eliminado) quedan abiertos los detalles que el usuario tenía abiertos.
+  const open = new Set($$("#view tr[data-detail]").filter((r) => !r.classList.contains("hidden")).map((r) => Number(r.dataset.detail)));
   let panels;
   try { panels = await Api.get("/api/alarms/panels"); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
+  alarmPanelsById = new Map(panels.map((p) => [p.id, p]));
 
   const isAdmin = Perms.can("alarms.configure");
   $("#view").innerHTML = `
@@ -84,18 +157,9 @@ async function renderAlarmPanels() {
         <tbody>
           ${panels.map((p) => `
             <tr data-id="${p.id}">
-              <td>${esc(p.name)}${p.disabledByLicense ? licenseWaitTag(p) : p.enabled ? "" : ` <span class="tag operator" title="Monitoreo desactivado">pausado</span>`}${locationLineHtml(p.location)}</td>
-              <td class="muted" title="${esc(alarmAddressHint(p))}">${alarmAddress(p)}</td>
-              <td>${esc(p.model ?? "—")}</td>
-              <td class="muted">${esc(p.serialNumber ?? "—")}</td>
-              <td class="muted">${esc(p.firmwareVersion ?? "—")}</td>
-              <td>${p.areas.length}</td>
-              <td>${p.zones.length}</td>
-              <td>${armSummary(p)}</td>
-              <td>${alarmStatusTag(p)}${p.lastError ? `<div class="muted" style="font-size:11px;max-width:220px" title="${esc(p.lastError)}">${esc(p.lastError)}</div>` : ""}</td>
-              <td>${p.live ? `<span class="dot ok" title="Canal de eventos abierto"></span>` : `<span class="dot bad" title="Canal de eventos cerrado"></span>`}</td>
+              ${alarmRowCells(p).join("")}
               <td class="row-actions">
-                <button class="btn ghost btn-state" title="Ver áreas y zonas, armar y desarmar">Estado</button>
+                <button class="btn ghost btn-state" aria-pressed="false" title="Ver áreas y zonas, armar y desarmar">Estado</button>
                 ${isAdmin ? `<button class="btn ghost btn-edit">Editar</button>
                 <button class="btn danger btn-delete">Eliminar</button>` : ""}
               </td>
@@ -103,51 +167,46 @@ async function renderAlarmPanels() {
             <tr class="hidden" data-detail="${p.id}"><td colspan="11"></td></tr>`).join("")}
         </tbody>
       </table></div>`}`;
+  for (const p of panels) {
+    $(`#view tr[data-id="${p.id}"]`)._cells = alarmRowCells(p);
+    if (open.has(p.id)) toggleAlarmDetail(p.id);
+  }
 
   $("#btn-alarm-new")?.addEventListener("click", () => alarmPanelModal(null));
-  $$("#view .btn-edit").forEach((b) => b.addEventListener("click", (e) => {
-    const id = Number(e.target.closest("tr").dataset.id);
-    alarmPanelModal(panels.find((p) => p.id === id));
-  }));
-  $$("#view .btn-delete").forEach((b) => b.addEventListener("click", async (e) => {
-    const id = Number(e.target.closest("tr").dataset.id);
-    const panel = panels.find((p) => p.id === id);
-    if (!confirm(`¿Eliminar el panel "${panel.name}"? El historial de eventos se conserva.`)) return;
-    try {
-      await Api.delete(`/api/alarms/panels/${id}`);
-      toast("Panel eliminado.");
-      renderAlarmPanels();
-    } catch (err) { toast(err.error, true); }
-  }));
-  $$("#view .btn-state").forEach((b) => b.addEventListener("click", (e) => {
-    const id = Number(e.target.closest("tr").dataset.id);
-    const row = $(`#view tr[data-detail="${id}"]`);
-    if (!row.classList.contains("hidden")) { row.classList.add("hidden"); return; }
-    row.classList.remove("hidden");
-    renderAlarmDetail(panels.find((p) => p.id === id));
-  }));
+  // Un solo manejador para los botones de las filas: sigue sirviendo aunque el refresco reemplace celdas.
+  $("#view tbody")?.addEventListener("click", async (e) => {
+    const button = e.target.closest("button");
+    const row = button?.closest("tr[data-id]");
+    if (!row) return;
+    const id = Number(row.dataset.id);
+    const panel = alarmPanelsById.get(id);
+    if (button.classList.contains("btn-state")) toggleAlarmDetail(id);
+    else if (button.classList.contains("btn-edit")) alarmPanelModal(panel);
+    else if (button.classList.contains("btn-delete")) {
+      if (!confirm(`¿Eliminar el panel "${panel.name}"? El historial de eventos se conserva.`)) return;
+      try {
+        await Api.delete(`/api/alarms/panels/${id}`);
+        toast("Panel eliminado.");
+        renderAlarmPanels();
+      } catch (err) { toast(err.error, true); }
+    }
+  });
 
-  // El estado cambia solo (eventos del panel): refrescar la tabla cada 10 s
-  // conservando los detalles abiertos.
+  // El estado cambia solo (eventos del panel): cada 10 s se lee la lista por AJAX y se cambia solo lo que cambió.
   clearInterval(alarmsTimer);
-  alarmsTimer = setInterval(async () => {
+  alarmsTimer = setInterval(() => {
     if (location.hash !== "#/alarm-panels" || $("#app-shell").classList.contains("hidden")) {
       clearInterval(alarmsTimer);
       return;
     }
-    if ($("#modal-backdrop") && !$("#modal-backdrop").classList.contains("hidden")) return;
-    const open = $$("#view tr[data-detail]").filter((r) => !r.classList.contains("hidden")).map((r) => Number(r.dataset.detail));
-    await renderAlarmPanels();
-    for (const id of open) {
-      const row = $(`#view tr[data-detail="${id}"]`);
-      if (!row) continue;
-      row.classList.remove("hidden");
-      try { renderAlarmDetail(await Api.get(`/api/alarms/panels/${id}`)); } catch { /* se reintenta en el próximo ciclo */ }
-    }
+    refreshAlarmPanels();
   }, 10000);
 }
 
-/** Detalle desplegable: áreas con sus botones y zonas con su estado. */
+/**
+ * Detalle desplegable: áreas con sus botones y zonas con su estado. Si nada cambió desde la última vez no se toca (el botón bajo el
+ * cursor sigue ahí y no parpadea); la hora de la última lectura se actualiza aparte.
+ */
 function renderAlarmDetail(panel) {
   const cell = $(`#view tr[data-detail="${panel.id}"] td`);
   if (!cell) return;
@@ -192,7 +251,7 @@ function renderAlarmDetail(panel) {
       </div>`;
   };
 
-  cell.innerHTML = `
+  const html = `
     <div style="padding:8px 4px">
       ${(() => { const w = [panel.panelTamper ? "Tapa del panel abierta (sabotaje): no se podrá armar hasta cerrarla." : null, panel.acLoss ? "Falla de corriente de red: el panel está en batería." : null].filter(Boolean); return w.length ? `<div class="error-box" style="margin-bottom:8px">⚠ ${w.map(esc).join("<br>")}</div>` : ""; })()}
       ${panel.areas.length === 0 ? `<div class="info-box">El panel no reportó áreas todavía.</div>` : ""}
@@ -205,16 +264,22 @@ function renderAlarmDetail(panel) {
       ${orphanZones.length ? `<div class="probe-box"><div class="muted" style="margin-bottom:6px">Zonas sin área</div>
         <div class="chip-row">${orphanZones.map(zoneChip).join("")}</div></div>` : ""}
       <div class="muted" style="font-size:11px;margin-top:6px">
-        Última lectura: ${panel.lastStateAt ? formatDate(panel.lastStateAt) : "—"}
+        Última lectura: <span class="alarm-read-at"></span>
         · <a href="#" class="btn-refresh">actualizar ahora</a>
       </div>
     </div>`;
+  const readAt = panel.lastStateAt ? formatDate(panel.lastStateAt) : "—";
+  if (cell._html === html) { $(".alarm-read-at", cell).textContent = readAt; return; }
+  cell._html = html;
+  cell.innerHTML = html;
+  $(".alarm-read-at", cell).textContent = readAt;
 
+  // Tras una orden se actualizan en el acto el detalle y la fila (columna Armado), sin esperar al refresco.
   const run = async (path, body, okMessage) => {
     try {
       const updated = await Api.post(path, body);
       toast(okMessage);
-      renderAlarmDetail(updated);
+      updateAlarmPanel(updated);
     } catch (err) { toast(err.error, true); }
   };
   $$(".btn-arm", cell).forEach((b) => b.addEventListener("click", () =>

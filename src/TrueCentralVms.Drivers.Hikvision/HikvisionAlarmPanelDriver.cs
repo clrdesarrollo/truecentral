@@ -372,11 +372,44 @@ public sealed class HikvisionAlarmPanelDriver : IAlarmPanelDriver
     // Órdenes
     // ------------------------------------------------------------------
 
-    public Task ArmAsync(AlarmConnectionInfo info, int areaNumber, AlarmArmMode mode, CancellationToken ct = default)
+    public async Task ArmAsync(AlarmConnectionInfo info, int areaNumber, AlarmArmMode mode, CancellationToken ct = default)
     {
         string ways = mode == AlarmArmMode.Stay ? "stay" : "away";
-        return AreaCommandAsync(info, areaNumber, "arm", $"?ways={ways}&format=json", "armar el área",
-            id => $"{{\"SubSys\":{{\"id\":{id},\"armType\":\"{ways}\"}}}}", ct);
+        try
+        {
+            await AreaCommandAsync(info, areaNumber, "arm", $"?ways={ways}&format=json", "armar el área",
+                id => $"{{\"SubSys\":{{\"id\":{id},\"armType\":\"{ways}\"}}}}", ct);
+        }
+        catch (DriverException ex) when (ex.Message.Contains("armedStatus", StringComparison.OrdinalIgnoreCase))
+        {
+            // El panel no vuelve a armar un área armada (Invalid Operation · armedStatus, medido en un AX Hybrid PRO por ISUP) y,
+            // con «todas», rechaza la orden completa si alguna ya lo estaba. Se arman solo las que faltan.
+            await ArmPendingAreasAsync(info, areaNumber, mode, ct);
+        }
+    }
+
+    /// <summary>
+    /// Arma las áreas pedidas que siguen desarmadas, una por una. Las que ya están armadas en el modo pedido quedan como están (la
+    /// orden ya se cumple); si alguna está armada en OTRO modo, el panel no lo cambia sin desarmar, y se avisa cuáles son.
+    /// </summary>
+    private static async Task ArmPendingAreasAsync(AlarmConnectionInfo info, int areaNumber, AlarmArmMode mode, CancellationToken ct)
+    {
+        string ways = mode == AlarmArmMode.Stay ? "stay" : "away";
+        var wanted = mode == AlarmArmMode.Stay ? AlarmArmState.Stay : AlarmArmState.Away;
+        var client = new HikvisionIsapiClient(info);
+        string json = await client.RequestAsync(HttpMethod.Get, "/ISAPI/SecurityCP/status/subSystems?format=json", ct: ct) ?? "{}";
+        var areas = ParseAreas(json, new Dictionary<int, string>()).Where(a => areaNumber <= 0 || a.Number == areaNumber).ToList();
+        foreach (var area in areas.Where(a => a.ArmState is AlarmArmState.Disarmed or AlarmArmState.Unknown))
+            await AreaCommandAsync(info, area.Number, "arm", $"?ways={ways}&format=json", "armar el área",
+                id => $"{{\"SubSys\":{{\"id\":{id},\"armType\":\"{ways}\"}}}}", ct);
+
+        var otherMode = areas.Where(a => (a.ArmState is AlarmArmState.Away or AlarmArmState.Stay or AlarmArmState.Vacation) && a.ArmState != wanted).ToList();
+        if (otherMode.Count == 0) return;
+        static string ModeOf(AlarmArmState s) => s switch { AlarmArmState.Stay => "parcial", AlarmArmState.Away => "total", _ => "vacaciones" };
+        string list = string.Join(", ", otherMode.Select(a => $"{a.Number} (armado {ModeOf(a.ArmState)})"));
+        throw new DriverException(otherMode.Count == 1
+            ? $"El área {list} ya está armada en otro modo: para pasarla a armado {ModeOf(wanted)}, desármela primero."
+            : $"Las áreas {list} ya están armadas en otro modo: para pasarlas a armado {ModeOf(wanted)}, desármelas primero.");
     }
 
     public Task DisarmAsync(AlarmConnectionInfo info, int areaNumber, CancellationToken ct = default) =>
