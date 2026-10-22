@@ -234,9 +234,10 @@ public static class PlaybackApi
         // Reproducción en el panel web por MSE (WebSocket con MP4
         // fragmentado): para grabaciones H.265 con B-frames, que WebRTC no
         // admite. Misma concesión y auditoría; FFmpeg lee la ruta de un solo
-        // uso y la reempaqueta sin recodificar.
+        // uso y la reempaqueta sin recodificar. Map y no MapGet: el WebSocket
+        // por HTTP/2 llega con el método CONNECT.
         // ------------------------------------------------------------------
-        app.MapGet("/api/playback/mse", async (HttpContext ctx, int deviceId, int rtspChannel, DateTime start, DateTime end,
+        app.Map("/api/playback/mse", async (HttpContext ctx, int deviceId, int rtspChannel, DateTime start, DateTime end,
             double? speed, VmsDbContext db, DriverRegistry drivers, CredentialProtector protector,
             StreamTokenService streamTokens, MediaMtxManager mtx, Services.Rtsp.PlaybackRelayManager relays,
             AuditService audit, ILogger<Program> logger, CancellationToken ct) =>

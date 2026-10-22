@@ -207,8 +207,17 @@ class PbCell {
       video.remove();
       if (this.channel !== channel) return;
       if (err?.cancelled || seq !== pb.seq) { if (seq === pb.seq || !pb.playing) this.idle(); return; }
+      // Grabación en un formato que este navegador no recibe por WebRTC (H.265 en
+      // Edge) pero sí decodifica por MSE: se aprende el canal y se reabre por ahí.
+      const codec = lvCodecRejected(err) || err?.codec;
+      if (codec && session.kind !== "mse" && lvHevc.mse && !lvMseChannels.has(pbMseKey(channel))) {
+        lvMarkMse(pbMseKey(channel));
+        this.status = "Este navegador no recibe H.265 por WebRTC: abriendo por la entrega alternativa…";
+        pbRenderCell(this);
+        return this.openAt(t, seq);
+      }
       this.opening = false;
-      this.error = await pbExplain(session, err);
+      this.error = codec ? lvCodecMessage(err) : await pbExplain(session, err);
       this.status = "";
       pbRenderCell(this);
       return;

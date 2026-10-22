@@ -397,6 +397,33 @@ function lvNewSession(channel, profile) {
 }
 
 /**
+ * H.265 en este navegador (se mide una vez por página). Chromium solo lo
+ * decodifica con la GPU, y Edge no lo ofrece por WebRTC aunque la GPU sepa:
+ * ahí el MSE sí sirve. Decide la vía cuando el servidor rechaza la conexión
+ * WebRTC por el códec de la cámara.
+ */
+const lvHevc = (() => {
+  let webrtc = false, mse = false;
+  try { webrtc = !!RTCRtpReceiver.getCapabilities?.("video")?.codecs?.some((c) => /h265|hevc/i.test(c.mimeType)); } catch { /* sin WebRTC */ }
+  try { mse = !!window.MediaSource?.isTypeSupported('video/mp4; codecs="hvc1.1.6.L120.90"'); } catch { /* sin MSE */ }
+  return { webrtc, mse };
+})();
+
+/** Canal y perfil cuyo formato este navegador no reproduce por ninguna vía (hasta recargar la página). */
+const lvNoDecode = new Set();
+
+/** ¿El servidor rechazó la conexión WebRTC porque este navegador no recibe el códec de la cámara? */
+function lvCodecRejected(err) { return String(err?.data?.detail || "").toLowerCase().includes("codec"); }
+
+/** Aviso cuando ninguna vía sirve para el formato del canal. */
+function lvCodecMessage(err) {
+  if (err?.codec) return err.error; // el MSE ya dice qué formato no admite
+  return "Este navegador no reproduce el formato de video de la cámara: típicamente H.265, que en este equipo no " +
+    "decodifica ni por WebRTC ni por la entrega alternativa (le falta decodificación por hardware). Use Chrome " +
+    "actualizado, configure el stream de la cámara en H.264 o use el cliente de escritorio.";
+}
+
+/**
  * Códec RFC 6381 del MP4 (init segment): "hvc1.1.6.L153.B0", "avc1.640028"…
  * Recorre moov › trak › mdia › minf › stbl › stsd hasta la entrada de video y
  * su caja de configuración (hvcC / avcC). null si el init todavía está incompleto.
@@ -476,7 +503,8 @@ class LvMseSession {
   /** Resuelve cuando hay imagen y su captureStream() ya trae la pista de video. */
   open() {
     return new Promise((resolve, reject) => {
-      const fail = (error) => { if (!this.closed) { this.close(); reject({ error }); } };
+      // codec: el navegador no admite este formato (reintentar no sirve).
+      const fail = (error, codec = false) => { if (!this.closed) { this.close(); reject({ error, codec }); } };
       const video = this.video = document.createElement("video");
       video.muted = true;
       video.playsInline = true;
@@ -499,13 +527,13 @@ class LvMseSession {
             merged.set(pending); merged.set(chunk, pending.length);
             pending = merged;
             const codec = lvMp4Codec(pending);
-            if (!codec) { if (pending.length > 4 * 1024 * 1024) fail("El video recibido no tiene un formato reconocible."); return; }
+            if (!codec) { if (pending.length > 4 * 1024 * 1024) fail("El video recibido no tiene un formato reconocible.", true); return; }
             this.codec = codec;
             const mime = `video/mp4; codecs="${codec}"`;
             if (!MediaSource.isTypeSupported(mime)) {
               fail(codec.startsWith("hev") || codec.startsWith("hvc")
                 ? "Este navegador no decodifica H.265 (sin decodificación por hardware). Use Chrome o Edge actualizados en un equipo con soporte H.265, o el cliente de escritorio."
-                : `Este navegador no admite el formato de video de la cámara (${codec}).`);
+                : `Este navegador no admite el formato de video de la cámara (${codec}).`, true);
               return;
             }
             try { this.sb = ms.addSourceBuffer(mime); } catch (err) { fail(`No se pudo preparar el video: ${err.message}`); return; }
@@ -713,6 +741,9 @@ class LvFeed {
     this.videos.forEach((v) => { v.srcObject = null; });
     this.connecting = true;
     this.render();
+    // Un perfil que este navegador no reproduce se cambia por el otro, si ese sí.
+    const other = this.profile === "Main" ? "Sub" : "Main";
+    if (lvNoDecode.has(lvMseKey(this.channel, this.profile)) && !lvNoDecode.has(lvMseKey(this.channel, other))) this.profile = other;
     const s = lvNewSession(this.channel, this.profile);
     s.onAudio = () => this.render();
     this.session = s;
@@ -743,7 +774,11 @@ class LvFeed {
     this.lastBytes = -1; this.stall = 0;
     s.onDrop = () => this.dropped(s);
     this.status = this.status.startsWith("Señal perdida") || this.status.includes("Reintentando") ? "" : this.status;
-    if (s.kind === "mse") this.flash("H.265 por entrega alternativa: sin audio en el panel web.", 8000);
+    const notes = [];
+    if (s.kind === "mse") notes.push("H.265 por entrega alternativa: sin audio en el panel web.");
+    if (lvNoDecode.has(lvMseKey(this.channel, this.profile === "Main" ? "Sub" : "Main")))
+      notes.push(`Se muestra el ${this.profile === "Main" ? "principal" : "secundario"}: este navegador no reproduce el formato del ${this.profile === "Main" ? "secundario" : "principal"}.`);
+    if (notes.length) this.flash(notes.join(" "), 10000);
     this.render();
     lvRefreshTreeLive();
     if (s.kind !== "mse") this.watchHevc(seq, s);
@@ -763,16 +798,40 @@ class LvFeed {
     s.close();
     if (this.session === s) this.session = null;
     this.connecting = false;
+    // Formato que esta vía no admite: se prueba la siguiente (MSE, después el otro perfil).
+    if (lvCodecRejected(err) || err?.codec) {
+      const next = this.codecFallback(s);
+      if (next) { this.status = next; this.render(); this.open(); return; }
+      err = { ...err, error: lvCodecMessage(err) };
+    }
     const message = err?.error || err?.message || "No se pudo abrir el video.";
     const detail = String(err?.data?.detail || "").toLowerCase();
     // Lo que no se arregla reintentando: sin permiso, fuera de alcance, canal
     // inexistente o deshabilitado, o un formato que este navegador no decodifica.
-    const fatal = err?.status === 403 || err?.status === 404 || detail.includes("codec") ||
+    const fatal = err?.status === 403 || err?.status === 404 || detail.includes("codec") || err?.codec ||
       (err?.status === 422 && message.includes("deshabilitado")) || err?.status === 503 && message.includes("deshabilitada");
     this.error = message;
     this.status = fatal ? "Sin video" : "Reintentando…";
     if (!fatal) this.scheduleRetry();
     this.render();
+  }
+
+  /**
+   * La vía recién probada no admite el formato del canal. Devuelve el aviso de
+   * la siguiente (MSE si este navegador decodifica H.265 ahí; si no, el otro
+   * perfil, que suele venir en H.264) o null si ya no queda ninguna.
+   */
+  codecFallback(s) {
+    const key = lvMseKey(this.channel, this.profile);
+    if (s.kind !== "mse" && lvHevc.mse && !lvMseChannels.has(key)) {
+      lvMarkMse(key);
+      return "Este navegador no recibe H.265 por WebRTC: abriendo por la entrega alternativa…";
+    }
+    lvNoDecode.add(key);
+    const other = this.profile === "Main" ? "Sub" : "Main";
+    if (lvNoDecode.has(lvMseKey(this.channel, other))) return null;
+    this.profile = other;
+    return `Este navegador no reproduce el ${other === "Sub" ? "principal" : "secundario"}: abriendo el ${other === "Sub" ? "secundario" : "principal"}…`;
   }
 
   dropped(s) {
@@ -818,6 +877,11 @@ class LvFeed {
       if (target === this.profile) { this.cancelSwitch(); return; } // "quédate como estabas"
     }
     if (target === this.profile) return;
+    const targetName = target === "Main" ? "principal" : "secundario";
+    if (lvNoDecode.has(lvMseKey(this.channel, target))) {
+      this.flash(`Este navegador no reproduce el formato del ${targetName} de este canal: se mantiene el actual.`);
+      return;
+    }
     this.releaseParked();
     const seq = ++this.switchSeq, openSeq = this.seq;
     this.pendingTarget = target;
@@ -841,6 +905,13 @@ class LvFeed {
         s.close();
         if (this.pending === s) back.srcObject = null;
         if (err?.cancelled || stale()) return;
+        // Formato que esta vía no admite: se reintenta por MSE (sin gastar el intento) o se desiste.
+        if (lvCodecRejected(err) || err?.codec) {
+          const key = lvMseKey(this.channel, target);
+          if (s.kind !== "mse" && lvHevc.mse && !lvMseChannels.has(key)) { lvMarkMse(key); attempt--; continue; }
+          lvNoDecode.add(key);
+          break;
+        }
         continue;
       }
       if (this.rec) this.stopRecording();
@@ -865,6 +936,7 @@ class LvFeed {
         oldVideo.srcObject = null;
       }
       this.render();
+      if (s.kind === "mse") this.flash("H.265 por entrega alternativa: sin audio en el panel web.", 8000);
       lvScheduleLastSave();
       return;
     }
@@ -873,6 +945,8 @@ class LvFeed {
     if (hardFallback) {
       this.profile = target;
       this.open();
+    } else if (lvNoDecode.has(lvMseKey(this.channel, target))) {
+      this.flash(`Este navegador no reproduce el formato del ${targetName} de este canal: se mantiene el actual.`, 10000);
     } else {
       this.flash("El stream destino no entregó imagen: se mantiene el actual.");
     }
@@ -1507,7 +1581,9 @@ function lvRenderSettingsPop() {
       <span>Estirar el video al tamaño del cuadro (sin mantener la proporción)</span></label>
     ${lv.aux ? "" : `<label class="lv-set-check"><input type="checkbox" id="lv-set-reopen" ${p.reopen ? "checked" : ""}>
       <span>Volver a abrir las cámaras de la última sesión al entrar</span></label>`}
-    <div class="muted lv-small" style="margin-top:8px">Las capturas y grabaciones se guardan en la carpeta de descargas del navegador.</div>`;
+    <div class="muted lv-small" style="margin-top:8px">Las capturas y grabaciones se guardan en la carpeta de descargas del navegador.</div>
+    <div class="muted lv-small" style="margin-top:4px">H.265 en este navegador: por WebRTC ${lvHevc.webrtc ? "sí" : "no"};
+      por la entrega alternativa (sin audio) ${lvHevc.mse ? "sí" : "no"}.</div>`;
   $("#lv-set-profile").addEventListener("change", (e) => { p.profile = e.target.value; lvSavePrefs(); });
   $("#lv-set-snap").addEventListener("change", (e) => { p.snapFormat = e.target.value; lvSavePrefs(); });
   $("#lv-set-fit").addEventListener("change", (e) => { p.fitDevice = e.target.checked; lvSavePrefs(); });

@@ -84,8 +84,10 @@ public static class StreamsApi
         // para lo que WebRTC no admite: H.265 con B-frames. Misma concesión
         // (permiso, canal habilitado, alcance); FFmpeg la canjea en MediaMTX
         // como cualquier lector y la auditoría registra la IP del navegador.
+        // Map y no MapGet: sobre HTTPS, Chrome y Edge abren el WebSocket por
+        // HTTP/2 con el método CONNECT, que un MapGet no atiende.
         // ------------------------------------------------------------------
-        app.MapGet("/api/streams/mse", async (HttpContext ctx, int deviceId, int rtspChannel, StreamProfile? profile,
+        app.Map("/api/streams/mse", async (HttpContext ctx, int deviceId, int rtspChannel, StreamProfile? profile,
             VmsDbContext db, StreamTokenService streamTokens, MediaMtxManager mtx, ILogger<Program> logger) =>
         {
             if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend) is { } failure) return failure;
