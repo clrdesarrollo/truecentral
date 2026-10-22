@@ -566,6 +566,7 @@ use el cliente.
   [Pantalla completa], [Es la del navegador: #tecla("Esc") sale.],
   [Ajustes], [Se cambian con el engranaje de la barra y quedan guardados en
     ese navegador.],
+  [Joystick PTZ], [Solo en el navegador: ver _Joystick PTZ_ más abajo.],
 )
 
 Si sus roles no incluyen *Mover cámaras PTZ*, el panel PTZ lo dice: «Sus roles
@@ -589,7 +590,49 @@ navegador*. Los cambios se guardan apenas los hace:
   [*Volver a abrir las cámaras de la última sesión al entrar*], [Al abrir la
     página, reabre lo que había en la grilla la última vez en este navegador.
     Solo en la ventana principal.],
+  [*Joystick PTZ*], [El joystick detectado y sus opciones (ver _Joystick PTZ_).
+    Solo en la ventana principal.],
 )
+
+=== Joystick PTZ
+
+#requiere("Mover cámaras PTZ")
+
+En la ventana principal, un joystick USB conectado a este equipo mueve la
+cámara PTZ del cuadro seleccionado. Sirve cualquier joystick que Windows
+reconozca como mando de juego, sin instalar nada.
+
++ Conecte el joystick y, con la Vista en vivo abierta, muévalo o apriete un
+  botón: el navegador lo detecta recién ahí, y la barra de estado dice
+  «Joystick conectado: …».
++ Seleccione el cuadro de la cámara PTZ. El panel PTZ muestra la marca
+  *JOYSTICK*.
++ Incline la palanca hacia donde quiera mover la cámara, también en diagonal:
+  cuanto más la incline, más rápido se mueve. Gire la palanca en sentido
+  horario para acercar y al revés para alejar. Al soltarla, la cámara se
+  detiene.
+
+El joystick da una orden a la vez: si inclina y gira la palanca al mismo
+tiempo, manda el movimiento. Solo actúa con la ventana del panel activa; si
+cambia a otra ventana, la cámara se detiene. El modo precisión
+(#tecla("Shift")) también vale para el joystick.
+
+En *Ajustes de este navegador*, la sección *Joystick PTZ* muestra el joystick
+detectado y permite:
+
+- Desactivarlo: *Mover la cámara PTZ seleccionada con el joystick*.
+- *Invertir arriba y abajo* e *Invertir el zoom del giro*.
+- #boton("Asignar botones…"): elija #boton("Asignar") en una acción y apriete
+  el botón del joystick que la hará. Hay acciones para zoom, foco e iris
+  (mientras se sostiene el botón), el modo precisión, los dígitos del 0 al 9,
+  *Ir al preset tecleado*, *Guardar la posición en el preset tecleado*,
+  *Borrar el número tecleado*, el cuadro siguiente y el anterior, y
+  maximizar.
+
+Con los dígitos se arma el número de preset, como en un teclado PTZ. Por
+ejemplo, 1, 2 y el botón de *Ir al preset tecleado* llevan la cámara al preset
+12 («PTZ: moviéndose al preset 12.»). La configuración se guarda en ese
+navegador, por joystick.
 
 === Vistas guardadas en el navegador
 
