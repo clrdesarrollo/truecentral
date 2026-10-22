@@ -83,6 +83,17 @@ public sealed class WindowBounds
     public bool Maximized { get; set; }
 }
 
+/// <summary>Ajustes de un modelo de joystick PTZ (ver <see cref="ClientSettings.Joysticks"/>).</summary>
+public sealed class JoystickConfig
+{
+    /// <summary>Mueve la cámara PTZ del cuadro seleccionado.</summary>
+    public bool Enabled { get; set; } = true;
+    public bool InvertY { get; set; }
+    public bool InvertZoom { get; set; }
+    /// <summary>Acción de cada botón: índice desde 0 → clave de <c>JoystickActions</c> (las mismas del panel web).</summary>
+    public Dictionary<int, string> Buttons { get; set; } = [];
+}
+
 /// <summary>Preferencias locales del cliente (%AppData%\CLRTrueCentralVMS\client.json).</summary>
 public sealed class ClientSettings
 {
@@ -179,6 +190,15 @@ public sealed class ClientSettings
     public string? ProjectionIp { get; set; }
     /// <summary>Reproducir en bucle el archivo de video proyectado.</summary>
     public bool ProjectionLoop { get; set; }
+
+    // ---------- Joystick PTZ ----------
+
+    /// <summary>Ajustes por modelo de joystick (clave "VID_xxxx&amp;PID_xxxx"): otro joystick no hereda los botones.</summary>
+    public Dictionary<string, JoystickConfig> Joysticks { get; set; } = [];
+
+    /// <summary>Ajustes del joystick <paramref name="id"/> (se crean con los valores por defecto).</summary>
+    public JoystickConfig JoystickFor(string id) =>
+        Joysticks.TryGetValue(id, out var config) ? config : Joysticks[id] = new JoystickConfig();
 
     public static string DefaultSnapshotFolder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "TrueCentral VMS");

@@ -54,6 +54,55 @@ public partial class SettingsWindow : Window
         AutoLoginAccountText.Text = settings.Username is { Length: > 0 } user
             ? $"Cuenta del inicio automático: {user} en {settings.ServerUrl}"
             : "";
+
+        // Joystick: se detecta en vivo (puede conectarse con la ventana abierta).
+        _joystickTimer.Interval = TimeSpan.FromMilliseconds(100);
+        _joystickTimer.Tick += (_, _) => RefreshJoystick();
+        _joystickTimer.Start();
+        Closed += (_, _) => _joystickTimer.Stop();
+        RefreshJoystick();
+    }
+
+    private readonly System.Windows.Threading.DispatcherTimer _joystickTimer = new();
+    private JoystickState? _joystick;
+
+    /// <summary>Apartado Joystick: nombre, ejes y botones en vivo; las opciones son del modelo conectado.</summary>
+    private void RefreshJoystick()
+    {
+        var state = Joystick.Read();
+        if (state is null)
+        {
+            _joystick = null;
+            JoystickOptions.IsEnabled = false;
+            JoystickStateText.Text = "No se detecta ningún joystick. Conéctelo por USB: Windows debe reconocerlo como mando de juego.";
+            JoystickLiveText.Text = "";
+            return;
+        }
+        if (_joystick?.Id != state.Id)
+        {
+            var config = _settings.JoystickFor(state.Id);
+            JoystickEnabledCheck.IsChecked = config.Enabled;
+            JoystickInvertYCheck.IsChecked = config.InvertY;
+            JoystickInvertZoomCheck.IsChecked = config.InvertZoom;
+            UpdateJoystickButtonsText(config);
+        }
+        _joystick = state;
+        JoystickOptions.IsEnabled = true;
+        JoystickStateText.Text = state.Name;
+        string pressed = string.Join(", ", state.Buttons.Select((p, i) => p ? (i + 1).ToString() : null).Where(b => b is not null));
+        JoystickLiveText.Text = $"Ejes: {string.Join("  ", state.Axes.Select(a => a.ToString("+0.00;-0.00;0.00")))}" +
+                                $"   Botones apretados: {(pressed.Length > 0 ? pressed : "—")}";
+    }
+
+    private void UpdateJoystickButtonsText(JoystickConfig config) =>
+        JoystickButtonsText.Text = config.Buttons.Count == 0 ? "ninguno asignado" : $"{config.Buttons.Count} asignados";
+
+    private void OnJoystickButtonsClick(object sender, RoutedEventArgs e)
+    {
+        if (_joystick is not { } state) return;
+        var config = _settings.JoystickFor(state.Id);
+        new JoystickButtonsWindow(_settings, config, state.Name) { Owner = this }.ShowDialog();
+        UpdateJoystickButtonsText(config);
     }
 
     /// <summary>Apartado Licencia: solo lectura del estado que informa el servidor.</summary>
@@ -98,6 +147,7 @@ public partial class SettingsWindow : Window
         SectionVideo.Visibility = NavVideo.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionImagen.Visibility = NavImagen.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionSonido.Visibility = NavSonido.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SectionJoystick.Visibility = NavJoystick.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionRed.Visibility = NavRed.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionApariencia.Visibility = NavApariencia.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SectionSistema.Visibility = NavSistema.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -153,6 +203,13 @@ public partial class SettingsWindow : Window
         // cliente; la contraseña recordada se administra en el propio login.
         _settings.AutoLogin = AutoLoginCheck.IsChecked == true;
         _settings.AlertWindowRememberPlacement = AlertPlacementCheck.IsChecked == true;
+        if (_joystick is { } joystick)
+        {
+            var config = _settings.JoystickFor(joystick.Id);
+            config.Enabled = JoystickEnabledCheck.IsChecked == true;
+            config.InvertY = JoystickInvertYCheck.IsChecked == true;
+            config.InvertZoom = JoystickInvertZoomCheck.IsChecked == true;
+        }
         // La apariencia rige desde el próximo arranque (los estilos se toman
         // al crear cada ventana): se avisa para que nadie la crea ignorada.
         string appearance = AppearanceConsole.IsChecked == true ? ClientTheme.Console : ClientTheme.Classic;

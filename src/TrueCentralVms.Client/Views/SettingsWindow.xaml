@@ -125,6 +125,8 @@
                              Checked="OnSectionChanged"/>
                 <RadioButton x:Name="NavSonido" Content="Sonido" Style="{StaticResource SectionRadio}"
                              Checked="OnSectionChanged"/>
+                <RadioButton x:Name="NavJoystick" Content="Joystick" Style="{StaticResource SectionRadio}"
+                             Checked="OnSectionChanged"/>
                 <RadioButton x:Name="NavRed" Content="Red" Style="{StaticResource SectionRadio}"
                              Checked="OnSectionChanged"/>
                 <RadioButton x:Name="NavApariencia" Content="Apariencia" Style="{StaticResource SectionRadio}"
@@ -225,6 +227,30 @@
                 </DockPanel>
                 <TextBlock Style="{StaticResource SettingHint}"
                            Text="Se aplica a los cuadros que se creen desde ahora (al cambiar la división o reabrir la Vista en Vivo). El audio de cada cuadro sigue partiendo silenciado; este es el volumen con el que suena al activarlo."/>
+            </StackPanel>
+
+            <!-- ============ JOYSTICK PTZ ============ -->
+            <StackPanel x:Name="SectionJoystick" Visibility="Collapsed">
+                <TextBlock Text="Joystick PTZ" Style="{StaticResource SectionTitle}"/>
+                <TextBlock x:Name="JoystickStateText" Foreground="{StaticResource TextBrush}" FontSize="12.5"
+                           FontWeight="SemiBold" TextWrapping="Wrap"/>
+                <TextBlock x:Name="JoystickLiveText" Style="{StaticResource SettingHint}" FontFamily="Consolas"/>
+                <StackPanel x:Name="JoystickOptions" Margin="0,8,0,0" IsEnabled="False">
+                    <CheckBox x:Name="JoystickEnabledCheck" Style="{StaticResource DarkCheckBox}" Margin="0,4,0,0"
+                              Content="Mover la cámara PTZ seleccionada con el joystick"/>
+                    <CheckBox x:Name="JoystickInvertYCheck" Style="{StaticResource DarkCheckBox}" Margin="0,8,0,0"
+                              Content="Invertir arriba y abajo"/>
+                    <CheckBox x:Name="JoystickInvertZoomCheck" Style="{StaticResource DarkCheckBox}" Margin="0,8,0,0"
+                              Content="Invertir el zoom del giro"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                        <Button Content="Asignar botones…" Style="{StaticResource GhostButton}" Padding="12,6"
+                                Click="OnJoystickButtonsClick"/>
+                        <TextBlock x:Name="JoystickButtonsText" Foreground="{StaticResource MutedBrush}" FontSize="11.5"
+                                   VerticalAlignment="Center" Margin="10,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+                <TextBlock Style="{StaticResource SettingHint}"
+                           Text="Sirve cualquier joystick que Windows reconozca como mando de juego. En la Vista en Vivo, la palanca mueve la cámara PTZ del cuadro seleccionado (más rápido cuanto más se inclina) y el giro hace zoom, a la vez. Actúa con una ventana del cliente activa y la detiene al soltar. Los ajustes se guardan por modelo de joystick; los botones, al asignarlos."/>
             </StackPanel>
 
             <!-- ============ RED ============ -->

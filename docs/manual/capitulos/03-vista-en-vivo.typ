@@ -309,6 +309,34 @@ Con una cámara PTZ seleccionada:
 El teclado no mueve la cámara mientras escribe en un campo de texto, como el
 buscador o el número de preset.
 
+=== Con un joystick
+
+Un joystick USB que Windows reconozca como mando de juego mueve la cámara PTZ
+del cuadro seleccionado, sin instalar nada:
+
+- incline la palanca hacia donde quiera mover la cámara, también en diagonal:
+  cuanto más la incline, más rápido se mueve;
+- gire la palanca en sentido horario para acercar y al revés para alejar; se
+  puede mover y hacer zoom a la vez;
+- al soltarla, la cámara se detiene.
+
+Con el joystick conectado y una cámara PTZ seleccionada, el panel muestra la
+marca *JOYSTICK*. Actúa mientras alguna ventana del cliente está activa,
+también una pantalla auxiliar; si cambia a otro programa, la cámara se
+detiene. Si se corta la red mientras se mueve, el servidor la detiene a los 3
+segundos.
+
+En #menu("Configuración", "Joystick") se ve el joystick detectado, con sus
+ejes y botones en vivo, y se puede desactivar, *Invertir arriba y abajo* o
+*Invertir el zoom del giro*. #boton("Asignar botones…") abre la lista de
+acciones: elija #boton("Asignar") y apriete el botón del joystick que la hará.
+Hay acciones para zoom, foco e iris (mientras se sostiene el botón), el modo
+precisión, los dígitos del 0 al 9 para teclear el número de preset, *Ir al
+preset tecleado*, *Guardar la posición en el preset tecleado*, *Borrar el
+número tecleado*, el cuadro siguiente y el anterior, y maximizar. Los ajustes
+se guardan en este equipo, por modelo de joystick; los botones, apenas se
+asignan.
+
 #nota[Si una cámara PTZ no muestra el control PTZ, pida al administrador que
   la marque como PTZ (ver _Configuración_ al final de este capítulo).]
 
@@ -566,7 +594,9 @@ use el cliente.
   [Pantalla completa], [Es la del navegador: #tecla("Esc") sale.],
   [Ajustes], [Se cambian con el engranaje de la barra y quedan guardados en
     ese navegador.],
-  [Joystick PTZ], [Solo en el navegador: ver _Joystick PTZ_ más abajo.],
+  [Joystick PTZ], [Solo con la ventana principal activa (en el cliente vale
+    también una pantalla auxiliar). Sus opciones están en *Ajustes de este
+    navegador*: ver _Joystick PTZ_ más abajo.],
 )
 
 Si sus roles no incluyen *Mover cámaras PTZ*, el panel PTZ lo dice: «Sus roles
