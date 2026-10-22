@@ -622,11 +622,25 @@ Use Chrome, Edge o Firefox actualizados. Si el navegador no admite el video en
 vivo, la página muestra «Este navegador no admite WebRTC: use Chrome, Edge o
 Firefox actualizados para ver video en vivo.»
 
-Algunos navegadores no pueden mostrar cámaras configuradas en H.265. El cuadro
-lo dice y no reintenta: «Este navegador no puede reproducir el formato de
-video de la cámara por WebRTC (típicamente H.265 sin decodificación por
-hardware). Use Chrome actualizado, o configure el stream de la cámara en
-H.264.»
+Algunos navegadores no reciben por WebRTC las cámaras configuradas en H.265
+(Edge, por ejemplo). El panel lo resuelve solo, en este orden:
+
++ Abre la cámara por la *entrega alternativa*, si el navegador decodifica
+  H.265 en ese equipo. El cuadro avisa «H.265 por entrega alternativa: sin
+  audio en el panel web.»: la imagen llega con algo más de retardo y sin
+  audio. El navegador lo recuerda para las próximas veces.
++ Si no, abre el stream secundario, que suele venir en H.264. El cuadro avisa
+  «Se muestra el secundario: este navegador no reproduce el formato del
+  principal.» y no sube a principal al maximizarlo.
+
+Si ninguna de las dos sirve, el cuadro lo dice y no reintenta: «Este navegador
+no reproduce el formato de video de la cámara: típicamente H.265, que en este
+equipo no decodifica ni por WebRTC ni por la entrega alternativa (le falta
+decodificación por hardware). Use Chrome actualizado, configure el stream de la
+cámara en H.264 o use el cliente de escritorio.» Las grabaciones siguen el
+mismo camino, salvo el secundario. *Ajustes de este navegador* (el engranaje)
+dice qué admite el navegador en uso: «H.265 en este navegador: por WebRTC no; por la
+entrega alternativa (sin audio) sí.»
 
 #importante[Para hablar por los parlantes desde el navegador, el panel debe
   abrirse por HTTPS o desde el propio servidor (`http://localhost`). Si no, el
