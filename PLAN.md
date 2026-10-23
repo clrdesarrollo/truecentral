@@ -1632,6 +1632,34 @@ hacer un ISUP propio basado en `..\isuptest` que cubra todos los tipos de equipo
   una tarjeta), reproducción de un grabador 5.0, llamadas de un frente por ISUP (formato real del evento) y la voz de parlantes y
   frentes.
 
+## Flota (DVR móviles por ISUP) — fase 0: GPS — 2026-10-23
+
+Rama `feat/flota-gps`. El usuario pidió un módulo de DVR móviles (como el iVMS-5200 Mobile Surveillance de su cliente: árbol de
+vehículos, grilla con cámaras de distintos vehículos, mapa con GPS, recorridos), aparte de los DVR y cámaras normales y con
+licencia propia. Los grabadores entran por **nuestro ISUP** (decisión del usuario). Plan acordado por fases: 0 GPS, 1 vehículos y
+vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 salud y reportes, 6 extras.
+
+- **Licencia en la competencia** (para decidir la nuestra): HikCentral cobra por equipo móvil, no por canal
+  (`HikCentral-P-MS-Base` = 10 equipos, `HikCentral-P-MS-1Unit` = +1 grabador o dashcam sin límite de canales; aparte rutas y
+  conductores y ANPR móvil por canal). Propuesta: `module_fleet` + `fleet_vehicles`, sin consumir `video_channels`. Pendiente
+  de decisión del usuario.
+- **Fase 0 (hecha)**: el host decodifica la alarma de tipo 4 (`NET_EHOME_GPS_INFO`, offsets en `Layout.Gps*` revisados contra
+  `HCISUPAlarm.h`) y la publica como evento `gps` (`IsupHostEvent.Gps`, `IsupGpsFix`). `IsupService` guarda la última posición
+  por equipo (`GpsTracks`, evento `GpsReceived`) y deja en el registro la primera de cada equipo; el host, una línea cada 5 min.
+  Diagnóstico: `GET /api/isup/gps` (permiso `system.services`, bitácora `isup/gps-viewed` cada 30 min: la posición es dato
+  personal del conductor). Todavía no se guarda en la base: eso es la fase 2.
+- **Requisito**: los equipos 2.0/4.0 mandan el GPS por **UDP** al puerto de alarmas 2.0/4.0 (`Isup:LegacyAlarmPort`), que solo
+  se abre con la compatibilidad 2.0/4.0 encendida (Sistema → Conexión ISUP). Abrirlo en el router también para UDP.
+- **Validado con hardware** (servidor aislado en el 6741 con la IP pública y los puertos de isuptest): DVR móvil 123456 por 4G
+  (ISUP 2.0/4.0, fw V4.1.2 build160608, IP 191.125.6.99): posición −33,398911, −70,683808 (Santiago), altitud ~520 m, 9-10
+  satélites, detenido. **Una posición cada 10 s** (18 en 170 s), ninguna retransmitida ni inválida; el reloj del equipo va
+  ~10 s adelantado al del servidor. Kilometraje del día 0 (vehículo detenido). Para 300 vehículos: ~2,6 millones de filas al día.
+- **Gotcha**: ese DVR informa desfase UTC 0:00 con el reloj en hora de Chile → un 0:00 se toma como «no informado»
+  (`UtcOffsetMinutes = null`); la hora de la posición es la local del equipo, como en la reproducción.
+- **Gotcha del arnés**: desde el bloque HTTPS el servidor ignora `--Urls` y escucha en `Web:HttpsPort/HttpPort/InternalPort`
+  (443/80/5099 por omisión): un servidor de prueba tiene que fijarlos (`isp1\start-flota.ps1`: 6741 HTTPS, HTTP cerrado,
+  interno 6744). La marca de prueba de este PC venció: en Debug, `--Licensing:TrialDays=3650`.
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

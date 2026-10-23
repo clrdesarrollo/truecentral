@@ -107,17 +107,46 @@ public static class IsupEventKinds
     public const string Sleep = "sleep";
     public const string Rejected = "rejected";
     public const string Alarm = "alarm";
+    /// <summary>Posición GPS de un equipo móvil (DVR de vehículo): trae <see cref="IsupHostEvent.Gps"/>.</summary>
+    public const string Gps = "gps";
     /// <summary>Latido del canal de eventos (cada 15 s), para saber que el host sigue vivo.</summary>
     public const string Ping = "ping";
 }
 
-/// <summary>Evento del host. Según <see cref="Kind"/> trae <see cref="Alarm"/> o solo el equipo.</summary>
+/// <summary>Evento del host. Según <see cref="Kind"/> trae <see cref="Alarm"/>, <see cref="Gps"/> o solo el equipo.</summary>
 public sealed record IsupHostEvent(
     string Kind,
     string DeviceId,
     DateTimeOffset At,
     string? Detail = null,
-    IsupAlarm? Alarm = null);
+    IsupAlarm? Alarm = null,
+    IsupGpsFix? Gps = null);
+
+/// <summary>
+/// Posición que informa un equipo móvil (NET_EHOME_GPS_INFO, alarma de tipo 4). Grados decimales, negativo = oeste / sur.
+/// <paramref name="DeviceTime"/> es la hora local del equipo al tomar la posición; <paramref name="UtcOffsetMinutes"/> su desfase
+/// con UTC si el equipo lo informa (null si no). <paramref name="Retransmitted"/> = posición guardada sin cobertura y enviada después.
+/// <paramref name="LocateMode"/>: 0 autónomo, 1 diferencial, 2 estimado, 3 sin datos válidos. <paramref name="DailyMileageM"/> se
+/// reinicia cada día (primer encendido o 00:00).
+/// </summary>
+public sealed record IsupGpsFix(
+    string DeviceId,
+    DateTime DeviceTime,
+    int? UtcOffsetMinutes,
+    double Latitude,
+    double Longitude,
+    double SpeedKmh,
+    double HeadingDeg,
+    double AltitudeM,
+    int Satellites,
+    double Hdop,
+    int LocateMode,
+    long DailyMileageM,
+    bool Retransmitted)
+{
+    /// <summary>¿Es una posición utilizable? (con datos válidos y fuera del punto 0,0).</summary>
+    public bool Valid => LocateMode != 3 && (Latitude != 0 || Longitude != 0) && Math.Abs(Latitude) <= 90 && Math.Abs(Longitude) <= 180;
+}
 
 /// <summary>
 /// Alarma o evento que un equipo envió por ISUP, normalizado por el host.

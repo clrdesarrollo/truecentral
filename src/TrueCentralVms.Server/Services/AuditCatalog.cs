@@ -366,6 +366,7 @@ public static class AuditCatalog
             new("status-viewed", "Estado de la conexión ISUP consultado"),
             new("legacy-enabled", "Equipos ISUP 2.0/4.0 (sin clave) habilitados"),
             new("legacy-disabled", "Equipos ISUP 2.0/4.0 deshabilitados"),
+            new("gps-viewed", "Posiciones GPS de equipos móviles consultadas"),
         ]),
         new("backup", "Respaldos",
         [
