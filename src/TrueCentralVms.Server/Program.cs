@@ -278,6 +278,9 @@ builder.Services.AddSingleton<TrueCentralVms.Server.Services.Isup.IsupHostManage
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Isup.IsupHostManager>());
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Isup.IsupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Isup.IsupService>());
+// Flota: posiciones GPS de los vehículos (las entrega el servicio ISUP).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Fleet.FleetPositionService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Fleet.FleetPositionService>());
 builder.Services.AddSingleton<SessionAccounting>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionAccounting>());
 

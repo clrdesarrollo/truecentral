@@ -6,7 +6,7 @@
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
   <link rel="stylesheet" href="vendor/mdi/css/materialdesignicons.min.css?v=1">
-  <link rel="stylesheet" href="styles.css?v=66">
+  <link rel="stylesheet" href="styles.css?v=69">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -67,7 +67,15 @@
 
         <div class="nav-divider"><span class="nav-text">Aplicaciones</span></div>
         <a href="#/live" data-route="live" data-module="module_video" data-perm="live.view"><i class="mdi mdi-video" aria-hidden="true"></i><span class="nav-text">Vista en vivo</span></a>
-        <a href="#/fleet/live" data-route="fleet-live" data-module="module_fleet" data-perm="fleet.live"><i class="mdi mdi-bus" aria-hidden="true"></i><span class="nav-text">Flota</span></a>
+        <div class="nav-group" data-group="fleet">
+          <button type="button" class="nav-toggle">
+            <i class="mdi mdi-bus" aria-hidden="true"></i><span class="nav-text">Flota</span><span class="caret" aria-hidden="true"></span>
+          </button>
+          <div class="nav-children">
+            <a href="#/fleet/live" data-route="fleet-live" data-module="module_fleet" data-perm="fleet.live">En vivo</a>
+            <a href="#/fleet/map" data-route="fleet-map" data-module="module_fleet" data-perm="fleet.view">Mapa</a>
+          </div>
+        </div>
         <a href="#/playback" data-route="playback" data-module="module_playback" data-perm="playback.view"><i class="mdi mdi-history" aria-hidden="true"></i><span class="nav-text">Reproducción</span></a>
         <a href="#/alarms" data-route="alarms" data-module="module_alarms" data-perm="alarms.monitor"><i class="mdi mdi-shield" aria-hidden="true"></i><span class="nav-text">Alarmas</span></a>
         <a href="#/cerco" data-route="cerco" data-module="module_fence" data-perm="cerco.monitor"><i class="mdi mdi-flash" aria-hidden="true"></i><span class="nav-text">Cerco eléctrico</span></a>
@@ -189,6 +197,7 @@
   <script src="speakers.js?v=14"></script>
   <script src="io-modules.js?v=3"></script>
   <script src="fleet.js?v=1"></script>
+  <script src="fleet-map.js?v=1"></script>
   <script src="alarm-screens.js?v=3"></script>
   <script src="intercoms.js?v=8"></script>
   <script src="access.js?v=13"></script>
@@ -216,12 +225,12 @@
   <script src="cerco-alarm.js?v=5"></script>
   <script src="resources.js?v=9"></script>
   <!-- live.js va DESPUÉS de resources.js: usa sus íconos de ubicación. -->
-  <script src="live.js?v=9"></script>
+  <script src="live.js?v=10"></script>
   <script src="live-joystick.js?v=2"></script>
   <!-- playback.js usa LvSession y utilidades de live.js. -->
   <script src="playback.js?v=6"></script>
   <script src="roles.js?v=3"></script>
   <script src="dashboard.js?v=8"></script>
-  <script src="app.js?v=78"></script>
+  <script src="app.js?v=79"></script>
 </body>
 </html>

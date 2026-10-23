@@ -262,6 +262,9 @@ public static class AuditCatalog
             new("vehicle-deleted", "Vehículo eliminado"),
             new("vehicles-imported", "Vehículos importados desde CSV"),
             new("live-idle-stopped", "Video de vehículos cortado por inactividad"),
+            new("track-viewed", "Recorrido de un vehículo consultado"),
+            new("map-settings-updated", "Ajustes del mapa de flota modificados"),
+            new("positions-purged", "Posiciones GPS antiguas borradas por la retención"),
         ]),
         new("io", "Módulos de E/S",
         [

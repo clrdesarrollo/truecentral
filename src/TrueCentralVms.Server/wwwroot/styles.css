@@ -2757,4 +2757,44 @@ table.kv .tag { margin: 0 4px 4px 0; }
 .fl-plate { padding: 0 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 12px; letter-spacing: .5px; }
 .fl-hint { font-size: 12px; }
 .fl-import-result { max-height: 280px; overflow: auto; margin-top: 8px; }
-.fl-import-result .bad { color: var(--danger, #d64545); }
+.fl-import-result .bad { color: var(--danger, #d64545); }/* ---- Flota: mapa ---- */
+.fm-root { display: grid; grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; height: 100%; }
+.fm-side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--panel); }
+.fm-side-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 6px; }
+.fm-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 8px; }
+.fm-filters button { font-size: 11.5px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 12px; background: transparent; color: inherit; cursor: pointer; }
+.fm-filters button.on { border-color: var(--accent); background: rgba(var(--accent-rgb), .12); }
+.fm-filters b { font-weight: 600; margin-left: 2px; }
+.fm-list { flex: 1; overflow: auto; }
+.fm-row { display: flex; gap: 8px; padding: 7px 12px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.fm-row:hover { background: rgba(var(--accent-rgb), .06); }
+.fm-row.sel { background: rgba(var(--accent-rgb), .14); }
+.fm-row-text { flex: 1; min-width: 0; font-size: 12.5px; }
+.fm-row-top { display: flex; justify-content: space-between; gap: 6px; }
+.fm-row-text .muted { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fm-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-top: 4px; flex: none; }
+.fm-dot.move { background: #2f9e44; } .fm-dot.stop { background: #e8a33d; } .fm-dot.off { background: #8a8f98; }
+.fm-main { position: relative; min-width: 0; min-height: 0; height: 100%; }
+.fm-map { position: absolute; inset: 0; width: 100%; height: 100%; background: #e7eaee; } /* MapLibre le pone position: relative al contenedor */
+.fm-legend { position: absolute; left: 10px; bottom: 26px; display: flex; gap: 10px; padding: 4px 8px; font-size: 11.5px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.fm-legend span { display: inline-flex; align-items: center; gap: 4px; } .fm-legend .fm-dot { margin-top: 0; }
+.fm-note { position: absolute; left: 56px; top: 10px; max-width: calc(100% - 380px); padding: 5px 10px; font-size: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.fm-mk { display: flex; align-items: center; gap: 3px; cursor: pointer; }
+.fm-mk svg { fill: #8a8f98; stroke: #fff; stroke-width: 1.5; flex: none; }
+.fm-mk.move svg { fill: #2f9e44; } .fm-mk.stop svg { fill: #e8a33d; }
+.fm-mk span { font-size: 11px; font-weight: 600; padding: 0 4px; border-radius: 3px; background: rgba(255,255,255,.88); color: #1b1f24; white-space: nowrap; }
+.fm-mk.sel span { background: var(--accent); color: #fff; }
+.fm-card { position: absolute; top: 10px; right: 10px; width: 300px; padding: 10px; display: flex; flex-direction: column; gap: 8px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+.fm-card[hidden] { display: none; }
+.fm-card-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.fm-small { font-size: 11.5px; }
+.fm-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.fm-stats div { display: flex; flex-direction: column; padding: 4px 6px; border-radius: 6px; background: rgba(var(--accent-rgb), .06); font-size: 11.5px; }
+.fm-cams { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.fm-cam { position: relative; aspect-ratio: 4 / 3; background: #15181d; border-radius: 6px; overflow: hidden; }
+.fm-cam video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.fm-cam span { position: absolute; left: 6px; bottom: 4px; font-size: 11px; color: #d6d8dc; text-shadow: 0 1px 2px #000; }
+.fm-cam.loading::after { content: "Conectando…"; position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; color: #9aa0a8; }
+.fm-card-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.fm-card-actions .on { border-color: var(--accent); color: var(--accent); }

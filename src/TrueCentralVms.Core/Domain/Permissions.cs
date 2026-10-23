@@ -20,6 +20,7 @@ public static class Permissions
     public const string WallLayouts = "wall.layouts";
     public const string FleetView = "fleet.view";
     public const string FleetLive = "fleet.live";
+    public const string FleetHistory = "fleet.history";
 
     // Monitoreo y operación
     public const string EventsAttend = "events.attend";
@@ -100,6 +101,8 @@ public static class Permissions
             "Ver los vehículos, su estado y sus cámaras en el árbol de Flota.", []),
         new(FleetLive, "Video", "Ver video de vehículos",
             "Abrir en vivo las cámaras de los vehículos (consume datos móviles del vehículo).", [FleetView]),
+        new(FleetHistory, "Video", "Ver recorridos de vehículos",
+            "Consultar por dónde anduvo un vehículo (historial de posiciones GPS: dato personal del conductor).", [FleetView]),
 
         new(EventsAttend, "Monitoreo y operación", "Atender alertas",
             "Ver el centro de eventos y dar por atendidas las alertas.", []),

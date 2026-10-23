@@ -2222,6 +2222,7 @@ const routes = {
   "#/cerco-panels": renderCercoPanels,
   "#/live": renderLiveView,
   "#/fleet/live": renderFleetLive,
+  "#/fleet/map": renderFleetMap,
   "#/fleet/vehicles": renderFleetVehicles,
   "#/playback": renderPlayback,
   "#/event-center": renderEventCenter,
@@ -2397,6 +2398,7 @@ function leaveCurrentPage() {
   document.getElementById("vw-menu")?.remove();
   intercomConsoleLeave();        // timbre, conversación y sondeo de la citofonía
   liveViewLeave();               // video en vivo (WebRTC), grabaciones locales, PTZ y voz
+  if (typeof fleetMapLeave === "function") fleetMapLeave(); // mapa de flota: MapLibre, video de la ficha y hub
   playbackLeave();              // reproducción de grabaciones (WebRTC) y su línea de tiempo
 }
 

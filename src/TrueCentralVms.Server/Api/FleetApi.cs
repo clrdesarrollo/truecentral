@@ -52,6 +52,10 @@ public static class FleetApi
         return IsupEquipmentRules.Validate(r.IsupDeviceId, r.IsupKey, keyStored);
     }
 
+    /// <summary>El servicio de posiciones relee qué grabador es de qué vehículo.</summary>
+    private static void VehiclesChanged(HttpContext ctx) =>
+        ctx.RequestServices.GetRequiredService<Services.Fleet.FleetPositionService>().InvalidateVehicles();
+
     private static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
     /// <summary>Licencia para un vehículo habilitado más (null = permitido).</summary>
@@ -115,6 +119,8 @@ public static class FleetApi
 
     public static void MapFleetApi(this WebApplication app)
     {
+        MapPositionsApi(app);
+
         // Árbol de Flota y mantenedor: vehículos con sus cámaras, estado y última posición. Alcance: el del grabador.
         app.MapGet("/api/fleet/vehicles", async (HttpContext ctx, VmsDbContext db, IsupService isup, CancellationToken ct) =>
         {
@@ -166,7 +172,7 @@ public static class FleetApi
             }
             db.Vehicles.Add(vehicle);
             await db.SaveChangesAsync(ct);
-            isup.InvalidateDirectory();
+            isup.InvalidateDirectory(); VehiclesChanged(ctx);
             await audit.LogAsync(ctx, "fleet", "vehicle-created", "vehicle", vehicle.Id.ToString(), vehicle.Code,
                 $"Agregó el vehículo {vehicle.Code}{(vehicle.Plate is { } p ? $" (patente {p})" : "")} con su grabador ISUP " +
                 $"{vehicle.Device.IsupDeviceId}: " + (vehicle.Device.Channels.Count > 0
@@ -238,6 +244,7 @@ public static class FleetApi
             }
             await db.SaveChangesAsync(ct);
             if (isupChanged) isup.InvalidateDirectory();
+            VehiclesChanged(ctx);
             await audit.LogAsync(ctx, "fleet", "vehicle-updated", "vehicle", id.ToString(), vehicle.Code,
                 $"Modificó el vehículo {vehicle.Code}: " + (changes.Count > 0 ? string.Join(", ", changes) : "sin cambios") + ".");
             await EquipmentLocation.LogFollowersAsync(ctx, audit, "device", device.Id, device.Name, locationId,
@@ -256,7 +263,7 @@ public static class FleetApi
             if (vehicle is null) return Results.NotFound();
             db.Devices.Remove(vehicle.Device);   // el vehículo y los canales caen por cascada
             await db.SaveChangesAsync(ct);
-            isup.InvalidateDirectory();
+            isup.InvalidateDirectory(); VehiclesChanged(ctx);
             await audit.LogAsync(ctx, "fleet", "vehicle-deleted", "vehicle", id.ToString(), vehicle.Code,
                 $"Eliminó el vehículo {vehicle.Code} y su grabador ISUP {vehicle.Device.IsupDeviceId} con todas sus cámaras.");
             EquipmentLocation.Changed(ctx);
@@ -318,7 +325,7 @@ public static class FleetApi
                 data: new { created, failed, dryRun = request.DryRun }, success: failed == 0 || created > 0);
             if (!request.DryRun && created > 0)
             {
-                isup.InvalidateDirectory();
+                isup.InvalidateDirectory(); VehiclesChanged(ctx);
                 EquipmentLocation.Changed(ctx);
                 await mtx.RefreshPathsAsync(ct);
                 await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "fleet", cancellationToken: ct);
@@ -326,4 +333,81 @@ public static class FleetApi
             return Results.Ok(new VehicleImportResultDto(created, failed, request.DryRun, rows));
         });
     }
+
+    // ---------------- posiciones y mapa (fase 2) ----------------
+
+    private static void MapPositionsApi(WebApplication app)
+    {
+        // Última posición de cada vehículo visible (el mapa la pide al abrir; después llegan por el hub).
+        app.MapGet("/api/fleet/positions", async (HttpContext ctx, Services.Fleet.FleetPositionService positions) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.FleetView, out var session) is { } failure) return failure;
+            var scope = await ctx.ScopeAsync(session);
+            return Results.Ok(positions.Latest().Where(p => scope.CanViewDevice(p.DeviceId)));
+        });
+
+        // Recorrido de un vehículo: dato personal del conductor, con permiso propio y bitácora.
+        app.MapGet("/api/fleet/vehicles/{id:int}/track", async (HttpContext ctx, int id, DateTime from, DateTime to,
+            VmsDbContext db, Services.Fleet.FleetPositionService positions, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.FleetHistory, out var session) is { } failure) return failure;
+            var vehicle = await db.Vehicles.AsNoTracking().FirstOrDefaultAsync(v => v.Id == id, ct);
+            if (vehicle is null) return Results.NotFound();
+            if (!(await ctx.ScopeAsync(session)).CanViewDevice(vehicle.DeviceId))
+                return await ctx.OutOfScopeAsync(session, "vehicle", id.ToString(), vehicle.Code, "ver su recorrido");
+            var fromUtc = from.ToUniversalTime();
+            var toUtc = to.ToUniversalTime();
+            if (toUtc <= fromUtc || toUtc - fromUtc > TimeSpan.FromDays(7))
+                return Error("El rango debe ser de hasta 7 días y terminar después de empezar.");
+            var points = await positions.TrackAsync(id, fromUtc, toUtc, ct);
+            if (audit.ShouldLog($"fleet-track:{session.UserId}:{id}", TimeSpan.FromMinutes(10)))
+                await audit.LogAsync(ctx, "fleet", "track-viewed", "vehicle", id.ToString(), vehicle.Code,
+                    $"Consultó el recorrido de {vehicle.Code} entre {fromUtc.ToLocalTime():yyyy-MM-dd HH:mm} y {toUtc.ToLocalTime():yyyy-MM-dd HH:mm} ({points.Count} puntos).");
+            return Results.Ok(points);
+        });
+
+        app.MapGet("/api/fleet/map/settings", async (HttpContext ctx, Services.Fleet.FleetPositionService positions, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.FleetView, Permissions.FleetManage) is { } failure) return failure;
+            // Con teselas en línea, el navegador de cada operador las pide directo al proveedor: la plantilla (con su clave, si
+            // la lleva) va a todos los que ven el mapa.
+            return Results.Ok(await positions.LoadSettingsAsync(ct));
+        });
+
+        app.MapPut("/api/fleet/map/settings", async (HttpContext ctx, FleetMapSettingsWriteDto request,
+            Services.Fleet.FleetPositionService positions, AuditService audit, IHubContext<VmsHub> hub, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.FleetManage, out _) is { } failure) return failure;
+            if (request.Mode is not ("none" or "raster" or "pmtiles")) return Error("Modo de mapa base desconocido.");
+            if (request.Mode == "raster" && (request.RasterUrl is not { Length: > 10 } url || !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                    || !url.Contains("{z}") || !url.Contains("{x}") || !url.Contains("{y}")))
+                return Error("La plantilla de teselas debe ser https://… con {z}, {x} e {y}.");
+            if (request.PositionRetentionDays is < 7 or > 3650) return Error("La retención de posiciones va de 7 a 3650 días.");
+            if (request.Zoom is < 2 or > 18 || Math.Abs(request.CenterLatitude) > 85 || Math.Abs(request.CenterLongitude) > 180)
+                return Error("Posición inicial inválida.");
+            var before = await positions.LoadSettingsAsync(ct);
+            await positions.SaveSettingsAsync(request with { RasterUrl = request.Mode == "raster" ? request.RasterUrl!.Trim() : null }, ct);
+            await audit.LogAsync(ctx, "fleet", "map-settings-updated", detail:
+                $"Mapa base: {ModeLabel(request.Mode)}; retención de posiciones {request.PositionRetentionDays} días" +
+                (before.PositionRetentionDays != request.PositionRetentionDays ? $" (antes {before.PositionRetentionDays})" : "") + ".");
+            await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "fleet-map", cancellationToken: ct);
+            return Results.NoContent();
+        });
+
+        // Mapa base sin internet (PMTiles): lo lee el navegador por rangos, con la sesión del usuario.
+        app.MapGet("/api/fleet/map/basemap.pmtiles", (HttpContext ctx, Services.Fleet.FleetPositionService positions) =>
+        {
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.FleetView, Permissions.FleetManage) is { } failure) return failure;
+            return File.Exists(positions.PmtilesPath)
+                ? Results.File(positions.PmtilesPath, "application/octet-stream", enableRangeProcessing: true)
+                : Results.NotFound();
+        });
+    }
+
+    private static string ModeLabel(string mode) => mode switch
+    {
+        "raster" => "teselas de un proveedor en línea",
+        "pmtiles" => "archivo del servidor (sin internet)",
+        _ => "sin mapa base",
+    };
 }

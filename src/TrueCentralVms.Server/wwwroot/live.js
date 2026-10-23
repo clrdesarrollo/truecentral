@@ -1410,7 +1410,10 @@ async function renderLiveView(fleet = false) {
   await lvLoadTree();
   if (!lv.active) return;
   if (!lv.aux && !lv.fleet) lvLoadSpeakers();
-  if (!lv.aux && lv.prefs.reopen) await lvReopenLast();
+  // Desde el mapa de flota ("Abrir en grilla"): las cámaras de ese vehículo.
+  const fromMap = lv.fleet ? lv.devices.find((d) => d.id === Number(params.get("dev"))) : null;
+  if (fromMap) await lvOpenAll(fromMap.name, fromMap.channels);
+  else if (!lv.aux && lv.prefs.reopen) await lvReopenLast();
 }
 
 /** Suelta todo al salir de la página (video, grabaciones, teclado, hub). */
@@ -2325,7 +2328,8 @@ async function lvLocationCommand(locationId, name, command) {
 function lvOnDeviceStatus(dto) {
   const d = lv.devices.find((x) => x.id === dto.id);
   if (!d) return;
-  d.status = dto.status;
+  // El hub manda los enums como números (la API, como texto): DeviceStatus { Unknown, Online, Offline, AuthFailed }.
+  d.status = typeof dto.status === "number" ? ["Unknown", "Online", "Offline", "AuthFailed"][dto.status] ?? "Unknown" : dto.status;
   lvRenderTree();
 }
 

@@ -3,9 +3,30 @@ namespace TrueCentralVms.Core.Contracts;
 /// <summary>Cámara de un vehículo (canal de su grabador móvil). <see cref="IsOnline"/> exige además el grabador en línea.</summary>
 public sealed record FleetChannelDto(int Id, int ChannelNumber, int RtspChannel, string Name, bool Enabled, bool IsOnline);
 
-/// <summary>Última posición conocida de un vehículo (desde que arrancó el servidor; la historia es de la fase de recorridos).</summary>
+/// <summary>Última posición conocida de un vehículo (guardada: sobrevive a un reinicio del servidor).</summary>
 public sealed record FleetPositionDto(double Latitude, double Longitude, double SpeedKmh, double HeadingDeg, int Satellites,
     DateTime DeviceTime, DateTimeOffset ReceivedAt);
+
+/// <summary>Posición en vivo de un vehículo para el mapa (hub <c>FleetPositions</c> y <c>GET /api/fleet/positions</c>).
+/// <paramref name="At"/> es la hora de la posición en UTC.</summary>
+public sealed record FleetLivePositionDto(int VehicleId, int DeviceId, double Latitude, double Longitude, double SpeedKmh,
+    double HeadingDeg, int Satellites, DateTime At, bool Online);
+
+public sealed record FleetPositionBatchDto(IReadOnlyList<FleetLivePositionDto> Positions);
+
+/// <summary>Punto de un recorrido (hora UTC).</summary>
+public sealed record FleetTrackPointDto(DateTime At, double Latitude, double Longitude, double SpeedKmh, double HeadingDeg);
+
+/// <summary>
+/// Mapa base del módulo Flota (Sistema → Mapa). <paramref name="Mode"/>: "none" (sin mapa base: solo los vehículos sobre un fondo
+/// liso), "raster" (plantilla de teselas de un proveedor, con su clave si la pide) o "pmtiles" (archivo del servidor, sin
+/// internet). La posición inicial se usa si no hay vehículos con posición.
+/// </summary>
+public sealed record FleetMapSettingsDto(string Mode, string? RasterUrl, string? Attribution, bool PmtilesAvailable,
+    double CenterLatitude, double CenterLongitude, int Zoom, int PositionRetentionDays);
+
+public sealed record FleetMapSettingsWriteDto(string Mode, string? RasterUrl, string? Attribution, double CenterLatitude,
+    double CenterLongitude, int Zoom, int PositionRetentionDays);
 
 /// <summary>
 /// Vehículo de la flota con su grabador móvil. <see cref="DeviceId"/> es el equipo de video (para las concesiones de vivo, que

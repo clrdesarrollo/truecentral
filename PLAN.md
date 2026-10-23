@@ -1701,6 +1701,35 @@ vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 
   inactividad (depende de que nadie use el PC durante 5 min).
 - **Pendiente**: offline de un vehículo no debería alarmar como equipo caído (fase 4), manual, ajuste del corte en el cliente.
 
+### Flota — fase 2: posiciones y mapa — 2026-10-23
+
+- **Posiciones**: tabla `VehiclePositions` PARTICIONADA por día UTC (migración `FleetPositions`, SQL a mano: no es entidad de
+  EF; PK `(VehicleId, At)`). `Services\Fleet\FleetPositionService` toma `IsupService.GpsReceived`, guarda por lotes cada 2 s
+  (`INSERT … unnest … ON CONFLICT DO NOTHING`), crea la partición del día al necesitarla y descarta horas imposibles (más de 1 h
+  en el futuro o fuera de la retención: reloj del equipo descompuesto). Hora: la local del grabador con su desfase si lo informa,
+  si no la zona del servidor. Última posición por vehículo en memoria (se relee de la tabla al arrancar) y por el hub
+  `FleetPositions` (lotes, recortado al alcance; exige `fleet.view`). Retención por particiones enteras (por omisión 90 días,
+  bitácora `fleet/positions-purged`).
+- **API**: `GET /api/fleet/positions`, `GET /api/fleet/vehicles/{id}/track?from&to` (hasta 7 días; permiso nuevo
+  `fleet.history` «Ver recorridos», que NO se da al Operador por omisión: es dato personal; bitácora `track-viewed` cada 10 min),
+  `GET/PUT /api/fleet/map/settings` (SystemBlob `fleet.map`; bitácora `map-settings-updated`) y
+  `GET /api/fleet/map/basemap.pmtiles` (por rangos, con la sesión).
+- **Mapa base**: «sin mapa» (fondo liso), teselas de un proveedor en línea (plantilla https con {z}/{x}/{y} y su atribución; los
+  servidores públicos de OSM NO se permiten en un producto) o archivo `maps\basemap.pmtiles` en la carpeta de datos (sin internet;
+  estilo de Protomaps SIN capas de texto: faltan las fuentes).
+- **Web** Flota → **Mapa** (`fleet-map.js`): MapLibre GL 6.12.0 (BSD-3) como módulo ES bajo demanda desde `vendor/maplibre`
+  (+ `vendor/pmtiles` 4.5.0 y `vendor/protomaps` 5.7.2, con su licencia); lista con buscador y filtros (en marcha ≥ 3 km/h,
+  detenidos, sin conexión), marcadores HTML (flecha según el rumbo, color por estado, código), ficha con datos y sus cámaras en
+  vivo (`LvSession` en secundario), «Abrir en grilla» (`#/fleet/live?dev=`), seguir al vehículo y recorrido de 2 h. Ajustes del
+  mapa para `fleet.manage`. GOTCHA: MapLibre le pone `position: relative` al contenedor (anula `inset: 0`): darle alto y ancho.
+- **De paso**: el hub manda `DeviceStatus` como número y `live.js` lo comparaba con texto (el árbol marcaba caídos a los equipos
+  que cambiaban de estado): se normaliza.
+- **Probado** con el 123456: posiciones en la tabla (11:45 de Chile → 14:45Z), API de últimas y de recorrido, mapa web (Edge por
+  CDP, `isp1\fleet-map.mjs`) con el marcador en su lugar real, ficha con video y sin errores JS; con teselas de OSM solo para
+  esa verificación (el servidor de prueba quedó «sin mapa»).
+- **Pendiente de la fase 2**: mapa en el cliente WPF (WebView2), minimapa en Flota en vivo, fuentes para los nombres de calles
+  del PMTiles y probar ese modo con un extracto real de Chile.
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

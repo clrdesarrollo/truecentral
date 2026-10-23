@@ -27,6 +27,7 @@ public sealed class ScopedHub(IHubContext<VmsHub> hub, UserScopeService scopes, 
         [VmsHubContract.CercoEventReceived] = Permissions.CercoMonitor,
         [VmsHubContract.IntercomCallChanged] = Permissions.IntercomAnswer,
         [VmsHubContract.AccessPersonSyncChanged] = Permissions.PersonsView,
+        [VmsHubContract.FleetPositions] = Permissions.FleetView,
     };
 
     /// <summary>El permiso que exige el mensaje y si algún usuario no lo tiene (si todos lo tienen, no hay que filtrar por él).</summary>
