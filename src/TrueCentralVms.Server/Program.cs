@@ -281,6 +281,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Ser
 // Flota: posiciones GPS de los vehículos (las entrega el servicio ISUP).
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Fleet.FleetPositionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Fleet.FleetPositionService>());
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Fleet.FleetEventService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Fleet.FleetEventService>());
 builder.Services.AddSingleton<SessionAccounting>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionAccounting>());
 
@@ -553,6 +555,7 @@ app.MapSpeakersApi();
 app.MapSpeakerAgentsApi();
 app.MapIoModulesApi();
 app.MapFleetApi();
+app.MapFleetEventsApi();
 app.MapIntercomsApi();
 app.MapAccessApi();
 app.MapAccessSettingsApi();

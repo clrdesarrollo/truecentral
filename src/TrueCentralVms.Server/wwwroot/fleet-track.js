@@ -17,6 +17,8 @@ const ft = {
   points: [],          // { at (ms), lat, lon, speed, heading }
   stops: [],
   marker: null,
+  events: [],          // eventos del vehículo en el rango (fase 4)
+  evMarkers: [],
   idx: 0,
   playing: false,
   rate: 8,
@@ -63,6 +65,7 @@ async function renderFleetTrack() {
         </div>
         <div class="ft-summary" id="ft-summary"><div class="muted fm-small">Elija un vehículo y el rango (hasta 7 días).</div></div>
         <div class="ft-stops" id="ft-stops"></div>
+        <div class="ft-stops" id="ft-events"></div>
         <div class="ft-export" id="ft-export" hidden>
           <span class="muted fm-small">Exportar:</span>
           <button type="button" class="btn ghost small" data-fmt="csv">CSV</button>
@@ -94,6 +97,10 @@ async function renderFleetTrack() {
   $("#ft-slider").addEventListener("input", (e) => { ftPause(); ftSeek(Number(e.target.value)); });
   $("#ft-video-btn").addEventListener("click", ftOpenVideo);
   $$("#ft-export [data-fmt]").forEach((b) => b.addEventListener("click", () => ftExport(b.dataset.fmt)));
+  $("#ft-events").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-ev]");
+    if (row) ftGoEvent(ft.events[Number(row.dataset.ev)]);
+  });
   $("#ft-stops").addEventListener("click", (e) => {
     const row = e.target.closest("[data-i]");
     if (row) { ftPause(); ftSeek(Number(row.dataset.i)); ft.map?.flyTo({ center: [ft.points[ft.idx].lon, ft.points[ft.idx].lat], zoom: 16 }); }
@@ -118,6 +125,7 @@ function fleetTrackLeave() {
   ft.active = false;
   ftPause();
   ftCloseVideo();
+  ftClearEvents();
   try { ft.map?.remove(); } catch { /* ya liberado */ }
   ft.map = null;
   ft.marker = null;
@@ -138,6 +146,7 @@ async function ftLoad() {
   ft.stops = ftFindStops(ft.points);
   ftRenderSummary();
   ftDraw();
+  await ftLoadEvents(id, from, to);
   $("#ft-bar").hidden = ft.points.length < 2;
   $("#ft-export").hidden = ft.points.length === 0;
   $("#ft-slider").max = Math.max(0, ft.points.length - 1);
@@ -195,6 +204,8 @@ function ftColor(speed) {
 
 function ftDraw() {
   if (!ft.map) return;
+  // «Ver recorrido» antes de que el mapa termine de cargar: se dibuja cuando quede listo.
+  if (!ft.map.isStyleLoaded()) { ft.map.once("idle", ftDraw); return; }
   const segs = [];
   for (let k = 1; k < ft.points.length; k++) {
     const a = ft.points[k - 1], b = ft.points[k];
@@ -333,4 +344,48 @@ function ftExport(fmt) {
   a.remove();
   Api.post("/api/audit/client-event", { action: "fleet-track-exported", deviceName: v.code, filePath: name,
     detail: `${p.length} posiciones, panel web` }).catch(() => { /* la auditoría nunca bloquea */ });
+}
+
+/** Eventos del vehículo en el rango (pánico, geocercas, conducción…): marcados sobre el recorrido y en la lista. */
+async function ftLoadEvents(id, from, to) {
+  ftClearEvents();
+  ft.events = [];
+  if (Perms.can("fleet.view"))
+    try {
+      const page = await Api.get(`/api/fleet/events?vehicleId=${id}&from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}&take=500`);
+      ft.events = page.events.filter((e) => e.kind !== "connected" && e.kind !== "disconnected").reverse();
+    } catch { /* sin eventos: el recorrido igual se muestra */ }
+  const host = $("#ft-events");
+  if (!host) return;
+  host.innerHTML = ft.events.length ? `<div class="lv-cap" style="padding:8px 0 4px 12px">EVENTOS (${ft.events.length})</div>` + ft.events.map((e, i) => `
+    <div class="fm-row" data-ev="${i}"><i class="fm-dot ${ftSev(e) === "critical" ? "alarm" : ftSev(e) === "info" ? "off" : "stop"}"></i><div class="fm-row-text">
+      <div class="fm-row-top"><b>${esc(e.label)}</b><span>${new Date(e.at).toLocaleTimeString("es-CL", { timeStyle: "short" })}</span></div>
+      <div class="muted">${esc(e.description)}</div></div></div>`).join("") : "";
+  if (!ft.map || !fm.lib) return;
+  ft.events.forEach((e) => {
+    if (e.latitude == null) return;
+    const el = document.createElement("div");
+    el.className = `ft-ev ${ftSev(e)}`;
+    el.title = `${e.label} · ${new Date(e.at).toLocaleString("es-CL")}`;
+    el.addEventListener("click", () => ftGoEvent(e));
+    ft.evMarkers.push(new fm.lib.Marker({ element: el, anchor: "center" }).setLngLat([e.longitude, e.latitude]).addTo(ft.map));
+  });
+}
+
+const ftSev = (e) => (typeof e.severity === "number" ? ["info", "warning", "critical"][e.severity] : String(e.severity).toLowerCase());
+
+function ftClearEvents() {
+  ft.evMarkers.forEach((m) => m.remove());
+  ft.evMarkers = [];
+}
+
+/** Lleva la animación al punto más cercano a la hora del evento. */
+function ftGoEvent(e) {
+  if (!e || !ft.points.length) return;
+  const at = new Date(e.at).getTime();
+  let best = 0;
+  ft.points.forEach((p, i) => { if (Math.abs(p.at - at) < Math.abs(ft.points[best].at - at)) best = i; });
+  ftPause();
+  ftSeek(best);
+  ft.map?.flyTo({ center: e.longitude != null ? [e.longitude, e.latitude] : [ft.points[best].lon, ft.points[best].lat], zoom: 16 });
 }

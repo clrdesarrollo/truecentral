@@ -43,6 +43,15 @@ public sealed class FleetPositionService(IsupService isup, IServiceScopeFactory 
         return _latest.Values.Select(p => p with { Online = online.GetValueOrDefault(p.VehicleId) }).ToList();
     }
 
+    /// <summary>
+    /// Posiciones recién guardadas, más nuevas que la última conocida de su vehículo y en orden de hora (las retransmitidas de
+    /// horas atrás no llegan aquí): las usa la evaluación de geocercas. Corre en el hilo del lote.
+    /// </summary>
+    public event Func<IReadOnlyList<FleetLivePositionDto>, CancellationToken, Task>? PositionsAccepted;
+
+    /// <summary>Última posición conocida de un vehículo (para ubicar sus eventos).</summary>
+    public FleetLivePositionDto? LatestOf(int vehicleId) => _latest.GetValueOrDefault(vehicleId);
+
     /// <summary>El catálogo de vehículos cambió (alta, baja, cambio de ID ISUP): se relee en el próximo lote.</summary>
     public void InvalidateVehicles() => _vehiclesLoadedUtc = DateTime.MinValue;
 
@@ -126,16 +135,23 @@ public sealed class FleetPositionService(IsupService isup, IServiceScopeFactory 
 
         // Última posición: la más nueva de cada vehículo (una retransmitida de horas atrás no mueve el marcador).
         var changed = new List<FleetLivePositionDto>();
+        var fresh = new List<FleetLivePositionDto>();
         var online = OnlineByVehicle();
         foreach (var g in list.GroupBy(r => r.VehicleId))
         {
             var newest = g.MaxBy(r => r.At);
+            var since = _latest.TryGetValue(g.Key, out var last) ? last.At : DateTime.MinValue;
+            fresh.AddRange(g.Where(r => r.At > since).OrderBy(r => r.At).Select(r => new FleetLivePositionDto(g.Key, r.DeviceId,
+                r.Fix.Latitude, r.Fix.Longitude, r.Fix.SpeedKmh, r.Fix.HeadingDeg, r.Fix.Satellites, r.At, true)));
             if (_latest.TryGetValue(g.Key, out var prev) && prev.At >= newest.At) continue;
             var dto = new FleetLivePositionDto(g.Key, newest.DeviceId, newest.Fix.Latitude, newest.Fix.Longitude, newest.Fix.SpeedKmh,
                 newest.Fix.HeadingDeg, newest.Fix.Satellites, newest.At, online.GetValueOrDefault(g.Key, true));
             _latest[g.Key] = dto;
             changed.Add(dto);
         }
+        if (fresh.Count > 0 && PositionsAccepted is { } accepted)
+            try { await accepted(fresh, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "Flota: error al evaluar las geocercas."); }
         if (changed.Count > 0)
             await hub.SendTrimmedAsync(VmsHubContract.FleetPositions, new FleetPositionBatchDto(changed),
                 (scope, b) => b.Positions.Where(p => scope.CanViewDevice(p.DeviceId)).ToList() is { Count: > 0 } mine

@@ -78,3 +78,95 @@ public sealed record VehicleImportRequestDto(string Csv, bool DryRun = false, in
 public sealed record VehicleImportRowDto(int Line, string Code, string? IsupDeviceId, bool Ok, string? Error);
 
 public sealed record VehicleImportResultDto(int Created, int Failed, bool DryRun, IReadOnlyList<VehicleImportRowDto> Rows);
+
+/// <summary>
+/// Tipos de evento de un vehículo. Los del grabador vienen de sus alarmas ISUP (EN_ALARM_TYPE); los de geocerca los calcula el
+/// servidor con cada posición; los de conexión, del registro ISUP del grabador (un vehículo apagado se desconecta: es informativo).
+/// </summary>
+public static class FleetEventKinds
+{
+    public const string Panic = "panic";
+    public const string Overspeed = "overspeed";
+    public const string Collision = "collision";
+    public const string Rollover = "rollover";
+    public const string HarshAcceleration = "harsh-acceleration";
+    public const string HarshBraking = "harsh-braking";
+    public const string HarshTurn = "harsh-turn";
+    public const string AbnormalDriving = "abnormal-driving";
+    public const string LaneDeparture = "lane-departure";
+    public const string DoorOpenMoving = "door-open-moving";
+    public const string Overload = "overload";
+    public const string Adas = "adas";
+    public const string Radar = "radar";
+    public const string HighTemperature = "high-temperature";
+    public const string AlarmInput = "alarm-input";
+    public const string VideoLoss = "video-loss";
+    public const string VideoTamper = "video-tamper";
+    public const string StorageFault = "storage-fault";
+    public const string GeofenceEnter = "geofence-enter";
+    public const string GeofenceExit = "geofence-exit";
+    public const string GeofenceOverspeed = "geofence-overspeed";
+    public const string Connected = "connected";
+    public const string Disconnected = "disconnected";
+
+    /// <summary>Nombre para la interfaz y las plantillas de las automatizaciones.</summary>
+    public static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>
+    {
+        [Panic] = "Botón de pánico",
+        [Overspeed] = "Exceso de velocidad",
+        [Collision] = "Choque",
+        [Rollover] = "Volcamiento",
+        [HarshAcceleration] = "Aceleración brusca",
+        [HarshBraking] = "Frenada brusca",
+        [HarshTurn] = "Giro brusco",
+        [AbnormalDriving] = "Conducción anómala",
+        [LaneDeparture] = "Salida de pista",
+        [DoorOpenMoving] = "Puerta abierta en marcha",
+        [Overload] = "Sobrecarga",
+        [Adas] = "Asistencia a la conducción (ADAS)",
+        [Radar] = "Alarma del radar",
+        [HighTemperature] = "Temperatura alta del grabador",
+        [AlarmInput] = "Entrada de alarma",
+        [VideoLoss] = "Pérdida de video",
+        [VideoTamper] = "Cámara tapada",
+        [StorageFault] = "Falla de disco o grabación",
+        [GeofenceEnter] = "Entrada a geocerca",
+        [GeofenceExit] = "Salida de geocerca",
+        [GeofenceOverspeed] = "Exceso de velocidad en geocerca",
+        [Connected] = "Vehículo conectado",
+        [Disconnected] = "Vehículo desconectado",
+    };
+
+    public static string LabelOf(string kind) => Labels.TryGetValue(kind, out var l) ? l : kind;
+
+    /// <summary>Gravedad por omisión: crítica (pánico, choque, volcamiento), informativa (conexión) o advertencia.</summary>
+    public static AlarmSeverity SeverityOf(string kind) => kind switch
+    {
+        Panic or Collision or Rollover => AlarmSeverity.Critical,
+        Connected or Disconnected => AlarmSeverity.Info,
+        _ => AlarmSeverity.Warning,
+    };
+}
+
+/// <summary>
+/// Evento de un vehículo (hora UTC). Los informativos nacen atendidos; el resto queda pendiente hasta que un operador lo acusa.
+/// Posición: la última conocida del vehículo al momento del evento (puede no haber).
+/// </summary>
+public sealed record FleetEventDto(long Id, int VehicleId, string VehicleCode, int DeviceId, DateTime At, string Kind, string Label,
+    AlarmSeverity Severity, string Description, int? Channel, int? GeofenceId, double? Latitude, double? Longitude, double? SpeedKmh,
+    DateTime? AcknowledgedAt, string? AcknowledgedBy, string? AckNote);
+
+public sealed record FleetEventPageDto(IReadOnlyList<FleetEventDto> Events, int Total, int Pending);
+
+public sealed record FleetEventAckDto(string? Note);
+
+/// <summary>
+/// Geocerca. <paramref name="Kind"/>: "polygon" (vértices), "circle" (un punto y <paramref name="RadiusM"/>) o "corridor" (una
+/// línea y su ancho total <paramref name="RadiusM"/>). Puntos como [longitud, latitud]. <paramref name="VehicleIds"/> vacío = toda la
+/// flota. <paramref name="SpeedLimitKmh"/>: velocidad máxima dentro (null = sin límite).
+/// </summary>
+public sealed record GeofenceDto(int Id, string Name, string Kind, IReadOnlyList<double[]> Points, double RadiusM, string Color,
+    bool AlertOnEnter, bool AlertOnExit, int? SpeedLimitKmh, IReadOnlyList<int> VehicleIds, bool Enabled);
+
+public sealed record GeofenceWriteDto(string Name, string Kind, IReadOnlyList<double[]> Points, double RadiusM, string? Color,
+    bool AlertOnEnter, bool AlertOnExit, int? SpeedLimitKmh, IReadOnlyList<int>? VehicleIds, bool Enabled = true);

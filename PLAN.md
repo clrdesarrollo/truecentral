@@ -1767,6 +1767,45 @@ vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 
 - **Pendiente de la fase 3**: probar un recorrido con el vehículo en movimiento (la línea por velocidad solo se vio sin desplazarse),
   y la línea de tiempo de Reproducción saltando de un archivo al siguiente.
 
+### Flota — fase 4: eventos del vehículo y geocercas — 2026-10-23
+
+- **Eventos** (`FleetEvents`, migración `FleetEvents`; `Services\Fleet\FleetEventService`), tres fuentes:
+  - alarmas ISUP del grabador (`IsupService.AlarmReceived`, solo el comienzo, Action 0) según EN_ALARM_TYPE de HCISUPAlarm.h:
+    13 pánico, 10 exceso de velocidad, 114/115 y 40965/40966 volcamiento/choque, 40963/40964 aceleración/frenada, 40967/40968
+    giro brusco, 40962/40969 conducción anómala, 40971/40972 salida de pista, 40973 puerta abierta en marcha, 40970 sobrecarga,
+    40974 ADAS, 41009 radar, 40961 temperatura, 6 entrada de alarma, 5/7 video, 0/1/17/706 disco o grabación. El 9 (formato de
+    video que no coincide, lo manda el 123456 por los canales sin cámara) se ignora. Repetido en < 60 s (por canal): uno;
+  - geocercas, con cada posición nueva (`FleetPositionService.PositionsAccepted`, solo las más nuevas que la última conocida);
+  - conexión del grabador (informativa, nace atendida).
+  Gravedad: crítica (pánico, choque, volcamiento), informativa (conexión), advertencia (el resto). Se guarda con la última
+  posición; va por el hub (`FleetEvent`, `FleetEventAcknowledged`, permiso `fleet.view` y alcance del vehículo) y dispara el
+  disparador nuevo **«Evento de vehículo (Flota)»** (`fleet-event`; filtros por tipo, vehículo y geocerca, más la gravedad; solo
+  con `module_fleet` en la licencia; marcas {vehiculo}, {patente}, {velocidad}, {latitud}, {longitud}, {canal}). Retención: la
+  de las posiciones. API `GET /api/fleet/events` (vehículo, rango, pendientes) y `POST /api/fleet/events/{id}/ack` (nota;
+  bitácora `event-acknowledged`).
+- **Vehículo desconectado ≠ equipo caído**: `DeviceStatusMonitor` ya no dispara «Conexión de un equipo» por un grabador móvil
+  (el panel de inicio ya los excluía); su conexión va como evento informativo del vehículo.
+- **Geocercas** (`Geofences`): polígono, círculo (centro + radio) o corredor (línea + ancho total), avisos de entrada y salida,
+  velocidad máxima dentro, vehículos (vacío = toda la flota), color. `Geo.DistanceOutside` (proyección local en metros) y
+  `FleetEventService.Step` (función pura): la primera posición solo fija el estado, salir exige 20 m fuera del borde
+  (histéresis contra el ruido del GPS) y el exceso de velocidad avisa una vez por pasada y se rearma al bajar 5 km/h; editar una
+  geocerca la vuelve a tomar sin avisar. API `/api/fleet/geofences` (ver: `fleet.view`; crear/editar/borrar: `fleet.manage` +
+  módulo; bitácora `geofence-created/updated/deleted`).
+- **Web**: el Mapa tiene pestañas Vehículos | Eventos (contador de pendientes, «Ver», «Atender» con nota, aviso inmediato de los
+  críticos) | Geocercas (lista, dibujo con clics en el mapa, editar, redibujar, eliminar); el vehículo con eventos sin atender se
+  marca en rojo (`fleet-events.js`). El corredor se dibuja con su ancho real (grosor según el zoom). Recorridos muestra los
+  eventos del rango sobre la línea y en la lista (clic = la animación salta a esa hora). GOTCHA MapLibre: agregar capas antes de
+  que el estilo termine de cargar lanza «Style is not done loading»: reintentar con `map.once("idle", …)` (el «load» puede haber
+  pasado ya); afectaba también a «Ver recorrido» pulsado apenas abierta la página.
+- **Probado**: geometría y transiciones con trayectorias simuladas (programa de prueba con 19 verificaciones: polígono cóncavo,
+  círculo, corredor, ruido en el borde, dos excesos con rearme, salida con histéresis, clasificación de alarmas); con el 123456
+  (quieto): evento de conexión real, geocercas por API (validaciones), automatización «Evento de vehículo» → aviso en el centro
+  de eventos, y en Edge: pestañas, marcador en rojo, atender, dibujar un polígono, Recorridos con eventos y el acuse llegando
+  por el hub a otra página abierta; bitácora. Los eventos pendientes de la prueba se insertaron a mano en la base aislada.
+- **Pendiente de la fase 4**: una alarma real del grabador (pánico con el botón del vehículo, si lo tiene cableado a una entrada) y
+  una geocerca cruzada en movimiento; MDVR ISUP 5.0 (sus alarmas vienen como texto ISAPI, no como alarma básica: no se clasifican
+  todavía); aviso sonoro propio del mapa (hoy el sonido va por una automatización con «Avisar a los operadores»).
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

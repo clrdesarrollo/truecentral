@@ -118,17 +118,20 @@ async function renderFleetMap() {
     <div class="fm-root">
       <aside class="fm-side">
         <div class="fm-side-head">
-          <span class="lv-cap">VEHÍCULOS</span>
-          ${canManage ? `<button type="button" class="btn ghost small" id="fm-settings" title="Mapa base, posición inicial y retención de posiciones">Ajustes del mapa</button>` : ""}
+          <div class="fme-tabs" id="fm-tabs"><button type="button" class="on">Vehículos</button></div>
+          ${canManage ? `<button type="button" class="lv-icon-btn" id="fm-settings" title="Ajustes del mapa: mapa base, posición inicial y retención de posiciones">⚙</button>` : ""}
         </div>
-        <input id="fm-search" class="lv-search" type="search" placeholder="Buscar código o patente…" autocomplete="off">
-        <div class="fm-filters" id="fm-filters">
-          <button type="button" data-f="all" class="on">Todos <b id="fm-n-all">0</b></button>
-          <button type="button" data-f="move">En marcha <b id="fm-n-move">0</b></button>
-          <button type="button" data-f="stop">Detenidos <b id="fm-n-stop">0</b></button>
-          <button type="button" data-f="off">Sin conexión <b id="fm-n-off">0</b></button>
+        <div class="fm-pane" id="fm-vehicles-pane">
+          <input id="fm-search" class="lv-search" type="search" placeholder="Buscar código o patente…" autocomplete="off">
+          <div class="fm-filters" id="fm-filters">
+            <button type="button" data-f="all" class="on">Todos <b id="fm-n-all">0</b></button>
+            <button type="button" data-f="move">En marcha <b id="fm-n-move">0</b></button>
+            <button type="button" data-f="stop">Detenidos <b id="fm-n-stop">0</b></button>
+            <button type="button" data-f="off">Sin conexión <b id="fm-n-off">0</b></button>
+          </div>
+          <div class="fm-list" id="fm-list"><div class="muted lv-small" style="padding:10px 14px">Cargando vehículos…</div></div>
         </div>
-        <div class="fm-list" id="fm-list"><div class="muted lv-small" style="padding:10px 14px">Cargando vehículos…</div></div>
+        <div class="fm-pane" id="fm-other-pane" hidden></div>
       </aside>
       <div class="fm-main">
         <div class="fm-map" id="fm-map"></div>
@@ -176,7 +179,7 @@ async function renderFleetMap() {
     fm.map.addControl(new lib.NavigationControl({ showCompass: false }), "top-left");
     fm.map.addControl(new lib.ScaleControl({ unit: "metric" }), "bottom-right");
     fm.map.on("dragstart", () => { if (fm.follow) { fm.follow = false; fmRenderCard(); } });
-    fm.map.on("load", () => { fmEnsureTrackLayer(); fmFitAll(); });
+    fm.map.on("load", () => { fmEnsureTrackLayer(); fmFitAll(); if (typeof fmeAttach === "function") fmeAttach(); });
   } catch (err) {
     $("#fm-map").innerHTML = `<div class="error-box" style="margin:24px">No se pudo iniciar el mapa: ${esc(err.message)}</div>`;
   }
@@ -222,6 +225,7 @@ function fleetMapLeave() {
   fm.active = false;
   fmCloseFeeds();
   clearInterval(fm.tick);
+  if (typeof fmeDetach === "function") fmeDetach();
   if (fm.hub) {
     VmsHub.off("FleetPositions", fm.hub.positions);
     VmsHub.off("ConfigChanged", fm.hub.config);
@@ -275,8 +279,9 @@ function fmRenderList() {
     const st = fmState(p, v);
     const right = st === "move" ? `${Math.round(p.speedKmh)} km/h` : st === "stop" ? "Detenido" : "—";
     const sub = [v.plate, p ? fmAgo(p.at) : "sin posición"].filter(Boolean).join(" · ");
+    const alarm = typeof fmeAlarmed === "function" && fmeAlarmed(v.id);
     return `<div class="fm-row ${fm.selected === v.id ? "sel" : ""}" data-v="${v.id}" title="${p ? "Clic para verlo en el mapa" : "Este vehículo aún no informa posición"}">
-      <i class="fm-dot ${st}"></i>
+      <i class="fm-dot ${alarm ? "alarm" : st}"></i>
       <div class="fm-row-text"><div class="fm-row-top"><b>${esc(v.code)}</b><span>${esc(right)}</span></div><div class="muted">${esc(sub)}</div></div>
     </div>`;
   }).join("");
@@ -287,7 +292,8 @@ function fmMarkerHtml(v, p) {
   const arrow = st === "move"
     ? `<svg viewBox="0 0 24 24" width="22" height="22" style="transform:rotate(${Math.round(p.headingDeg)}deg)"><path d="M12 2l7 18-7-4-7 4z"/></svg>`
     : `<svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="8"/></svg>`;
-  return `<div class="fm-mk ${st} ${fm.selected === v.id ? "sel" : ""}">${arrow}<span>${esc(v.code)}</span></div>`;
+  const alarm = typeof fmeAlarmed === "function" && fmeAlarmed(v.id) ? "alarm" : "";
+  return `<div class="fm-mk ${st} ${alarm} ${fm.selected === v.id ? "sel" : ""}">${arrow}<span>${esc(v.code)}</span></div>`;
 }
 
 function fmRenderMarkers() {

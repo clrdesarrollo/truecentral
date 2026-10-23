@@ -52,9 +52,12 @@ public static class FleetApi
         return IsupEquipmentRules.Validate(r.IsupDeviceId, r.IsupKey, keyStored);
     }
 
-    /// <summary>El servicio de posiciones relee qué grabador es de qué vehículo.</summary>
-    private static void VehiclesChanged(HttpContext ctx) =>
+    /// <summary>Los servicios de posiciones y de eventos releen qué grabador es de qué vehículo.</summary>
+    private static void VehiclesChanged(HttpContext ctx)
+    {
         ctx.RequestServices.GetRequiredService<Services.Fleet.FleetPositionService>().InvalidateVehicles();
+        ctx.RequestServices.GetRequiredService<Services.Fleet.FleetEventService>().Invalidate();
+    }
 
     private static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 

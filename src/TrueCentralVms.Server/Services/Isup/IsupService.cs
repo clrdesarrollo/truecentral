@@ -189,6 +189,8 @@ public sealed class IsupService : BackgroundService, IIsupGateway
                 break;
             case IsupEventKinds.Alarm when e.Alarm is not null:
                 LogFirstOfKind(e.Alarm);
+                try { AlarmReceived?.Invoke(e.Alarm); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Error al entregar una alarma ISUP de {Device}.", e.DeviceId); }
                 if (_alarmSubscribers.TryGetValue(e.DeviceId, out var list))
                 {
                     Action<IsupAlarm>[] handlers;
@@ -211,6 +213,9 @@ public sealed class IsupService : BackgroundService, IIsupGateway
 
     /// <summary>Última posición de un equipo y cuántas llegaron desde que arrancó el servidor (y cuántas retransmitidas o sin posición).</summary>
     public sealed record GpsTrack(IsupGpsFix Last, DateTimeOffset ReceivedAt, long Count, long Retransmitted, long Invalid, IsupGpsFix? LastValid);
+
+    /// <summary>Cualquier alarma de cualquier equipo (los vehículos de la flota la toman de aquí). Encolar y volver.</summary>
+    public event Action<IsupAlarm>? AlarmReceived;
 
     /// <summary>Un equipo móvil informó su posición. Corre en el hilo del canal de eventos: encolar y volver.</summary>
     public event Action<IsupGpsFix>? GpsReceived;

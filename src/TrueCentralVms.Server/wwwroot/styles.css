@@ -2799,6 +2799,29 @@ table.kv .tag { margin: 0 4px 4px 0; }
 .fm-card-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .fm-card-actions .on { border-color: var(--accent); color: var(--accent); }
 /* ---- Página incrustada en el cliente de escritorio (?embed=1): solo el contenido ---- */
+/* Flota → Mapa: pestañas, eventos y geocercas */
+.fme-tabs { display: flex; gap: 2px; }
+.fme-tabs button { white-space: nowrap; font-size: 12px; padding: 3px 8px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: inherit; cursor: pointer; }
+.fme-tabs button.on { border-bottom-color: var(--accent); font-weight: 600; }
+.fme-badge { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--danger); color: #fff; font-size: 10.5px; line-height: 16px; text-align: center; }
+.fm-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.fm-pane[hidden] { display: none; }
+.fme-only { padding: 2px 12px 8px; font-size: 12px; }
+.fme-row { padding: 7px 12px; border-bottom: 1px solid var(--border); border-left: 3px solid #8a8f98; font-size: 12.5px; }
+.fme-row.warning { border-left-color: #e8a33d; } .fme-row.critical { border-left-color: var(--danger); background: rgba(var(--danger-rgb), .06); }
+.fme-row.done { opacity: .65; background: transparent; }
+.fme-row .muted { font-size: 11.5px; }
+.fme-actions { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.fme-new { display: flex; align-items: center; gap: 4px; padding: 0 12px 8px; flex-wrap: wrap; }
+.fme-drawing { margin: 0 10px 8px; padding: 8px; font-size: 12px; border: 1px dashed #e8590c; border-radius: 6px; }
+.fme-vehicles { max-height: 160px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+.fm-dot.alarm { background: var(--danger); box-shadow: 0 0 0 3px rgba(var(--danger-rgb), .25); }
+.fm-mk.alarm svg { fill: var(--danger); animation: fme-pulse 1.2s ease-in-out infinite; }
+.fm-mk.alarm span { background: var(--danger); color: #fff; }
+@keyframes fme-pulse { 50% { transform: scale(1.35); } }
+.ft-ev { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; background: #e8a33d; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.ft-ev.critical { background: var(--danger); } .ft-ev.info { background: #8a8f98; }
+
 /* Flota → Recorridos */
 .ft-form { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 10px; }
 .ft-form label { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; }
