@@ -1641,8 +1641,16 @@ vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 
 
 - **Licencia en la competencia** (para decidir la nuestra): HikCentral cobra por equipo móvil, no por canal
   (`HikCentral-P-MS-Base` = 10 equipos, `HikCentral-P-MS-1Unit` = +1 grabador o dashcam sin límite de canales; aparte rutas y
-  conductores y ANPR móvil por canal). Propuesta: `module_fleet` + `fleet_vehicles`, sin consumir `video_channels`. Pendiente
-  de decisión del usuario.
+  conductores y ANPR móvil por canal).
+- **Licencia de Flota (DECIDIDO por el usuario, 2026-10-23): por vehículo.** Módulo `module_fleet` con cupo `fleet_vehicles`; los
+  canales de un vehículo **no** consumen `video_channels` (hoy `LicenseService` cuenta `db.Channels.CountAsync(c => c.Enabled)`:
+  hay que excluir los grabadores móviles ahí, en `EnforceChannelQuotaAsync` y en `RestoreChannelsDisabledByLicenseAsync`; precedente:
+  el video de citofonía tampoco consume canales). Valores propuestos para el catálogo (a confirmar al implementarlo en la fase 1):
+  Flota se vende aparte, como expansión «Flota base» (módulo + 10 vehículos) y expansiones de +1/+10/+50 vehículos; prueba con 5;
+  tope anti-abuso de 16 canales por vehículo, para que un NVR fijo no se registre como vehículo y esquive el cupo de canales.
+  Subir `LicenseCatalog.Version`, `TrialFeatures`, `Deny` al crear o habilitar, `LicenseQuotaReconciler`, ocultar el módulo sin
+  licencia e importar el catálogo en bouncer. Las licencias ya emitidas están congeladas: no traerán Flota hasta sumarles la
+  expansión.
 - **Fase 0 (hecha)**: el host decodifica la alarma de tipo 4 (`NET_EHOME_GPS_INFO`, offsets en `Layout.Gps*` revisados contra
   `HCISUPAlarm.h`) y la publica como evento `gps` (`IsupHostEvent.Gps`, `IsupGpsFix`). `IsupService` guarda la última posición
   por equipo (`GpsTracks`, evento `GpsReceived`) y deja en el registro la primera de cada equipo; el host, una línea cada 5 min.
