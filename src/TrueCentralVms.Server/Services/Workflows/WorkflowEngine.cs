@@ -8,6 +8,7 @@ using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services.Workflows;
 
@@ -31,7 +32,7 @@ namespace TrueCentralVms.Server.Services.Workflows;
 /// · Toda ejecución queda en el historial (qué la disparó, qué paso hizo qué
 ///   y cuánto demoró) y en la bitácora de auditoría.
 /// </summary>
-public sealed class WorkflowEngine : BackgroundService
+public sealed class WorkflowEngine : SupervisedBackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IServiceProvider _services;
@@ -156,7 +157,7 @@ public sealed class WorkflowEngine : BackgroundService
     // Ciclo de vida
     // ------------------------------------------------------------------
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    protected override async Task RunAsync(CancellationToken ct)
     {
         _slots = new SemaphoreSlim(Math.Clamp(_config.GetValue("Workflows:MaxConcurrentRuns", 4), 1, 32));
         var purger = Task.Run(() => PurgeLoopAsync(ct), ct);
@@ -424,6 +425,15 @@ public sealed class WorkflowEngine : BackgroundService
         if (Has(conditions.IoInputStates) &&
             (trigger.IoActive is not { } active ||
              !conditions.IoInputStates!.Any(s => string.Equals(s, active ? "Active" : "Inactive", StringComparison.OrdinalIgnoreCase))))
+            return false;
+
+        // --- Vehículos de la flota ---
+        if (Has(conditions.VehicleIds) && (trigger.VehicleId is null || !conditions.VehicleIds!.Contains(trigger.VehicleId.Value)))
+            return false;
+        if (Has(conditions.FleetEventKinds) &&
+            !conditions.FleetEventKinds!.Any(k => string.Equals(k, trigger.FleetKind, StringComparison.OrdinalIgnoreCase)))
+            return false;
+        if (Has(conditions.GeofenceIds) && (trigger.GeofenceId is null || !conditions.GeofenceIds!.Contains(trigger.GeofenceId.Value)))
             return false;
 
         // --- Video ---
@@ -744,6 +754,14 @@ public sealed class WorkflowEngine : BackgroundService
             .Where(d => deviceId == null || d.Id == deviceId).OrderBy(d => d.Id).FirstOrDefaultAsync(ct);
         channel ??= device is null ? null
             : await db.Channels.AsNoTracking().Where(c => c.DeviceId == device.Id).OrderBy(c => c.ChannelNumber).FirstOrDefaultAsync(ct);
+        // Evento de vehículo: el primer vehículo elegido (o el primero de la flota), con su código como nombre.
+        if (workflow.TriggerType == WorkflowTriggerTypes.FleetEvent)
+        {
+            int? vehicleId = conditions.VehicleIds is { Count: > 0 } ? conditions.VehicleIds[0] : null;
+            var vehicle = await db.Vehicles.AsNoTracking().Where(v => vehicleId == null || v.Id == vehicleId).OrderBy(v => v.Id)
+                .Select(v => new { v.DeviceId, v.Code }).FirstOrDefaultAsync(ct);
+            device = vehicle is null ? null : new Data.Entities.Device { Id = vehicle.DeviceId, Name = vehicle.Code };
+        }
 
         int? accessId = conditions.AccessDeviceIds is { Count: > 0 } ? conditions.AccessDeviceIds[0] : null;
         var accessDevice = await db.AccessDevices.AsNoTracking().Include(d => d.Doors)

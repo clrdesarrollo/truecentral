@@ -172,6 +172,10 @@ public sealed class ApiClient
     public Task<List<ChannelDto>> GetChannelsAsync(int deviceId, CancellationToken ct = default) =>
         SendAsync<List<ChannelDto>>(HttpMethod.Get, $"/api/devices/{deviceId}/channels", null, ct);
 
+    /// <summary>Vehículos de la flota con sus cámaras (módulo Flota).</summary>
+    public Task<List<VehicleDto>> GetFleetVehiclesAsync(CancellationToken ct = default) =>
+        SendAsync<List<VehicleDto>>(HttpMethod.Get, "/api/fleet/vehicles", null, ct);
+
     /// <summary>Árbol de ubicaciones de Recursos (lista plana: se arma por ParentId).</summary>
     public Task<List<LocationDto>> GetLocationsAsync(CancellationToken ct = default) =>
         SendAsync<List<LocationDto>>(HttpMethod.Get, "/api/locations", null, ct);

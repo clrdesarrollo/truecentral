@@ -1632,6 +1632,180 @@ hacer un ISUP propio basado en `..\isuptest` que cubra todos los tipos de equipo
   una tarjeta), reproducción de un grabador 5.0, llamadas de un frente por ISUP (formato real del evento) y la voz de parlantes y
   frentes.
 
+## Flota (DVR móviles por ISUP) — fase 0: GPS — 2026-10-23
+
+Rama `feat/flota-gps`. El usuario pidió un módulo de DVR móviles (como el iVMS-5200 Mobile Surveillance de su cliente: árbol de
+vehículos, grilla con cámaras de distintos vehículos, mapa con GPS, recorridos), aparte de los DVR y cámaras normales y con
+licencia propia. Los grabadores entran por **nuestro ISUP** (decisión del usuario). Plan acordado por fases: 0 GPS, 1 vehículos y
+vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 salud y reportes, 6 extras.
+
+- **Licencia en la competencia** (para decidir la nuestra): HikCentral cobra por equipo móvil, no por canal
+  (`HikCentral-P-MS-Base` = 10 equipos, `HikCentral-P-MS-1Unit` = +1 grabador o dashcam sin límite de canales; aparte rutas y
+  conductores y ANPR móvil por canal).
+- **Licencia de Flota (DECIDIDO por el usuario, 2026-10-23): por vehículo.** Módulo `module_fleet` con cupo `fleet_vehicles`; los
+  canales de un vehículo **no** consumen `video_channels` (hoy `LicenseService` cuenta `db.Channels.CountAsync(c => c.Enabled)`:
+  hay que excluir los grabadores móviles ahí, en `EnforceChannelQuotaAsync` y en `RestoreChannelsDisabledByLicenseAsync`; precedente:
+  el video de citofonía tampoco consume canales). Valores propuestos para el catálogo (a confirmar al implementarlo en la fase 1):
+  Flota se vende aparte, como expansión «Flota base» (módulo + 10 vehículos) y expansiones de +1/+10/+50 vehículos; prueba con 5;
+  tope anti-abuso de 16 canales por vehículo, para que un NVR fijo no se registre como vehículo y esquive el cupo de canales.
+  Subir `LicenseCatalog.Version`, `TrialFeatures`, `Deny` al crear o habilitar, `LicenseQuotaReconciler`, ocultar el módulo sin
+  licencia e importar el catálogo en bouncer. Las licencias ya emitidas están congeladas: no traerán Flota hasta sumarles la
+  expansión.
+- **Fase 0 (hecha)**: el host decodifica la alarma de tipo 4 (`NET_EHOME_GPS_INFO`, offsets en `Layout.Gps*` revisados contra
+  `HCISUPAlarm.h`) y la publica como evento `gps` (`IsupHostEvent.Gps`, `IsupGpsFix`). `IsupService` guarda la última posición
+  por equipo (`GpsTracks`, evento `GpsReceived`) y deja en el registro la primera de cada equipo; el host, una línea cada 5 min.
+  Diagnóstico: `GET /api/isup/gps` (permiso `system.services`, bitácora `isup/gps-viewed` cada 30 min: la posición es dato
+  personal del conductor). Todavía no se guarda en la base: eso es la fase 2.
+- **Requisito**: los equipos 2.0/4.0 mandan el GPS por **UDP** al puerto de alarmas 2.0/4.0 (`Isup:LegacyAlarmPort`), que solo
+  se abre con la compatibilidad 2.0/4.0 encendida (Sistema → Conexión ISUP). Abrirlo en el router también para UDP.
+- **Validado con hardware** (servidor aislado en el 6741 con la IP pública y los puertos de isuptest): DVR móvil 123456 por 4G
+  (ISUP 2.0/4.0, fw V4.1.2 build160608, IP 191.125.6.99): posición −33,398911, −70,683808 (Santiago), altitud ~520 m, 9-10
+  satélites, detenido. **Una posición cada 10 s** (18 en 170 s), ninguna retransmitida ni inválida; el reloj del equipo va
+  ~10 s adelantado al del servidor. Kilometraje del día 0 (vehículo detenido). Para 300 vehículos: ~2,6 millones de filas al día.
+- **Gotcha**: ese DVR informa desfase UTC 0:00 con el reloj en hora de Chile → un 0:00 se toma como «no informado»
+  (`UtcOffsetMinutes = null`); la hora de la posición es la local del equipo, como en la reproducción.
+- **Gotcha del arnés**: desde el bloque HTTPS el servidor ignora `--Urls` y escucha en `Web:HttpsPort/HttpPort/InternalPort`
+  (443/80/5099 por omisión): un servidor de prueba tiene que fijarlos (`isp1\start-flota.ps1`: 6741 HTTPS, HTTP cerrado,
+  interno 6744). La marca de prueba de este PC venció: en Debug, `--Licensing:TrialDays=3650`.
+
+### Flota — fase 1: vehículos y Flota en vivo — 2026-10-23
+
+- **Modelo**: `Vehicle` (código único, patente, tipo, notas, habilitado + `DisabledByLicense`) con su grabador como `Device`
+  `hikvision-isup` marcado `IsMobile` (1:1, borrar el vehículo borra el grabador). Migración `FleetVehicles` (agrega
+  `fleet.view` y `fleet.live` al rol Operador). La ubicación (alcance) es la del grabador.
+- **Separación**: `/api/devices`, el panel de inicio y el árbol de video no muestran grabadores móviles; editarlos o borrarlos
+  por `/api/devices` responde 409 («se administra desde Flota → Vehículos»). Canales y releer: permiso según el equipo.
+- **Licencia (catálogo v5)**: `module_fleet` + `fleet_vehicles`; expansiones `addon_fleet_base_10`, `addon_fleet_vehicles_1/10/50`
+  (todas traen el módulo, como las demás); prueba 5. Los canales móviles salen del conteo de `video_channels` (uso, alta,
+  habilitar canal, restaurar por cupo) y tienen tope `LicenseFeatures.MaxChannelsPerVehicle` = 16 (`EnforceChannelQuotaAsync`).
+  `LicenseQuotaReconciler` apaga/restaura vehículos. **Falta importar el catálogo v5 en bouncer.**
+- **Permisos**: `fleet.view` (ver la flota), `fleet.live` (video de vehículos; las concesiones de un canal móvil lo exigen junto
+  con el módulo y el vehículo habilitado; las de canales fijos siguen pidiendo los de video), `fleet.manage` (Configuración).
+  Las vistas guardadas se listan y aplican también con `fleet.live`.
+- **API** `/api/fleet/*`: `GET vehicles` (con cámaras y última posición GPS), `POST/PUT/DELETE vehicles`, `GET detected`
+  (grabadores rechazados por no estar dados de alta), `POST vehicles/import` (CSV `código;patente;tipo;id_isup[;clave]`, con
+  revisión en seco). Bitácora: categoría `fleet` (alta, edición, baja, importación, corte por inactividad).
+- **Web**: Aplicaciones → **Flota** (`#/fleet/live`: `live.js` en modo Flota — árbol de vehículos con patente y velocidad,
+  preferencias aparte `tcvms.fleet.prefs`, secundario por omisión, sin PTZ/parlantes/auxiliares, corte por inactividad con aviso
+  de 30 s, configurable 2-30 min o nunca; las vistas de cada árbol se muestran en el suyo) y Configuración → Dispositivos →
+  **Vehículos** (`fleet.js`).
+- **Cliente**: riel y tarjeta «Flota en vivo» abren una ventana propia (`AuxLiveWindow` con `AuxScreenViewModel` en modo Flota:
+  árbol y buscador propios, secundario, corte por inactividad con `GetLastInputInfo` y `ClientSettings.FleetIdleMinutes` = 5,
+  fuera de la última sesión). Sin ajuste en Configuración todavía.
+- **Probado** (servidor aislado 6741 + DVR 123456 por 4G): alta como vehículo UUBB-0123, 4 cámaras leídas al reconectar, licencia
+  0 canales de video / 1 de 5 vehículos, concesión y cuadro por FFmpeg (8,5 s; el OSD coincide con el GPS decodificado), Edge sin
+  ventana por CDP (`isp1\fleet-web.mjs`): menú, Vehículos, árbol, video en los 4 cuadros en secundario, aviso y corte por
+  inactividad, sin errores JS; importación en seco (repetidos y filas vacías). Cliente WPF (copia de prueba con su
+  configuración en `TCVMS_TEST_APPDATA`, sin tocar el client.json real): el botón del riel abre «Flota en vivo» (UI
+  Automation), árbol del vehículo y sus 4 cámaras en secundario con video del DVR. Sin probar en el cliente: el corte por
+  inactividad (depende de que nadie use el PC durante 5 min).
+- **Pendiente**: offline de un vehículo no debería alarmar como equipo caído (fase 4), manual, ajuste del corte en el cliente.
+
+### Flota — fase 2: posiciones y mapa — 2026-10-23
+
+- **Posiciones**: tabla `VehiclePositions` PARTICIONADA por día UTC (migración `FleetPositions`, SQL a mano: no es entidad de
+  EF; PK `(VehicleId, At)`). `Services\Fleet\FleetPositionService` toma `IsupService.GpsReceived`, guarda por lotes cada 2 s
+  (`INSERT … unnest … ON CONFLICT DO NOTHING`), crea la partición del día al necesitarla y descarta horas imposibles (más de 1 h
+  en el futuro o fuera de la retención: reloj del equipo descompuesto). Hora: la local del grabador con su desfase si lo informa,
+  si no la zona del servidor. Última posición por vehículo en memoria (se relee de la tabla al arrancar) y por el hub
+  `FleetPositions` (lotes, recortado al alcance; exige `fleet.view`). Retención por particiones enteras (por omisión 90 días,
+  bitácora `fleet/positions-purged`).
+- **API**: `GET /api/fleet/positions`, `GET /api/fleet/vehicles/{id}/track?from&to` (hasta 7 días; permiso nuevo
+  `fleet.history` «Ver recorridos», que NO se da al Operador por omisión: es dato personal; bitácora `track-viewed` cada 10 min),
+  `GET/PUT /api/fleet/map/settings` (SystemBlob `fleet.map`; bitácora `map-settings-updated`) y
+  `GET /api/fleet/map/basemap.pmtiles` (por rangos, con la sesión).
+- **Mapa base**: «sin mapa» (fondo liso), teselas de un proveedor en línea (plantilla https con {z}/{x}/{y} y su atribución; los
+  servidores públicos de OSM NO se permiten en un producto) o archivo `maps\basemap.pmtiles` en la carpeta de datos (sin internet;
+  estilo de Protomaps SIN capas de texto: faltan las fuentes).
+- **Web** Flota → **Mapa** (`fleet-map.js`): MapLibre GL 6.12.0 (BSD-3) como módulo ES bajo demanda desde `vendor/maplibre`
+  (+ `vendor/pmtiles` 4.5.0 y `vendor/protomaps` 5.7.2, con su licencia); lista con buscador y filtros (en marcha ≥ 3 km/h,
+  detenidos, sin conexión), marcadores HTML (flecha según el rumbo, color por estado, código), ficha con datos y sus cámaras en
+  vivo (`LvSession` en secundario), «Abrir en grilla» (`#/fleet/live?dev=`), seguir al vehículo y recorrido de 2 h. Ajustes del
+  mapa para `fleet.manage`. GOTCHA: MapLibre le pone `position: relative` al contenedor (anula `inset: 0`): darle alto y ancho.
+- **De paso**: el hub manda `DeviceStatus` como número y `live.js` lo comparaba con texto (el árbol marcaba caídos a los equipos
+  que cambiaban de estado): se normaliza.
+- **Probado** con el 123456: posiciones en la tabla (11:45 de Chile → 14:45Z), API de últimas y de recorrido, mapa web (Edge por
+  CDP, `isp1\fleet-map.mjs`) con el marcador en su lugar real, ficha con video y sin errores JS; con teselas de OSM solo para
+  esa verificación (el servidor de prueba quedó «sin mapa»).
+- **Cliente WPF**: riel y tarjeta «Mapa de flota» abren `FleetMapWindow`: la MISMA página web (`/?embed=1#/fleet/map`; con
+  `embed=1` el panel oculta menú, barra, títulos y aviso de licencia) en un WebView2 (`Microsoft.Web.WebView2` 1.0.4258.31, usa el
+  WebView2 Runtime de Windows; perfil propio en `%LOCALAPPDATA%\CLRTrueCentralVMS\WebView2`). La sesión del cliente se deja en el
+  localStorage del origen del servidor antes de que cargue el panel; el certificado propio se acepta solo si su llave es la que
+  el cliente confía (`ServerTrust.Validate`); no navega a otros sitios ni abre ventanas. «Abrir en grilla» de la ficha manda
+  `postMessage({type:"fleet-open", deviceId})` y el cliente abre ese vehículo en Flota en vivo (`OpenFleetVehicle`). Botón
+  «Recargar» que vuelve a dejar el token vigente (tras un re-login automático).
+- **Probado en el cliente** (copia de prueba, UI Automation y captura): el mapa carga con la sesión del cliente y el vehículo en su
+  lugar, y «Abrir en grilla» abre Flota en vivo con sus 4 cámaras. De paso se vio el corte por inactividad del cliente (cortó a
+  los 30 s porque nadie tocaba el PC): ahora abrir una cámara también cuenta como actividad.
+- **Pendiente de la fase 2**: minimapa en Flota en vivo, fuentes para los nombres de calles del PMTiles y probar ese modo con un
+  extracto real de Chile.
+
+### Flota — fase 3: grabaciones del DVR móvil y recorridos — 2026-10-23
+
+- **Grabaciones de un grabador ISUP 2.0/4.0** (sin ISAPI): búsqueda de archivos con `NET_ECMS_StartFindFile_V11` +
+  `FindNextFile_V11` (`IsupEngine.GetRecordingFiles`, ruta del host `GET /files/{id}/{canal}?from&to`, `yyyyMMddTHHmmss` en hora
+  del equipo). El driver arma los tramos (tipo 0 = continua, el resto = alarma) y los días del mes con esa búsqueda.
+- **Reproducción** solo por NOMBRE de archivo (`byPlayBackMode = 0`): se busca el archivo que contiene la hora pedida y se
+  reproduce hasta el final de ese archivo (la línea de tiempo pide el siguiente aparte). GOTCHAS con el MDVR V4.1.2 build160608:
+  - el enlace llega al puerto de reproducción ANTES de que vuelva `NET_ECMS_StartPlayBack`, con sesión 0 y SIN el ID del equipo
+    ni el canal: las reproducciones 2.0/4.0 se piden de a una en todo el servidor (`_legacyPbGate`) hasta que llega su enlace (o
+    20 s), y el enlace se empareja con la única que espera (`_pbAwaiting`). Con 4 pedidos a la vez no se sabía cuál era cuál;
+  - para empezar a mitad del archivo, el desplazamiento por segundos (`dwSeekType = 1`) se acepta pero el equipo no manda nada:
+    se usa el de bytes, estimado en proporción al tamaño (pedidas las 10:30:00, la imagen empezó a las 10:30:05);
+  - un primer intento fallido (error 10) dejó al equipo desconectado unos minutos;
+  - los canales SIN cámara también tienen archivos (graban «NO VIDEO» o nada): abren el enlace y no entregan video.
+- **Permisos**: un canal móvil en Reproducción exige además `fleet.view` y el módulo `module_fleet` licenciado
+  (`PlaybackApi.FleetDeniedAsync`: tramos, días, concesión y exportación).
+- **Web** Flota → **Recorridos** (`fleet-track.js`, `#/fleet/track?v=ID`, permiso `fleet.history`): vehículo y rango (hasta 7
+  días), línea coloreada por velocidad (gris < 5, verde, ámbar ≥ 50, rojo ≥ 90 km/h), detenciones (≥ 3 min en 60 m) en el mapa y en
+  la lista, resumen (distancia sin saltos imposibles, máxima, tiempo en marcha), animación 1× a 64× que salta los huecos largos,
+  «Ver video aquí» (hasta 4 cámaras desde esa hora con `PbSession`, abiertas de a una) y exportación CSV/KML/GPX en el navegador
+  (bitácora `fleet/track-exported` por `client-event`).
+- **Probado** con el 123456 (una sola cámara, en el canal 1): exportación de 20 s desde el inicio de un archivo y desde la mitad
+  (H.264 960×576, 15 fps, con la posición GPS estampada por el grabador); página Recorridos en Edge por CDP
+  (`isp1\fleet-track.mjs`): resumen, detención, animación y video grabado del canal 1 en ~20 s, sin errores JS.
+- **Pendiente de la fase 3**: probar un recorrido con el vehículo en movimiento (la línea por velocidad solo se vio sin desplazarse),
+  y la línea de tiempo de Reproducción saltando de un archivo al siguiente.
+
+### Flota — fase 4: eventos del vehículo y geocercas — 2026-10-23
+
+- **Eventos** (`FleetEvents`, migración `FleetEvents`; `Services\Fleet\FleetEventService`), tres fuentes:
+  - alarmas ISUP del grabador (`IsupService.AlarmReceived`, solo el comienzo, Action 0) según EN_ALARM_TYPE de HCISUPAlarm.h:
+    13 pánico, 10 exceso de velocidad, 114/115 y 40965/40966 volcamiento/choque, 40963/40964 aceleración/frenada, 40967/40968
+    giro brusco, 40962/40969 conducción anómala, 40971/40972 salida de pista, 40973 puerta abierta en marcha, 40970 sobrecarga,
+    40974 ADAS, 41009 radar, 40961 temperatura, 6 entrada de alarma, 5/7 video, 0/1/17/706 disco o grabación. El 9 (formato de
+    video que no coincide, lo manda el 123456 por los canales sin cámara) se ignora. Repetido en < 60 s (por canal): uno;
+  - geocercas, con cada posición nueva (`FleetPositionService.PositionsAccepted`, solo las más nuevas que la última conocida);
+  - conexión del grabador (informativa, nace atendida).
+  Gravedad: crítica (pánico, choque, volcamiento), informativa (conexión), advertencia (el resto). Se guarda con la última
+  posición; va por el hub (`FleetEvent`, `FleetEventAcknowledged`, permiso `fleet.view` y alcance del vehículo) y dispara el
+  disparador nuevo **«Evento de vehículo (Flota)»** (`fleet-event`; filtros por tipo, vehículo y geocerca, más la gravedad; solo
+  con `module_fleet` en la licencia; marcas {vehiculo}, {patente}, {velocidad}, {latitud}, {longitud}, {canal}). Retención: la
+  de las posiciones. API `GET /api/fleet/events` (vehículo, rango, pendientes) y `POST /api/fleet/events/{id}/ack` (nota;
+  bitácora `event-acknowledged`).
+- **Vehículo desconectado ≠ equipo caído**: `DeviceStatusMonitor` ya no dispara «Conexión de un equipo» por un grabador móvil
+  (el panel de inicio ya los excluía); su conexión va como evento informativo del vehículo.
+- **Geocercas** (`Geofences`): polígono, círculo (centro + radio) o corredor (línea + ancho total), avisos de entrada y salida,
+  velocidad máxima dentro, vehículos (vacío = toda la flota), color. `Geo.DistanceOutside` (proyección local en metros) y
+  `FleetEventService.Step` (función pura): la primera posición solo fija el estado, salir exige 20 m fuera del borde
+  (histéresis contra el ruido del GPS) y el exceso de velocidad avisa una vez por pasada y se rearma al bajar 5 km/h; editar una
+  geocerca la vuelve a tomar sin avisar. API `/api/fleet/geofences` (ver: `fleet.view`; crear/editar/borrar: `fleet.manage` +
+  módulo; bitácora `geofence-created/updated/deleted`).
+- **Web**: el Mapa tiene pestañas Vehículos | Eventos (contador de pendientes, «Ver», «Atender» con nota, aviso inmediato de los
+  críticos) | Geocercas (lista, dibujo con clics en el mapa, editar, redibujar, eliminar); el vehículo con eventos sin atender se
+  marca en rojo (`fleet-events.js`). El corredor se dibuja con su ancho real (grosor según el zoom). Recorridos muestra los
+  eventos del rango sobre la línea y en la lista (clic = la animación salta a esa hora). GOTCHA MapLibre: agregar capas antes de
+  que el estilo termine de cargar lanza «Style is not done loading»: reintentar con `map.once("idle", …)` (el «load» puede haber
+  pasado ya); afectaba también a «Ver recorrido» pulsado apenas abierta la página.
+- **Probado**: geometría y transiciones con trayectorias simuladas (programa de prueba con 19 verificaciones: polígono cóncavo,
+  círculo, corredor, ruido en el borde, dos excesos con rearme, salida con histéresis, clasificación de alarmas); con el 123456
+  (quieto): evento de conexión real, geocercas por API (validaciones), automatización «Evento de vehículo» → aviso en el centro
+  de eventos, y en Edge: pestañas, marcador en rojo, atender, dibujar un polígono, Recorridos con eventos y el acuse llegando
+  por el hub a otra página abierta; bitácora. Los eventos pendientes de la prueba se insertaron a mano en la base aislada.
+- **Pendiente de la fase 4**: una alarma real del grabador (pánico con el botón del vehículo, si lo tiene cableado a una entrada) y
+  una geocerca cruzada en movimiento; MDVR ISUP 5.0 (sus alarmas vienen como texto ISAPI, no como alarma básica: no se clasifican
+  todavía); aviso sonoro propio del mapa (hoy el sonido va por una automatización con «Avisar a los operadores»).
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

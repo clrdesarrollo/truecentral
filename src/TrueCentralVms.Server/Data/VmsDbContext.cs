@@ -23,6 +23,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<StreamSession> StreamSessions => Set<StreamSession>();
+    /// <summary>Vehículos de la flota (módulo Flota); su grabador es un Device con IsMobile.</summary>
+    public DbSet<Vehicle> Vehicles => Set<Vehicle>();
+    public DbSet<FleetEvent> FleetEvents => Set<FleetEvent>();
+    public DbSet<Geofence> Geofences => Set<Geofence>();
 
     /// <summary>Reconocimientos de patentes (módulo Aplicaciones → ANPR).</summary>
     public DbSet<PlateEvent> PlateEvents => Set<PlateEvent>();
@@ -121,6 +125,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         (typeof(Speaker), nameof(Speaker.Enabled), nameof(Speaker.DisabledByLicense)),
         (typeof(Intercom), nameof(Intercom.Enabled), nameof(Intercom.DisabledByLicense)),
         (typeof(IoModule), nameof(IoModule.Enabled), nameof(IoModule.DisabledByLicense)),
+        (typeof(Vehicle), nameof(Vehicle.Enabled), nameof(Vehicle.DisabledByLicense)),
         (typeof(Workflow), nameof(Workflow.Enabled), nameof(Workflow.DisabledByLicense)),
         (typeof(User), nameof(User.Enabled), nameof(User.DisabledByLicense)),
         (typeof(Device), nameof(Device.AnprEnabled), nameof(Device.AnprDisabledByLicense)),
@@ -241,6 +246,39 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(d => d.IsupDeviceId).HasMaxLength(32);
             // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
             e.HasIndex(d => d.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
+        });
+
+        // Vehículos de la flota: un grabador por vehículo; borrar el vehículo borra su grabador (y este, sus canales).
+        modelBuilder.Entity<Vehicle>(e =>
+        {
+            e.Property(v => v.Code).HasMaxLength(64);
+            e.Property(v => v.Plate).HasMaxLength(16);
+            e.Property(v => v.Kind).HasMaxLength(64);
+            e.Property(v => v.Notes).HasMaxLength(1024);
+            e.HasIndex(v => v.Code).IsUnique();
+            e.HasIndex(v => v.DeviceId).IsUnique();
+            e.HasOne(v => v.Device).WithOne().HasForeignKey<Vehicle>(v => v.DeviceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Eventos de vehículos: se listan por vehículo y hora, y los pendientes de acusar.
+        modelBuilder.Entity<FleetEvent>(e =>
+        {
+            e.Property(x => x.Kind).HasMaxLength(32);
+            e.Property(x => x.Description).HasMaxLength(256);
+            e.Property(x => x.AcknowledgedBy).HasMaxLength(128);
+            e.Property(x => x.AckNote).HasMaxLength(512);
+            e.HasIndex(x => new { x.VehicleId, x.At });
+            e.HasIndex(x => x.At);
+            e.HasIndex(x => x.AcknowledgedAt).HasFilter("\"AcknowledgedAt\" IS NULL");
+            e.HasOne(x => x.Vehicle).WithMany().HasForeignKey(x => x.VehicleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Geofence>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(80);
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Color).HasMaxLength(16);
+            e.HasIndex(x => x.Name).IsUnique();
         });
 
         modelBuilder.Entity<Channel>(e =>

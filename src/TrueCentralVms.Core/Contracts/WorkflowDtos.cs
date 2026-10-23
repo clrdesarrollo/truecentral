@@ -30,9 +30,11 @@ public static class WorkflowTriggerTypes
     public const string Webhook = "webhook";
     /// <summary>Una entrada de un módulo de E/S se activó o volvió a reposo (pulsador, lazo detector, sensor).</summary>
     public const string IoInput = "io-input";
+    /// <summary>Evento de un vehículo de la flota: pánico, choque, conducción, geocerca, conexión… (ver FleetEventKinds).</summary>
+    public const string FleetEvent = "fleet-event";
 
     public static readonly string[] All =
-        [AlarmEvent, PanelStatus, DeviceStatus, VideoEvent, PlateRecognized, AccessEvent, Schedule, Webhook, IoInput];
+        [AlarmEvent, PanelStatus, DeviceStatus, VideoEvent, PlateRecognized, AccessEvent, Schedule, Webhook, IoInput, FleetEvent];
 }
 
 /// <summary>Acciones disponibles. La clave se guarda en la base.</summary>
@@ -265,7 +267,15 @@ public sealed record WorkflowConditionsDto(
     /// <summary>Entradas sueltas ("módulo:número", desde 0). Se suman a <see cref="IoModuleIds"/>: dispara cualquiera de las dos.</summary>
     IReadOnlyList<string>? IoInputKeys = null,
     /// <summary>Cambio que dispara: "Active" (se activó) | "Inactive" (volvió a reposo). Vacío = ambos.</summary>
-    IReadOnlyList<string>? IoInputStates = null);
+    IReadOnlyList<string>? IoInputStates = null,
+
+    // --- Vehículos de la flota (disparador fleet-event) ---
+    /// <summary>Vehículos (Ids de Vehicles). Vacío = toda la flota.</summary>
+    IReadOnlyList<int>? VehicleIds = null,
+    /// <summary>Tipos de evento de vehículo (FleetEventKinds: "panic", "geofence-enter"…). Vacío = cualquiera.</summary>
+    IReadOnlyList<string>? FleetEventKinds = null,
+    /// <summary>Geocercas (Ids de Geofences) para los eventos de geocerca. Vacío = cualquiera.</summary>
+    IReadOnlyList<int>? GeofenceIds = null);
 
 /// <summary>
 /// Franja horaria semanal: días de la semana (0 = domingo; vacío = todos) y

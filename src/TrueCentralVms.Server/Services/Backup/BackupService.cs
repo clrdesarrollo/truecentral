@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services.Backup;
 
@@ -31,7 +32,7 @@ public sealed record BackupProgress(string Stage, long Bytes, long ExpectedBytes
 /// La restauración es por consola con el servicio detenido (<see cref="BackupRestore"/>): nunca desde la web.
 /// </summary>
 public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IServiceScopeFactory scopes,
-    CredentialProtector protector, AuditService audit, ILogger<BackupService> logger) : BackgroundService
+    CredentialProtector protector, AuditService audit, ILogger<BackupService> logger) : SupervisedBackgroundService
 {
     public const string SettingsBlob = "backup.settings";
     public const string StateBlob = "backup.state";
@@ -548,7 +549,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
 
     // ------------------------------------------------------------------ programador
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         try
         {
@@ -607,20 +608,26 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
     }
 
     /// <summary>
+    /// Un respaldo bueno así de reciente (el de antes de actualizar, minutos atrás) cubre el diario de hoy. Corto a
+    /// propósito: si se omite el diario, el siguiente sale 24 h después, y el hueco no debe pasar las 26 h con que
+    /// <see cref="Health"/> da los respaldos por atrasados (con 12 h, un respaldo hecho a media tarde dejaba al día
+    /// siguiente sin respaldo hasta pasadas las 26 h).
+    /// </summary>
+    private static readonly TimeSpan RecentEnough = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// ¿Toca respaldar? "programado": ya pasó la hora de hoy y hoy no se intentó. "atrasado": no hay un respaldo bueno
     /// de las últimas 26 h (servidor apagado a la hora, o el anterior falló) y el último intento fue hace más de una
-    /// hora: reintenta solo, sin martillar. En una instalación nueva, el primero sale a los pocos minutos de arrancar.
+    /// hora: reintenta solo, sin martillar. Al arrancar se espera un minuto, para no respaldar en medio del arranque;
+    /// en una instalación nueva el primero sale entonces.
     /// </summary>
-    /// <summary>Un respaldo bueno así de reciente cubre el diario de hoy.</summary>
-    private static readonly TimeSpan RecentEnough = TimeSpan.FromHours(12);
-
     private string? DueReason(DateTime now)
     {
         if (now.TimeOfDay >= _settings.DailyTimeOfDay.ToTimeSpan() && _state.LastScheduledDay != now.ToString("yyyy-MM-dd"))
             return "programado";
         bool stale = _state.LastSuccessUtc is not { } ok || DateTime.UtcNow - ok > TimeSpan.FromHours(26);
         bool rested = _state.LastAttemptUtc is not { } last || DateTime.UtcNow - last > TimeSpan.FromHours(1);
-        return stale && rested && DateTime.UtcNow - _startedUtc > TimeSpan.FromMinutes(5) ? "atrasado" : null;
+        return stale && rested && DateTime.UtcNow - _startedUtc > TimeSpan.FromMinutes(1) ? "atrasado" : null;
     }
 
     private async Task AuditRestoreMarkerAsync()
@@ -637,13 +644,16 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         catch (Exception ex) { logger.LogWarning(ex, "Respaldos: no se pudo registrar la restauración."); }
     }
 
-    /// <summary>Salud para el panel de servicios: falla si no hay un respaldo bueno reciente o si el segundo destino falla.</summary>
+    /// <summary>
+    /// Salud para el panel de servicios: false si no hay un respaldo bueno reciente o si el segundo destino falla. Es una
+    /// advertencia (<see cref="Supervisor.BackupManagedService"/>), no una caída: reiniciar el programador no la arregla.
+    /// </summary>
     public (bool Healthy, string Detail) Health()
     {
         if (Busy) return (true, "Respaldando…");
         if (_state.LastSuccessUtc is not { } ok)
             return DateTime.UtcNow - _startedUtc < TimeSpan.FromHours(26) && _state.LastError is null
-                ? (true, "Todavía no hay respaldos: el primero se hace a los pocos minutos de arrancar.")
+                ? (true, "Todavía no hay respaldos: el primero se hace al minuto de arrancar.")
                 : (false, $"No hay ningún respaldo bueno. {_state.LastError}".Trim());
         if (_state.LastError is { } error && _state.LastAttemptUtc > ok)
             return (false, $"El último respaldo falló: {error}");

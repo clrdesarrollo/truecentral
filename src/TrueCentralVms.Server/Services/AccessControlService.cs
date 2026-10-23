@@ -5,6 +5,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -30,7 +31,7 @@ public sealed class AccessControlService(
     Isup.IsupService isup,
     Isup.IsupHostManager isupHost,
     Licensing.LicenseService license,
-    ILogger<AccessControlService> logger) : BackgroundService
+    ILogger<AccessControlService> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
     /// <summary>Equipos que se sondean a la vez (los ISAPI son lentos y limitan sesiones).</summary>
@@ -226,7 +227,7 @@ public sealed class AccessControlService(
     // Sondeo de estado
     // ------------------------------------------------------------------
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         // Un equipo ISUP que se conecta se sondea de inmediato y, si se agregó sin conexión, se completa (puertas y capacidades).
         isup.DeviceOnlineChanged += (isupId, online) =>

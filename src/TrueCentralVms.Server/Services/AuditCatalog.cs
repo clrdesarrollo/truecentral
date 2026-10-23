@@ -255,6 +255,22 @@ public static class AuditCatalog
             new("agent-revoked", "TrueCentral Speaker revocado"),
             new("test-tone", "Tono de prueba en parlante"),
         ]),
+        new("fleet", "Flota (DVR móviles)",
+        [
+            new("vehicle-created", "Vehículo agregado"),
+            new("vehicle-updated", "Vehículo modificado"),
+            new("vehicle-deleted", "Vehículo eliminado"),
+            new("vehicles-imported", "Vehículos importados desde CSV"),
+            new("live-idle-stopped", "Video de vehículos cortado por inactividad"),
+            new("track-viewed", "Recorrido de un vehículo consultado"),
+            new("track-exported", "Recorrido de un vehículo exportado (CSV, KML o GPX)"),
+            new("event-acknowledged", "Evento de un vehículo atendido"),
+            new("geofence-created", "Geocerca creada"),
+            new("geofence-updated", "Geocerca modificada"),
+            new("geofence-deleted", "Geocerca eliminada"),
+            new("map-settings-updated", "Ajustes del mapa de flota modificados"),
+            new("positions-purged", "Posiciones GPS antiguas borradas por la retención"),
+        ]),
         new("io", "Módulos de E/S",
         [
             new("io-module-created", "Módulo de E/S agregado"),
@@ -366,6 +382,7 @@ public static class AuditCatalog
             new("status-viewed", "Estado de la conexión ISUP consultado"),
             new("legacy-enabled", "Equipos ISUP 2.0/4.0 (sin clave) habilitados"),
             new("legacy-disabled", "Equipos ISUP 2.0/4.0 deshabilitados"),
+            new("gps-viewed", "Posiciones GPS de equipos móviles consultadas"),
         ]),
         new("backup", "Respaldos",
         [
@@ -388,6 +405,8 @@ public static class AuditCatalog
             new("service-stopped", "Servicio detenido"),
             new("service-restarted", "Servicio reiniciado"),
             new("service-failed", "Servicio caído (detectado por el supervisor)"),
+            new("service-degraded", "Servicio con advertencia (detectado por el supervisor)"),
+            new("service-degraded-cleared", "Advertencia de servicio resuelta"),
             new("service-autorestart-changed", "Auto-reinicio de servicio cambiado"),
             new("server-restart-requested", "Reinicio completo del servidor solicitado"),
             new("client-installer-downloaded", "Instalador del cliente de escritorio descargado"),
@@ -416,5 +435,7 @@ public static class AuditCatalog
             ["playback-export-saved"] = ("playback", "export-saved", "Guardó una exportación de grabación"),
             ["playback-export-cancelled"] = ("playback", "export-cancelled", "Canceló una exportación de grabación"),
             ["playback-export-failed"] = ("playback", "export-failed", "Falló una exportación de grabación"),
+            ["fleet-live-idle-stopped"] = ("fleet", "live-idle-stopped", "Se cortó el video de vehículos por inactividad del operador"),
+            ["fleet-track-exported"] = ("fleet", "track-exported", "Exportó el recorrido de un vehículo"),
         };
 }

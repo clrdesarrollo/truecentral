@@ -57,7 +57,7 @@ public sealed record LicensePackageDefinition(
 public static class LicenseCatalog
 {
     /// <summary>Versión del catálogo: subirla con cualquier cambio de este archivo.</summary>
-    public const int Version = 4;
+    public const int Version = 5;
 
     /// <summary>Formato del JSON exportado (lo valida el servidor de licencias).</summary>
     public const int SchemaVersion = 1;
@@ -65,7 +65,7 @@ public static class LicenseCatalog
     // Identidad del producto: el servidor de licencias la actualiza en cada importación.
     public const string ProductName = "CLRobotics TrueCentral VMS";
     public const string ProductDescription =
-        "Plataforma de video, alarmas, cerco eléctrico, control de acceso, muro de video, parlantes IP, citofonía, módulos de E/S y pantallas de alarma";
+        "Plataforma de video, flota (DVR móviles), alarmas, cerco eléctrico, control de acceso, muro de video, parlantes IP, citofonía, módulos de E/S y pantallas de alarma";
 
     // Valores INICIALES: solo se usan al crear el producto en el servidor de
     // licencias; después se ajustan en su web (política y texto comercial).
@@ -78,7 +78,7 @@ public static class LicenseCatalog
         "de este certificado (activación en línea).\n" +
         "3. Si el servidor no tiene salida a internet, genere ahí la \"solicitud de activación\" " +
         "(.req), envíela a soporte@clrobotics.cl y luego importe el archivo .lic que recibirá.\n\n" +
-        "Las expansiones (canales, decodificadores, paneles de alarma y de cerco, parlantes, frentes de citofonía, módulos de E/S, pantallas de alarma) " +
+        "Las expansiones (canales, vehículos de flota, decodificadores, paneles de alarma y de cerco, parlantes, frentes de citofonía, módulos de E/S, pantallas de alarma) " +
         "se suman automáticamente a esta licencia: no requieren activación aparte.";
 
     /// <summary>Características, en el orden del certificado y del backoffice.</summary>
@@ -92,6 +92,9 @@ public static class LicenseCatalog
         Bool(LicenseFeatures.ModulePlayback, "Reproducción remota de grabaciones", "Video", true),
         Bool(LicenseFeatures.ModuleAnpr, "Reconocimiento de patentes (ANPR)", "Video", false),
         Int(LicenseFeatures.AnprChannels, "Fuentes ANPR", "Video", 0, "Fuentes"),
+
+        Bool(LicenseFeatures.ModuleFleet, "Módulo de flota (DVR móviles)", "Flota", false),
+        Int(LicenseFeatures.FleetVehicles, "Vehículos de flota", "Flota", 0, "Vehículos"),
 
         Bool(LicenseFeatures.ModuleAlarms, "Módulo de paneles de alarma", "Alarmas", false),
         Int(LicenseFeatures.AlarmPanels, "Paneles de alarma", "Alarmas", 0, "Paneles"),
@@ -181,6 +184,15 @@ public static class LicenseCatalog
         Addon("addon_automation_25", "Expansión 25 automatizaciones",
             (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 25)),
         Addon("addon_clients_5", "Expansión 5 clientes simultáneos", (LicenseFeatures.MaxClientSessions, 5)),
+        // Flota se vende aparte de las ediciones (decisión del usuario, 2026-10-23): base de 10 vehículos y expansiones.
+        Addon("addon_fleet_base_10", "Flota base: módulo de DVR móviles con 10 vehículos",
+            (LicenseFeatures.ModuleFleet, true), (LicenseFeatures.FleetVehicles, 10)),
+        Addon("addon_fleet_vehicles_1", "Expansión 1 vehículo de flota",
+            (LicenseFeatures.ModuleFleet, true), (LicenseFeatures.FleetVehicles, 1)),
+        Addon("addon_fleet_vehicles_10", "Expansión 10 vehículos de flota",
+            (LicenseFeatures.ModuleFleet, true), (LicenseFeatures.FleetVehicles, 10)),
+        Addon("addon_fleet_vehicles_50", "Expansión 50 vehículos de flota",
+            (LicenseFeatures.ModuleFleet, true), (LicenseFeatures.FleetVehicles, 50)),
     ];
 
     // Mismas restricciones que el servidor de licencias (SlugField de 50, nombres de 120...)

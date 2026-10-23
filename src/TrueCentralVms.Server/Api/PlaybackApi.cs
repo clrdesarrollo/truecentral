@@ -39,6 +39,7 @@ public static class PlaybackApi
             if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{deviceId}/{channelNumber}",
                     $"{channel.Device.Name} · {channel.Name}", "buscar grabaciones de");
+            if (await FleetDeniedAsync(ctx, channel) is { } fleetDenied) return fleetDenied;
 
             var device = channel.Device;
             if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
@@ -133,6 +134,7 @@ public static class PlaybackApi
             if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{deviceId}/{channelNumber}",
                     $"{channel.Device.Name} · {channel.Name}", "buscar grabaciones de");
+            if (await FleetDeniedAsync(ctx, channel) is { } fleetDenied) return fleetDenied;
 
             var device = channel.Device;
             if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
@@ -315,6 +317,7 @@ public static class PlaybackApi
             if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
                 return await ctx.OutOfScopeAsync(session, "channel", $"{deviceId}/{rtspChannel}",
                     $"{channel.Device.Name} · {channel.Name}", "descargar grabaciones de");
+            if (await FleetDeniedAsync(ctx, channel) is { } fleetDenied) return fleetDenied;
 
             var device = channel.Device;
             if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
@@ -496,6 +499,20 @@ public static class PlaybackApi
     /// auditoría. La comparten el RTSP del cliente de escritorio y el WebRTC
     /// del panel web.
     /// </summary>
+    /// <summary>
+    /// Grabaciones de una cámara de vehículo: además de «Ver grabaciones», piden ver la flota y el módulo Flota en la licencia
+    /// (las de las cámaras fijas, nada más). Null = permitido.
+    /// </summary>
+    private static async Task<IResult?> FleetDeniedAsync(HttpContext ctx, Data.Entities.Channel channel)
+    {
+        if (!channel.Device.IsMobile) return null;
+        if (ApiSecurity.Require(ctx, Permissions.FleetView, out _) is { } noFleet) return noFleet;
+        var license = ctx.RequestServices.GetRequiredService<Services.Licensing.LicenseService>();
+        return license.Deny(LicenseFeatures.ModuleFleet, null, 0, 0) is { } denied
+            ? await license.DenyAsync(ctx, denied, "channel", $"{channel.Device.Name} · {channel.Name}")
+            : null;
+    }
+
     private static async Task<PlaybackGrant> PrepareGrantAsync(HttpContext ctx, SessionInfo session,
         PlaybackRequestDto request, VmsDbContext db, DriverRegistry drivers, CredentialProtector protector,
         StreamTokenService streamTokens, MediaMtxManager mtx, Services.Rtsp.PlaybackRelayManager relays,
@@ -519,6 +536,7 @@ public static class PlaybackApi
         if (!(await ctx.ScopeAsync(session)).CanViewChannel(channel.Id))
             return new PlaybackGrant(await ctx.OutOfScopeAsync(session, "channel", $"{request.DeviceId}/{request.RtspChannel}",
                 $"{channel.Device.Name} · {channel.Name}", "reproducir grabaciones de"));
+        if (await FleetDeniedAsync(ctx, channel) is { } fleetDenied) return new PlaybackGrant(fleetDenied);
 
         var device = channel.Device;
         if (drivers.Find(device.DriverKey)?.Create() is not { } driver)

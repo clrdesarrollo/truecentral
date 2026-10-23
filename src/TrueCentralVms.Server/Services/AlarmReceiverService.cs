@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -36,7 +37,7 @@ public sealed class AlarmReceiverService(
     AlarmPanelService alarms,
     AuditService audit,
     IConfiguration config,
-    ILogger<AlarmReceiverService> logger) : BackgroundService
+    ILogger<AlarmReceiverService> logger) : SupervisedBackgroundService
 {
     private const int MaxFrameBytes = 4096;
     private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(10);
@@ -47,7 +48,7 @@ public sealed class AlarmReceiverService(
 
     public int Port { get; private set; }
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    protected override async Task RunAsync(CancellationToken ct)
     {
         if (!config.GetValue("Alarms:Receiver:Enabled", true))
         {

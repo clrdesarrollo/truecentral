@@ -23,7 +23,7 @@ const WFE_ICONS = {
 };
 const WFE_TRIGGER_ICONS = {
   "alarm-event": "🚨", "panel-status": "📡", "device-status": "🔌", "video-event": "🎥",
-  "plate-recognized": "🚗", "access-event": "🪪", schedule: "🕒", webhook: "🔗", "io-input": "🔘",
+  "plate-recognized": "🚗", "access-event": "🪪", schedule: "🕒", webhook: "🔗", "io-input": "🔘", "fleet-event": "🚌",
 };
 
 /// Tipos de evento que traen número de línea/región (reglas de la analítica de la cámara).
@@ -82,6 +82,14 @@ const WFE_VIDEO_KINDS = [
 ];
 const WFE_DEVICE_KINDS = [["video", "Cámaras y grabadores"], ["access", "Terminales de acceso"], ["speaker", "Parlantes IP"], ["io", "Módulos de E/S"]];
 const WFE_IO_STATES = [["Active", "Se activa"], ["Inactive", "Vuelve a reposo"]];
+const WFE_FLEET_KINDS = [["panic", "Botón de pánico"], ["collision", "Choque"], ["rollover", "Volcamiento"],
+  ["overspeed", "Exceso de velocidad (grabador)"], ["harsh-acceleration", "Aceleración brusca"], ["harsh-braking", "Frenada brusca"],
+  ["harsh-turn", "Giro brusco"], ["abnormal-driving", "Conducción anómala"], ["lane-departure", "Salida de pista"],
+  ["door-open-moving", "Puerta abierta en marcha"], ["overload", "Sobrecarga"], ["adas", "ADAS"], ["radar", "Radar"],
+  ["alarm-input", "Entrada de alarma"], ["video-loss", "Pérdida de video"], ["video-tamper", "Cámara tapada"],
+  ["storage-fault", "Falla de disco o grabación"], ["high-temperature", "Temperatura alta"],
+  ["geofence-enter", "Entra a una geocerca"], ["geofence-exit", "Sale de una geocerca"], ["geofence-overspeed", "Exceso de velocidad en geocerca"],
+  ["connected", "Se conecta"], ["disconnected", "Se desconecta"]];
 const WFE_DEVICE_STATUSES = [["Offline", "Sin conexión"], ["AuthFailed", "Credenciales rechazadas"], ["Online", "En línea (recuperado)"]];
 const WFE_ACCESS_KINDS = [["Granted", "Acceso concedido"], ["Denied", "Acceso denegado"], ["Alarm", "Alarma de puerta (forzada, mantenida abierta, sabotaje)"],
   ["DoorOpen", "Puerta abierta"], ["DoorClose", "Puerta cerrada"], ["Other", "Otro"]];
@@ -110,12 +118,12 @@ async function renderWorkflowEditor() {
     return;
   }
 
-  let catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules, workflow = null;
+  let catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules, fleet, workflow = null;
   try {
-    [catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules] = await Promise.all([
+    [catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules, fleet] = await Promise.all([
       wfCatalog(), wfCameras(), Api.get("/api/workflows/devices"), Api.get("/api/workflows/doors"),
       Api.get("/api/alarms/panels"), wfSpeakers(), Api.get("/api/workflows/audio"), Api.get("/api/access/devices"),
-      Api.get("/api/workflows/io-modules"),
+      Api.get("/api/workflows/io-modules"), Api.get("/api/workflows/fleet").catch(() => ({ vehicles: [], geofences: [] })),
     ]);
     if (id) workflow = await Api.get(`/api/workflows/${id}`);
   } catch (err) {
@@ -123,7 +131,7 @@ async function renderWorkflowEditor() {
     return;
   }
 
-  const lists = { catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules };
+  const lists = { catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules, fleet };
   wfEd = {
     id, lists, readOnly,
     name: workflow?.name ?? "",
@@ -1064,6 +1072,12 @@ function wfeConditionsForm(container, node, isTrigger) {
         </div>`);
         break;
 
+      case "fleet-event":
+        field("Tipo de evento", wfeCheckList(WFE_FLEET_KINDS, c.fleetEventKinds, "fkind"),
+          "Nada marcado = cualquiera. Las geocercas se dibujan en Flota → Mapa; los demás eventos los informa el grabador del vehículo.");
+        sources("Vehículos (nada marcado = toda la flota) y, para los eventos de geocerca, cuáles geocercas.");
+        break;
+
       case "io-input":
         sources("Un módulo completo (cualquiera de sus entradas) o solo algunas entradas. Las entradas se nombran en Dispositivos → Módulos de E/S.");
         field("Cambio que dispara", wfeCheckList(WFE_IO_STATES, c.ioInputStates, "iostate"),
@@ -1232,6 +1246,9 @@ function wfeConditionsForm(container, node, isTrigger) {
       case "io-input":
         next.ioInputStates = marked("iostate");
         break;
+      case "fleet-event":
+        next.fleetEventKinds = marked("fkind");
+        break;
       case "schedule":
         if (isTrigger) next.scheduleTimes = strings("wfe-times");
         break;
@@ -1262,6 +1279,7 @@ const WFE_SOURCE_FIELDS = {
   "plate-recognized": { title: "Cámaras ANPR", fields: ["deviceIds"], any: "Cualquier cámara con reconocimiento de patentes", button: "Elegir cámaras…" },
   "access-event": { title: "Terminales y puertas", fields: ["accessDeviceIds", "doorNumbers"], any: "Cualquier terminal o puerta", button: "Elegir terminales y puertas…" },
   "io-input": { title: "Módulos y entradas", fields: ["ioModuleIds", "ioInputKeys"], any: "Cualquier entrada de cualquier módulo", button: "Elegir entradas…" },
+  "fleet-event": { title: "Vehículos y geocercas", fields: ["vehicleIds", "geofenceIds"], any: "Cualquier vehículo y geocerca", button: "Elegir vehículos…" },
 };
 /// Nombre de cada campo para las chips y el resumen: [singular, plural].
 const WFE_SOURCE_WORDS = {
@@ -1269,6 +1287,7 @@ const WFE_SOURCE_WORDS = {
   deviceIds: ["equipo", "equipos"], channelIds: ["cámara", "cámaras"], accessDeviceIds: ["terminal", "terminales"],
   speakerIds: ["parlante", "parlantes"], doorNumbers: ["puerta", "puertas"],
   ioModuleIds: ["módulo", "módulos"], ioInputKeys: ["entrada", "entradas"],
+  vehicleIds: ["vehículo", "vehículos"], geofenceIds: ["geocerca", "geocercas"],
 };
 
 const wfeSourceKey = (field, value) => `${field}|${value}`;
@@ -1311,6 +1330,11 @@ function wfeSourceTree(triggerType) {
         field: "ioModuleIds", value: m.id, label: m.name, hint: "cualquiera de sus entradas",
         children: m.inputs.map((p) => leaf("ioInputKeys", `${m.id}:${p.number}`, p.name === p.code ? p.code : `${p.code} · ${p.name}`)),
       }));
+    case "fleet-event":
+      return [
+        group("Vehículos", (L.fleet?.vehicles || []).map((v) => leaf("vehicleIds", v.id, v.name))),
+        group("Geocercas", (L.fleet?.geofences || []).map((f) => leaf("geofenceIds", f.id, f.name))),
+      ].filter((g) => g.children.length > 0);
     case "access-event":
       return L.accessDevices.map((d) => ({
         field: "accessDeviceIds", value: d.id, label: d.name, hint: "todas sus puertas",
@@ -1502,6 +1526,9 @@ function wfeConditionsSummary(c, triggerType) {
   push(count(c.ioModuleIds, "módulo", "módulos"));
   push(count(c.ioInputKeys, "entrada", "entradas"));
   if (c.ioInputStates?.length) push(names(c.ioInputStates, WFE_IO_STATES));
+  if (c.fleetEventKinds?.length) push(names(c.fleetEventKinds, WFE_FLEET_KINDS));
+  push(count(c.vehicleIds, "vehículo", "vehículos"));
+  push(count(c.geofenceIds, "geocerca", "geocercas"));
   if (c.videoEventKinds?.length) push(names(c.videoEventKinds, WFE_VIDEO_KINDS));
   push(count(c.channelIds, "cámara", "cámaras"));
   if (c.ruleIds?.length) {

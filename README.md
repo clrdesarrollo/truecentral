@@ -1080,6 +1080,7 @@ administrador opera):
 | Base de datos (PostgreSQL embebido) | proceso | `SELECT 1` por Npgsql | **esencial**: solo reiniciar |
 | Media server (MediaMTX) | proceso | proceso vivo **y** su API de control responde | iniciar / detener / reiniciar |
 | Monitor de dispositivos, Contabilidad de sesiones, Paneles de alarma, Receptor SIA DC-09, Parlantes IP, Reconocimiento de patentes, Automatizaciones, Retención de la bitácora | interno | la tarea del `BackgroundService` sigue viva (no terminó ni falló) | iniciar / detener / reiniciar |
+| Respaldos | interno | la tarea del programador sigue viva; sin un respaldo bueno de las últimas 26 h, con el último fallido o con el segundo destino fallando queda **Con advertencia** | iniciar / detener / reiniciar |
 
 Reglas:
 
@@ -1095,8 +1096,18 @@ Reglas:
 - MediaMTX conserva su relanzamiento propio ante una caída del proceso; el
   supervisor lo muestra "Iniciando" mientras esa reposición está pendiente en
   vez de lanzar un segundo arranque encima.
+- Un servicio que funciona pero con un problema que reiniciarlo no arregla
+  (respaldos atrasados) queda **Con advertencia**: se ve en el panel y en el
+  tablero, queda en la bitácora y el supervisor no lo reinicia.
+- Detener un servicio interno o que falle nunca detiene el servidor completo:
+  los `BackgroundService` del catálogo heredan de
+  `SupervisedBackgroundService`, cuya ejecución termina limpia al detenerse y
+  guarda el error en vez de pasárselo al host (con `StopHost`, el host de .NET
+  detiene el proceso cuando la primera ejecución de un `BackgroundService`
+  termina cancelada o con error).
 - Todo cambio de estado se empuja por el hub (`ServiceStateChanged`) y queda
-  en la bitácora (categoría **Sistema**): `service-failed` y los
+  en la bitácora (categoría **Sistema**): `service-failed`,
+  `service-degraded`, `service-degraded-cleared` y los
   `service-restarted` automáticos los firma `sistema`; las órdenes manuales
   (`service-started`, `service-stopped`, `service-restarted`,
   `service-autorestart-changed`, `server-restart-requested`) llevan el
@@ -1107,11 +1118,11 @@ Reglas:
   botón queda deshabilitado.
 
 Para agregar un servicio al supervisor basta con implementar
-`IManagedService` (o envolver un `BackgroundService` con
+`IManagedService` (o envolver un `SupervisedBackgroundService` con
 `HostedServiceAdapter`) y agregarlo al catálogo de `ServiceSupervisor`;
-los `BackgroundService` supervisados se registran como singleton +
-`AddHostedService(sp => sp.GetRequiredService<T>())` para que el supervisor
-tome la MISMA instancia que arranca el host.
+los servicios supervisados implementan `RunAsync` (no `ExecuteAsync`) y se
+registran como singleton + `AddHostedService(sp => sp.GetRequiredService<T>())`
+para que el supervisor tome la MISMA instancia que arranca el host.
 
 API (`/api/system/...`):
 

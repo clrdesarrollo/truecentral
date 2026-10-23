@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Server.Data;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -12,11 +13,11 @@ public sealed class AuditRetentionService(
     IServiceScopeFactory scopeFactory,
     IConfiguration config,
     AuditService audit,
-    ILogger<AuditRetentionService> logger) : BackgroundService
+    ILogger<AuditRetentionService> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(12);
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    protected override async Task RunAsync(CancellationToken ct)
     {
         // Margen para que el arranque (migraciones incluidas) termine primero.
         await Task.Delay(TimeSpan.FromMinutes(1), ct);

@@ -3,9 +3,10 @@ using TrueCentralVms.Server.Services.Backup;
 namespace TrueCentralVms.Server.Services.Supervisor;
 
 /// <summary>
-/// Respaldos en el panel de servicios. Además de la vida del programador, la salud dice si hay un respaldo bueno
-/// reciente y si el segundo destino funciona: así una falla de respaldos se ve (y avisa) como cualquier servicio caído.
-/// Reiniciarlo hace que el programador reintente de inmediato si no hay un respaldo reciente.
+/// Respaldos en el panel de servicios. Solo la vida del programador decide si está caído (y el watchdog lo reinicia).
+/// Que no haya un respaldo bueno reciente o que falle el segundo destino es una advertencia: se ve y queda en la
+/// bitácora, pero reiniciar el programador no hace un respaldo, así que el watchdog no lo reinicia. El programador
+/// reintenta solo (ver <see cref="BackupService"/>) y un administrador puede respaldar a pedido en Sistema → Respaldos.
 /// </summary>
 public sealed class BackupManagedService(BackupService backups) : IManagedService
 {
@@ -27,6 +28,6 @@ public sealed class BackupManagedService(BackupService backups) : IManagedServic
         var running = await _inner.CheckAsync(ct);
         if (!running.Healthy) return running;
         var (healthy, detail) = backups.Health();
-        return healthy ? ServiceHealth.Ok(detail) : ServiceHealth.Down(detail);
+        return healthy ? ServiceHealth.Ok(detail) : ServiceHealth.Warning(detail);
     }
 }

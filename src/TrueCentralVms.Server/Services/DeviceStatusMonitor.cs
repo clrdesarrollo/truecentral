@@ -7,6 +7,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services.Isup;
 using TrueCentralVms.Server.Services.Licensing;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -28,12 +29,12 @@ public sealed class DeviceStatusMonitor(
     LicenseService license,
     MediaMtxManager mtx,
     AuditService audit,
-    ILogger<DeviceStatusMonitor> logger) : BackgroundService
+    ILogger<DeviceStatusMonitor> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(4);
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    protected override async Task RunAsync(CancellationToken ct)
     {
         // Un equipo ISUP que se conecta o se cae se refleja al instante, sin esperar la pasada.
         isup.DeviceOnlineChanged += (isupId, online) => _ = Task.Run(() => OnIsupChangedAsync(isupId, online, ct), ct);
@@ -74,7 +75,7 @@ public sealed class DeviceStatusMonitor(
                 ? isup.IsOnline(isupId)
                 : await IsReachableAsync(x.Device.Host, x.Device.SdkPort, ct))));
 
-        var changed = new List<(DeviceDto Dto, DeviceStatus Previous)>();
+        var changed = new List<(DeviceDto Dto, DeviceStatus Previous, bool Mobile)>();
         foreach (var (device, channelCount, enabledCount, reachable) in results)
         {
             var newStatus = reachable ? DeviceStatus.Online : DeviceStatus.Offline;
@@ -89,7 +90,7 @@ public sealed class DeviceStatusMonitor(
                     device.SdkPort, device.RtspPort, device.Username, device.Model, device.SerialNumber,
                     device.FirmwareVersion, channelCount, device.Status, device.LastSeenAt, device.CreatedAt,
                     device.AnprEnabled, enabledCount, IsupDeviceId: device.IsupDeviceId,
-                    HasIsupKey: device.IsupKeyCiphertext is { Length: > 0 }), previous));
+                    HasIsupKey: device.IsupKeyCiphertext is { Length: > 0 }), previous, device.IsMobile));
             }
         }
         await db.SaveChangesAsync(ct);
@@ -97,13 +98,16 @@ public sealed class DeviceStatusMonitor(
         // Resuelto al vuelo: el motor de automatizaciones contiene acciones
         // que a su vez dependen de otros servicios; por constructor sería un ciclo.
         var workflows = scope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>();
-        foreach (var (dto, previous) in changed)
+        foreach (var (dto, previous, mobile) in changed)
         {
             logger.LogInformation("Dispositivo '{Name}' ({Host}) ahora está {Status}.", dto.Name, dto.IsupDeviceId is { } logId ? $"ISUP {logId}" : dto.Host, dto.Status);
             // Solo a quien ve alguno de sus canales (alcance por ubicación).
             await hub.SendAsync(VmsHubContract.DeviceStatusChanged, dto, s => s.CanViewDevice(dto.Id), ct);
             // La primera lectura tras arrancar (Desconocido → En línea) no es
             // una recuperación: no dispara automatizaciones.
+            // Un vehículo apagado se desconecta: no es un equipo caído. Su conexión va como evento informativo del vehículo
+            // (disparador «Evento de vehículo», FleetEventService), no como «Conexión de un equipo».
+            if (mobile) continue;
             if (previous != DeviceStatus.Unknown || dto.Status != DeviceStatus.Online)
                 workflows.Publish(Workflows.WorkflowTrigger.FromDeviceStatus("video", dto.Id, dto.Name,
                     dto.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : dto.Host, dto.Model, dto.Status.ToString(),

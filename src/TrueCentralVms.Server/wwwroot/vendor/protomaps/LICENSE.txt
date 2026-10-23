@@ -1,0 +1,3 @@
+@protomaps/basemaps 5.7.2 (npm, https://github.com/protomaps/basemaps) — código BSD-3-Clause, según su package.json; el diseño
+del mapa es CC0. Los datos de un mapa base de Protomaps vienen de OpenStreetMap (ODbL): el mapa muestra la atribución
+«© OpenStreetMap».

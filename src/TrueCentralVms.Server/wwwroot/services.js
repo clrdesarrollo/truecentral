@@ -9,6 +9,7 @@ let servicesRowsCache = {}; // id → JSON de la última fila dibujada (refresco
 
 const SERVICE_STATES = {
   Running:  { cls: "on",       label: "En ejecución" },
+  Degraded: { cls: "warn",     label: "Con advertencia" },
   Starting: { cls: "admin",    label: "Iniciando" },
   Stopping: { cls: "admin",    label: "Deteniendo" },
   Stopped:  { cls: "operator", label: "Detenido" },
@@ -79,8 +80,9 @@ function serviceRowHtml(s, isAdmin) {
 }
 
 function serverCardsHtml(server, services) {
-  const running = services.filter((s) => s.state === "Running").length;
+  const running = services.filter((s) => s.state === "Running" || s.state === "Degraded").length;
   const failed = services.filter((s) => s.state === "Failed").length;
+  const warned = services.filter((s) => s.state === "Degraded").length;
   const supervised = services.filter((s) => s.state !== "Disabled").length;
   return `
     <div class="cards">
@@ -98,9 +100,10 @@ function serverCardsHtml(server, services) {
       </div>
       <div class="card">
         <div class="card-label">Servicios</div>
-        <div class="card-value" style="color:${failed ? "var(--danger)" : "var(--ok)"}">${running}
+        <div class="card-value" style="color:${failed ? "var(--danger)" : warned ? "var(--warn-text)" : "var(--ok)"}">${running}
           <span class="muted" style="font-size:13px">de ${supervised} en ejecución</span></div>
         ${failed ? `<div style="font-size:12px;color:var(--danger)">${failed} caído(s)</div>` : ""}
+        ${warned ? `<div style="font-size:12px;color:var(--warn-text)">${warned} con advertencia</div>` : ""}
       </div>
       <div class="card">
         <div class="card-label">Memoria del servidor</div>
@@ -130,8 +133,9 @@ async function renderServices() {
     </div>
     <div class="info-box">El supervisor comprueba cada servicio y, si uno cae, lo reinicia solo con esperas crecientes
       (5, 10, 20, 40, 60 s) hasta agotar los reintentos. Un servicio detenido a mano NO se reinicia hasta que un
-      administrador lo inicie. La base de datos es esencial: solo se puede reiniciar. Cada caída, reinicio y orden
-      queda en la bitácora de auditoría.</div>
+      administrador lo inicie. La base de datos es esencial: solo se puede reiniciar. Un servicio "Con advertencia"
+      funciona, pero tiene un problema que reiniciarlo no arregla (por ejemplo, respaldos atrasados): revise el
+      detalle. Cada caída, advertencia, reinicio y orden queda en la bitácora de auditoría.</div>
     <div class="table-scroll"><table class="grid" id="svc-table">
       <thead><tr>
         <th>Servicio</th><th>Tipo</th><th>Estado</th><th>Desde</th><th>Reinicios</th>

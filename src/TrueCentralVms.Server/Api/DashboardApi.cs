@@ -54,12 +54,14 @@ public static class DashboardApi
                 disk = m.DiskPercent, diskUsedGb = m.DiskUsedGb, diskTotalGb = m.DiskTotalGb, diskName = m.DiskName,
                 network = metrics.ReadNetwork(),
                 servicesTotal = supervised.Count,
-                servicesRunning = supervised.Count(s => s.State == ManagedServiceState.Running),
+                servicesRunning = supervised.Count(s => s.State is ManagedServiceState.Running or ManagedServiceState.Degraded),
                 servicesFailed = supervised.Where(s => s.State == ManagedServiceState.Failed).Select(s => s.Name).ToList(),
+                servicesWarning = supervised.Where(s => s.State == ManagedServiceState.Degraded).Select(s => s.Name).ToList(),
             };
 
             // ---------------- Equipos ----------------
-            var videoRows = await db.Devices.AsNoTracking()
+            // Los grabadores de vehículos (Flota) se desconectan a diario: no cuentan como equipos de video caídos.
+            var videoRows = await db.Devices.AsNoTracking().Where(d => !d.IsMobile)
                 .Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt,
                     Channels = d.Channels.Where(c => c.Enabled).Select(c => new { c.Id, c.Name, c.IsOnline }).ToList() })
                 .ToListAsync(ct);

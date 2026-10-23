@@ -1,0 +1,2 @@
+pmtiles 4.5.0 (npm, https://github.com/protomaps/PMTiles) — licencia BSD-3-Clause, según su package.json.
+Copyright (c) Protomaps LLC. Redistribución y uso permitidos bajo los términos de la licencia BSD de 3 cláusulas.
