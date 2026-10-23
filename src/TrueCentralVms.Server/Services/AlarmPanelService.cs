@@ -7,6 +7,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -34,7 +35,7 @@ public sealed class AlarmPanelService(
     Auth.UserScopeService scopes,
     Isup.IsupService isup,
     Isup.IsupHostManager isupHost,
-    ILogger<AlarmPanelService> logger) : BackgroundService
+    ILogger<AlarmPanelService> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(20);
     /// <summary>Espera tras un fallo de red antes de reintentar.</summary>
@@ -299,7 +300,7 @@ public sealed class AlarmPanelService(
     // Ciclo de vida
     // ------------------------------------------------------------------
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    protected override async Task RunAsync(CancellationToken ct)
     {
         // Un panel ISUP que se conecta (o vuelve) se lee de inmediato, sin esperar el reintento de un minuto.
         isup.DeviceOnlineChanged += OnIsupDeviceChanged;

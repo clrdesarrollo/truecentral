@@ -54,8 +54,9 @@ public static class DashboardApi
                 disk = m.DiskPercent, diskUsedGb = m.DiskUsedGb, diskTotalGb = m.DiskTotalGb, diskName = m.DiskName,
                 network = metrics.ReadNetwork(),
                 servicesTotal = supervised.Count,
-                servicesRunning = supervised.Count(s => s.State == ManagedServiceState.Running),
+                servicesRunning = supervised.Count(s => s.State is ManagedServiceState.Running or ManagedServiceState.Degraded),
                 servicesFailed = supervised.Where(s => s.State == ManagedServiceState.Failed).Select(s => s.Name).ToList(),
+                servicesWarning = supervised.Where(s => s.State == ManagedServiceState.Degraded).Select(s => s.Name).ToList(),
             };
 
             // ---------------- Equipos ----------------

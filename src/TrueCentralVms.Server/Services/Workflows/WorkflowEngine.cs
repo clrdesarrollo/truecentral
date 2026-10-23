@@ -8,6 +8,7 @@ using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services.Workflows;
 
@@ -31,7 +32,7 @@ namespace TrueCentralVms.Server.Services.Workflows;
 /// · Toda ejecución queda en el historial (qué la disparó, qué paso hizo qué
 ///   y cuánto demoró) y en la bitácora de auditoría.
 /// </summary>
-public sealed class WorkflowEngine : BackgroundService
+public sealed class WorkflowEngine : SupervisedBackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IServiceProvider _services;
@@ -156,7 +157,7 @@ public sealed class WorkflowEngine : BackgroundService
     // Ciclo de vida
     // ------------------------------------------------------------------
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    protected override async Task RunAsync(CancellationToken ct)
     {
         _slots = new SemaphoreSlim(Math.Clamp(_config.GetValue("Workflows:MaxConcurrentRuns", 4), 1, 32));
         var purger = Task.Run(() => PurgeLoopAsync(ct), ct);

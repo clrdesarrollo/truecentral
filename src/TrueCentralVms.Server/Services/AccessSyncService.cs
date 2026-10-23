@@ -9,6 +9,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -39,7 +40,7 @@ public sealed partial class AccessSyncService(
     CredentialProtector credentials,
     IHubContext<VmsHub> hub,
     AuditService audit,
-    ILogger<AccessSyncService> logger) : BackgroundService
+    ILogger<AccessSyncService> logger) : SupervisedBackgroundService
 {
     /// <summary>Cada cuánto se reintenta sola la escritura pendiente (equipos que estaban caídos).</summary>
     private static readonly TimeSpan RetryInterval = TimeSpan.FromMinutes(5);
@@ -117,7 +118,7 @@ public sealed partial class AccessSyncService(
     private bool DueForRetry(int personId, DateTime now) =>
         !_failures.TryGetValue(personId, out var f) || now >= f.LastAt + Backoff(f.Attempts);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         // El sondeo de estado necesita una vuelta para saber qué equipos están
         // vivos; escribir antes de eso sería escribirle a equipos "desconocidos".

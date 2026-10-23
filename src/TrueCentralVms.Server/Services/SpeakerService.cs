@@ -7,6 +7,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 using TrueCentralVms.Server.Services.Workflows;
 
 namespace TrueCentralVms.Server.Services;
@@ -40,7 +41,7 @@ public sealed class SpeakerService(
     Isup.IsupService isup,
     Isup.IsupHostManager isupHost,
     SpeakerAgents.SpeakerAgentHub agents,
-    ILogger<SpeakerService> logger) : BackgroundService
+    ILogger<SpeakerService> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
     /// <summary>G.711 a 8 kHz: 640 bytes = 80 ms. Trozo que se manda a todos los parlantes antes de esperar.</summary>
@@ -94,7 +95,7 @@ public sealed class SpeakerService(
     // Sondeo de estado
     // ------------------------------------------------------------------
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         _stopping = stoppingToken;
         // Un parlante ISUP que se conecta: si se agregó antes de conectarse, se completa (modelo y capacidades) y se sondea ya.

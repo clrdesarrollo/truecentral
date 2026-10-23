@@ -127,6 +127,11 @@ public enum ManagedServiceState
     Failed,
     /// <summary>Deshabilitado en la configuración: no se ejecuta ni se supervisa.</summary>
     Disabled,
+    /// <summary>
+    /// Funciona, pero con un problema que reiniciarlo no arregla (p. ej. respaldos atrasados): se avisa y el watchdog
+    /// no lo reinicia.
+    /// </summary>
+    Degraded,
 }
 
 /// <summary>

@@ -4,13 +4,18 @@ namespace TrueCentralVms.Server.Services.Supervisor;
 /// Resultado de una comprobación de salud. <see cref="Transitioning"/> marca un
 /// servicio que está sano pero en medio de un arranque propio (p. ej. MediaMTX
 /// relanzándose tras una caída): el watchdog lo muestra "Iniciando" y no lo
-/// reinicia encima.
+/// reinicia encima. <see cref="Degraded"/> marca uno que funciona pero con un
+/// problema que reiniciarlo no arregla (p. ej. respaldos atrasados): el
+/// watchdog lo muestra "Con advertencia", lo registra y no lo reinicia.
+/// <see cref="Error"/> es la excepción con la que cayó, para el log.
 /// </summary>
-public readonly record struct ServiceHealth(bool Healthy, string? Detail = null, bool Transitioning = false)
+public readonly record struct ServiceHealth(
+    bool Healthy, string? Detail = null, bool Transitioning = false, bool Degraded = false, Exception? Error = null)
 {
     public static ServiceHealth Ok(string? detail = null) => new(true, detail);
-    public static ServiceHealth Down(string reason) => new(false, reason);
+    public static ServiceHealth Down(string reason, Exception? error = null) => new(false, reason, Error: error);
     public static ServiceHealth Restarting(string detail) => new(true, detail, Transitioning: true);
+    public static ServiceHealth Warning(string detail) => new(true, detail, Degraded: true);
 }
 
 /// <summary>

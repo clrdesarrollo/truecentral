@@ -23,9 +23,15 @@ namespace TrueCentralVms.Server.Services.Supervisor;
 ///   que un administrador lo inicie.
 /// - Los esenciales (la base de datos) no se pueden dejar detenidos, solo
 ///   reiniciar.
-/// - Todo cambio de estado se empuja por el hub y las caídas y reinicios
-///   automáticos quedan en la bitácora (los manuales los audita la API con
-///   el actor real).
+/// - Un servicio que funciona pero con un problema que reiniciarlo no arregla
+///   (p. ej. respaldos atrasados) queda "Con advertencia": se avisa y no se
+///   reinicia.
+/// - Todo cambio de estado se empuja por el hub y las caídas, advertencias y
+///   reinicios automáticos quedan en la bitácora (los manuales los audita la
+///   API con el actor real).
+/// - Los BackgroundService del catálogo heredan de
+///   <see cref="SupervisedBackgroundService"/>: detenerlos o que fallen no
+///   detiene el servidor completo.
 ///
 /// El propio proceso del servidor no puede vigilarse a sí mismo: para eso
 /// están las acciones de recuperación del SCM de Windows (ver README). Sí
@@ -84,8 +90,9 @@ public sealed class ServiceSupervisor : BackgroundService
     /// <summary>
     /// Catálogo de servicios supervisados, en el orden en que se muestran.
     /// Para vigilar uno nuevo basta con agregarlo aquí (los BackgroundService
-    /// deben registrarse como singleton + AddHostedService(sp => ...) para
-    /// que esta sea la MISMA instancia que arranca el host).
+    /// heredan de SupervisedBackgroundService y se registran como singleton +
+    /// AddHostedService(sp => ...) para que esta sea la MISMA instancia que
+    /// arranca el host).
     /// </summary>
     private static IEnumerable<IManagedService> BuildCatalog(IServiceProvider sp, IConfiguration config, ILoggerFactory loggers)
     {
@@ -230,30 +237,63 @@ public sealed class ServiceSupervisor : BackgroundService
         var now = DateTime.UtcNow;
         if (health.Healthy)
         {
-            if (health.Transitioning)
+            if (!health.Transitioning)
             {
-                if (e.State != ManagedServiceState.Starting)
-                    Transition(e, ManagedServiceState.Starting, health.Detail);
-                else
-                    e.Detail = health.Detail;
-                return;
+                e.HealthySinceUtc ??= now;
+                // Estable durante toda la ventana: el contador de reintentos parte de cero.
+                if (e.FailedAttempts > 0 && now - e.HealthySinceUtc.Value > RestartWindow)
+                    e.FailedAttempts = 0;
             }
-            e.HealthySinceUtc ??= now;
-            // Estable durante toda la ventana: el contador de reintentos parte de cero.
-            if (e.FailedAttempts > 0 && now - e.HealthySinceUtc.Value > RestartWindow)
-                e.FailedAttempts = 0;
-            if (e.State != ManagedServiceState.Running)
-                Transition(e, ManagedServiceState.Running, health.Detail);
-            else if (e.Detail != health.Detail)
-                e.Detail = health.Detail;
+            await SettleAsync(e, health);
             return;
         }
         e.HealthySinceUtc = null;
-        await FailAsync(e, health.Detail ?? "El servicio no responde.");
+        await FailAsync(e, health.Detail ?? "El servicio no responde.", health.Error);
+    }
+
+    /// <summary>
+    /// Deja en su estado a un servicio sano: Iniciando, Con advertencia o En ejecución. Entrar en advertencia y salir
+    /// de ella queda en el log y en la bitácora: reiniciarlo no la arregla, la tiene que ver una persona.
+    /// </summary>
+    private async Task SettleAsync(Entry e, ServiceHealth health)
+    {
+        var state = health.Transitioning ? ManagedServiceState.Starting
+            : health.Degraded ? ManagedServiceState.Degraded
+            : ManagedServiceState.Running;
+        var previous = e.State;
+        if (previous == state)
+        {
+            e.Detail = health.Detail;
+            return;
+        }
+        Transition(e, state, health.Detail);
+        if (state == ManagedServiceState.Degraded)
+        {
+            _logger.LogWarning("Servicio '{Name}' con advertencia: {Detail}", e.Service.Name, health.Detail);
+            await AuditAsync(e, "service-degraded", $"El servicio «{e.Service.Name}» funciona con una advertencia: {health.Detail}",
+                success: false);
+        }
+        else if (previous == ManagedServiceState.Degraded && state == ManagedServiceState.Running)
+        {
+            await AuditAsync(e, "service-degraded-cleared", $"El servicio «{e.Service.Name}» ya no tiene advertencias: {health.Detail}");
+        }
+    }
+
+    private async Task AuditAsync(Entry e, string action, string detail, bool success = true)
+    {
+        try
+        {
+            await _audit.LogSystemAsync("system", action, targetType: "service", targetId: e.Service.Id, targetName: e.Service.Name,
+                detail: detail, success: success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "No se pudo auditar '{Action}' del servicio '{Name}'.", action, e.Service.Name);
+        }
     }
 
     /// <summary>Marca el servicio caído, programa el reintento (si corresponde) y lo audita.</summary>
-    private async Task FailAsync(Entry e, string reason)
+    private async Task FailAsync(Entry e, string reason, Exception? error = null)
     {
         var now = DateTime.UtcNow;
         e.LastError = reason;
@@ -267,7 +307,7 @@ public sealed class ServiceSupervisor : BackgroundService
                 ? $"Se agotaron los {MaxAttempts} reintentos automáticos: revise el registro del servidor y reinícielo a mano."
                 : "Auto-reinicio desactivado: reinícielo a mano.";
         Transition(e, ManagedServiceState.Failed, detail);
-        _logger.LogError("Servicio '{Name}' caído: {Reason} {Detail}", e.Service.Name, reason, detail);
+        _logger.LogError(error, "Servicio '{Name}' caído: {Reason} {Detail}", e.Service.Name, reason, detail);
         try
         {
             await _audit.LogSystemAsync("system", "service-failed",
@@ -315,7 +355,7 @@ public sealed class ServiceSupervisor : BackgroundService
 
         e.RestartCount++;
         e.HealthySinceUtc = DateTime.UtcNow;
-        Transition(e, health.Transitioning ? ManagedServiceState.Starting : ManagedServiceState.Running, health.Detail);
+        await SettleAsync(e, health);
         if (automatic)
         {
             try
@@ -345,7 +385,7 @@ public sealed class ServiceSupervisor : BackgroundService
         {
             if (e.Service.DisabledReason is { } why)
                 return Conflict(e, $"El servicio está deshabilitado: {why}");
-            if (e.State is ManagedServiceState.Running or ManagedServiceState.Starting)
+            if (e.State is ManagedServiceState.Running or ManagedServiceState.Starting or ManagedServiceState.Degraded)
                 return Conflict(e, "El servicio ya está en ejecución.");
             if (e.State is ManagedServiceState.Stopping)
                 return Conflict(e, "El servicio se está deteniendo; espere unos segundos.");
@@ -366,7 +406,7 @@ public sealed class ServiceSupervisor : BackgroundService
             e.FailedAttempts = 0;
             e.NextRetryAtUtc = null;
             e.HealthySinceUtc = DateTime.UtcNow;
-            Transition(e, health.Transitioning ? ManagedServiceState.Starting : ManagedServiceState.Running, health.Detail);
+            await SettleAsync(e, health);
             return new(true, $"Servicio «{e.Service.Name}» iniciado.", Dto(e));
         }
         finally

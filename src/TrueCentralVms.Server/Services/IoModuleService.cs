@@ -6,6 +6,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -31,7 +32,7 @@ public sealed class IoModuleService(
     IoModuleDriverRegistry drivers,
     ScopedHub hub,
     AuditService audit,
-    ILogger<IoModuleService> logger) : BackgroundService
+    ILogger<IoModuleService> logger) : SupervisedBackgroundService
 {
     /// <summary>Repaso de la configuración por si algo cambió sin aviso (y reintento de los que no abrieron).</summary>
     private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(30);
@@ -192,7 +193,7 @@ public sealed class IoModuleService(
     // Conexiones
     // ------------------------------------------------------------------
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         var processing = Task.Run(() => ProcessEventsAsync(stoppingToken), CancellationToken.None);
         try

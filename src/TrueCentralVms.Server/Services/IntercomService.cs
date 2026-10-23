@@ -8,6 +8,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -39,7 +40,7 @@ public sealed class IntercomService(
     IConfiguration config,
     Isup.IsupService isup,
     Isup.IsupHostManager isupHost,
-    ILogger<IntercomService> logger) : BackgroundService
+    ILogger<IntercomService> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan StatusPollInterval = TimeSpan.FromSeconds(10);
@@ -173,7 +174,7 @@ public sealed class IntercomService(
     // Ciclo de fondo
     // ------------------------------------------------------------------
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         HookIsup(stoppingToken);
         try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }

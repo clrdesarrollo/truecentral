@@ -13,6 +13,7 @@ using TrueCentralVms.Server.Api;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 using TrueCentralVms.Server.Services.Workflows;
 
 namespace TrueCentralVms.Server.Services;
@@ -45,7 +46,7 @@ public sealed partial class AlarmScreenService(
     AuditService audit,
     IConfiguration config,
     IHostEnvironment environment,
-    ILogger<AlarmScreenService> logger) : BackgroundService
+    ILogger<AlarmScreenService> logger) : SupervisedBackgroundService
 {
     /// <summary>Valor de <see cref="WorkflowAlert.AcknowledgedFrom"/> para lo confirmado en una pantalla.</summary>
     public const string FromScreen = "screen";
@@ -575,7 +576,7 @@ public sealed partial class AlarmScreenService(
     // Servicio de fondo: autodiscovery y caídas
     // ------------------------------------------------------------------
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+    protected override Task RunAsync(CancellationToken stoppingToken) =>
         Task.WhenAll(DiscoveryLoopAsync(stoppingToken), OfflineLoopAsync(stoppingToken));
 
     /// <summary>

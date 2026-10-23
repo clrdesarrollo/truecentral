@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -19,11 +20,11 @@ public sealed class SessionAccounting(
     StreamTokenService streamTokens,
     ScopedHub hub,
     AuditService audit,
-    ILogger<SessionAccounting> logger) : BackgroundService
+    ILogger<SessionAccounting> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(5);
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    protected override async Task RunAsync(CancellationToken ct)
     {
         await Task.Delay(TimeSpan.FromSeconds(8), ct);
         while (!ct.IsCancellationRequested)
