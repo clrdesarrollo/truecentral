@@ -2223,6 +2223,7 @@ const routes = {
   "#/live": renderLiveView,
   "#/fleet/live": renderFleetLive,
   "#/fleet/map": renderFleetMap,
+  "#/fleet/track": renderFleetTrack,
   "#/fleet/vehicles": renderFleetVehicles,
   "#/playback": renderPlayback,
   "#/event-center": renderEventCenter,
@@ -2399,6 +2400,7 @@ function leaveCurrentPage() {
   intercomConsoleLeave();        // timbre, conversación y sondeo de la citofonía
   liveViewLeave();               // video en vivo (WebRTC), grabaciones locales, PTZ y voz
   if (typeof fleetMapLeave === "function") fleetMapLeave(); // mapa de flota: MapLibre, video de la ficha y hub
+  if (typeof fleetTrackLeave === "function") fleetTrackLeave(); // recorridos: MapLibre, animación y video grabado
   playbackLeave();              // reproducción de grabaciones (WebRTC) y su línea de tiempo
 }
 

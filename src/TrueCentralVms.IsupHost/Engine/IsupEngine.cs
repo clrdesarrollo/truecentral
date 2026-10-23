@@ -229,7 +229,8 @@ public sealed partial class IsupEngine : IDisposable
         if (_disposed) return;
         _disposed = true;
         foreach (var s in _liveSessions.Values.ToList()) StopLive(s);
-        foreach (var s in _pbSessions.Values.ToList()) StopPlayback(s);
+        // Las 2.0/4.0 pueden no tener sesión (0): se cierran también por su enlace y las que esperan el enlace.
+        foreach (var s in _pbSessions.Values.Concat(_pbByLink.Values).Concat(_pbAwaiting.Keys).Distinct().ToList()) StopPlayback(s);
         foreach (var v in _voiceSessions.Values.ToList()) CloseVoice(v);
         foreach (var r in _relays) r.Dispose();
         if (!_started) return;
@@ -472,6 +473,8 @@ public sealed partial class IsupEngine : IDisposable
         _userByDevice.TryRemove(id, out _);
         foreach (var s in _liveSessions.Values.Where(s => s.DeviceId == id).ToList()) { s.Close(); _liveSessions.TryRemove(s.Session, out _); }
         foreach (var s in _pbSessions.Values.Where(s => s.DeviceId == id).ToList()) { s.Close(); _pbSessions.TryRemove(s.Session, out _); }
+        foreach (var (link, s) in _pbByLink.Where(kv => kv.Value.DeviceId == id).ToList()) { s.Close(); _pbByLink.TryRemove(link, out _); }
+        foreach (var s in _pbAwaiting.Keys.Where(s => s.DeviceId == id).ToList()) { s.Close(); EndLinkWait(s); }
         foreach (var v in _voiceSessions.Values.Where(v => v.DeviceId == id).ToList()) v.MarkClosed();
         Emit($"Equipo '{id}' fuera de línea.");
         Raise(new IsupHostEvent(IsupEventKinds.Offline, id, DateTimeOffset.Now));

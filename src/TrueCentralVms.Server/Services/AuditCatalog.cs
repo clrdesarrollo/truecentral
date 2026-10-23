@@ -263,6 +263,7 @@ public static class AuditCatalog
             new("vehicles-imported", "Vehículos importados desde CSV"),
             new("live-idle-stopped", "Video de vehículos cortado por inactividad"),
             new("track-viewed", "Recorrido de un vehículo consultado"),
+            new("track-exported", "Recorrido de un vehículo exportado (CSV, KML o GPX)"),
             new("map-settings-updated", "Ajustes del mapa de flota modificados"),
             new("positions-purged", "Posiciones GPS antiguas borradas por la retención"),
         ]),
@@ -429,5 +430,6 @@ public static class AuditCatalog
             ["playback-export-cancelled"] = ("playback", "export-cancelled", "Canceló una exportación de grabación"),
             ["playback-export-failed"] = ("playback", "export-failed", "Falló una exportación de grabación"),
             ["fleet-live-idle-stopped"] = ("fleet", "live-idle-stopped", "Se cortó el video de vehículos por inactividad del operador"),
+            ["fleet-track-exported"] = ("fleet", "track-exported", "Exportó el recorrido de un vehículo"),
         };
 }

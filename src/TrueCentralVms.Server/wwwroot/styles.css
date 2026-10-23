@@ -2799,5 +2799,19 @@ table.kv .tag { margin: 0 4px 4px 0; }
 .fm-card-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .fm-card-actions .on { border-color: var(--accent); color: var(--accent); }
 /* ---- Página incrustada en el cliente de escritorio (?embed=1): solo el contenido ---- */
+/* Flota → Recorridos */
+.ft-form { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 10px; }
+.ft-form label { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; }
+.ft-summary { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border); }
+.ft-stops { flex: 1; overflow: auto; padding: 0 0 8px; }
+.ft-stops .lv-cap { padding-left: 12px !important; }
+.ft-export { display: flex; align-items: center; gap: 4px; padding: 8px 12px; border-top: 1px solid var(--border); }
+.ft-export[hidden], .ft-bar[hidden], .ft-video[hidden] { display: none; }
+.ft-bar { position: absolute; left: 10px; right: 10px; bottom: 26px; display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.ft-bar input[type=range] { flex: 1; min-width: 80px; }
+.ft-now { font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ft-video { position: absolute; top: 10px; right: 10px; width: 420px; max-width: calc(100% - 70px); padding: 10px; display: flex; flex-direction: column; gap: 8px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
 body.embedded .topbar, body.embedded .sidebar, body.embedded .page-titles, body.embedded .license-banner { display: none !important; }
 body.embedded .main { margin-left: 0 !important; padding-top: 0 !important; height: 100vh; min-height: 0; }

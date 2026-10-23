@@ -393,6 +393,18 @@ public sealed class IsupService : BackgroundService, IIsupGateway
                ?? throw new DriverException("El servicio ISUP no entregó los datos del equipo.");
     }
 
+    public async Task<IReadOnlyList<IsupRecordingFile>> GetRecordingFilesAsync(string deviceId, int channel, DateTime localStart,
+        DateTime localEnd, CancellationToken ct = default)
+    {
+        if (!_host.IsRunning) throw new DriverException("El servicio ISUP del servidor no está en ejecución.");
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(75));   // por 4G la búsqueda llega por páginas
+        string q = $"from={localStart.ToString("yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture)}&to={localEnd.ToString("yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture)}";
+        using var r = await _http.GetAsync($"/files/{Uri.EscapeDataString(deviceId)}/{channel}?{q}", cts.Token);
+        if (!r.IsSuccessStatusCode) throw new DriverException(await ErrorOf(r));
+        return await r.Content.ReadFromJsonAsync<List<IsupRecordingFile>>(Json, cts.Token) ?? [];
+    }
+
     public Task PtzAsync(string deviceId, int channel, IsupPtzCommand command, bool start, int speed, CancellationToken ct = default) =>
         CommandAsync($"/ptz/{Uri.EscapeDataString(deviceId)}/{channel}?command={command}&start={start}&speed={speed}", ct);
 

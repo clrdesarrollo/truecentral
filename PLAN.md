@@ -1740,6 +1740,33 @@ vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 
 - **Pendiente de la fase 2**: minimapa en Flota en vivo, fuentes para los nombres de calles del PMTiles y probar ese modo con un
   extracto real de Chile.
 
+### Flota — fase 3: grabaciones del DVR móvil y recorridos — 2026-10-23
+
+- **Grabaciones de un grabador ISUP 2.0/4.0** (sin ISAPI): búsqueda de archivos con `NET_ECMS_StartFindFile_V11` +
+  `FindNextFile_V11` (`IsupEngine.GetRecordingFiles`, ruta del host `GET /files/{id}/{canal}?from&to`, `yyyyMMddTHHmmss` en hora
+  del equipo). El driver arma los tramos (tipo 0 = continua, el resto = alarma) y los días del mes con esa búsqueda.
+- **Reproducción** solo por NOMBRE de archivo (`byPlayBackMode = 0`): se busca el archivo que contiene la hora pedida y se
+  reproduce hasta el final de ese archivo (la línea de tiempo pide el siguiente aparte). GOTCHAS con el MDVR V4.1.2 build160608:
+  - el enlace llega al puerto de reproducción ANTES de que vuelva `NET_ECMS_StartPlayBack`, con sesión 0 y SIN el ID del equipo
+    ni el canal: las reproducciones 2.0/4.0 se piden de a una en todo el servidor (`_legacyPbGate`) hasta que llega su enlace (o
+    20 s), y el enlace se empareja con la única que espera (`_pbAwaiting`). Con 4 pedidos a la vez no se sabía cuál era cuál;
+  - para empezar a mitad del archivo, el desplazamiento por segundos (`dwSeekType = 1`) se acepta pero el equipo no manda nada:
+    se usa el de bytes, estimado en proporción al tamaño (pedidas las 10:30:00, la imagen empezó a las 10:30:05);
+  - un primer intento fallido (error 10) dejó al equipo desconectado unos minutos;
+  - los canales SIN cámara también tienen archivos (graban «NO VIDEO» o nada): abren el enlace y no entregan video.
+- **Permisos**: un canal móvil en Reproducción exige además `fleet.view` y el módulo `module_fleet` licenciado
+  (`PlaybackApi.FleetDeniedAsync`: tramos, días, concesión y exportación).
+- **Web** Flota → **Recorridos** (`fleet-track.js`, `#/fleet/track?v=ID`, permiso `fleet.history`): vehículo y rango (hasta 7
+  días), línea coloreada por velocidad (gris < 5, verde, ámbar ≥ 50, rojo ≥ 90 km/h), detenciones (≥ 3 min en 60 m) en el mapa y en
+  la lista, resumen (distancia sin saltos imposibles, máxima, tiempo en marcha), animación 1× a 64× que salta los huecos largos,
+  «Ver video aquí» (hasta 4 cámaras desde esa hora con `PbSession`, abiertas de a una) y exportación CSV/KML/GPX en el navegador
+  (bitácora `fleet/track-exported` por `client-event`).
+- **Probado** con el 123456 (una sola cámara, en el canal 1): exportación de 20 s desde el inicio de un archivo y desde la mitad
+  (H.264 960×576, 15 fps, con la posición GPS estampada por el grabador); página Recorridos en Edge por CDP
+  (`isp1\fleet-track.mjs`): resumen, detención, animación y video grabado del canal 1 en ~20 s, sin errores JS.
+- **Pendiente de la fase 3**: probar un recorrido con el vehículo en movimiento (la línea por velocidad solo se vio sin desplazarse),
+  y la línea de tiempo de Reproducción saltando de un archivo al siguiente.
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

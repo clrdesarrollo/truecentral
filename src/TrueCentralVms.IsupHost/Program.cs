@@ -183,6 +183,18 @@ app.MapGet("/live/{deviceId}/{channel:int}/{stream:int}", async (string deviceId
     finally { engine.StopLive(media); }
 });
 
+// Archivos grabados de un canal entre dos horas locales (equipos ISUP 2.0/4.0, sin ISAPI).
+app.MapGet("/files/{deviceId}/{channel:int}", async (string deviceId, int channel, string from, string to, HttpContext ctx) =>
+{
+    if (!DateTime.TryParseExact(from, "yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start) ||
+        !DateTime.TryParseExact(to, "yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var end))
+    { ctx.Response.StatusCode = 400; return; }
+    List<IsupRecordingFile> files;
+    try { files = await Task.Run(() => engine.GetRecordingFiles(deviceId, channel, start, end)); }
+    catch (IsupCommandException ex) { await WriteProblem(ctx, ex.Message, ex.Code); return; }
+    await ctx.Response.WriteAsJsonAsync(files);
+});
+
 // Reproducción entre dos horas locales del equipo (yyyyMMddTHHmmss), dosificada a tiempo real con el reloj del propio flujo.
 app.MapGet("/playback/{deviceId}/{channel:int}", async (string deviceId, int channel, string from, string to, HttpContext ctx) =>
 {

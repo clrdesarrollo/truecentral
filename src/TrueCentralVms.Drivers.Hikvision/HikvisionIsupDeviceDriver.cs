@@ -237,10 +237,19 @@ public sealed class HikvisionIsupDeviceDriver : IDeviceDriver
     private static DateTime? DeviceTime(string? text) =>
         DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var t) ? t.DateTime : null;
 
-    private static void RequireIsapiRecordings(string id)
+    /// <summary>
+    /// ¿Equipo ISUP 2.0/4.0 (sin ISAPI)? Sus grabaciones se buscan por archivo (NET_ECMS_StartFindFile_V11) y se reproducen por nombre
+    /// de archivo desde la hora pedida (lo resuelve el servicio ISUP): es el caso de los DVR móviles de vehículos.
+    /// </summary>
+    private static bool IsLegacy(string id) => IsupGateway.Require().GetState(id) is { Protocol: { } protocol } && !protocol.StartsWith('5');
+
+    /// <summary>Tramos de un equipo 2.0/4.0: uno por archivo grabado (tipo 0 = continua; los demás, de evento).</summary>
+    private static async Task<IReadOnlyList<RecordingSegment>> QueryLegacyRecordingsAsync(string id, int channelNumber,
+        DateTime localStart, DateTime localEnd, CancellationToken ct)
     {
-        if (IsupGateway.Require().GetState(id) is { Protocol: { } protocol } && !protocol.StartsWith('5'))
-            throw new DriverException("El equipo se conecta por ISUP 2.0/4.0: buscar y reproducir sus grabaciones requiere ISUP 5.0.");
+        var files = await IsupGateway.Require().GetRecordingFilesAsync(id, channelNumber, localStart, localEnd, ct);
+        return files.Select(f => new RecordingSegment(f.Start, f.End, f.MainType == 0 ? RecordingKind.Continuous : RecordingKind.Alarm))
+            .OrderBy(s => s.Start).ToList();
     }
 
     public async Task<IReadOnlyList<RecordingSegment>> QueryRecordingsAsync(DeviceConnectionInfo info, int channelNumber,
@@ -248,7 +257,7 @@ public sealed class HikvisionIsupDeviceDriver : IDeviceDriver
     {
         string id = IdOf(info);
         Online(id);
-        RequireIsapiRecordings(id);
+        if (IsLegacy(id)) return await QueryLegacyRecordingsAsync(id, channelNumber, localStart, localEnd, ct);
         var result = new List<RecordingSegment>();
         string searchId = Guid.NewGuid().ToString().ToUpperInvariant();
         const int page = 50;
@@ -322,7 +331,16 @@ public sealed class HikvisionIsupDeviceDriver : IDeviceDriver
         try
         {
             Online(id);
-            RequireIsapiRecordings(id);
+            if (IsLegacy(id))
+            {
+                // Sin calendario ISAPI: los archivos del mes y los días que tocan.
+                var monthStart = new DateTime(year, month, 1);
+                var legacyDays = new SortedSet<int>();
+                foreach (var s in await QueryLegacyRecordingsAsync(id, channelNumber, monthStart, monthStart.AddMonths(1).AddSeconds(-1), ct))
+                    for (var day = s.Start.Date; day <= s.End.Date; day = day.AddDays(1))
+                        if (day.Year == year && day.Month == month) legacyDays.Add(day.Day);
+                return [.. legacyDays];
+            }
             // Una consulta por mes (lo que usa el propio calendario del equipo).
             string body = $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><trackDailyParam><year>{year}</year><monthOfYear>{month}</monthOfYear></trackDailyParam>";
             var root = await XmlAsync(id, $"/ISAPI/ContentMgmt/record/tracks/{channelNumber * 100 + 1}/dailyDistribution", ct, "POST", body, Slow);
@@ -355,7 +373,7 @@ public sealed class HikvisionIsupDeviceDriver : IDeviceDriver
     {
         string id = IdOf(info);
         Online(id);
-        RequireIsapiRecordings(id);
+        // 2.0/4.0 también: el servicio ISUP busca el archivo que contiene la hora y lo reproduce desde ahí.
         return Task.FromResult(BuildPlaybackUrl(info, rtspPort, rtspChannel, localStart, localEnd));
     }
 

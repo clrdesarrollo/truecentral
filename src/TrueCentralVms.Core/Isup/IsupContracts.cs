@@ -198,6 +198,12 @@ public sealed record IsupCidAlarm(
 public sealed record IsupDeviceInfo(int AnalogChannels, int TotalChannels, int StartChannel, int MaxDigitalChannels, int DeviceType,
     int Disks, string? Serial, string? Firmware, int AudioEncoding);
 
+/// <summary>
+/// Archivo grabado en un equipo ISUP 2.0/4.0 (búsqueda NET_ECMS_StartFindFile_V11): horas LOCALES del equipo, tamaño en bytes y
+/// el nombre con que se pide su reproducción. <paramref name="MainType"/> es el tipo de grabación del equipo (0 continua…).
+/// </summary>
+public sealed record IsupRecordingFile(DateTime Start, DateTime End, long Size, string Name, int MainType);
+
 /// <summary>Respuesta de una petición ISAPI por el túnel ISUP.</summary>
 public sealed record IsupIsapiResponse(bool Ok, byte[] Body, int ErrorCode, string? Error);
 
@@ -247,6 +253,13 @@ public interface IIsupGateway
 
     /// <summary>Datos y canales por la configuración del SDK (sirve a los equipos ISUP 2.0/4.0). Lanza DriverException si no responde.</summary>
     Task<IsupDeviceInfo> GetDeviceInfoAsync(string deviceId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Archivos grabados de un canal entre dos horas locales del equipo (equipos ISUP 2.0/4.0, que no tienen ISAPI). Lanza
+    /// DriverException si el equipo no está conectado o rechaza la búsqueda.
+    /// </summary>
+    Task<IReadOnlyList<IsupRecordingFile>> GetRecordingFilesAsync(string deviceId, int channel, DateTime localStart, DateTime localEnd,
+        CancellationToken ct = default);
 
     /// <summary>Movimiento PTZ (start=true lo inicia, false lo detiene; velocidad 0..7).</summary>
     Task PtzAsync(string deviceId, int channel, IsupPtzCommand command, bool start, int speed, CancellationToken ct = default);
