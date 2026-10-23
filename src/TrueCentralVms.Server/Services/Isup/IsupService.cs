@@ -184,8 +184,13 @@ public sealed class IsupService : BackgroundService, IIsupGateway
             case IsupEventKinds.Sleep:
                 if (_states.TryGetValue(e.DeviceId, out var st)) _states[e.DeviceId] = st with { Asleep = true };
                 break;
+            case IsupEventKinds.Gps when e.Gps is not null:
+                OnGps(e.Gps);
+                break;
             case IsupEventKinds.Alarm when e.Alarm is not null:
                 LogFirstOfKind(e.Alarm);
+                try { AlarmReceived?.Invoke(e.Alarm); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Error al entregar una alarma ISUP de {Device}.", e.DeviceId); }
                 if (_alarmSubscribers.TryGetValue(e.DeviceId, out var list))
                 {
                     Action<IsupAlarm>[] handlers;
@@ -201,6 +206,36 @@ public sealed class IsupService : BackgroundService, IIsupGateway
     }
 
     private string? NameOf(string id) => _namesById.GetValueOrDefault(id);
+
+    // ====================== posiciones GPS (equipos móviles) ======================
+
+    private readonly ConcurrentDictionary<string, GpsTrack> _gps = new(StringComparer.Ordinal);
+
+    /// <summary>Última posición de un equipo y cuántas llegaron desde que arrancó el servidor (y cuántas retransmitidas o sin posición).</summary>
+    public sealed record GpsTrack(IsupGpsFix Last, DateTimeOffset ReceivedAt, long Count, long Retransmitted, long Invalid, IsupGpsFix? LastValid);
+
+    /// <summary>Cualquier alarma de cualquier equipo (los vehículos de la flota la toman de aquí). Encolar y volver.</summary>
+    public event Action<IsupAlarm>? AlarmReceived;
+
+    /// <summary>Un equipo móvil informó su posición. Corre en el hilo del canal de eventos: encolar y volver.</summary>
+    public event Action<IsupGpsFix>? GpsReceived;
+
+    /// <summary>Último estado de posición de cada equipo móvil que mandó GPS desde que arrancó el servidor.</summary>
+    public IReadOnlyDictionary<string, GpsTrack> GpsTracks => _gps;
+
+    private void OnGps(IsupGpsFix fix)
+    {
+        var now = DateTimeOffset.Now;
+        var track = _gps.AddOrUpdate(fix.DeviceId,
+            _ => new GpsTrack(fix, now, 1, fix.Retransmitted ? 1 : 0, fix.Valid ? 0 : 1, fix.Valid ? fix : null),
+            (_, t) => new GpsTrack(fix, now, t.Count + 1, t.Retransmitted + (fix.Retransmitted ? 1 : 0), t.Invalid + (fix.Valid ? 0 : 1),
+                fix.Valid ? fix : t.LastValid));
+        if (track.Count == 1)
+            _logger.LogInformation("ISUP: primera posición GPS de {Device}: {Lat:0.000000}, {Lon:0.000000} · {Speed:0.0} km/h · {Sats} satélites · hora del equipo {Time:yyyy-MM-dd HH:mm:ss}{Valid}",
+                fix.DeviceId, fix.Latitude, fix.Longitude, fix.SpeedKmh, fix.Satellites, fix.DeviceTime, fix.Valid ? "" : " (sin posición válida)");
+        try { GpsReceived?.Invoke(fix); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Error al entregar una posición GPS de {Device}.", fix.DeviceId); }
+    }
 
     private readonly ConcurrentDictionary<string, byte> _alarmKindsSeen = new(StringComparer.Ordinal);
 
@@ -361,6 +396,18 @@ public sealed class IsupService : BackgroundService, IIsupGateway
         if (!r.IsSuccessStatusCode) throw new DriverException(await ErrorOf(r));
         return await r.Content.ReadFromJsonAsync<IsupDeviceInfo>(Json, cts.Token)
                ?? throw new DriverException("El servicio ISUP no entregó los datos del equipo.");
+    }
+
+    public async Task<IReadOnlyList<IsupRecordingFile>> GetRecordingFilesAsync(string deviceId, int channel, DateTime localStart,
+        DateTime localEnd, CancellationToken ct = default)
+    {
+        if (!_host.IsRunning) throw new DriverException("El servicio ISUP del servidor no está en ejecución.");
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(75));   // por 4G la búsqueda llega por páginas
+        string q = $"from={localStart.ToString("yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture)}&to={localEnd.ToString("yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture)}";
+        using var r = await _http.GetAsync($"/files/{Uri.EscapeDataString(deviceId)}/{channel}?{q}", cts.Token);
+        if (!r.IsSuccessStatusCode) throw new DriverException(await ErrorOf(r));
+        return await r.Content.ReadFromJsonAsync<List<IsupRecordingFile>>(Json, cts.Token) ?? [];
     }
 
     public Task PtzAsync(string deviceId, int channel, IsupPtzCommand command, bool start, int speed, CancellationToken ct = default) =>

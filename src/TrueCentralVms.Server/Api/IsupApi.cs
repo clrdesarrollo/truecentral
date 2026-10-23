@@ -87,6 +87,25 @@ public static class IsupApi
             return Results.NoContent();
         });
 
+        // Diagnóstico del GPS de los equipos móviles (DVR de vehículo): última posición de cada uno desde que arrancó el servidor.
+        // La posición es dato personal del conductor: queda en la bitácora quién la consultó.
+        app.MapGet("/api/isup/gps", async (HttpContext ctx, IsupService isup, AuditService audit) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.SystemServices, out _) is { } failure) return failure;
+            if (audit.ShouldLog($"isup-gps:{ApiSecurity.CurrentSession(ctx)?.UserId}", TimeSpan.FromMinutes(30)))
+                await audit.LogAsync(ctx, "isup", "gps-viewed", detail: "Consultó las últimas posiciones GPS de los equipos móviles conectados por ISUP.");
+            return Results.Ok(isup.GpsTracks.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => new
+            {
+                deviceId = kv.Key,
+                receivedAt = kv.Value.ReceivedAt,
+                count = kv.Value.Count,
+                retransmitted = kv.Value.Retransmitted,
+                invalid = kv.Value.Invalid,
+                last = kv.Value.Last,
+                lastValid = kv.Value.LastValid,
+            }));
+        });
+
         // Reconectar: el servidor da de baja la conexión del equipo y este vuelve a registrarse solo (útil tras cambiar algo en él).
         app.MapPost("/api/isup/devices/{deviceId}/reconnect", async (string deviceId, HttpContext ctx, IsupService isup, AuditService audit, CancellationToken ct) =>
         {

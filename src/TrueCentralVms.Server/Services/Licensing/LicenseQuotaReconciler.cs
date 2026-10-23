@@ -140,6 +140,13 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
                 await Changed("io-modules");
             }), ct);
 
+        // Un vehículo apagado por licencia conserva sus cámaras configuradas: las concesiones de vivo lo rechazan por el vehículo.
+        await RunAsync(db, sp, f, new Spec<Vehicle>(
+            "vehículos de flota", LicenseFeatures.ModuleFleet, LicenseFeatures.FleetVehicles,
+            d => d.Vehicles, x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
+            (x, on) => { x.Enabled = on; x.DisabledByLicense = !on; x.UpdatedAt = DateTime.UtcNow; }, x => x.Code,
+            async (_, _, _, _) => await Changed("fleet")), ct);
+
         await RunAsync(db, sp, f, new Spec<Workflow>(
             "automatizaciones", LicenseFeatures.ModuleAutomation, LicenseFeatures.AutomationRules,
             d => d.Workflows, x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,

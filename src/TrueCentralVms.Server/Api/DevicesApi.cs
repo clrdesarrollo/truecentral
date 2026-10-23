@@ -37,7 +37,7 @@ public static class DevicesApi
         d.LocationId, LocationPaths.Of(d.LocationId), d.IsupDeviceId, d.IsupKeyCiphertext is { Length: > 0 });
 
     /// <summary>Dónde está el equipo, para textos de bitácora: dirección y puerto, o su ID ISUP.</summary>
-    private static string WhereOf(Device d) => d.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : $"{d.Host}:{d.SdkPort}";
+    internal static string WhereOf(Device d) => d.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : $"{d.Host}:{d.SdkPort}";
 
     private static bool UsesIsup(DriverRegistry drivers, string driverKey) => drivers.Find(driverKey)?.UsesIsup == true;
 
@@ -79,7 +79,7 @@ public static class DevicesApi
     }
 
     /// <summary>Sondea el equipo con el driver; errores del driver se devuelven como mensaje.</summary>
-    private static async Task<(DeviceProbeInfo? Info, string? Error)> ProbeAsync(
+    internal static async Task<(DeviceProbeInfo? Info, string? Error)> ProbeAsync(
         DriverRegistry drivers, string driverKey, DeviceConnectionInfo conn, CancellationToken ct)
     {
         var factory = drivers.Find(driverKey)!;
@@ -181,8 +181,10 @@ public static class DevicesApi
     /// </summary>
     internal static async Task<int> EnforceChannelQuotaAsync(LicenseService license, VmsDbContext db, Device device, CancellationToken ct)
     {
-        int quota = license.IsModuleEnabled(LicenseFeatures.ModuleVideo) ? license.Quota(LicenseFeatures.VideoChannels) : 0;
-        int elsewhere = await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != device.Id, ct);
+        // Grabador de un vehículo: no consume canales de video, pero tiene un tope de canales por vehículo.
+        int quota = device.IsMobile ? LicenseFeatures.MaxChannelsPerVehicle
+            : license.IsModuleEnabled(LicenseFeatures.ModuleVideo) ? license.Quota(LicenseFeatures.VideoChannels) : 0;
+        int elsewhere = device.IsMobile ? 0 : await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != device.Id && !c.Device.IsMobile, ct);
         int allowed = Math.Max(0, quota - elsewhere);
         int trimmed = 0;
         foreach (var channel in device.Channels.Where(c => c.Enabled).OrderBy(c => c.ChannelNumber))
@@ -201,7 +203,7 @@ public static class DevicesApi
         LicenseService license, VmsDbContext db, int? excludeDeviceId, CancellationToken ct)
     {
         int quota = license.IsModuleEnabled(LicenseFeatures.ModuleVideo) ? license.Quota(LicenseFeatures.VideoChannels) : 0;
-        int inUse = await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != excludeDeviceId, ct);
+        int inUse = await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != excludeDeviceId && !c.Device.IsMobile, ct);
         return (quota, inUse, Math.Max(0, quota - inUse));
     }
 
@@ -264,6 +266,9 @@ public static class DevicesApi
             : $"{trimmed} de {device.Channels.Count} canales quedaron deshabilitados por el cupo de canales de la licencia. " +
               "Se habilitarán solos cuando la licencia tenga cupo (amplíela o libere canales en otros equipos).";
 
+    private const string MobileManagedInFleet =
+        "Es el grabador de un vehículo: se administra desde Flota → Vehículos.";
+
     public static void MapDevicesApi(this WebApplication app)
     {
         // ------------------------------------------------------------------
@@ -286,7 +291,8 @@ public static class DevicesApi
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             // Alcance por ubicación: un equipo aparece si se ve alguno de sus canales.
             var scope = await ctx.ScopeAsync(session);
-            var devices = await db.Devices
+            // Los grabadores de vehículos son del módulo Flota (/api/fleet/vehicles): no salen en los árboles de video.
+            var devices = await db.Devices.Where(d => !d.IsMobile)
                 .Select(d => new
                 {
                     Device = d,
@@ -407,6 +413,7 @@ public static class DevicesApi
 
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
+            if (device.IsMobile) return Error(MobileManagedInFleet, StatusCodes.Status409Conflict);
             if (ValidateWrite(request, drivers, device.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
             bool viaIsup = UsesIsup(drivers, request.DriverKey);
             string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
@@ -527,6 +534,7 @@ public static class DevicesApi
             if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
             var device = await db.Devices.FindAsync([id], ct);
             if (device is null) return Results.NotFound();
+            if (device.IsMobile) return Error(MobileManagedInFleet, StatusCodes.Status409Conflict);
 
             // El canal de eventos de patentes es una sesión viva contra el
             // equipo: se cierra antes de que la fila desaparezca.
@@ -559,9 +567,11 @@ public static class DevicesApi
             Services.MediaMtxManager mtx, AuditService audit, LicenseService license, IsupService isup, IsupHostManager isupHost,
             CancellationToken ct) =>
         {
-            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.FleetManage) is { } failure) return failure;
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
+            if (ApiSecurity.Require(ctx, device.IsMobile ? Permissions.FleetManage : Permissions.DevicesManage, out _) is { } wrong)
+                return wrong;
             // Por ISUP solo se puede revalidar con el equipo conectado: si no, se explica qué configurar en él.
             if (device.IsupDeviceId is { } isupId && !isup.IsOnline(isupId))
                 return Error(await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct));
@@ -680,16 +690,26 @@ public static class DevicesApi
             ChannelWriteDto request, VmsDbContext db, IHubContext<VmsHub> hub,
             Services.MediaMtxManager mtx, AuditService audit, LicenseService license, CancellationToken ct) =>
         {
-            if (ApiSecurity.Require(ctx, Permissions.DevicesManage, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.DevicesManage, Permissions.FleetManage) is { } failure) return failure;
             var channel = await db.Channels.Include(c => c.Device)
                 .FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
             if (channel is null) return Results.NotFound();
+            // Los canales de un vehículo se configuran con "Vehículos de flota"; los demás, con "Fuentes de video".
+            if (ApiSecurity.Require(ctx, channel.Device.IsMobile ? Permissions.FleetManage : Permissions.DevicesManage, out _) is { } wrong)
+                return wrong;
             if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
                 return Error("El nombre del canal es obligatorio (máximo 128 caracteres).");
 
-            if (!channel.Enabled && request.Enabled
+            if (!channel.Enabled && request.Enabled && channel.Device.IsMobile)
+            {
+                int onVehicle = await db.Channels.CountAsync(c => c.DeviceId == id && c.Enabled && c.Id != channelId, ct);
+                if (onVehicle >= LicenseFeatures.MaxChannelsPerVehicle)
+                    return await license.DenyAsync(ctx,
+                        $"Un vehículo admite hasta {LicenseFeatures.MaxChannelsPerVehicle} canales habilitados.", "channel", channel.Name);
+            }
+            else if (!channel.Enabled && request.Enabled
                 && license.Deny(LicenseFeatures.ModuleVideo, LicenseFeatures.VideoChannels,
-                    await db.Channels.CountAsync(c => c.Enabled && c.Id != channelId, ct)) is { } denied)
+                    await db.Channels.CountAsync(c => c.Enabled && c.Id != channelId && !c.Device.IsMobile, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "channel", channel.Name);
 
             var changes = new List<string>();

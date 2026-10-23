@@ -54,6 +54,11 @@ public sealed record WorkflowTrigger(
     AccessCredentialKind? Credential = null,
     int? DoorNumber = null,
     string? EmployeeNo = null,
+    // --- Vehículos de la flota ---
+    int? VehicleId = null,
+    /// <summary>FleetEventKinds del evento.</summary>
+    string? FleetKind = null,
+    int? GeofenceId = null,
     // --- Entradas de módulos de E/S ---
     /// <summary>Número de la entrada en el módulo (desde 0).</summary>
     int? IoInput = null,
@@ -418,6 +423,34 @@ public sealed record WorkflowTrigger(
     }
 
     // ------------------------------------------------------------------
+    // Vehículos de la flota
+    // ------------------------------------------------------------------
+
+    public static WorkflowTrigger FromFleetEvent(FleetEventDto evt, string? plate)
+    {
+        var local = DateTime.SpecifyKind(evt.At, DateTimeKind.Utc).ToLocalTime();
+        var fields = NewFields(local);
+        fields["equipo"] = evt.VehicleCode;
+        fields["equipoid"] = evt.DeviceId.ToString();
+        fields["vehiculo"] = evt.VehicleCode;
+        fields["patente"] = plate ?? "";
+        fields["evento"] = evt.Description;
+        fields["tipo"] = evt.Label;
+        fields["severidad"] = SeverityLabel(evt.Severity);
+        fields["origen"] = evt.Kind.StartsWith("geofence-", StringComparison.Ordinal) ? "calculado por el servidor (geocerca)"
+            : evt.Kind is FleetEventKinds.Connected or FleetEventKinds.Disconnected ? "conexión del grabador" : "informado por el grabador";
+        fields["velocidad"] = evt.SpeedKmh is double s ? Math.Round(s).ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+        fields["latitud"] = evt.Latitude?.ToString("0.000000", System.Globalization.CultureInfo.InvariantCulture) ?? "";
+        fields["longitud"] = evt.Longitude?.ToString("0.000000", System.Globalization.CultureInfo.InvariantCulture) ?? "";
+        fields["canal"] = evt.Channel?.ToString() ?? "";
+
+        return new WorkflowTrigger(WorkflowTriggerTypes.FleetEvent,
+            Truncate($"Vehículo {evt.VehicleCode}{(plate is { Length: > 0 } ? $" ({plate})" : "")} · {evt.Description}", 256), fields, local,
+            Severity: evt.Severity, Text: evt.Description,
+            DeviceKind: "vehicle", DeviceId: evt.DeviceId, VehicleId: evt.VehicleId, FleetKind: evt.Kind, GeofenceId: evt.GeofenceId);
+    }
+
+    // ------------------------------------------------------------------
     // Horario y llamada externa
     // ------------------------------------------------------------------
 
@@ -541,6 +574,14 @@ public sealed record WorkflowTrigger(
                             ?? new IoPoint { Kind = IoPointKind.Input, Number = 0, Name = "Entrada de prueba" };
                 return FromIoInput(module, input, true, DateTime.UtcNow) with
                     { Summary = $"Prueba manual · {module.Name} · {input.Name} activa" };
+            }
+
+            case WorkflowTriggerTypes.FleetEvent:
+            {
+                var evt = new FleetEventDto(0, 0, device?.Name ?? "VEH-PRUEBA", device?.Id ?? 0, DateTime.UtcNow, FleetEventKinds.Panic,
+                    FleetEventKinds.LabelOf(FleetEventKinds.Panic), AlarmSeverity.Critical, "Botón de pánico (prueba manual)", null, null,
+                    -33.45, -70.66, 0, null, null, null);
+                return FromFleetEvent(evt, "ABCD12") with { Summary = $"Prueba manual · {evt.VehicleCode} · botón de pánico" };
             }
 
             case WorkflowTriggerTypes.Webhook:

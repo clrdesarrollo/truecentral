@@ -92,7 +92,8 @@ public static class LiveViewsApi
         // Las propias del usuario + las compartidas por cualquiera.
         app.MapGet("/api/live-views", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate) is { } failure) return failure;
+            // Flota usa las mismas vistas (con cámaras de vehículos): basta con poder ver su video.
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.FleetLive) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var views = await db.LiveViews
                 .Include(v => v.Items)
@@ -193,7 +194,7 @@ public static class LiveViewsApi
         app.MapPost("/api/live-views/{id:int}/apply", async (HttpContext ctx, int id,
             VmsDbContext db, AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.FleetLive) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
             var view = await db.LiveViews.Include(v => v.Items)
                 .AsSplitQuery().AsNoTracking()

@@ -161,6 +161,16 @@ public static class WorkflowsApi
                 new("estado", "Activa o En reposo"),
                 new("direccion", "Dirección IP del módulo"),
             ], "Entradas y salidas"),
+        new(WorkflowTriggerTypes.FleetEvent, "Evento de vehículo (Flota)",
+            "Cuando un vehículo de la flota informa pánico, choque, exceso de velocidad o conducción brusca, entra o sale de una geocerca, o se conecta o desconecta.",
+            [
+                new("vehiculo", "Código del vehículo"),
+                new("patente", "Patente del vehículo"),
+                new("velocidad", "Velocidad al momento (km/h)"),
+                new("latitud", "Latitud"),
+                new("longitud", "Longitud"),
+                new("canal", "Cámara o entrada del grabador"),
+            ], "Flota"),
         new(WorkflowTriggerTypes.Schedule, "Horario programado",
             "A las horas indicadas, los días de la semana marcados (armar a las 22:00, abrir el portón a las 07:30…).",
             [], "Sistema"),
@@ -200,7 +210,8 @@ public static class WorkflowsApi
                 .Select(x => new AlarmScreenOptionDto(x.Id, x.Name, screens.IsOnline(x.Id), x.Status == AlarmScreenStatus.Approved))
                 .ToList();
             return Results.Ok(new WorkflowCatalogDto(
-                Triggers,
+                // «Evento de vehículo» solo con el módulo Flota en la licencia.
+                Triggers.Where(t => t.Key != WorkflowTriggerTypes.FleetEvent || license.IsModuleEnabled(LicenseFeatures.ModuleFleet)).ToArray(),
                 engine.Executors.Select(e => new WorkflowActionInfoDto(e.Type, e.Label, e.Description, e.UsesSecret, ActionGroup(e.Type))).ToList(),
                 Placeholders,
                 settings is { Enabled: true, Host.Length: > 0 },
@@ -331,6 +342,20 @@ public static class WorkflowsApi
                     dto.Inputs.Select(p => new WorkflowIoPointDto(p.Number, p.Code, p.Name)).ToList(),
                     dto.Outputs.Select(p => new WorkflowIoPointDto(p.Number, p.Code, p.Name)).ToList());
             }));
+        });
+
+        // Vehículos y geocercas para el disparador «Evento de vehículo» (vacío sin el módulo Flota en la licencia).
+        app.MapGet("/api/workflows/fleet", async (HttpContext ctx, VmsDbContext db, LicenseService license, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
+            if (!license.IsModuleEnabled(LicenseFeatures.ModuleFleet))
+                return Results.Ok(new { vehicles = Array.Empty<object>(), geofences = Array.Empty<object>() });
+            var scope = await ctx.ScopeAsync(session);
+            var vehicles = (await db.Vehicles.AsNoTracking().OrderBy(v => v.Code).Select(v => new { v.Id, v.Code, v.Plate, v.DeviceId }).ToListAsync(ct))
+                .Where(v => scope.CanViewDevice(v.DeviceId))
+                .Select(v => new { v.Id, name = v.Plate is { Length: > 0 } ? $"{v.Code} · {v.Plate}" : v.Code });
+            var geofences = await db.Geofences.AsNoTracking().OrderBy(f => f.Name).Select(f => new { f.Id, name = f.Name }).ToListAsync(ct);
+            return Results.Ok(new { vehicles, geofences });
         });
 
         // ------------------------------------------------------------------

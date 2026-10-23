@@ -18,6 +18,9 @@ public static class Permissions
     public const string PlaybackExport = "playback.export";
     public const string WallOperate = "wall.operate";
     public const string WallLayouts = "wall.layouts";
+    public const string FleetView = "fleet.view";
+    public const string FleetLive = "fleet.live";
+    public const string FleetHistory = "fleet.history";
 
     // Monitoreo y operación
     public const string EventsAttend = "events.attend";
@@ -41,6 +44,7 @@ public static class Permissions
 
     // Configuración
     public const string DevicesManage = "devices.manage";
+    public const string FleetManage = "fleet.manage";
     public const string AccessConfigure = "access.configure";
     public const string AlarmsConfigure = "alarms.configure";
     public const string CercoConfigure = "cerco.configure";
@@ -93,6 +97,12 @@ public static class Permissions
             "Poner cámaras en el muro, limpiarlo y aplicar diseños guardados.", [LiveView]),
         new(WallLayouts, "Video", "Guardar diseños del muro",
             "Guardar y borrar diseños del muro de video.", [WallOperate]),
+        new(FleetView, "Video", "Ver la flota",
+            "Ver los vehículos, su estado y sus cámaras en el árbol de Flota.", []),
+        new(FleetLive, "Video", "Ver video de vehículos",
+            "Abrir en vivo las cámaras de los vehículos (consume datos móviles del vehículo).", [FleetView]),
+        new(FleetHistory, "Video", "Ver recorridos de vehículos",
+            "Consultar por dónde anduvo un vehículo (historial de posiciones GPS: dato personal del conductor).", [FleetView]),
 
         new(EventsAttend, "Monitoreo y operación", "Atender alertas",
             "Ver el centro de eventos y dar por atendidas las alertas.", []),
@@ -130,6 +140,8 @@ public static class Permissions
 
         new(DevicesManage, "Configuración", "Fuentes de video",
             "Agregar y configurar cámaras, grabadores, decodificadores y muros; buscar equipos en la red.", []),
+        new(FleetManage, "Configuración", "Vehículos de flota",
+            "Agregar, importar y configurar vehículos y sus grabadores móviles.", [FleetView]),
         new(AccessConfigure, "Configuración", "Equipos de acceso",
             "Agregar y configurar terminales y puertas, y sincronizarlos.", []),
         new(AlarmsConfigure, "Configuración", "Paneles de alarma",
@@ -210,7 +222,7 @@ public static class Permissions
     /// <summary>Permisos del rol de sistema Operador al instalar (los que tenía el operador antes de los roles).</summary>
     public static readonly string[] OperatorDefaults =
     [
-        LiveView, LivePtz, LiveViewsManage, PlaybackView, PlaybackExport, WallOperate, WallLayouts,
+        LiveView, LivePtz, LiveViewsManage, PlaybackView, PlaybackExport, WallOperate, WallLayouts, FleetView, FleetLive,
         EventsAttend, LocationsCommand, AlarmsMonitor, AlarmsOperate, CercoMonitor, CercoOperate,
         AccessMonitor, AccessDoors, AccessRecordsExport, AnprView, SpeakersPlay, IntercomAnswer, IoOperate,
         PersonsView, WorkflowsView, MaintenanceView,

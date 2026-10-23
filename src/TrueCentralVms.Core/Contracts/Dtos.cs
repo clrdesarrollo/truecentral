@@ -207,6 +207,15 @@ public static class VmsHubContract
     /// <summary>Un módulo de E/S cambió de conexión o de estado de sus entradas y salidas (payload: IoModuleDto).</summary>
     public const string IoModuleChanged = nameof(IoModuleChanged);
 
+    /// <summary>Posiciones nuevas de vehículos de la flota, en lotes cada pocos segundos (payload: FleetPositionBatchDto).</summary>
+    public const string FleetPositions = nameof(FleetPositions);
+
+    /// <summary>Evento de un vehículo de la flota: alarma de su grabador, geocerca o conexión (payload: FleetEventDto).</summary>
+    public const string FleetEvent = nameof(FleetEvent);
+
+    /// <summary>Un evento de vehículo quedó atendido (payload: FleetEventDto ya acusado).</summary>
+    public const string FleetEventAcknowledged = nameof(FleetEventAcknowledged);
+
     /// <summary>Un equipo de control de acceso cambió de estado de conexión (payload: AccessDeviceDto).</summary>
     public const string AccessDeviceStatusChanged = nameof(AccessDeviceStatusChanged);
 

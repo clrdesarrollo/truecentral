@@ -2221,6 +2221,10 @@ const routes = {
   "#/cerco": renderCercoMonitor,
   "#/cerco-panels": renderCercoPanels,
   "#/live": renderLiveView,
+  "#/fleet/live": renderFleetLive,
+  "#/fleet/map": renderFleetMap,
+  "#/fleet/track": renderFleetTrack,
+  "#/fleet/vehicles": renderFleetVehicles,
   "#/playback": renderPlayback,
   "#/event-center": renderEventCenter,
   "#/videowall": renderVideowall,
@@ -2387,6 +2391,7 @@ function leaveCurrentPage() {
   if (typeof resourcesDetachHub === "function") resourcesDetachHub(); // ídem la página Recursos
   if (typeof rolesDetachHub === "function") rolesDetachHub(); // ídem la página Roles
   if (typeof ioModulesDetachHub === "function") ioModulesDetachHub(); // ídem los módulos de E/S
+  if (typeof fleetVehiclesDetachHub === "function") fleetVehiclesDetachHub(); // ídem los vehículos de Flota
   if (typeof alarmScreensDetachHub === "function") alarmScreensDetachHub(); // ídem las pantallas de alarma
   clearInterval(eventCenterTimer); // ídem el del centro de eventos
   evcStopSound();                // y su alarma sonora no sigue en otra página
@@ -2394,6 +2399,8 @@ function leaveCurrentPage() {
   document.getElementById("vw-menu")?.remove();
   intercomConsoleLeave();        // timbre, conversación y sondeo de la citofonía
   liveViewLeave();               // video en vivo (WebRTC), grabaciones locales, PTZ y voz
+  if (typeof fleetMapLeave === "function") fleetMapLeave(); // mapa de flota: MapLibre, video de la ficha y hub
+  if (typeof fleetTrackLeave === "function") fleetTrackLeave(); // recorridos: MapLibre, animación y video grabado
   playbackLeave();              // reproducción de grabaciones (WebRTC) y su línea de tiempo
 }
 
@@ -2758,5 +2765,9 @@ async function init() {
   }
   renderLogin();
 }
+
+// Página incrustada en el cliente de escritorio (?embed=1, WebView2 con la sesión del cliente): solo el contenido, sin
+// menú ni barra superior. El cliente atiende lo que la página le pide por window.chrome.webview.postMessage.
+if (new URLSearchParams(location.search).get("embed") === "1") document.body.classList.add("embedded");
 
 init();

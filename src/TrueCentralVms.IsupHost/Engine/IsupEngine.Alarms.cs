@@ -31,6 +31,7 @@ public sealed partial class IsupEngine
             // Estructuras binarias: alarma básica (sobre todo 2.0/4.0) y reporte Contact-ID de los paneles de alarma.
             if (type == Isup.EHOME_ALARM && info != IntPtr.Zero && infoLen >= Layout.BasicMinSize) { DecodeBasicAlarm(info, serial, now); return 1; }
             if (type == Isup.EHOME_ALARM_CID_REPORT && info != IntPtr.Zero && infoLen >= Layout.CidMinSize) { DecodeCid(info, serial, now); return 1; }
+            if (type == Isup.EHOME_ALARM_GPS && info != IntPtr.Zero && infoLen >= Layout.GpsMinSize) { DecodeGps(info, infoLen, serial, now); return 1; }
 
             string text = "";
             if (xml != IntPtr.Zero && xmlLen > 0 && xmlLen < 4_000_000) text = Marshal.PtrToStringUTF8(xml, xmlLen) ?? "";
@@ -160,6 +161,49 @@ public sealed partial class IsupEngine
             NullIfEmpty(ReadText(p + Layout.CidUserName, 32)));
         Emit($"CID de '{id}': código {cid.Code}, partición {cid.SubSystem}, zona {cid.ZoneNo}, usuario {cid.UserNo}{(cid.UserName != null ? $" ({cid.UserName})" : "")} · {cid.Description}");
         Raise(new IsupHostEvent(IsupEventKinds.Alarm, id, now, Alarm: new IsupAlarm(id, (int)Isup.EHOME_ALARM_CID_REPORT, now, Cid: cid)));
+    }
+
+    readonly ConcurrentDictionary<string, long> _gpsLogTick = new(StringComparer.Ordinal);
+
+    /// <summary>Posición de un equipo móvil (los 2.0/4.0 la mandan por UDP al puerto de alarmas, cada pocos segundos).</summary>
+    void DecodeGps(IntPtr p, int len, string serial, DateTimeOffset now)
+    {
+        var id = DeviceFromStruct(Isup.ReadCString(p + Layout.GpsDeviceId, 256), serial);
+        if (id == null) return;
+        char ew = (char)Marshal.ReadByte(p, Layout.GpsDivision), ns = (char)Marshal.ReadByte(p, Layout.GpsDivision + 1);
+        // Coordenadas en centésimas de segundo de arco: grados = valor / (3600·100).
+        double lon = (uint)Marshal.ReadInt32(p, Layout.GpsLongitude) / 360000.0, lat = (uint)Marshal.ReadInt32(p, Layout.GpsLatitude) / 360000.0;
+        if (ew is 'W' or 'w') lon = -lon;
+        if (ns is 'S' or 's') lat = -lat;
+        // Desfase con UTC: byte con signo, 0xff = no informado. Un 0:00 tampoco vale: el DVR móvil 123456 (2.0, fw V4.1.2) lo manda
+        // así con su reloj en hora de Chile (UTC-3); un equipo de verdad en UTC+0 solo pierde el dato.
+        int diffH = (sbyte)Marshal.ReadByte(p, Layout.GpsTimeDiffH), diffM = (sbyte)Marshal.ReadByte(p, Layout.GpsTimeDiffM);
+        int? offset = diffH is >= -12 and <= 14 && diffM is >= -59 and <= 59 && (diffH != 0 || diffM != 0)
+            ? diffH * 60 + (diffH < 0 ? -Math.Abs(diffM) : diffM) : null;
+        var text = Isup.ReadCString(p + Layout.GpsTime, 32);
+        var deviceTime = DateTime.TryParseExact(text, "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var t) ? t : now.LocalDateTime;
+        var fix = new IsupGpsFix(id, deviceTime, offset, lat, lon,
+            SpeedKmh: (uint)Marshal.ReadInt32(p, Layout.GpsSpeed) / 100000.0,
+            HeadingDeg: (uint)Marshal.ReadInt32(p, Layout.GpsDirection) / 100.0,
+            AltitudeM: Marshal.ReadInt32(p, Layout.GpsHeight) / 100.0,
+            Satellites: Marshal.ReadByte(p, Layout.GpsSatellites),
+            Hdop: Marshal.ReadByte(p, Layout.GpsPrecision) / 100.0,
+            LocateMode: Marshal.ReadByte(p, Layout.GpsLocateMode),
+            DailyMileageM: len >= Layout.GpsMileage + 4 ? (uint)Marshal.ReadInt32(p, Layout.GpsMileage) : 0,
+            Retransmitted: Marshal.ReadByte(p, Layout.GpsRetrans) == 1);
+        // En el registro, una línea por equipo cada 5 min (las posiciones llegan cada pocos segundos).
+        long tick = Environment.TickCount64;
+        if (!_gpsLogTick.TryGetValue(id, out var last) || tick - last > 300_000)
+        {
+            _gpsLogTick[id] = tick;
+            var c = System.Globalization.CultureInfo.InvariantCulture;
+            Emit($"GPS de '{id}': {fix.Latitude.ToString("0.000000", c)}, {fix.Longitude.ToString("0.000000", c)} · {fix.SpeedKmh.ToString("0.0", c)} km/h · " +
+                 $"rumbo {fix.HeadingDeg:0}° · {fix.Satellites} satélites · hora del equipo {fix.DeviceTime:yyyy-MM-dd HH:mm:ss}" +
+                 $"{(offset is { } o ? $" (UTC{(o < 0 ? "-" : "+")}{Math.Abs(o) / 60:00}:{Math.Abs(o) % 60:00})" : "")}{(fix.Retransmitted ? " · retransmitida" : "")}" +
+                 $"{(fix.Valid ? "" : " · SIN POSICIÓN VÁLIDA")}.");
+        }
+        Raise(new IsupHostEvent(IsupEventKinds.Gps, id, now, Gps: fix));
     }
 
     static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();

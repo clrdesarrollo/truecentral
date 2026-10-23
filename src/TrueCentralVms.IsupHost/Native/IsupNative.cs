@@ -37,7 +37,7 @@ public static unsafe class Isup
     public const uint EHOME_ALARM = 1;                          // alarma básica: NET_EHOME_ALARM_INFO (tipo EN_ALARM_TYPE)
     public const uint EHOME_ALARM_HEATMAP_REPORT = 2;
     public const uint EHOME_ALARM_FACESNAP_REPORT = 3;
-    public const uint EHOME_ALARM_GPS = 4;                      // posición GPS (equipos móviles; no se usa en el VMS)
+    public const uint EHOME_ALARM_GPS = 4;                      // posición GPS (equipos móviles: DVR de vehículo)
     public const uint EHOME_ALARM_CID_REPORT = 5;
     public const uint EHOME_ALARM_NOTICE_PICURL = 6;            // foto disponible por URL: NET_EHOME_NOTICE_PICURL
     public const uint EHOME_ALARM_NOTIFY_FAIL = 7;              // fallo asíncrono (p. ej. no pudo capturar): NET_EHOME_NOTIFY_FAIL_INFO
@@ -707,6 +707,14 @@ public static class Layout
     // dwAlarmInChannel 304 · dwDiskNumber 308 · byRemark[64] 312 · byRetransFlag 376.
     public const int BasicTime = 4, BasicDeviceId = 36, BasicType = 292, BasicAction = 296, BasicChannel = 300, BasicAlarmIn = 304,
         BasicDisk = 308, BasicRemark = 312, BasicRetrans = 376, BasicMinSize = 412;
+
+    // NET_EHOME_GPS_INFO (HCISUPAlarm.h, 380 bytes): dwSize 0 · bySampleTime[32] 4 · byDeviceID[256] 36 · byDivision[2] 292 ('E'/'W', 'N'/'S') ·
+    // bySatelites 294 · byPrecision 295 (HDOP·100) · dwLongitude 296 · dwLatitude 300 (centésimas de segundo de arco) · dwDirection 304 (grados·100) ·
+    // dwSpeed 308 (km/h·100000 = cm/h) · dwHeight 312 (cm) · byRetransFlag 316 · byLocateMode 317 · byTimeDiffH 318 · byTimeDiffM 319 (0xff = no
+    // informado) · dwMileage 320 (metros del día).
+    public const int GpsTime = 4, GpsDeviceId = 36, GpsDivision = 292, GpsSatellites = 294, GpsPrecision = 295, GpsLongitude = 296, GpsLatitude = 300,
+        GpsDirection = 304, GpsSpeed = 308, GpsHeight = 312, GpsRetrans = 316, GpsLocateMode = 317, GpsTimeDiffH = 318, GpsTimeDiffM = 319,
+        GpsMileage = 320, GpsMinSize = 320;
 
     // NET_EHOME_SERVER_INFO_V50 (respuesta de registro): dwSize 0 · dwKeepAliveSec 4 · dwTimeOutCount 8 · struTCPAlarmSever 12 · struUDPAlarmSever 144 ·
     // dwAlarmServerType 276 (0 UDP, 1 UDP+TCP, 2 MQTT) · struNTPSever 280 · dwNTPInterval 412 · struPictureSever 416 · dwPicServerType 548 ·
