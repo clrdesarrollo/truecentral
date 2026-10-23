@@ -177,9 +177,20 @@ const LV_PREFS_DEFAULTS = {
   profile: "auto", fitDevice: true, stretch: false, reopen: false, snapFormat: "jpg",
 };
 
+// Modo Flota (#/fleet/live): la misma grilla con el árbol de vehículos. Sus preferencias van aparte: por 4G conviene el
+// secundario y cortar el video que nadie mira (consume datos móviles del vehículo).
+const LV_FLEET_PREFS_KEY = "tcvms.fleet.prefs";
+const LV_FLEET_LAST_KEY = "tcvms.fleet.last";
+const LV_FLEET_DEFAULTS = { profile: "sub", idleMinutes: 5 };
+/** Segundos de aviso antes de cortar el video por inactividad. */
+const LV_IDLE_WARN_SECONDS = 30;
+
+function lvPrefsKey() { return lv.fleet ? LV_FLEET_PREFS_KEY : LV_PREFS_KEY; }
+function lvLastKey() { return lv.fleet ? LV_FLEET_LAST_KEY : LV_LAST_KEY; }
+
 function lvLoadPrefs(aux) {
-  let prefs = { ...LV_PREFS_DEFAULTS };
-  try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(LV_PREFS_KEY) || "{}") }; } catch { /* ilegible */ }
+  let prefs = { ...LV_PREFS_DEFAULTS, ...(lv.fleet ? LV_FLEET_DEFAULTS : {}) };
+  try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(lvPrefsKey()) || "{}") }; } catch { /* ilegible */ }
   // Las pantallas auxiliares recuerdan su propia división.
   if (aux) {
     try { prefs.layout = JSON.parse(localStorage.getItem(`${LV_PREFS_KEY}.aux${aux}`) || "{}").layout ?? "4"; } catch { prefs.layout = "4"; }
@@ -196,7 +207,7 @@ function lvSavePrefs() {
       const main = JSON.parse(localStorage.getItem(LV_PREFS_KEY) || "{}");
       localStorage.setItem(LV_PREFS_KEY, JSON.stringify({ ...p, layout: main.layout ?? LV_PREFS_DEFAULTS.layout }));
     } else {
-      localStorage.setItem(LV_PREFS_KEY, JSON.stringify(p));
+      localStorage.setItem(lvPrefsKey(), JSON.stringify(p));
     }
   } catch { /* modo privado */ }
 }
@@ -232,6 +243,9 @@ const LV_ICO = {
 // ---------------------------------------------------------------------------
 const lv = {
   active: false,
+  fleet: false,            // modo Flota: árbol de vehículos (#/fleet/live)
+  lastInput: 0,            // última interacción del operador (corte por inactividad en Flota)
+  idleWarnAt: 0,           // cuándo empezó el aviso de corte (0 = sin aviso)
   aux: 0,                  // 0 = ventana principal; 1..3 = pantalla auxiliar
   windowId: Math.random().toString(36).slice(2),
   prefs: { ...LV_PREFS_DEFAULTS },
@@ -1268,10 +1282,16 @@ function lvAllFeeds() { return lv.cells.map((c) => c.feed).filter(Boolean); }
 // ---------------------------------------------------------------------------
 const LV_DOC_TITLE = document.title;
 
-async function renderLiveView() {
+/** Flota en vivo: la vista en vivo con el árbol de vehículos (sin PTZ, parlantes ni pantallas auxiliares). */
+function renderFleetLive() { return renderLiveView(true); }
+
+async function renderLiveView(fleet = false) {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
-  lv.aux = Math.min(Math.max(Number(params.get("aux")) || 0, 0), 3);
+  lv.fleet = fleet === true;
+  lv.aux = lv.fleet ? 0 : Math.min(Math.max(Number(params.get("aux")) || 0, 0), 3);
   lv.prefs = lvLoadPrefs(lv.aux);
+  lv.lastInput = Date.now();
+  lv.idleWarnAt = 0;
   lv.active = true;
   lv.cells = [];
   lv.selected = null;
@@ -1280,7 +1300,7 @@ async function renderLiveView() {
   lv.zoomMode = false;
   lv.search = "";
   lv.activeView = "";
-  $("#page-title").textContent = lv.aux ? `Pantalla auxiliar ${lv.aux}` : "Vista en vivo";
+  $("#page-title").textContent = lv.fleet ? "Flota en vivo" : lv.aux ? `Pantalla auxiliar ${lv.aux}` : "Vista en vivo";
   if (lv.aux) document.title = `Pantalla auxiliar ${lv.aux} — TrueCentral VMS`;
   document.body.classList.toggle("live-aux", !!lv.aux);
   $("#view").className = "view-live";
@@ -1292,18 +1312,21 @@ async function renderLiveView() {
 
   const canPtz = Perms.can("live.ptz");
   $("#view").innerHTML = `
-    <div class="lv-root ${lv.prefs.treeCollapsed ? "tree-collapsed" : ""}" id="lv-root">
+    <div class="lv-root ${lv.prefs.treeCollapsed ? "tree-collapsed" : ""} ${lv.fleet ? "lv-fleet" : ""}" id="lv-root">
       <aside class="lv-side">
         <div class="lv-side-head">
-          <span class="lv-cap">CÁMARAS</span>
+          <span class="lv-cap">${lv.fleet ? "VEHÍCULOS" : "CÁMARAS"}</span>
           <span class="lv-seg">
-            <button type="button" data-tree="device" title="Cámaras agrupadas por equipo (DVR, NVR, cámara)">Equipo</button>
-            <button type="button" data-tree="location" title="Cámaras agrupadas por ubicación (sitio, edificio, sector…), como en Recursos">Ubicación</button>
+            ${lv.fleet
+              ? `<button type="button" data-tree="device" title="Cámaras agrupadas por vehículo">Vehículo</button>
+            <button type="button" data-tree="location" title="Vehículos agrupados por ubicación (base, región…), como en Recursos">Ubicación</button>`
+              : `<button type="button" data-tree="device" title="Cámaras agrupadas por equipo (DVR, NVR, cámara)">Equipo</button>
+            <button type="button" data-tree="location" title="Cámaras agrupadas por ubicación (sitio, edificio, sector…), como en Recursos">Ubicación</button>`}
           </span>
         </div>
-        <input id="lv-search" class="lv-search" type="search" placeholder="Buscar canal…" autocomplete="off">
-        <div class="lv-tree" id="lv-tree"><div class="muted lv-small" style="padding:10px 14px">Cargando cámaras…</div></div>
-        ${lv.aux ? "" : `
+        <input id="lv-search" class="lv-search" type="search" placeholder="${lv.fleet ? "Buscar vehículo, patente o cámara…" : "Buscar canal…"}" autocomplete="off">
+        <div class="lv-tree" id="lv-tree"><div class="muted lv-small" style="padding:10px 14px">${lv.fleet ? "Cargando vehículos…" : "Cargando cámaras…"}</div></div>
+        ${lv.aux || lv.fleet ? "" : `
         <section class="lv-panel" id="lv-spk" hidden></section>
         <section class="lv-panel ${lv.prefs.ptzOpen ? "open" : ""}" id="lv-ptz">
           <div class="lv-panel-head">
@@ -1359,7 +1382,7 @@ async function renderLiveView() {
             </span>
           </div>
           <div class="lv-tb-right">
-            ${lv.aux ? "" : `<button type="button" class="btn ghost lv-tb" id="lv-aux-btn" title="Abrir una pantalla auxiliar (hasta 3): otra ventana de vista en vivo para llevar a otro monitor">${lvSvg(LV_ICO.aux, 14)}<span>Pantalla auxiliar</span></button>`}
+            ${lv.aux || lv.fleet ? "" : `<button type="button" class="btn ghost lv-tb" id="lv-aux-btn" title="Abrir una pantalla auxiliar (hasta 3): otra ventana de vista en vivo para llevar a otro monitor">${lvSvg(LV_ICO.aux, 14)}<span>Pantalla auxiliar</span></button>`}
             <button type="button" class="btn ghost lv-tb" id="lv-full-btn" title="Pantalla completa de la grilla — presione Esc para salir">${lvSvg(LV_ICO.full, 14)}<span>Pantalla completa</span></button>
             <span class="lv-pop-anchor">
               <button type="button" class="btn ghost lv-tb lv-icon-only" id="lv-settings-btn" title="Ajustes de la vista en vivo de este navegador">${lvSvg(LV_ICO.gear, 15)}</button>
@@ -1368,6 +1391,10 @@ async function renderLiveView() {
           </div>
         </div>
         <div class="lv-gridwrap ${lv.prefs.stretch ? "stretch" : ""}" id="lv-gridwrap"><div class="lv-grid" id="lv-grid"></div></div>
+        ${lv.fleet ? `<div class="lv-idle" id="lv-idle" hidden>
+          <span id="lv-idle-text"></span>
+          <button type="button" class="btn small" id="lv-idle-keep">Seguir viendo</button>
+        </div>` : ""}
         <div class="lv-statusbar" id="lv-status"></div>
       </div>
     </div>`;
@@ -1376,11 +1403,13 @@ async function renderLiveView() {
   lvApplyLayout(lvFindLayout(lv.prefs.layout) ?? LV_LAYOUTS[1]);
   lvRenderLayoutButton();
   lvUpdatePtz();
-  lvStatus("Clic en la barra de un cuadro para seleccionarlo (borde azul); doble clic en un canal del árbol lo abre ahí.");
+  lvStatus(lv.fleet
+    ? "Doble clic en un vehículo abre todas sus cámaras; en una cámara, la abre en el cuadro seleccionado. El video de los vehículos usa sus datos móviles."
+    : "Clic en la barra de un cuadro para seleccionarlo (borde azul); doble clic en un canal del árbol lo abre ahí.");
 
   await lvLoadTree();
   if (!lv.active) return;
-  if (!lv.aux) lvLoadSpeakers();
+  if (!lv.aux && !lv.fleet) lvLoadSpeakers();
   if (!lv.aux && lv.prefs.reopen) await lvReopenLast();
 }
 
@@ -1472,8 +1501,9 @@ function lvWirePage() {
   });
   $("#lv-settings-btn").addEventListener("click", () => lvTogglePop("lv-settings-pop", lvRenderSettingsPop));
 
-  // PTZ (panel, teclado y joystick).
-  if (!lv.aux) { lvWirePtz(); lvJoyStart(); }
+  // PTZ (panel, teclado y joystick). Los vehículos no tienen PTZ.
+  if (!lv.aux && !lv.fleet) { lvWirePtz(); lvJoyStart(); }
+  if (lv.fleet) lvWireIdle();
 
   // Teclado (PTZ) y cierre de los desplegables con clic afuera.
   document.addEventListener("keydown", lvOnKeyDown, true);
@@ -1507,6 +1537,55 @@ function lvWirePage() {
     for (const c of lv.cells) if (c.feed?.rec) { const t = c.el.querySelector(".lv-rectime"); if (t) t.textContent = lvElapsed(c.feed.rec.startedAt); }
   }, 1000));
   lv.timers.push(setInterval(() => { for (const f of lvAllFeeds()) f.watch(); }, 4000));
+}
+
+// ---------------------------------------------------------------------------
+// Flota: corte por inactividad. El video de un vehículo viaja por su 4G: si el operador no toca la página en
+// lv.prefs.idleMinutes, se avisa y, sin respuesta en LV_IDLE_WARN_SECONDS, se cierran los cuadros (queda en la bitácora).
+// ---------------------------------------------------------------------------
+function lvWireIdle() {
+  const touch = () => {
+    lv.lastInput = Date.now();
+    if (lv.idleWarnAt) lvIdleHide();
+  };
+  for (const type of ["pointerdown", "keydown", "wheel"]) $("#lv-root").addEventListener(type, touch, { passive: true });
+  $("#lv-idle-keep").addEventListener("click", touch);
+  lv.timers.push(setInterval(lvIdleTick, 1000));
+}
+
+function lvIdleHide() {
+  lv.idleWarnAt = 0;
+  const box = $("#lv-idle");
+  if (box) box.hidden = true;
+}
+
+function lvIdleTick() {
+  const minutes = Number(lv.prefs.idleMinutes) || 0;
+  const feeds = lvAllFeeds();
+  if (!minutes || !feeds.length) { if (lv.idleWarnAt) lvIdleHide(); return; }
+  const now = Date.now();
+  if (!lv.idleWarnAt) {
+    if (now - lv.lastInput < minutes * 60000) return;
+    lv.idleWarnAt = now;
+    $("#lv-idle").hidden = false;
+  }
+  const left = LV_IDLE_WARN_SECONDS - Math.floor((now - lv.idleWarnAt) / 1000);
+  if (left > 0) {
+    $("#lv-idle-text").textContent = `Sin actividad hace ${minutes} min: el video de los vehículos se corta en ${left} s para no gastar sus datos móviles.`;
+    return;
+  }
+  lvIdleHide();
+  const names = [...new Set(feeds.map((f) => f.channel.device?.name).filter(Boolean))];
+  lvForgetPromotion();
+  lv.maximized = -1;
+  lv.cells.forEach((c) => c.clear());
+  lvApplyGridGeometry();
+  lvRefreshTreeLive();
+  lvStatus(`Se cerró el video de ${feeds.length} cámara(s) por inactividad (configurable en Ajustes de este navegador).`);
+  Api.post("/api/audit/client-event", {
+    action: "fleet-live-idle-stopped",
+    detail: `Se cerraron ${feeds.length} cámara(s) de ${names.join(", ")} tras ${minutes} min sin actividad en el panel web.`,
+  }).catch(() => { /* la auditoría nunca bloquea al operador */ });
 }
 
 function lvOnWindowBlur() {
@@ -1586,10 +1665,16 @@ function lvRenderSettingsPop() {
       <span>Estirar el video al tamaño del cuadro (sin mantener la proporción)</span></label>
     ${lv.aux ? "" : `<label class="lv-set-check"><input type="checkbox" id="lv-set-reopen" ${p.reopen ? "checked" : ""}>
       <span>Volver a abrir las cámaras de la última sesión al entrar</span></label>`}
+    ${lv.fleet ? `<label class="lv-set-row"><span>Cortar el video sin actividad</span>
+      <select id="lv-set-idle" title="El video de los vehículos usa sus datos móviles">
+        ${[2, 5, 10, 15, 30].map((m) => `<option value="${m}" ${Number(p.idleMinutes) === m ? "selected" : ""}>A los ${m} minutos</option>`).join("")}
+        <option value="0" ${Number(p.idleMinutes) === 0 ? "selected" : ""}>Nunca</option>
+      </select></label>` : ""}
     <div class="muted lv-small" style="margin-top:8px">Las capturas y grabaciones se guardan en la carpeta de descargas del navegador.</div>
     <div class="muted lv-small" style="margin-top:4px">H.265 en este navegador: por WebRTC ${lvHevc.webrtc ? "sí" : "no"};
       por la entrega alternativa (sin audio) ${lvHevc.mse ? "sí" : "no"}.</div>
-    ${lv.aux ? "" : lvJoySettingsHtml()}`;
+    ${lv.aux || lv.fleet ? "" : lvJoySettingsHtml()}`;
+  $("#lv-set-idle")?.addEventListener("change", (e) => { p.idleMinutes = Number(e.target.value); lvSavePrefs(); lv.lastInput = Date.now(); });
   $("#lv-set-profile").addEventListener("change", (e) => { p.profile = e.target.value; lvSavePrefs(); });
   $("#lv-set-snap").addEventListener("change", (e) => { p.snapFormat = e.target.value; lvSavePrefs(); });
   $("#lv-set-fit").addEventListener("change", (e) => { p.fitDevice = e.target.checked; lvSavePrefs(); });
@@ -1598,7 +1683,7 @@ function lvRenderSettingsPop() {
     $("#lv-gridwrap").classList.toggle("stretch", p.stretch);
   });
   $("#lv-set-reopen")?.addEventListener("change", (e) => { p.reopen = e.target.checked; lvSavePrefs(); });
-  if (!lv.aux) lvJoyWireSettings();
+  if (!lv.aux && !lv.fleet) lvJoyWireSettings();
 }
 
 // ---------------------------------------------------------------------------
@@ -1954,6 +2039,7 @@ async function lvOpenAll(label, channels) {
 // Árbol de cámaras
 // ---------------------------------------------------------------------------
 async function lvLoadTree() {
+  if (lv.fleet) return lvLoadFleetTree();
   let devices;
   try { devices = await Api.get("/api/devices"); }
   catch (err) { $("#lv-tree").innerHTML = `<div class="error-box" style="margin:10px">${esc(err.error)}</div>`; return; }
@@ -1981,6 +2067,50 @@ async function lvLoadTree() {
   }
   lvRenderTree();
   lvUpdatePtz();
+}
+
+/**
+ * Árbol de Flota: cada vehículo hace de "equipo" (su grabador móvil) con sus cámaras habilitadas. El vivo va por las mismas
+ * concesiones que cualquier cámara (equipo + canal RTSP); el servidor exige el permiso de Flota para estas.
+ */
+async function lvLoadFleetTree() {
+  let vehicles;
+  try { vehicles = await Api.get("/api/fleet/vehicles"); }
+  catch (err) { $("#lv-tree").innerHTML = `<div class="error-box" style="margin:10px">${esc(err.error)}</div>`; return; }
+  let locations = [];
+  try { locations = await Api.get("/api/locations"); } catch { /* sin ubicaciones: todo "Sin ubicación" */ }
+  if (!lv.active) return;
+
+  lv.channels = new Map();
+  lv.devices = vehicles.filter((v) => v.enabled).map((v) => {
+    const dev = { id: v.deviceId, name: v.code, status: v.status, vehicle: v, channels: [] };
+    dev.channels = v.channels.filter((c) => c.enabled).map((c) => {
+      const ch = { ...c, deviceId: v.deviceId, supportsPtz: false, locationId: v.locationId, device: dev };
+      lv.channels.set(ch.id, ch);
+      return ch;
+    });
+    return dev;
+  });
+  lvBuildLocationTree(locations);
+  for (const f of lvAllFeeds()) {
+    const fresh = lv.channels.get(f.channel.id);
+    if (fresh) { f.channel = fresh; f.render(); }
+  }
+  lvRenderTree();
+  if (!vehicles.length)
+    lvStatus(Perms.can("fleet.manage")
+      ? "Todavía no hay vehículos: agréguelos en Configuración → Dispositivos → Vehículos."
+      : "Todavía no hay vehículos (o su alcance no incluye ninguno).", true);
+}
+
+/** Datos del vehículo junto a su nombre en el árbol: patente y velocidad de su última posición. */
+function lvVehicleExtra(d) {
+  const v = d.vehicle;
+  if (!v) return "";
+  const parts = [];
+  if (v.plate) parts.push(`<span class="lv-plate">${esc(v.plate)}</span>`);
+  if (v.position && d.status === "Online") parts.push(`<span class="lv-speed" title="Última posición GPS">${Math.round(v.position.speedKmh)} km/h</span>`);
+  return parts.join("");
 }
 
 const lvCollator = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
@@ -2023,17 +2153,20 @@ function lvRenderTree() {
   let html = "";
   if (!lv.prefs.byLocation) {
     for (const d of lv.devices) {
-      const devMatch = !q || lvNorm(d.name).includes(q);
+      const devMatch = !q || lvNorm(d.name).includes(q) || (d.vehicle?.plate && lvNorm(d.vehicle.plate).includes(q));
       const chans = devMatch ? d.channels : d.channels.filter((c) => lvNorm(c.name).includes(q));
       if (q && !devMatch && !chans.length) continue;
       const key = `d${d.id}`;
       const collapsed = !q && lvIsCollapsed(key);
-      html += `<div class="lv-node lv-dev" data-dev="${d.id}" data-key="${key}" style="--d:0" title="Doble clic para abrir todos sus canales">
+      const devTip = d.vehicle
+        ? `${d.vehicle.kind ? `${d.vehicle.kind} · ` : ""}${d.status === "Online" ? "conectado" : "sin conexión"} — doble clic para abrir sus cámaras`
+        : "Doble clic para abrir todos sus canales";
+      html += `<div class="lv-node lv-dev" data-dev="${d.id}" data-key="${key}" style="--d:0" title="${esc(devTip)}">
         <span class="lv-caret ${collapsed ? "" : "open"}" data-caret></span>
-        <span class="dot ${d.status === "Online" ? "ok" : "bad"}"></span><b class="lv-label">${esc(d.name)}</b></div>`;
+        <span class="dot ${d.status === "Online" ? "ok" : "bad"}"></span><b class="lv-label">${esc(d.name)}</b>${lvVehicleExtra(d)}</div>`;
       if (!collapsed) html += chans.map((c) => chHtml(c, 1)).join("");
     }
-    if (!lv.devices.length) html = `<div class="muted lv-small" style="padding:10px 14px">No hay cámaras disponibles.</div>`;
+    if (!lv.devices.length) html = `<div class="muted lv-small" style="padding:10px 14px">${lv.fleet ? "No hay vehículos disponibles." : "No hay cámaras disponibles."}</div>`;
   } else {
     const walk = (node, depth, ancestorMatch) => {
       const name = node.loc ? node.loc.name : "Sin ubicación";
@@ -2197,10 +2330,10 @@ function lvOnDeviceStatus(dto) {
 }
 
 function lvOnConfigChanged(topic) {
-  if (["devices", "channels", "locations"].includes(topic)) {
+  if (["devices", "channels", "locations", "fleet"].includes(topic)) {
     clearTimeout(lv.treeReload);
     lv.treeReload = setTimeout(() => { if (lv.active) lvLoadTree(); }, 800);
-  } else if (topic === "speakers" && !lv.aux) {
+  } else if (topic === "speakers" && !lv.aux && !lv.fleet) {
     lvLoadSpeakers();
   }
   // Lo operable (alcance) se relee en app.js: el PTZ se re-evalúa después.
@@ -2242,14 +2375,18 @@ function lvViewDetail(v) {
   return `${v.items.length} cámara(s) · división ${layout}${owner}`;
 }
 
+/** Vistas de este árbol: las de Flota tienen cámaras de vehículos y las de la vista en vivo, de equipos fijos. */
+function lvViewsHere() { return lv.views.filter((v) => v.items.some((i) => lv.channels.has(i.channelId))); }
+
 function lvRenderViewsList() {
   const list = $("#lv-views-list");
   if (!list) return;
-  if (!lv.views.length) {
+  const views = lvViewsHere();
+  if (!views.length) {
     list.innerHTML = `<div class="muted lv-small">Todavía no hay vistas. Arme la grilla y guárdela con un nombre.</div>`;
     return;
   }
-  list.innerHTML = lv.views.map((v) => `
+  list.innerHTML = views.map((v) => `
     <div class="lv-view-row" data-view="${v.id}" title="Cargar esta vista en la grilla">
       <div class="lv-view-text"><b>${esc(v.name)}</b><span class="muted">${esc(lvViewDetail(v))}</span></div>
       ${v.canEdit ? `<span class="lv-view-actions">
@@ -2358,7 +2495,7 @@ function lvScheduleLastSave() {
 function lvSaveLastNow() {
   if (lv.aux || !lv.layout) return;
   try {
-    localStorage.setItem(LV_LAST_KEY, JSON.stringify({
+    localStorage.setItem(lvLastKey(), JSON.stringify({
       layout: lv.layout.key, columns: lv.layout.columns, rows: lv.layout.rows,
       items: lv.cells.map((c, i) => (c.feed ? { i, ch: c.feed.channel.id, p: c.feed.profile } : null)).filter(Boolean),
     }));
@@ -2367,7 +2504,7 @@ function lvSaveLastNow() {
 
 async function lvReopenLast() {
   let last = null;
-  try { last = JSON.parse(localStorage.getItem(LV_LAST_KEY) || "null"); } catch { /* ilegible */ }
+  try { last = JSON.parse(localStorage.getItem(lvLastKey()) || "null"); } catch { /* ilegible */ }
   if (!last?.items?.length) return;
   const fit = lvFitSavedItems(lvRestoreLayout(last.layout, last.columns, last.rows),
     last.items.map((x) => ({ cellIndex: x.i, channelId: x.ch, profile: x.p })));

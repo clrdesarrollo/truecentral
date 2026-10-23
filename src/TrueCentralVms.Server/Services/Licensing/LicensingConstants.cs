@@ -59,6 +59,8 @@ public static class LicensingConstants
         [LicenseFeatures.ModulePlayback] = true,
         [LicenseFeatures.ModuleAnpr] = true,
         [LicenseFeatures.AnprChannels] = 2,
+        [LicenseFeatures.ModuleFleet] = true,
+        [LicenseFeatures.FleetVehicles] = 5,
         [LicenseFeatures.ModuleAlarms] = true,
         [LicenseFeatures.AlarmPanels] = 2,
         [LicenseFeatures.ModuleFence] = true,

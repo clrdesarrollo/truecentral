@@ -883,6 +883,8 @@ public partial class MainViewModel : ObservableObject
         {
             if (entity is "devices" or "channels" or "locations")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadTreeAsync());
+            if (entity is "fleet" or "channels" or "locations")
+                Application.Current.Dispatcher.InvokeAsync(() => { if (_fleetWindow?.Vm is { } fleet) _ = fleet.LoadFleetAsync(); });
             // Cambió la licencia: el aviso y los módulos que incluye (los demás se ocultan).
             if (entity is "license")
                 Application.Current.Dispatcher.InvokeAsync(() => { _ = PollLicenseAsync(); _ = LoadPermissionsAsync(); });
@@ -903,6 +905,7 @@ public partial class MainViewModel : ObservableObject
         {
             var node = Devices.FirstOrDefault(d => d.Device.Id == dto.Id);
             if (node is not null) node.Device = dto;
+            _fleetWindow?.Vm.UpdateDeviceStatus(dto);
         });
         _hub.ConnectionStateChanged += ok => Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -1495,6 +1498,30 @@ public partial class MainViewModel : ObservableObject
             cell.Clear();
     }
 
+    // ---------- Flota en vivo (módulo Flota): una ventana propia con el árbol de vehículos ----------
+
+    private Views.AuxLiveWindow? _fleetWindow;
+
+    [RelayCommand]
+    private void OpenFleet()
+    {
+        if (!CanFleet) return;
+        if (_fleetWindow is { IsLoaded: true })
+        {
+            if (_fleetWindow.WindowState == WindowState.Minimized) _fleetWindow.WindowState = WindowState.Normal;
+            _fleetWindow.Activate();
+            return;
+        }
+        var window = new Views.AuxLiveWindow(new AuxScreenViewModel(this, 0, fleet: true));
+        window.Closed += (_, _) => { if (_fleetWindow == window) _fleetWindow = null; };
+        _fleetWindow = window;
+        var occupied = new List<Window>();
+        if (Application.Current.MainWindow is { } main) occupied.Add(main);
+        occupied.AddRange(_auxWindows.Where(w => w.IsLoaded));
+        window.ShowOnFreeMonitor(occupied);
+        StatusMessage = "Flota en vivo abierta en su propia ventana.";
+    }
+
     public void Shutdown()
     {
         // La última sesión se toma ANTES de cerrar ventanas y liberar cuadros:
@@ -1509,6 +1536,7 @@ public partial class MainViewModel : ObservableObject
         // sus players en su propio Closed).
         foreach (var window in _auxWindows.ToList())
             window.Close();
+        _fleetWindow?.Close();
         foreach (var cell in Cells)
             cell.Dispose();
         Playback.Dispose();

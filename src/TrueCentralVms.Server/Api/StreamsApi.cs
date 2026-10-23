@@ -19,7 +19,7 @@ public static class StreamsApi
         app.MapPost("/api/streams/request", async (HttpContext ctx, StreamRequestDto request, VmsDbContext db,
             StreamTokenService streamTokens, MediaMtxManager mtx, IConfiguration config) =>
         {
-            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend, Permissions.FleetLive) is { } failure) return failure;
 
             if (!mtx.IsRunning)
                 return Results.Json(new { error = "El servicio de streaming no está disponible en el servidor." },
@@ -41,7 +41,7 @@ public static class StreamsApi
         app.MapPost("/api/streams/webrtc", async (HttpContext ctx, WebRtcOfferDto request, VmsDbContext db,
             StreamTokenService streamTokens, MediaMtxManager mtx, ILogger<Program> logger, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend, Permissions.FleetLive) is { } failure) return failure;
 
             if (!mtx.IsRunning)
                 return Results.Json(new { error = "El servicio de streaming no está disponible en el servidor." },
@@ -90,7 +90,7 @@ public static class StreamsApi
         app.Map("/api/streams/mse", async (HttpContext ctx, int deviceId, int rtspChannel, StreamProfile? profile,
             VmsDbContext db, StreamTokenService streamTokens, MediaMtxManager mtx, ILogger<Program> logger) =>
         {
-            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend, Permissions.FleetLive) is { } failure) return failure;
             if (!ctx.WebSockets.IsWebSocketRequest)
                 return Results.Json(new { error = "Se esperaba una conexión WebSocket." }, statusCode: StatusCodes.Status400BadRequest);
             if (!mtx.IsRunning)
@@ -197,6 +197,20 @@ public static class StreamsApi
         var channel = await db.Channels.Include(c => c.Device)
             .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.RtspChannel == rtspChannel);
         if (channel is null) return new GrantResult(Results.NotFound());
+        // Las cámaras de un vehículo piden "Ver video de vehículos" (y el módulo Flota en la licencia); las fijas, los permisos
+        // de video de siempre.
+        if (channel.Device.IsMobile)
+        {
+            if (ApiSecurity.Require(ctx, Permissions.FleetLive, out _) is { } noFleet) return new GrantResult(noFleet);
+            var license = ctx.RequestServices.GetRequiredService<Services.Licensing.LicenseService>();
+            if (license.Deny(LicenseFeatures.ModuleFleet, null, 0, 0) is { } denied)
+                return new GrantResult(await license.DenyAsync(ctx, denied, "channel", $"{channel.Device.Name} · {channel.Name}"));
+            if (await db.Vehicles.AnyAsync(v => v.DeviceId == deviceId && !v.Enabled))
+                return new GrantResult(Results.Json(new { error = "El vehículo está deshabilitado." },
+                    statusCode: StatusCodes.Status422UnprocessableEntity));
+        }
+        else if (ApiSecurity.RequireAny(ctx, out _, Permissions.LiveView, Permissions.WallOperate, Permissions.EventsAttend) is { } noVideo)
+            return new GrantResult(noVideo);
         if (!channel.Enabled)
             return new GrantResult(Results.Json(new { error = "El canal está deshabilitado." },
                 statusCode: StatusCodes.Status422UnprocessableEntity));

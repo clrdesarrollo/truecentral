@@ -155,7 +155,8 @@
                         <!-- Modo del árbol y buscador: estado compartido con la ventana principal -->
                         <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8">
                             <Border DockPanel.Dock="Right" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                                    CornerRadius="6" Padding="2">
+                                    CornerRadius="6" Padding="2"
+                                    Visibility="{Binding ShowTreeModeToggle, Converter={x:Static vm:BoolToVisibility.Instance}}">
                                 <StackPanel Orientation="Horizontal">
                                     <Button Style="{StaticResource SegmentButton}" Content="Equipo"
                                             Tag="{Binding IsTreeByDevice}" Command="{Binding ShowTreeByDeviceCommand}"
@@ -165,13 +166,13 @@
                                             ToolTip="Cámaras agrupadas por ubicación (sitio, edificio, sector…)"/>
                                 </StackPanel>
                             </Border>
-                            <TextBlock Text="CÁMARAS" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                            <TextBlock Text="{Binding TreeCaption}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
                                        Foreground="{StaticResource MutedBrush}"/>
                         </DockPanel>
                         <Grid DockPanel.Dock="Top" Margin="10,0,10,8">
                             <TextBox x:Name="SearchBox" Style="{StaticResource DarkTextBox}" Padding="9,6" FontSize="12"
                                      Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Text="Buscar canal…" IsHitTestVisible="False"
+                            <TextBlock Text="{Binding SearchHint}" IsHitTestVisible="False"
                                        Margin="11,0,0,0" VerticalAlignment="Center" FontSize="12">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">

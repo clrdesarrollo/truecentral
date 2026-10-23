@@ -255,6 +255,14 @@ public static class AuditCatalog
             new("agent-revoked", "TrueCentral Speaker revocado"),
             new("test-tone", "Tono de prueba en parlante"),
         ]),
+        new("fleet", "Flota (DVR móviles)",
+        [
+            new("vehicle-created", "Vehículo agregado"),
+            new("vehicle-updated", "Vehículo modificado"),
+            new("vehicle-deleted", "Vehículo eliminado"),
+            new("vehicles-imported", "Vehículos importados desde CSV"),
+            new("live-idle-stopped", "Video de vehículos cortado por inactividad"),
+        ]),
         new("io", "Módulos de E/S",
         [
             new("io-module-created", "Módulo de E/S agregado"),
@@ -417,5 +425,6 @@ public static class AuditCatalog
             ["playback-export-saved"] = ("playback", "export-saved", "Guardó una exportación de grabación"),
             ["playback-export-cancelled"] = ("playback", "export-cancelled", "Canceló una exportación de grabación"),
             ["playback-export-failed"] = ("playback", "export-failed", "Falló una exportación de grabación"),
+            ["fleet-live-idle-stopped"] = ("fleet", "live-idle-stopped", "Se cortó el video de vehículos por inactividad del operador"),
         };
 }

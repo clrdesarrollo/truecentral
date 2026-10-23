@@ -2743,3 +2743,18 @@ table.kv .tag { margin: 0 4px 4px 0; }
 .wan-scenario input { margin-top: 3px; }
 .wan-scenario b { display: block; }
 .wan-scenario .muted { display: block; font-size: 12px; }
+
+/* ---- Flota (DVR móviles): árbol de vehículos, corte por inactividad y mantenedor ---- */
+.lv-plate { margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: 3px; font-size: 10.5px; letter-spacing: .5px; color: var(--muted); }
+.lv-speed { margin-left: auto; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.lv-idle { flex: none; display: flex; align-items: center; gap: 12px; padding: 6px 12px; font-size: 12.5px;
+  background: rgba(var(--accent-rgb), .12); border-top: 1px solid rgba(var(--accent-rgb), .35); }
+.lv-idle[hidden] { display: none; }
+.fl-chans { display: flex; flex-wrap: wrap; gap: 4px; }
+.fl-chan { padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11.5px; white-space: nowrap; }
+.fl-chan.off { opacity: .55; text-decoration: line-through; }
+.fl-chan .dot { margin-right: 4px; }
+.fl-plate { padding: 0 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 12px; letter-spacing: .5px; }
+.fl-hint { font-size: 12px; }
+.fl-import-result { max-height: 280px; overflow: auto; margin-top: 8px; }
+.fl-import-result .bad { color: var(--danger, #d64545); }

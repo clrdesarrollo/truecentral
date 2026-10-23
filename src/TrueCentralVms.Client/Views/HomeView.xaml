@@ -223,6 +223,19 @@
                         </StackPanel>
                     </DockPanel>
                 </Button>
+                <Button Style="{StaticResource HomeCard}" Command="{Binding OpenFleetCommand}"
+                        Visibility="{Binding CanFleet, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#3334D399">
+                            <TextBlock Text="&#xE806;" Foreground="#34D399" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Flota en vivo" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Cámaras de los vehículos (DVR móviles por 4G), en su propia ventana."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Button>
             </views:CardGridPanel>
         </StackPanel>
     </ScrollViewer>

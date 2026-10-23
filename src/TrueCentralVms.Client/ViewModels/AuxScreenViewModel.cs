@@ -3,6 +3,8 @@ using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using TrueCentralVms.Client.Services;
+using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Core.Drivers;
 
 namespace TrueCentralVms.Client.ViewModels;
@@ -20,32 +22,51 @@ public partial class AuxScreenViewModel : ObservableObject
     private readonly MainViewModel _shell;
 
     /// <summary>Número de la pantalla (1..3), fijo mientras esté abierta; al
-    /// cerrarla su número queda libre para la próxima.</summary>
+    /// cerrarla su número queda libre para la próxima. 0 en Flota en vivo.</summary>
     public int SlotNumber { get; }
 
-    public string WindowTitle => $"Pantalla auxiliar {SlotNumber}";
+    /// <summary>
+    /// Flota en vivo (módulo Flota): la misma ventana con el árbol de VEHÍCULOS en vez del inventario del shell, el stream
+    /// secundario por omisión (el video viaja por el 4G del vehículo) y corte por inactividad. No entra en la última sesión.
+    /// </summary>
+    public bool IsFleet { get; }
+
+    public string WindowTitle => IsFleet ? "Flota en vivo" : $"Pantalla auxiliar {SlotNumber}";
+    public string TreeCaption => IsFleet ? "VEHÍCULOS" : "CÁMARAS";
+    public string SearchHint => IsFleet ? "Buscar vehículo o cámara…" : "Buscar canal…";
+    /// <summary>El selector Equipo/Ubicación es del árbol del shell; en Flota no se ofrece.</summary>
+    public bool ShowTreeModeToggle => !IsFleet;
+
+    private readonly ObservableCollection<DeviceNode> _fleetDevices = [];
+    private string _fleetSearch = "";
 
     /// <summary>Árbol del shell, compartido: el mismo inventario y los mismos
-    /// estados en línea (y el filtro del buscador de la ventana principal).</summary>
-    public ObservableCollection<DeviceNode> Devices => _shell.Devices;
+    /// estados en línea (y el filtro del buscador de la ventana principal). En Flota, sus vehículos.</summary>
+    public ObservableCollection<DeviceNode> Devices => IsFleet ? _fleetDevices : _shell.Devices;
 
     /// <summary>Árbol de cámaras según el modo del shell (por equipo o por
     /// ubicación): cambia junto con el de la ventana principal.</summary>
-    public System.Collections.IEnumerable TreeItems => _shell.TreeItems;
+    public System.Collections.IEnumerable TreeItems => IsFleet ? _fleetDevices : _shell.TreeItems;
 
     /// <summary>Texto del buscador: es el MISMO del shell, así que escribir en
-    /// cualquier ventana filtra el árbol de todas y se conserva al cambiar de modo.</summary>
+    /// cualquier ventana filtra el árbol de todas y se conserva al cambiar de modo. Flota tiene el suyo.</summary>
     public string SearchText
     {
-        get => _shell.SearchText;
-        set => _shell.SearchText = value ?? "";
+        get => IsFleet ? _fleetSearch : _shell.SearchText;
+        set
+        {
+            if (!IsFleet) { _shell.SearchText = value ?? ""; return; }
+            _fleetSearch = value ?? "";
+            OnPropertyChanged();
+            ApplyFleetFilter();
+        }
     }
 
-    public bool IsTreeByDevice => _shell.IsTreeByDevice;
-    public bool IsTreeByLocation => _shell.IsTreeByLocation;
+    public bool IsTreeByDevice => IsFleet || _shell.IsTreeByDevice;
+    public bool IsTreeByLocation => !IsFleet && _shell.IsTreeByLocation;
 
-    [RelayCommand] private void ShowTreeByDevice() => _shell.IsTreeByLocation = false;
-    [RelayCommand] private void ShowTreeByLocation() => _shell.IsTreeByLocation = true;
+    [RelayCommand] private void ShowTreeByDevice() { if (!IsFleet) _shell.IsTreeByLocation = false; }
+    [RelayCommand] private void ShowTreeByLocation() { if (!IsFleet) _shell.IsTreeByLocation = true; }
 
     public ObservableCollection<VideoCellViewModel> Cells { get; } = [];
 
@@ -77,19 +98,147 @@ public partial class AuxScreenViewModel : ObservableObject
     /// muestra la notificación flotante en su propio monitor.</summary>
     public event Action<string, string, string>? MediaSaved;
 
-    public AuxScreenViewModel(MainViewModel shell, int slotNumber)
+    public AuxScreenViewModel(MainViewModel shell, int slotNumber, bool fleet = false)
     {
         _shell = shell;
         SlotNumber = slotNumber;
+        IsFleet = fleet;
+        if (fleet) _statusMessage = FleetHint;
         _shell.PropertyChanged += OnShellPropertyChanged;
         InitialLayout = ApplyLayoutAsync(VideoLayout.Default);
+        if (fleet)
+        {
+            _ = LoadFleetAsync();
+            _idleTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _idleTimer.Tick += (_, _) => IdleTick();
+            _idleTimer.Start();
+        }
     }
 
     /// <summary>La primera división: quien quiera cambiarla enseguida (restaurar la última sesión) la espera.</summary>
     public Task InitialLayout { get; }
 
+    private const string FleetHint =
+        "Doble clic en un vehículo abre todas sus cámaras. El video de los vehículos usa sus datos móviles.";
+
+    // ---------- Flota: árbol de vehículos ----------
+
+    /// <summary>Carga (o recarga) los vehículos y sus cámaras habilitadas; las celdas abiertas siguen con su video.</summary>
+    public async Task LoadFleetAsync()
+    {
+        if (!IsFleet) return;
+        try
+        {
+            var vehicles = await _shell.Api.GetFleetVehiclesAsync();
+            _fleetDevices.Clear();
+            foreach (var v in vehicles.Where(v => v.Enabled))
+            {
+                // El vehículo hace de "equipo" (su grabador): las concesiones de vivo van por equipo + canal RTSP.
+                string name = v.Plate is { Length: > 0 } plate ? $"{v.Code} · {plate}" : v.Code;
+                var device = new DeviceDto(v.DeviceId, name, DeviceType.Dvr, "hikvision-isup", "", 0, 0, "",
+                    v.Model, null, v.FirmwareVersion, v.Channels.Count, v.Status, v.LastSeenAt, v.CreatedAt,
+                    EnabledChannelCount: v.Channels.Count(c => c.Enabled), LocationId: v.LocationId, Location: v.Location);
+                var node = new DeviceNode(device);
+                foreach (var c in v.Channels.Where(c => c.Enabled))
+                    node.Channels.Add(new ChannelNode(node, new ChannelDto(c.Id, v.DeviceId, c.ChannelNumber, c.RtspChannel, c.Name,
+                        c.Enabled, c.IsOnline, SupportsPtz: false, LocationId: v.LocationId)));
+                _fleetDevices.Add(node);
+            }
+            ApplyFleetFilter();
+            RefreshFleetLive();
+            if (_fleetDevices.Count == 0)
+                StatusMessage = "Todavía no hay vehículos habilitados (o su alcance no incluye ninguno).";
+        }
+        catch (ApiException ex)
+        {
+            StatusMessage = ex.Message;
+        }
+    }
+
+    /// <summary>Estado de un grabador que cambió (en línea / fuera de línea): llega por el hub del shell.</summary>
+    public void UpdateDeviceStatus(DeviceDto dto)
+    {
+        var node = _fleetDevices.FirstOrDefault(d => d.Device.Id == dto.Id);
+        if (node is not null) node.Device = node.Device with { Status = dto.Status, LastSeenAt = dto.LastSeenAt };
+    }
+
+    private void ApplyFleetFilter()
+    {
+        string q = Normalize(_fleetSearch.Trim());
+        foreach (var d in _fleetDevices)
+        {
+            bool deviceMatch = q.Length == 0 || Normalize(d.Device.Name).Contains(q);
+            foreach (var c in d.Channels) c.IsVisible = deviceMatch || Normalize(c.Header).Contains(q);
+            d.IsVisible = deviceMatch || d.Channels.Any(c => c.IsVisible);
+        }
+    }
+
+    private static string Normalize(string s) =>
+        new string(s.Normalize(System.Text.NormalizationForm.FormD)
+            .Where(ch => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            .ToArray()).ToLowerInvariant();
+
+    /// <summary>Marca ▶ en los vehículos que están en pantalla (el árbol de Flota es propio de esta ventana).</summary>
+    private void RefreshFleetLive()
+    {
+        var live = Cells.Where(c => c.AssignedChannel is not null)
+            .GroupBy(c => c.AssignedChannel!.Channel.Id)
+            .ToDictionary(g => g.Key, g => string.Join(", ", g.Select(c => $"cuadro {c.Index}")));
+        foreach (var channel in _fleetDevices.SelectMany(d => d.Channels))
+        {
+            bool on = live.TryGetValue(channel.Channel.Id, out var where);
+            channel.IsLive = on;
+            channel.LiveLocation = on ? "En vivo en " + where : "";
+        }
+    }
+
+    private void OnCellChannelChanged()
+    {
+        if (IsFleet) RefreshFleetLive();
+        else _shell.RefreshLiveChannels();
+    }
+
+    // ---------- Flota: corte por inactividad ----------
+    // El video de un vehículo viaja por su 4G: sin teclado ni mouse en el PC durante Settings.FleetIdleMinutes, se avisa y,
+    // si nadie responde en IdleWarnSeconds, se cierran los cuadros (queda en la bitácora).
+
+    private readonly DispatcherTimer? _idleTimer;
+    private DateTime? _idleWarnSince;
+    private const int IdleWarnSeconds = 30;
+
+    private void IdleTick()
+    {
+        int minutes = _shell.Settings.FleetIdleMinutes;
+        var open = Cells.Where(c => !c.IsEmpty).ToList();
+        if (minutes <= 0 || open.Count == 0) { EndIdleWarning(); return; }
+        var idle = UserInput.IdleTime();
+        if (idle < TimeSpan.FromMinutes(minutes)) { EndIdleWarning(); return; }
+        _idleWarnSince ??= DateTime.UtcNow;
+        int left = IdleWarnSeconds - (int)(DateTime.UtcNow - _idleWarnSince.Value).TotalSeconds;
+        if (left > 0)
+        {
+            StatusMessage = $"Sin actividad hace {minutes} min: el video de los vehículos se corta en {left} s " +
+                            "para no gastar sus datos móviles (mueva el mouse para seguir viendo).";
+            return;
+        }
+        _idleWarnSince = null;
+        var names = open.Select(c => c.AssignedChannel?.Device.Name).Where(n => n is not null).Distinct().ToList();
+        ClearAll();
+        StatusMessage = $"Se cerró el video de {open.Count} cámara(s) por inactividad (Configuración → Video).";
+        _ = _shell.Api.ReportAuditEventAsync(new ClientAuditEventDto("fleet-live-idle-stopped", null, null, null, null, null,
+            $"Se cerraron {open.Count} cámara(s) de {string.Join(", ", names)} tras {minutes} min sin actividad en el cliente de escritorio."));
+    }
+
+    private void EndIdleWarning()
+    {
+        if (_idleWarnSince is null) return;
+        _idleWarnSince = null;
+        StatusMessage = FleetHint;
+    }
+
     private void OnShellPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (IsFleet) return;   // Flota tiene su propio árbol y su propio buscador
         switch (e.PropertyName)
         {
             case nameof(MainViewModel.TreeItems): OnPropertyChanged(nameof(TreeItems)); break;
@@ -137,7 +286,7 @@ public partial class AuxScreenViewModel : ObservableObject
             Cells.RemoveAt(Cells.Count - 1);
             cell.AudioActivated -= _shell.OnCellAudioActivated;
             cell.MediaSaved -= OnCellMediaSaved;
-            cell.AssignedChannelChanged -= _shell.RefreshLiveChannels;
+            cell.AssignedChannelChanged -= OnCellChannelChanged;
             cell.Dispose();
             await MainViewModel.BreatheAsync();
         }
@@ -147,7 +296,7 @@ public partial class AuxScreenViewModel : ObservableObject
             cell.AudioActivated += _shell.OnCellAudioActivated;
             cell.MediaSaved += OnCellMediaSaved;
             // El árbol es del shell: la marca de "en vivo" cuenta todas las pantallas.
-            cell.AssignedChannelChanged += _shell.RefreshLiveChannels;
+            cell.AssignedChannelChanged += OnCellChannelChanged;
             Cells.Add(cell);
             await MainViewModel.BreatheAsync();
         }
@@ -155,7 +304,7 @@ public partial class AuxScreenViewModel : ObservableObject
             Cells[i].Index = i + 1;
         if (SelectedCell is not null && !Cells.Contains(SelectedCell))
             SelectedCell = null;
-        _shell.RefreshLiveChannels();
+        OnCellChannelChanged();
     }
 
     private void OnCellMediaSaved(string title, string glyph, string path) =>
@@ -320,6 +469,8 @@ public partial class AuxScreenViewModel : ObservableObject
     /// <summary>Misma regla que la grilla principal (Configuración → Video).</summary>
     private StreamProfile DefaultProfileForOpen() => _shell.Settings.DefaultProfile switch
     {
+        // Flota: secundario salvo que el puesto pida siempre el principal (el video viaja por el 4G del vehículo).
+        _ when IsFleet => _shell.Settings.DefaultProfile == "main" ? StreamProfile.Main : StreamProfile.Sub,
         "main" => StreamProfile.Main,
         "sub" => StreamProfile.Sub,
         _ => Cells.Count <= 4 ? StreamProfile.Main : StreamProfile.Sub,
@@ -335,6 +486,7 @@ public partial class AuxScreenViewModel : ObservableObject
     /// <summary>La ventana se cerró: se liberan sus players.</summary>
     public void Dispose()
     {
+        _idleTimer?.Stop();
         _shell.PropertyChanged -= OnShellPropertyChanged;
         foreach (var cell in Cells)
             cell.Dispose();

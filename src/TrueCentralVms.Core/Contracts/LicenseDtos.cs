@@ -65,6 +65,14 @@ public static class LicenseFeatures
     public const string ModuleAutomation = "module_automation";
     public const string AutomationRules = "automation_rules";
 
+    // Flota (DVR móviles en vehículos, por ISUP): se licencia por vehículo; sus canales no consumen video_channels.
+    public const string ModuleFleet = "module_fleet";
+    public const string FleetVehicles = "fleet_vehicles";
+
+    /// <summary>Tope de canales habilitados por vehículo: un grabador fijo no debe poder darse de alta como vehículo para
+    /// esquivar el cupo de canales de video.</summary>
+    public const int MaxChannelsPerVehicle = 16;
+
     // Áreas en que se agrupan módulos y cupos en las pantallas de licencia.
     public const string AreaPlatform = "Plataforma";
     public const string AreaVideo = "Video";
@@ -85,6 +93,7 @@ public static class LicenseFeatures
         new(ModuleAnpr, "Reconocimiento de patentes", AnprChannels, "fuentes ANPR", AreaVideo),
         new(ModuleVideowall, "Muro de video", Videowalls, "muros", AreaVideo),
         new(ModuleVideowall, "Decodificadores de muro", VideowallDecoders, "decodificadores", AreaVideo),
+        new(ModuleFleet, "Flota (DVR móviles)", FleetVehicles, "vehículos", AreaVideo),
         new(ModuleAlarms, "Paneles de alarma", AlarmPanels, "paneles", AreaIntrusion),
         new(ModuleFence, "Cerco eléctrico", FencePanels, "paneles de cerco", AreaIntrusion),
         new(ModuleAlarmScreens, "Pantallas de alarma", AlarmScreens, "pantallas", AreaIntrusion),

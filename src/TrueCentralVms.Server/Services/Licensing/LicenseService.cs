@@ -235,8 +235,9 @@ public sealed class LicenseService : BackgroundService
     {
         var usage = new Dictionary<string, int>
         {
-            [LicenseFeatures.VideoChannels] = await db.Channels.CountAsync(c => c.Enabled, ct),
+            [LicenseFeatures.VideoChannels] = await db.Channels.CountAsync(c => c.Enabled && !c.Device.IsMobile, ct),
             [LicenseFeatures.AnprChannels] = await db.Devices.CountAsync(d => d.AnprEnabled, ct),
+            [LicenseFeatures.FleetVehicles] = await db.Vehicles.CountAsync(v => v.Enabled, ct),
             [LicenseFeatures.AlarmPanels] = await db.AlarmPanels.CountAsync(p => p.Enabled, ct),
             [LicenseFeatures.FencePanels] = await db.CercoPanels.CountAsync(p => p.Enabled, ct),
             [LicenseFeatures.AccessDoors] = await db.AccessDoors.CountAsync(d => d.Enabled && d.AccessDevice!.Enabled, ct),
@@ -762,13 +763,13 @@ public sealed class LicenseService : BackgroundService
             await using var scope = _scopes.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
             var pending = await db.Channels.Include(c => c.Device)
-                .Where(c => c.DisabledByLicense && !c.Enabled)
+                .Where(c => c.DisabledByLicense && !c.Enabled && !c.Device.IsMobile)
                 .OrderBy(c => c.DeviceId).ThenBy(c => c.ChannelNumber)
                 .ToListAsync(ct);
             if (pending.Count == 0) return;
 
             int quota = Quota(LicenseFeatures.VideoChannels);
-            int available = quota - await db.Channels.CountAsync(c => c.Enabled, ct);
+            int available = quota - await db.Channels.CountAsync(c => c.Enabled && !c.Device.IsMobile, ct);
             if (available <= 0) return;
 
             var restored = pending.Take(available).ToList();

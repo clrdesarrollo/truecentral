@@ -59,7 +59,8 @@ public static class DashboardApi
             };
 
             // ---------------- Equipos ----------------
-            var videoRows = await db.Devices.AsNoTracking()
+            // Los grabadores de vehículos (Flota) se desconectan a diario: no cuentan como equipos de video caídos.
+            var videoRows = await db.Devices.AsNoTracking().Where(d => !d.IsMobile)
                 .Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt,
                     Channels = d.Channels.Where(c => c.Enabled).Select(c => new { c.Id, c.Name, c.IsOnline }).ToList() })
                 .ToListAsync(ct);

@@ -549,6 +549,7 @@ app.MapCercoApi();
 app.MapSpeakersApi();
 app.MapSpeakerAgentsApi();
 app.MapIoModulesApi();
+app.MapFleetApi();
 app.MapIntercomsApi();
 app.MapAccessApi();
 app.MapAccessSettingsApi();

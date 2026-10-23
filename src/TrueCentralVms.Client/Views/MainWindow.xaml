@@ -599,6 +599,10 @@
                                 ToolTip="Aplicaciones · Reconocimiento de patentes"
                                 Command="{Binding OpenLprCommand}"
                                 Visibility="{Binding CanLpr, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <Button Style="{StaticResource RailButton}" Content="&#xE806;"
+                                ToolTip="Aplicaciones · Flota en vivo (se abre en su propia ventana)"
+                                Command="{Binding OpenFleetCommand}"
+                                Visibility="{Binding CanFleet, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                     </StackPanel>
                 </DockPanel>
             </Border>

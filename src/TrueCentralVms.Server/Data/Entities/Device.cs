@@ -55,6 +55,12 @@ public class Device : IIsupEquipment
     /// </summary>
     public int? LocationId { get; set; }
 
+    /// <summary>
+    /// Grabador móvil de un vehículo (módulo Flota, <see cref="Vehicle"/>): no aparece en los árboles de video ni en Dispositivos,
+    /// y sus canales no consumen el cupo de canales de video de la licencia (consume el de vehículos).
+    /// </summary>
+    public bool IsMobile { get; set; }
+
     public DeviceStatus Status { get; set; } = DeviceStatus.Unknown;
     public DateTime? LastSeenAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

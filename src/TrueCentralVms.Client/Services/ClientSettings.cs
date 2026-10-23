@@ -132,6 +132,9 @@ public sealed class ClientSettings
     /// <summary>Al abrir un equipo completo: true = grilla a medida (columnas×filas
     /// sin cuadros de sobra); false = la división estándar más cercana.</summary>
     public bool FitGridToDevice { get; set; } = true;
+    /// <summary>Flota en vivo: minutos sin teclado ni mouse en el PC tras los que se corta el video de los vehículos
+    /// (consume sus datos móviles). 0 = nunca.</summary>
+    public int FleetIdleMinutes { get; set; } = 5;
     /// <summary>Tiempo de espera de la API en segundos (se aplica al iniciar la aplicación).</summary>
     public int ApiTimeoutSeconds { get; set; } = 20;
     /// <summary>Micrófono para hablar por los parlantes IP (nombre del dispositivo); null = el predeterminado.</summary>

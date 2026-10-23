@@ -1668,6 +1668,36 @@ vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 
   (443/80/5099 por omisión): un servidor de prueba tiene que fijarlos (`isp1\start-flota.ps1`: 6741 HTTPS, HTTP cerrado,
   interno 6744). La marca de prueba de este PC venció: en Debug, `--Licensing:TrialDays=3650`.
 
+### Flota — fase 1: vehículos y Flota en vivo — 2026-10-23
+
+- **Modelo**: `Vehicle` (código único, patente, tipo, notas, habilitado + `DisabledByLicense`) con su grabador como `Device`
+  `hikvision-isup` marcado `IsMobile` (1:1, borrar el vehículo borra el grabador). Migración `FleetVehicles` (agrega
+  `fleet.view` y `fleet.live` al rol Operador). La ubicación (alcance) es la del grabador.
+- **Separación**: `/api/devices`, el panel de inicio y el árbol de video no muestran grabadores móviles; editarlos o borrarlos
+  por `/api/devices` responde 409 («se administra desde Flota → Vehículos»). Canales y releer: permiso según el equipo.
+- **Licencia (catálogo v5)**: `module_fleet` + `fleet_vehicles`; expansiones `addon_fleet_base_10`, `addon_fleet_vehicles_1/10/50`
+  (todas traen el módulo, como las demás); prueba 5. Los canales móviles salen del conteo de `video_channels` (uso, alta,
+  habilitar canal, restaurar por cupo) y tienen tope `LicenseFeatures.MaxChannelsPerVehicle` = 16 (`EnforceChannelQuotaAsync`).
+  `LicenseQuotaReconciler` apaga/restaura vehículos. **Falta importar el catálogo v5 en bouncer.**
+- **Permisos**: `fleet.view` (ver la flota), `fleet.live` (video de vehículos; las concesiones de un canal móvil lo exigen junto
+  con el módulo y el vehículo habilitado; las de canales fijos siguen pidiendo los de video), `fleet.manage` (Configuración).
+  Las vistas guardadas se listan y aplican también con `fleet.live`.
+- **API** `/api/fleet/*`: `GET vehicles` (con cámaras y última posición GPS), `POST/PUT/DELETE vehicles`, `GET detected`
+  (grabadores rechazados por no estar dados de alta), `POST vehicles/import` (CSV `código;patente;tipo;id_isup[;clave]`, con
+  revisión en seco). Bitácora: categoría `fleet` (alta, edición, baja, importación, corte por inactividad).
+- **Web**: Aplicaciones → **Flota** (`#/fleet/live`: `live.js` en modo Flota — árbol de vehículos con patente y velocidad,
+  preferencias aparte `tcvms.fleet.prefs`, secundario por omisión, sin PTZ/parlantes/auxiliares, corte por inactividad con aviso
+  de 30 s, configurable 2-30 min o nunca; las vistas de cada árbol se muestran en el suyo) y Configuración → Dispositivos →
+  **Vehículos** (`fleet.js`).
+- **Cliente**: riel y tarjeta «Flota en vivo» abren una ventana propia (`AuxLiveWindow` con `AuxScreenViewModel` en modo Flota:
+  árbol y buscador propios, secundario, corte por inactividad con `GetLastInputInfo` y `ClientSettings.FleetIdleMinutes` = 5,
+  fuera de la última sesión). Sin ajuste en Configuración todavía.
+- **Probado** (servidor aislado 6741 + DVR 123456 por 4G): alta como vehículo UUBB-0123, 4 cámaras leídas al reconectar, licencia
+  0 canales de video / 1 de 5 vehículos, concesión y cuadro por FFmpeg (8,5 s; el OSD coincide con el GPS decodificado), Edge sin
+  ventana por CDP (`isp1\fleet-web.mjs`): menú, Vehículos, árbol, video en los 4 cuadros en secundario, aviso y corte por
+  inactividad, sin errores JS; importación en seco (repetidos y filas vacías). **El cliente WPF solo compila: falta probarlo.**
+- **Pendiente**: offline de un vehículo no debería alarmar como equipo caído (fase 4), manual, ajuste del corte en el cliente.
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

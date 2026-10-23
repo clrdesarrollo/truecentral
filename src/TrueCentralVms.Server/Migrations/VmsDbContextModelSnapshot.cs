@@ -1766,6 +1766,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<bool>("IsMobile")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("IsupDeviceId")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
@@ -3045,6 +3048,57 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("UserRoles");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Vehicle", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DeviceId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("Plate")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("DeviceId")
+                        .IsUnique();
+
+                    b.ToTable("Vehicles");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.VideoWall", b =>
                 {
                     b.Property<int>("Id")
@@ -4072,6 +4126,17 @@ namespace TrueCentralVms.Server.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Vehicle", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Device", "Device")
+                        .WithOne()
+                        .HasForeignKey("TrueCentralVms.Server.Data.Entities.Vehicle", "DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Device");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.VideoWall", b =>

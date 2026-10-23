@@ -24,6 +24,7 @@ public partial class MainViewModel
     public bool CanIntercom => Perms.Has(Permissions.IntercomAnswer) && Perms.IsLicensed(LicenseFeatures.ModuleIntercom);
     public bool CanEvents => Perms.Has(Permissions.EventsAttend);
     public bool CanLpr => Perms.Has(Permissions.AnprView) && Perms.IsLicensed(LicenseFeatures.ModuleAnpr);
+    public bool CanFleet => Perms.Has(Permissions.FleetLive) && Perms.IsLicensed(LicenseFeatures.ModuleFleet);
     public bool CanDownloads => Perms.Has(Permissions.PlaybackExport) && Perms.IsLicensed(LicenseFeatures.ModulePlayback);
 
     // Acciones dentro de los módulos (además, el recurso tiene que estar en su alcance).
@@ -33,7 +34,7 @@ public partial class MainViewModel
     private static readonly string[] ModuleFlags =
     [
         nameof(CanLiveView), nameof(CanPlayback), nameof(CanWall), nameof(CanAlarms), nameof(CanCerco),
-        nameof(CanIntercom), nameof(CanEvents), nameof(CanLpr), nameof(CanDownloads), nameof(RoleLabel),
+        nameof(CanIntercom), nameof(CanEvents), nameof(CanLpr), nameof(CanFleet), nameof(CanDownloads), nameof(RoleLabel),
         nameof(CanPtz), nameof(CanSaveViews),
     ];
 
@@ -58,5 +59,6 @@ public partial class MainViewModel
         if (IsIntercomOpen && !CanIntercom) CloseIntercomCommand.Execute(null);
         if (IsEventsOpen && !CanEvents) CloseEventsCommand.Execute(null);
         if (IsLprOpen && !CanLpr) CloseLprCommand.Execute(null);
+        if (!CanFleet) _fleetWindow?.Close();
     });
 }
