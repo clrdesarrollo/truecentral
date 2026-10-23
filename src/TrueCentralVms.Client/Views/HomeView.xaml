@@ -236,6 +236,19 @@
                         </StackPanel>
                     </DockPanel>
                 </Button>
+                <Button Style="{StaticResource HomeCard}" Command="{Binding OpenFleetMapCommand}"
+                        Visibility="{Binding CanFleetMap, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                    <DockPanel Margin="16,0">
+                        <Border DockPanel.Dock="Left" Style="{StaticResource CardIconBox}" Background="#3360A5FA">
+                            <TextBlock Text="&#xE707;" Foreground="#60A5FA" Style="{StaticResource CardIcon}"/>
+                        </Border>
+                        <StackPanel Style="{StaticResource CardBody}">
+                            <TextBlock Text="Mapa de flota" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Dónde está cada vehículo, su ficha con cámaras y su recorrido."
+                                       Style="{StaticResource CardDescription}"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Button>
             </views:CardGridPanel>
         </StackPanel>
     </ScrollViewer>

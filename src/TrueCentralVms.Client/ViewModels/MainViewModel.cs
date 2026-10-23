@@ -1522,6 +1522,32 @@ public partial class MainViewModel : ObservableObject
         StatusMessage = "Flota en vivo abierta en su propia ventana.";
     }
 
+    /// <summary>Abre (o trae al frente) Flota en vivo y muestra ahí las cámaras de un vehículo: lo pide el mapa de flota.</summary>
+    public void OpenFleetVehicle(int deviceId)
+    {
+        OpenFleet();
+        if (_fleetWindow?.Vm is { } fleet) _ = fleet.OpenFleetDeviceAsync(deviceId);
+    }
+
+    private Views.FleetMapWindow? _fleetMapWindow;
+
+    [RelayCommand]
+    private void OpenFleetMap()
+    {
+        if (!CanFleetMap) return;
+        if (_fleetMapWindow is { IsLoaded: true })
+        {
+            if (_fleetMapWindow.WindowState == WindowState.Minimized) _fleetMapWindow.WindowState = WindowState.Normal;
+            _fleetMapWindow.Activate();
+            return;
+        }
+        var window = new Views.FleetMapWindow(_api, OpenFleetVehicle) { Owner = Application.Current.MainWindow };
+        window.Closed += (_, _) => { if (_fleetMapWindow == window) _fleetMapWindow = null; };
+        _fleetMapWindow = window;
+        window.Show();
+        StatusMessage = "Mapa de flota abierto en su propia ventana.";
+    }
+
     public void Shutdown()
     {
         // La última sesión se toma ANTES de cerrar ventanas y liberar cuadros:
@@ -1537,6 +1563,7 @@ public partial class MainViewModel : ObservableObject
         foreach (var window in _auxWindows.ToList())
             window.Close();
         _fleetWindow?.Close();
+        _fleetMapWindow?.Close();
         foreach (var cell in Cells)
             cell.Dispose();
         Playback.Dispose();

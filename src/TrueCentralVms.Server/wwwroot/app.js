@@ -2764,4 +2764,8 @@ async function init() {
   renderLogin();
 }
 
+// Página incrustada en el cliente de escritorio (?embed=1, WebView2 con la sesión del cliente): solo el contenido, sin
+// menú ni barra superior. El cliente atiende lo que la página le pide por window.chrome.webview.postMessage.
+if (new URLSearchParams(location.search).get("embed") === "1") document.body.classList.add("embedded");
+
 init();

@@ -2798,3 +2798,6 @@ table.kv .tag { margin: 0 4px 4px 0; }
 .fm-cam.loading::after { content: "Conectando…"; position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; color: #9aa0a8; }
 .fm-card-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .fm-card-actions .on { border-color: var(--accent); color: var(--accent); }
+/* ---- Página incrustada en el cliente de escritorio (?embed=1): solo el contenido ---- */
+body.embedded .topbar, body.embedded .sidebar, body.embedded .page-titles, body.embedded .license-banner { display: none !important; }
+body.embedded .main { margin-left: 0 !important; padding-top: 0 !important; height: 100vh; min-height: 0; }

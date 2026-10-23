@@ -603,6 +603,10 @@
                                 ToolTip="Aplicaciones · Flota en vivo (se abre en su propia ventana)"
                                 Command="{Binding OpenFleetCommand}"
                                 Visibility="{Binding CanFleet, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <Button Style="{StaticResource RailButton}" Content="&#xE707;"
+                                ToolTip="Aplicaciones · Mapa de flota (se abre en su propia ventana)"
+                                Command="{Binding OpenFleetMapCommand}"
+                                Visibility="{Binding CanFleetMap, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                     </StackPanel>
                 </DockPanel>
             </Border>

@@ -155,6 +155,20 @@ public partial class AuxScreenViewModel : ObservableObject
         }
     }
 
+    /// <summary>Abre las cámaras de un vehículo por el id de su grabador (lo pide el mapa de flota con "Abrir en grilla").</summary>
+    public async Task OpenFleetDeviceAsync(int deviceId)
+    {
+        if (!IsFleet) return;
+        var node = _fleetDevices.FirstOrDefault(d => d.Device.Id == deviceId);
+        if (node is null)
+        {
+            await LoadFleetAsync();
+            node = _fleetDevices.FirstOrDefault(d => d.Device.Id == deviceId);
+        }
+        if (node is null) { StatusMessage = "Ese vehículo no está disponible (deshabilitado o fuera de su alcance)."; return; }
+        await OpenDeviceAsync(node);
+    }
+
     /// <summary>Estado de un grabador que cambió (en línea / fuera de línea): llega por el hub del shell.</summary>
     public void UpdateDeviceStatus(DeviceDto dto)
     {
@@ -194,6 +208,8 @@ public partial class AuxScreenViewModel : ObservableObject
 
     private void OnCellChannelChanged()
     {
+        // Abrir o cambiar una cámara cuenta como actividad (también si la abrió el mapa, sin teclado ni mouse).
+        _lastOpenUtc = DateTime.UtcNow;
         if (IsFleet) RefreshFleetLive();
         else _shell.RefreshLiveChannels();
     }
@@ -204,6 +220,7 @@ public partial class AuxScreenViewModel : ObservableObject
 
     private readonly DispatcherTimer? _idleTimer;
     private DateTime? _idleWarnSince;
+    private DateTime _lastOpenUtc = DateTime.UtcNow;
     private const int IdleWarnSeconds = 30;
 
     private void IdleTick()
@@ -211,7 +228,8 @@ public partial class AuxScreenViewModel : ObservableObject
         int minutes = _shell.Settings.FleetIdleMinutes;
         var open = Cells.Where(c => !c.IsEmpty).ToList();
         if (minutes <= 0 || open.Count == 0) { EndIdleWarning(); return; }
-        var idle = UserInput.IdleTime();
+        var sinceOpen = DateTime.UtcNow - _lastOpenUtc;
+        var idle = UserInput.IdleTime() is var input && input < sinceOpen ? input : sinceOpen;
         if (idle < TimeSpan.FromMinutes(minutes)) { EndIdleWarning(); return; }
         _idleWarnSince ??= DateTime.UtcNow;
         int left = IdleWarnSeconds - (int)(DateTime.UtcNow - _idleWarnSince.Value).TotalSeconds;

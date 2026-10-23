@@ -373,7 +373,11 @@ function fmRenderCard() {
     </div>`;
   $("#fm-close").addEventListener("click", () => { fmCloseFeeds(); fmClearTrack(); fm.selected = null; fm.follow = false; fmRenderAll(); });
   $("#fm-live")?.addEventListener("click", () => fmOpenFeeds(v));
-  $("#fm-grid")?.addEventListener("click", () => { location.hash = `#/fleet/live?dev=${v.deviceId}`; });
+  $("#fm-grid")?.addEventListener("click", () => {
+    // En el cliente de escritorio (WebView2) la grilla es la ventana nativa Flota en vivo: se le pide a él.
+    if (window.chrome?.webview) window.chrome.webview.postMessage({ type: "fleet-open", deviceId: v.deviceId });
+    else location.hash = `#/fleet/live?dev=${v.deviceId}`;
+  });
   $("#fm-follow").addEventListener("click", () => { fm.follow = !fm.follow; fmRenderAll(); });
   $("#fm-track")?.addEventListener("click", () => fmShowTrack(v));
 }

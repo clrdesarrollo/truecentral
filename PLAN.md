@@ -1727,8 +1727,18 @@ vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 
 - **Probado** con el 123456: posiciones en la tabla (11:45 de Chile → 14:45Z), API de últimas y de recorrido, mapa web (Edge por
   CDP, `isp1\fleet-map.mjs`) con el marcador en su lugar real, ficha con video y sin errores JS; con teselas de OSM solo para
   esa verificación (el servidor de prueba quedó «sin mapa»).
-- **Pendiente de la fase 2**: mapa en el cliente WPF (WebView2), minimapa en Flota en vivo, fuentes para los nombres de calles
-  del PMTiles y probar ese modo con un extracto real de Chile.
+- **Cliente WPF**: riel y tarjeta «Mapa de flota» abren `FleetMapWindow`: la MISMA página web (`/?embed=1#/fleet/map`; con
+  `embed=1` el panel oculta menú, barra, títulos y aviso de licencia) en un WebView2 (`Microsoft.Web.WebView2` 1.0.4258.31, usa el
+  WebView2 Runtime de Windows; perfil propio en `%LOCALAPPDATA%\CLRTrueCentralVMS\WebView2`). La sesión del cliente se deja en el
+  localStorage del origen del servidor antes de que cargue el panel; el certificado propio se acepta solo si su llave es la que
+  el cliente confía (`ServerTrust.Validate`); no navega a otros sitios ni abre ventanas. «Abrir en grilla» de la ficha manda
+  `postMessage({type:"fleet-open", deviceId})` y el cliente abre ese vehículo en Flota en vivo (`OpenFleetVehicle`). Botón
+  «Recargar» que vuelve a dejar el token vigente (tras un re-login automático).
+- **Probado en el cliente** (copia de prueba, UI Automation y captura): el mapa carga con la sesión del cliente y el vehículo en su
+  lugar, y «Abrir en grilla» abre Flota en vivo con sus 4 cámaras. De paso se vio el corte por inactividad del cliente (cortó a
+  los 30 s porque nadie tocaba el PC): ahora abrir una cámara también cuenta como actividad.
+- **Pendiente de la fase 2**: minimapa en Flota en vivo, fuentes para los nombres de calles del PMTiles y probar ese modo con un
+  extracto real de Chile.
 
 ## Pendientes (al 2026-10-07)
 
