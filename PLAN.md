@@ -1695,7 +1695,10 @@ vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 
 - **Probado** (servidor aislado 6741 + DVR 123456 por 4G): alta como vehículo UUBB-0123, 4 cámaras leídas al reconectar, licencia
   0 canales de video / 1 de 5 vehículos, concesión y cuadro por FFmpeg (8,5 s; el OSD coincide con el GPS decodificado), Edge sin
   ventana por CDP (`isp1\fleet-web.mjs`): menú, Vehículos, árbol, video en los 4 cuadros en secundario, aviso y corte por
-  inactividad, sin errores JS; importación en seco (repetidos y filas vacías). **El cliente WPF solo compila: falta probarlo.**
+  inactividad, sin errores JS; importación en seco (repetidos y filas vacías). Cliente WPF (copia de prueba con su
+  configuración en `TCVMS_TEST_APPDATA`, sin tocar el client.json real): el botón del riel abre «Flota en vivo» (UI
+  Automation), árbol del vehículo y sus 4 cámaras en secundario con video del DVR. Sin probar en el cliente: el corte por
+  inactividad (depende de que nadie use el PC durante 5 min).
 - **Pendiente**: offline de un vehículo no debería alarmar como equipo caído (fase 4), manual, ajuste del corte en el cliente.
 
 ## Pendientes (al 2026-10-07)
