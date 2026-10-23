@@ -388,6 +388,8 @@ public static class AuditCatalog
             new("service-stopped", "Servicio detenido"),
             new("service-restarted", "Servicio reiniciado"),
             new("service-failed", "Servicio caído (detectado por el supervisor)"),
+            new("service-degraded", "Servicio con advertencia (detectado por el supervisor)"),
+            new("service-degraded-cleared", "Advertencia de servicio resuelta"),
             new("service-autorestart-changed", "Auto-reinicio de servicio cambiado"),
             new("server-restart-requested", "Reinicio completo del servidor solicitado"),
             new("client-installer-downloaded", "Instalador del cliente de escritorio descargado"),

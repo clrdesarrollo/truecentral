@@ -7,6 +7,7 @@ using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Hubs;
 using TrueCentralVms.Server.Services.Isup;
 using TrueCentralVms.Server.Services.Licensing;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -28,12 +29,12 @@ public sealed class DeviceStatusMonitor(
     LicenseService license,
     MediaMtxManager mtx,
     AuditService audit,
-    ILogger<DeviceStatusMonitor> logger) : BackgroundService
+    ILogger<DeviceStatusMonitor> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(4);
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    protected override async Task RunAsync(CancellationToken ct)
     {
         // Un equipo ISUP que se conecta o se cae se refleja al instante, sin esperar la pasada.
         isup.DeviceOnlineChanged += (isupId, online) => _ = Task.Run(() => OnIsupChangedAsync(isupId, online, ct), ct);

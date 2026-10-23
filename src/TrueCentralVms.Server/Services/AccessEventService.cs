@@ -5,6 +5,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -41,7 +42,7 @@ public sealed class AccessEventService(
     AccessControlService access,
     IConfiguration config,
     ScopedHub hub,
-    ILogger<AccessEventService> logger) : BackgroundService
+    ILogger<AccessEventService> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
 
@@ -148,7 +149,7 @@ public sealed class AccessEventService(
 
     private int RetentionDays => Math.Clamp(config.GetValue("Access:EventRetentionDays", 365), 7, 3650);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         // Después del primer sondeo de estado: preguntarle el historial a un
         // equipo que todavía no se sabe si está vivo es tiempo perdido.

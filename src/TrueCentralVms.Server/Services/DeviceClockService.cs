@@ -5,6 +5,7 @@ using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -27,7 +28,7 @@ public sealed class DeviceClockService(
     IServiceScopeFactory scopeFactory,
     AccessControlService access,
     AuditService audit,
-    ILogger<DeviceClockService> logger) : BackgroundService
+    ILogger<DeviceClockService> logger) : SupervisedBackgroundService
 {
     public const string AccessKind = "access";
 
@@ -95,7 +96,7 @@ public sealed class DeviceClockService(
     // Vuelta periódica
     // ------------------------------------------------------------------
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         // Que el sondeo de estado de los equipos haga su primera vuelta antes:
         // así ya se sabe cuáles están en línea.

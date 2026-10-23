@@ -7,6 +7,7 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Hubs;
+using TrueCentralVms.Server.Services.Supervisor;
 
 namespace TrueCentralVms.Server.Services;
 
@@ -31,7 +32,7 @@ public sealed class AnprService(
     AnprStore store,
     ScopedHub hub,
     IConfiguration config,
-    ILogger<AnprService> logger) : BackgroundService
+    ILogger<AnprService> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(20);
     /// <summary>Espera antes de reintentar una fuente que falló (no martillar un equipo caído).</summary>
@@ -91,7 +92,7 @@ public sealed class AnprService(
     // Ciclo de vida
     // ------------------------------------------------------------------
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    protected override async Task RunAsync(CancellationToken ct)
     {
         // El receptor de patentes Dahua anota en el log su conexión y el texto
         // de los primeros eventos (los nombres de campo varían con el firmware).

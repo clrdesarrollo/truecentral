@@ -1,16 +1,18 @@
 namespace TrueCentralVms.Server.Services.Supervisor;
 
 /// <summary>
-/// Envuelve un <see cref="BackgroundService"/> del servidor para que el
-/// watchdog lo pueda vigilar y reiniciar. La salud sale de su tarea de
+/// Envuelve un <see cref="SupervisedBackgroundService"/> del servidor para que
+/// el watchdog lo pueda vigilar y reiniciar. La salud sale de su tarea de
 /// ejecución: viva = sano; terminada con error o por sí sola = caído.
 ///
 /// Un BackgroundService admite Stop + Start otra vez (cada StartAsync crea un
 /// token nuevo y vuelve a llamar a ExecuteAsync); los servicios del sistema
-/// están escritos para arrancar limpios en cada ejecución.
+/// están escritos para arrancar limpios en cada ejecución. Tiene que ser un
+/// SupervisedBackgroundService: con un BackgroundService común, detenerlo para
+/// reiniciarlo hace que el host detenga el servidor completo.
 /// </summary>
 public sealed class HostedServiceAdapter(
-    string id, string name, string description, BackgroundService service,
+    string id, string name, string description, SupervisedBackgroundService service,
     Func<string?>? disabledReason = null) : IManagedService
 {
     public string Id => id;
@@ -39,13 +41,10 @@ public sealed class HostedServiceAdapter(
         var task = service.ExecuteTask;
         if (task is null)
             return Task.FromResult(ServiceHealth.Down("El servicio nunca se inició."));
-        if (task.IsFaulted)
-        {
-            string reason = task.Exception?.GetBaseException().Message ?? "error desconocido";
-            return Task.FromResult(ServiceHealth.Down($"El servicio terminó con error: {reason}"));
-        }
-        if (task.IsCompleted)
-            return Task.FromResult(ServiceHealth.Down("El servicio terminó por sí solo."));
-        return Task.FromResult(ServiceHealth.Ok());
+        if (!task.IsCompleted)
+            return Task.FromResult(ServiceHealth.Ok());
+        if (service.Failure is { } error)
+            return Task.FromResult(ServiceHealth.Down($"El servicio terminó con error: {error.GetBaseException().Message}", error));
+        return Task.FromResult(ServiceHealth.Down("El servicio terminó por sí solo."));
     }
 }

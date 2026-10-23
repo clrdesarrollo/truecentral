@@ -96,6 +96,7 @@ function dbAssess(d) {
   if (d.pendingAlerts) alarms.push({ text: `${d.pendingAlerts} ${dbPlural(d.pendingAlerts, "alerta", "alertas")} sin atender`, href: "#/event-center", icon: "mdi-bell-ring" });
 
   if (s.servicesFailed.length) warnings.push({ text: `Servicio caído: ${s.servicesFailed.join(", ")}`, href: "#/services", icon: "mdi-server-off" });
+  if (s.servicesWarning.length) warnings.push({ text: `Servicio con advertencia: ${s.servicesWarning.join(", ")}`, href: "#/services", icon: "mdi-alert" });
   const offline = [
     [e.cameras, "cámara", "cámaras", "#/devices"],
     [e.access, "equipo de acceso", "equipos de acceso", "#/access"],
@@ -387,6 +388,7 @@ function dbHealthHtml(d) {
       <div class="lbl">${esc(label)}</div><div class="sub">${esc(sub)}</div></div>`;
   };
   const failed = s.servicesFailed.length;
+  const warned = s.servicesWarning.length;
   return `
   <section class="db-card span-4">
     <div class="db-card-head"><h4><i class="mdi mdi-server" aria-hidden="true"></i>Salud del servidor</h4><a href="#/services">Servicios →</a></div>
@@ -398,7 +400,7 @@ function dbHealthHtml(d) {
     </div>
     <div class="db-health-list">
       <a class="db-health-row" href="#/services"><span><i class="mdi mdi-settings" aria-hidden="true"></i>Servicios</span>
-        <b style="${failed ? "color:var(--danger)" : ""}">${s.servicesRunning} de ${s.servicesTotal} en ejecución${failed ? ` · ${failed} caído(s)` : ""}</b></a>
+        <b style="${failed ? "color:var(--danger)" : warned ? "color:var(--warn-text)" : ""}">${s.servicesRunning} de ${s.servicesTotal} en ejecución${failed ? ` · ${failed} caído(s)` : ""}${warned ? ` · ${warned} con advertencia` : ""}</b></a>
       ${lic ? `<a class="db-health-row" href="#/license"><span><i class="mdi mdi-certificate" aria-hidden="true"></i>Licencia</span>${licenseStateTag(lic.state)}</a>` : ""}
       ${d.sessions != null ? `<a class="db-health-row" href="#/sessions"><span><i class="mdi mdi-video" aria-hidden="true"></i>Sesiones de video</span><b>${d.sessions}</b></a>` : ""}
       <div class="db-health-row"><span><i class="mdi mdi-clock" aria-hidden="true"></i>Hora del servidor (UTC)</span><b>${new Date(d.generatedAt).toISOString().slice(11, 16)}</b></div>
