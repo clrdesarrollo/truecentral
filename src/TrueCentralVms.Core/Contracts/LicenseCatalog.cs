@@ -57,7 +57,7 @@ public sealed record LicensePackageDefinition(
 public static class LicenseCatalog
 {
     /// <summary>Versión del catálogo: subirla con cualquier cambio de este archivo.</summary>
-    public const int Version = 5;
+    public const int Version = 6;
 
     /// <summary>Formato del JSON exportado (lo valida el servidor de licencias).</summary>
     public const int SchemaVersion = 1;
@@ -123,6 +123,10 @@ public static class LicenseCatalog
 
         Bool(LicenseFeatures.ModuleAutomation, "Módulo de automatizaciones", "Automatización", false),
         Int(LicenseFeatures.AutomationRules, "Automatizaciones", "Automatización", 0, "Reglas"),
+
+        Bool(LicenseFeatures.ModulePatrol, "Módulo de control de rondas", "Control de rondas", false),
+        Int(LicenseFeatures.PatrolReaders, "Bastones de ronda", "Control de rondas", 0, "Bastones"),
+        Int(LicenseFeatures.PatrolCheckpoints, "Puntos de control de ronda", "Control de rondas", 0, "Puntos"),
     ];
 
     /// <summary>Packages estándar. Los especiales para un cliente se crean en la web del servidor de licencias.</summary>
@@ -141,7 +145,8 @@ public static class LicenseCatalog
             (LicenseFeatures.ModuleIntercom, true), (LicenseFeatures.IntercomDevices, 4),
             (LicenseFeatures.ModuleIo, true), (LicenseFeatures.IoModules, 4),
             (LicenseFeatures.ModuleAlarmScreens, true), (LicenseFeatures.AlarmScreens, 4),
-            (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 50)),
+            (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 50),
+            (LicenseFeatures.ModulePatrol, true), (LicenseFeatures.PatrolReaders, 2), (LicenseFeatures.PatrolCheckpoints, 20)),
         Base("enterprise", "Enterprise",
             (LicenseFeatures.MaxUsers, 200), (LicenseFeatures.MaxClientSessions, 50),
             (LicenseFeatures.VideoChannels, 512),
@@ -154,7 +159,8 @@ public static class LicenseCatalog
             (LicenseFeatures.ModuleIntercom, true), (LicenseFeatures.IntercomDevices, 64),
             (LicenseFeatures.ModuleIo, true), (LicenseFeatures.IoModules, 32),
             (LicenseFeatures.ModuleAlarmScreens, true), (LicenseFeatures.AlarmScreens, 32),
-            (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 500)),
+            (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 500),
+            (LicenseFeatures.ModulePatrol, true), (LicenseFeatures.PatrolReaders, 16), (LicenseFeatures.PatrolCheckpoints, 200)),
 
         // Expansiones: lo que SUMAN a la licencia base. Una que habilita un
         // módulo trae el booleano en true para servir también sobre una base
@@ -183,6 +189,12 @@ public static class LicenseCatalog
             (LicenseFeatures.ModuleAlarmScreens, true), (LicenseFeatures.AlarmScreens, 2)),
         Addon("addon_automation_25", "Expansión 25 automatizaciones",
             (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 25)),
+        Addon("addon_patrol_base_1", "Control de rondas: módulo con 1 bastón y 10 puntos de control",
+            (LicenseFeatures.ModulePatrol, true), (LicenseFeatures.PatrolReaders, 1), (LicenseFeatures.PatrolCheckpoints, 10)),
+        Addon("addon_patrol_readers_1", "Expansión 1 bastón de ronda",
+            (LicenseFeatures.ModulePatrol, true), (LicenseFeatures.PatrolReaders, 1)),
+        Addon("addon_patrol_checkpoints_10", "Expansión 10 puntos de control de ronda",
+            (LicenseFeatures.ModulePatrol, true), (LicenseFeatures.PatrolCheckpoints, 10)),
         Addon("addon_clients_5", "Expansión 5 clientes simultáneos", (LicenseFeatures.MaxClientSessions, 5)),
         // Flota se vende aparte de las ediciones (decisión del usuario, 2026-10-23): base de 10 vehículos y expansiones.
         Addon("addon_fleet_base_10", "Flota base: módulo de DVR móviles con 10 vehículos",

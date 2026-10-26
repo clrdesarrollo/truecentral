@@ -57,6 +57,11 @@ public static class LicenseFeatures
     public const string ModuleIo = "module_io";
     public const string IoModules = "io_modules";
 
+    // Control de rondas (bastones de ronda y puntos de control): el módulo y dos cupos.
+    public const string ModulePatrol = "module_patrol";
+    public const string PatrolReaders = "patrol_readers";
+    public const string PatrolCheckpoints = "patrol_checkpoints";
+
     // Pantallas de alarma (Raspberry Pi de las casetas que muestran los avisos)
     public const string ModuleAlarmScreens = "module_alarm_screens";
     public const string AlarmScreens = "alarm_screens";
@@ -80,6 +85,7 @@ public static class LicenseFeatures
     public const string AreaAccess = "Control de acceso";
     public const string AreaAudio = "Audio y comunicación";
     public const string AreaAutomation = "Automatización";
+    public const string AreaSecurity = "Seguridad y guardias";
 
     /// <summary>
     /// Catálogo de presentación: módulo → nombre, clave del cupo asociado
@@ -102,6 +108,8 @@ public static class LicenseFeatures
         new(ModuleIntercom, "Citofonía", IntercomDevices, "frentes", AreaAudio),
         new(ModuleIo, "Módulos de E/S", IoModules, "módulos", AreaAutomation),
         new(ModuleAutomation, "Automatizaciones", AutomationRules, "reglas", AreaAutomation),
+        new(ModulePatrol, "Control de rondas", PatrolReaders, "bastones", AreaSecurity),
+        new(ModulePatrol, "Puntos de control de ronda", PatrolCheckpoints, "puntos", AreaSecurity),
     ];
 
     /// <summary>Cupos que no dependen de un módulo (siempre aplican).</summary>
