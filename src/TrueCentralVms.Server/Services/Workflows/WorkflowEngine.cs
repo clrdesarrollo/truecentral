@@ -475,6 +475,13 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
         if (Has(conditions.GeofenceIds) && (trigger.GeofenceId is null || !conditions.GeofenceIds!.Contains(trigger.GeofenceId.Value)))
             return false;
 
+        // --- Control de rondas ---
+        if (Has(conditions.PatrolRouteIds) && (trigger.PatrolRouteId is null || !conditions.PatrolRouteIds!.Contains(trigger.PatrolRouteId.Value)))
+            return false;
+        if (Has(conditions.PatrolEventKinds) &&
+            !conditions.PatrolEventKinds!.Any(k => string.Equals(k, trigger.PatrolKind, StringComparison.OrdinalIgnoreCase)))
+            return false;
+
         // --- Video ---
         if (Has(conditions.VideoEventKinds) && (trigger.VideoKind is null || !conditions.VideoEventKinds!.Contains(trigger.VideoKind.Value)))
             return false;

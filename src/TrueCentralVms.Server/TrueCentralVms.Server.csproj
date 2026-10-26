@@ -10,6 +10,7 @@
     <!-- Servicio ISUP interno: un ejecutable aparte que el servidor lanza y vigila. Se referencia para que quede junto al
          servidor (con el SDK ISUP en isup\); el instalador lo vuelve a publicar autocontenido en la misma carpeta. -->
     <ProjectReference Include="..\TrueCentralVms.IsupHost\TrueCentralVms.IsupHost.csproj" />
+    <ProjectReference Include="..\TrueCentralVms.Drivers.Patrol\TrueCentralVms.Drivers.Patrol.csproj" />
   </ItemGroup>
 
   <!-- DLLs nativas de los SDK: se copian junto al ejecutable. Hikvision

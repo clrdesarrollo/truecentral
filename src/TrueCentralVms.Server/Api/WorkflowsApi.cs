@@ -167,6 +167,15 @@ public static class WorkflowsApi
                 new("estado", "Activa o En reposo"),
                 new("direccion", "Dirección IP del módulo"),
             ], "Entradas y salidas"),
+        new(WorkflowTriggerTypes.PatrolEvent, "Evento de rondas",
+            "Cuando una ronda no se inicia a tiempo, queda sin terminar o incompleta, se cumple o empieza; cuando la memoria de un bastón supera el 80 % o una base de descarga deja de responder.",
+            [
+                new("ruta", "Nombre de la ruta"),
+                new("detalle", "Detalle (causa, puntos no marcados, bastón)"),
+                new("ubicacion", "Ubicación de la ruta"),
+                new("horaprogramada", "Hora programada de la ronda (HH:mm)"),
+                new("guardias", "Guardias que la hicieron"),
+            ], "Control de rondas"),
         new(WorkflowTriggerTypes.FleetEvent, "Evento de vehículo (Flota)",
             "Cuando un vehículo de la flota informa pánico, choque, exceso de velocidad o conducción brusca, entra o sale de una geocerca, o se conecta o desconecta.",
             [
@@ -218,7 +227,8 @@ public static class WorkflowsApi
                 .ToList();
             return Results.Ok(new WorkflowCatalogDto(
                 // «Evento de vehículo» solo con el módulo Flota en la licencia.
-                Triggers.Where(t => t.Key != WorkflowTriggerTypes.FleetEvent || license.IsModuleEnabled(LicenseFeatures.ModuleFleet)).ToArray(),
+                Triggers.Where(t => (t.Key != WorkflowTriggerTypes.FleetEvent || license.IsModuleEnabled(LicenseFeatures.ModuleFleet))
+                    && (t.Key != WorkflowTriggerTypes.PatrolEvent || license.IsModuleEnabled(LicenseFeatures.ModulePatrol))).ToArray(),
                 engine.Executors.Select(e => new WorkflowActionInfoDto(e.Type, e.Label, e.Description, e.UsesSecret, ActionGroup(e.Type))).ToList(),
                 Placeholders,
                 settings is { Enabled: true, Host.Length: > 0 },

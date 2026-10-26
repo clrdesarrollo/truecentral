@@ -2210,6 +2210,8 @@ const routes = {
   "#/access-events": renderAccessEvents,
   "#/speakers": renderSpeakers,
   "#/io-modules": renderIoModules,
+  "#/patrol": renderPatrol,
+  "#/patrol-reports": renderPatrolReports,
   "#/alarm-screens": renderAlarmScreens,
   "#/intercoms": renderIntercoms,
   "#/device-maintenance": renderDeviceMaintenance,
@@ -2396,6 +2398,7 @@ function leaveCurrentPage() {
   if (typeof resourcesDetachHub === "function") resourcesDetachHub(); // ídem la página Recursos
   if (typeof rolesDetachHub === "function") rolesDetachHub(); // ídem la página Roles
   if (typeof ioModulesDetachHub === "function") ioModulesDetachHub(); // ídem los módulos de E/S
+  if (typeof patrolDetachHub === "function") patrolDetachHub(); // ídem el control de rondas
   if (typeof fleetVehiclesDetachHub === "function") fleetVehiclesDetachHub(); // ídem los vehículos de Flota
   if (typeof alarmScreensDetachHub === "function") alarmScreensDetachHub(); // ídem las pantallas de alarma
   clearInterval(eventCenterTimer); // ídem el del centro de eventos

@@ -140,6 +140,20 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
                 await Changed("io-modules");
             }), ct);
 
+        // Rondas: solo cuentan los bastones aprobados (uno pendiente no ocupa cupo).
+        await RunAsync(db, sp, f, new Spec<PatrolReader>(
+            "bastones de ronda", LicenseFeatures.ModulePatrol, LicenseFeatures.PatrolReaders,
+            d => d.PatrolReaders.Where(r => r.Status == PatrolReaderStatus.Approved),
+            x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
+            (x, on) => { x.Enabled = on; x.DisabledByLicense = !on; x.UpdatedAt = DateTime.UtcNow; }, x => x.Name,
+            async (_, _, _, _) => await Changed("patrol")), ct);
+
+        await RunAsync(db, sp, f, new Spec<PatrolCheckpoint>(
+            "puntos de control de ronda", LicenseFeatures.ModulePatrol, LicenseFeatures.PatrolCheckpoints,
+            d => d.PatrolCheckpoints, x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
+            (x, on) => { x.Enabled = on; x.DisabledByLicense = !on; x.UpdatedAt = DateTime.UtcNow; }, x => x.Name,
+            async (_, _, _, _) => await Changed("patrol")), ct);
+
         // Un vehículo apagado por licencia conserva sus cámaras configuradas: las concesiones de vivo lo rechazan por el vehículo.
         await RunAsync(db, sp, f, new Spec<Vehicle>(
             "vehículos de flota", LicenseFeatures.ModuleFleet, LicenseFeatures.FleetVehicles,

@@ -2884,3 +2884,55 @@ table.kv .tag { margin: 0 4px 4px 0; }
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
 body.embedded .topbar, body.embedded .sidebar, body.embedded .page-titles, body.embedded .license-banner { display: none !important; }
 body.embedded .main { margin-left: 0 !important; padding-top: 0 !important; height: 100vh; min-height: 0; }
+
+/* ---------------------------------------------------------------------------
+   Control de rondas (patrol.js, patrol-serial.js)
+--------------------------------------------------------------------------- */
+.pt-mono { font-family: var(--mono); letter-spacing: .3px; }
+.pt-note { font-size: 11.5px; margin-top: 2px; max-width: 320px; }
+.pt-tab-actions { margin-bottom: 12px; }
+.pt-section-title { margin: 22px 0 6px; font-size: 14px; }
+.pt-section-title:first-child { margin-top: 4px; }
+.pt-grid td { padding-top: 8px; padding-bottom: 8px; }
+.pt-grid .row-actions { flex-wrap: wrap; }
+tr.pt-voided td { opacity: .62; }
+tr.pt-voided td:last-child, tr.pt-voided td:nth-last-child(2) { opacity: 1; }
+.pt-error { color: var(--danger-text); font-size: 12px; display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.pt-code { font-family: var(--mono); font-size: 30px; font-weight: 700; letter-spacing: 4px; text-align: center; padding: 14px; margin: 14px 0;
+  background: var(--panel-2); border: 1px dashed var(--border); border-radius: 8px; user-select: all; }
+.pt-command { display: flex; gap: 8px; align-items: flex-start; }
+.pt-command code { flex: 1; min-width: 0; padding: 9px 11px; background: var(--field); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 12.5px; word-break: break-all; user-select: all; }
+.pt-serial-status { margin: 12px 0 8px; font-size: 13px; }
+.pt-serial-status.pt-error { white-space: normal; max-width: none; display: block; }
+.pt-progress { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.pt-progress.hidden { display: none; }
+.pt-progress-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.pt-progress-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+.pt-progress > .muted { font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Rondas fase 2: cumplimiento y rutas */
+.pt-presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.pt-kpis { margin-bottom: 16px; }
+.pt-runs tbody tr { cursor: pointer; }
+.pt-runs tbody tr:hover td, .pt-runs tbody tr:focus-visible td { background: rgba(var(--accent-rgb), .06); }
+.pt-runs tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pt-cause { display: inline-block; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.pt-foot { font-size: 12px; margin-top: 8px; }
+.pt-run-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; }
+.pt-run-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px 16px; margin: 12px 0 14px; font-size: 13px; }
+.pt-run-facts b { display: block; font-size: 11px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); }
+.pt-route-form .pt-section-title { margin-top: 18px; }
+.pt-mode .checkbox-row { align-items: flex-start; margin-bottom: 6px; }
+.pt-stops td { vertical-align: middle; }
+.pt-stops select { min-width: 180px; }
+.pt-stops input[type=number] { width: 90px; }
+.pt-stops .checkbox-row { margin: 0; white-space: nowrap; }
+.pt-sched-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.pt-sched-row .checkbox-row { margin: 0; }
+.pt-sched-row input[type=time] { width: 120px; }
+.pt-days { display: inline-flex; gap: 4px; }
+.pt-day { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--field);
+  color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.pt-day:hover { border-color: var(--accent); }
+.pt-day.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pt-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

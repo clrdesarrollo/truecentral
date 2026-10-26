@@ -249,6 +249,8 @@ public sealed class LicenseService : BackgroundService
             [LicenseFeatures.SpeakerChannels] = await db.Speakers.CountAsync(s => s.Enabled, ct),
             [LicenseFeatures.IntercomDevices] = await db.Intercoms.CountAsync(i => i.Enabled, ct),
             [LicenseFeatures.IoModules] = await db.IoModules.CountAsync(m => m.Enabled, ct),
+            [LicenseFeatures.PatrolReaders] = await db.PatrolReaders.CountAsync(r => r.Enabled && r.Status == PatrolReaderStatus.Approved, ct),
+            [LicenseFeatures.PatrolCheckpoints] = await db.PatrolCheckpoints.CountAsync(c => c.Enabled, ct),
             [LicenseFeatures.AlarmScreens] = await db.AlarmScreens.CountAsync(s => s.Status == AlarmScreenStatus.Approved, ct),
             [LicenseFeatures.AutomationRules] = await db.Workflows.CountAsync(w => w.Enabled, ct),
             [LicenseFeatures.MaxUsers] = await db.Users.CountAsync(u => u.Enabled, ct),
