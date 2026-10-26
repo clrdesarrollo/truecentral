@@ -34,6 +34,7 @@ public sealed class ScmAwareServiceLifetime : WindowsServiceLifetime
         applicationLifetime.ApplicationStopping.Register(() =>
         {
             if (_stopRequestedByScm) return;
+            RunJournal.ReportStop(StopCause.SelfStop);
             ExitCode = ErrorProcessAborted;
             Environment.ExitCode = ErrorProcessAborted;
             logger.LogError("El servidor se detiene sin que Windows lo haya pedido: el servicio terminará con código " +
@@ -44,12 +45,14 @@ public sealed class ScmAwareServiceLifetime : WindowsServiceLifetime
     protected override void OnStop()
     {
         _stopRequestedByScm = true;
+        RunJournal.ReportStop(StopCause.ServiceStop);
         base.OnStop();
     }
 
     protected override void OnShutdown()
     {
         _stopRequestedByScm = true;
+        RunJournal.ReportStop(StopCause.SystemShutdown);
         base.OnShutdown();
     }
 }

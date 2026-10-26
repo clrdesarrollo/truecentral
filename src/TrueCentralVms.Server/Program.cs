@@ -81,6 +81,7 @@ if (TrueCentralVms.Server.Services.Backup.BackupRestore.IsRequested(args))
     return;
 }
 builder.Services.AddSingleton(postgres);
+builder.Services.AddSingleton<RunJournal>();
 var protector = new CredentialProtector(postgres);
 builder.Services.AddSingleton(protector);
 
@@ -585,9 +586,23 @@ app.MapFallbackToFile("index.html");
 app.Logger.LogInformation("CLR TrueCentral VMS v{Version} escuchando en HTTPS :{Https}, HTTP :{Http} (solo equipos sin TLS) e interno 127.0.0.1:{Internal}.",
     serverVersion, webPorts.HttpsPort, webPorts.HttpPort > 0 ? webPorts.HttpPort : "cerrado", webPorts.InternalPort);
 
-// Evidencia de disponibilidad: cada arranque del servidor queda en la bitácora.
-await app.Services.GetRequiredService<AuditService>().LogSystemAsync("system", "server-started",
-    detail: $"Servidor CLR TrueCentral VMS v{serverVersion} iniciado.");
+// Evidencia de disponibilidad: cada arranque del servidor queda en la bitácora,
+// con cómo terminó la ejecución anterior. Si terminó de mala forma (corte de luz,
+// reinicio forzado del equipo, proceso matado o caído) va además como evento
+// propio y como error en el registro de eventos de Windows (ver RunJournal).
+var runJournal = app.Services.GetRequiredService<RunJournal>();
+var previousRun = runJournal.Start(serverVersion);
+var startupAudit = app.Services.GetRequiredService<AuditService>();
+if (previousRun is { Unexpected: true })
+{
+    app.Logger.LogError("{Detail}", previousRun.Detail);
+    await startupAudit.LogSystemAsync("system", "server-unexpected-stop", detail: previousRun.Detail,
+        success: false, data: previousRun.Data);
+}
+else if (previousRun is not null)
+    app.Logger.LogInformation("{Detail}", previousRun.Detail);
+await startupAudit.LogSystemAsync("system", "server-started",
+    detail: $"Servidor CLR TrueCentral VMS v{serverVersion} iniciado." + (previousRun is null ? "" : " " + previousRun.Detail));
 
 // ...y cada apagado ordenado, lo pida el Watchdog, services.msc o el propio
 // SCM al apagar el equipo. Va en ApplicationStopping y no en ApplicationStopped
@@ -595,11 +610,14 @@ await app.Services.GetRequiredService<AuditService>().LogSystemAsync("system", "
 // punto la base sigue viva para recibir el evento.
 app.Lifetime.ApplicationStopping.Register(() =>
 {
+    // Primero el archivo (no depende de la base): si el registro en la
+    // bitácora falla, la próxima ejecución igual sabe que esta terminó en orden.
+    string stopCause = runJournal.Stop();
     try
     {
         app.Services.GetRequiredService<AuditService>()
             .LogSystemAsync("system", "server-stopped",
-                detail: $"Servidor CLR TrueCentral VMS v{serverVersion} detenido.")
+                detail: $"Servidor CLR TrueCentral VMS v{serverVersion} detenido: {stopCause}.")
             .GetAwaiter().GetResult();
     }
     catch (Exception ex)

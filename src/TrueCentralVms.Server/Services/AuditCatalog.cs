@@ -399,6 +399,7 @@ public static class AuditCatalog
         [
             new("server-started", "Servidor iniciado"),
             new("server-stopped", "Servidor detenido"),
+            new("server-unexpected-stop", "Apagado inesperado del servidor (corte de luz, reinicio forzado, proceso matado o caído)"),
             new("audit-purged", "Bitácora purgada por retención"),
             new("audit-exported", "Bitácora exportada a CSV"),
             new("service-started", "Servicio iniciado"),

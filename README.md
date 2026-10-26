@@ -1192,6 +1192,19 @@ Cada apagado ordenado del servidor (lo pida el Watchdog, `services.msc` o el
 SCM al apagar el equipo) queda en la bitácora como `server-stopped`, al lado
 del `server-started` de cada arranque.
 
+Y cada apagado **de mala forma** también: mientras corre, el servidor mantiene
+`server-run.json` en la carpeta de datos (arranque, hora de inicio de Windows y
+un latido cada 30 s), y al detenerse en orden anota el motivo (Windows detuvo el
+servicio, se apagó o reinició el equipo, el servidor se detuvo solo por una
+falla, o consola). Si al arrancar ese archivo no tiene motivo, la ejecución
+anterior terminó de golpe: queda `server-unexpected-stop` (fallido) en la
+bitácora y un error en el registro de eventos, con la última señal de vida, si
+fue el EQUIPO (corte de luz, reinicio forzado, pantallazo azul) o solo el
+PROCESO (matado o caído), y los eventos de Windows de ese lapso (41/6008
+apagado inesperado, 1074 quién pidió reiniciar, 1001 pantallazo azul). El
+`server-started` y el `server-stopped` también dicen cómo terminó la ejecución
+anterior y por qué se detiene esta.
+
 ## Panel web
 
 `#/` dashboard (salud, dispositivos, sesiones activas) · `#/devices`
