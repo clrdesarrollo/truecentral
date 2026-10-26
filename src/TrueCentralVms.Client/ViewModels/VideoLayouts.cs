@@ -4,6 +4,12 @@ namespace TrueCentralVms.Client.ViewModels;
 /// (columna/fila de origen y cuántas ocupa).</summary>
 public readonly record struct LayoutCell(int Col, int Row, int ColSpan = 1, int RowSpan = 1);
 
+/// <summary>Borde de la grilla donde se agrega una franja nueva.</summary>
+public enum GridEdge { None, Left, Top, Right, Bottom }
+
+/// <summary>Resultado de ampliar una división (ver <see cref="VideoLayout.Grow"/>).</summary>
+public sealed record LayoutGrowth(VideoLayout Layout, IReadOnlyList<int> Placement, IReadOnlyList<int> StripCells);
+
 /// <summary>Familia de divisiones del selector (un encabezado y sus miniaturas).</summary>
 public sealed class VideoLayoutGroup
 {
@@ -31,6 +37,9 @@ public sealed class VideoLayout
     public required IReadOnlyList<LayoutCell> Cells { get; init; }
 
     public int CellCount => Cells.Count;
+
+    /// <summary>Cómo se nombra la división en los textos (vistas guardadas).</summary>
+    public string Label => Key.StartsWith(CustomPrefix) ? $"a medida {Columns}×{Rows}" : Key;
 
     /// <summary>Cuadrícula uniforme de columnas × filas en orden de lectura.</summary>
     private static VideoLayout Uniform(int columns, int rows, string? key = null)
@@ -159,12 +168,222 @@ public sealed class VideoLayout
         ["13"] = "13 combinada",
     };
 
-    /// <summary>División del selector con esa clave (acepta las claves antiguas).</summary>
+    /// <summary>División del selector con esa clave (acepta las claves antiguas
+    /// y las de una división a medida: "m43…").</summary>
     public static VideoLayout? Find(string? key)
     {
         if (string.IsNullOrEmpty(key)) return null;
+        if (key.StartsWith(CustomPrefix)) return Decode(key);
         if (LegacyKeys.TryGetValue(key, out var current)) key = current;
         return Standard.FirstOrDefault(l => l.Key == key);
+    }
+
+    // ------------------------------------------------------------------
+    // Ampliar la grilla: soltar una cámara en un borde agrega una franja
+    // (fila o columna) de ese lado. Los cuadros existentes conservan su
+    // forma y su lugar relativo; los de la franja son de una celda.
+    // ------------------------------------------------------------------
+
+    /// <summary>Topes de la grilla ampliada: los de la división más grande del
+    /// selector (8×8) y los 64 cuadros que aceptan las vistas guardadas.</summary>
+    public const int MaxGrowColumns = 8, MaxGrowRows = 8, MaxGrowCells = 64;
+
+    /// <summary>Por qué no se puede agregar una franja en ese borde (null = se puede).</summary>
+    public string? GrowBlockedReason(GridEdge edge, int maxCells)
+    {
+        bool sideways = edge is GridEdge.Left or GridEdge.Right;
+        if (sideways && Columns >= MaxGrowColumns)
+            return $"La grilla ya tiene {MaxGrowColumns} columnas, el máximo.";
+        if (!sideways && Rows >= MaxGrowRows)
+            return $"La grilla ya tiene {MaxGrowRows} filas, el máximo.";
+        int count = CellCount + (sideways ? Rows : Columns);
+        if (count > Math.Min(maxCells, MaxGrowCells))
+            return maxCells < MaxGrowCells
+                ? $"Con {count} cuadros la grilla superaría las {maxCells} cámaras disponibles."
+                : $"La grilla no puede pasar de {MaxGrowCells} cuadros.";
+        return null;
+    }
+
+    /// <summary>
+    /// La división con una franja más en <paramref name="edge"/>, o null si se
+    /// pasa de los topes. Los cuadros quedan en orden de lectura; Placement[i]
+    /// dice dónde quedó el cuadro i actual y StripCells son los de la franja,
+    /// de izquierda a derecha o de arriba abajo.
+    /// </summary>
+    public LayoutGrowth? Grow(GridEdge edge, int maxCells)
+    {
+        if (edge == GridEdge.None || GrowBlockedReason(edge, maxCells) is not null) return null;
+        bool sideways = edge is GridEdge.Left or GridEdge.Right;
+        int columns = Columns + (sideways ? 1 : 0), rows = Rows + (sideways ? 0 : 1);
+        int dx = edge == GridEdge.Left ? 1 : 0, dy = edge == GridEdge.Top ? 1 : 0;
+
+        // Origen de cada cuadro: >= 0 un cuadro actual, < 0 la franja (~k).
+        var all = Cells.Select((c, i) => (Cell: c with { Col = c.Col + dx, Row = c.Row + dy }, From: i)).ToList();
+        int stripLength = sideways ? Rows : Columns;
+        for (int k = 0; k < stripLength; k++)
+            all.Add((sideways
+                ? new LayoutCell(edge == GridEdge.Left ? 0 : Columns, k)
+                : new LayoutCell(k, edge == GridEdge.Top ? 0 : Rows), ~k));
+        var ordered = all.OrderBy(x => x.Cell.Row).ThenBy(x => x.Cell.Col).ToList();
+
+        var placement = new int[CellCount];
+        var strip = new int[stripLength];
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            if (ordered[i].From >= 0) placement[ordered[i].From] = i;
+            else strip[~ordered[i].From] = i;
+        }
+
+        var layout = FromCells(columns, rows, ordered.Select(x => x.Cell).ToList());
+        return layout is null ? null : new LayoutGrowth(layout, placement, strip);
+    }
+
+    // ------------------------------------------------------------------
+    // Divisiones a medida (grilla ampliada o con cuadros unidos). Clave
+    // compacta: "m" + columnas + filas + 2 caracteres por cada cuadro de más
+    // de una celda (columna, fila, ancho-1 y alto-1 en 3 bits cada uno); las
+    // celdas libres son cuadros simples. Cabe en los 32 caracteres de las
+    // vistas guardadas con hasta 14 cuadros grandes. La web (live.js)
+    // entiende la misma clave.
+    // ------------------------------------------------------------------
+    private const string CustomPrefix = "m";
+    private const string CustomAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    public const int MaxBigCells = 14;
+
+    /// <summary>
+    /// La división de esos cuadros (quedan en orden de lectura): la del
+    /// selector si coincide con una, "C×R" si es uniforme o una a medida; null
+    /// si tiene más cuadros grandes de los que caben en la clave.
+    /// </summary>
+    public static VideoLayout? FromCells(int columns, int rows, List<LayoutCell> cells)
+    {
+        cells.Sort((a, b) => a.Row != b.Row ? a.Row.CompareTo(b.Row) : a.Col.CompareTo(b.Col));
+        var standard = Standard.FirstOrDefault(l => l.Columns == columns && l.Rows == rows && l.Cells.SequenceEqual(cells));
+        if (standard is not null) return standard;
+        var big = cells.Where(c => c.ColSpan > 1 || c.RowSpan > 1).ToList();
+        if (big.Count == 0 && cells.Count == columns * rows) return Grid(columns, rows);
+        if (big.Count > MaxBigCells || columns > 8 || rows > 8) return null;
+        var key = new System.Text.StringBuilder(CustomPrefix).Append(columns).Append(rows);
+        foreach (var c in big)
+        {
+            int v = c.Col << 9 | c.Row << 6 | (c.ColSpan - 1) << 3 | (c.RowSpan - 1);
+            key.Append(CustomAlphabet[v >> 6]).Append(CustomAlphabet[v & 63]);
+        }
+        return new VideoLayout
+        {
+            Key = key.ToString(), Name = cells.Count.ToString(),
+            Columns = columns, Rows = rows, Cells = cells,
+        };
+    }
+
+    /// <summary>Rearma una división a medida desde su clave (null si no es válida).</summary>
+    private static VideoLayout? Decode(string key)
+    {
+        if (key.Length < 3 || (key.Length - 3) % 2 != 0) return null;
+        int columns = key[1] - '0', rows = key[2] - '0';
+        if (columns is < 1 or > 8 || rows is < 1 or > 8) return null;
+        var taken = new bool[columns, rows];
+        var cells = new List<LayoutCell>();
+        for (int i = 3; i < key.Length; i += 2)
+        {
+            int hi = CustomAlphabet.IndexOf(key[i]), lo = CustomAlphabet.IndexOf(key[i + 1]);
+            if (hi < 0 || lo < 0) return null;
+            int v = hi << 6 | lo;
+            var c = new LayoutCell(v >> 9 & 7, v >> 6 & 7, (v >> 3 & 7) + 1, (v & 7) + 1);
+            if (c.Col + c.ColSpan > columns || c.Row + c.RowSpan > rows) return null;
+            for (int x = c.Col; x < c.Col + c.ColSpan; x++)
+                for (int y = c.Row; y < c.Row + c.RowSpan; y++)
+                {
+                    if (taken[x, y]) return null;
+                    taken[x, y] = true;
+                }
+            cells.Add(c);
+        }
+        for (int y = 0; y < rows; y++)
+            for (int x = 0; x < columns; x++)
+                if (!taken[x, y]) cells.Add(new LayoutCell(x, y));
+        return FromCells(columns, rows, cells);
+    }
+
+    // ------------------------------------------------------------------
+    // Unir y separar cuadros: seleccionar con el puntero de un cuadro a otro
+    // une todo el rectángulo en un solo cuadro, siempre que no corte a otro
+    // cuadro por la mitad (un cuadro grande que asoma afuera, o una L).
+    // ------------------------------------------------------------------
+
+    private static bool Overlaps(LayoutCell a, LayoutCell b) =>
+        a.Col < b.Col + b.ColSpan && b.Col < a.Col + a.ColSpan && a.Row < b.Row + b.RowSpan && b.Row < a.Row + a.RowSpan;
+
+    private static bool Contains(LayoutCell outer, LayoutCell inner) =>
+        inner.Col >= outer.Col && inner.Row >= outer.Row &&
+        inner.Col + inner.ColSpan <= outer.Col + outer.ColSpan && inner.Row + inner.RowSpan <= outer.Row + outer.RowSpan;
+
+    /// <summary>
+    /// Rectángulo que une los cuadros <paramref name="from"/> y <paramref name="to"/>:
+    /// los cuadros que quedan adentro y los que lo cortan (si hay alguno, no
+    /// se puede unir).
+    /// </summary>
+    public (LayoutCell Rect, List<int> Inside, List<int> Cut) MergeSelection(int from, int to)
+    {
+        var a = Cells[from];
+        var b = Cells[to];
+        int col = Math.Min(a.Col, b.Col), row = Math.Min(a.Row, b.Row);
+        var rect = new LayoutCell(col, row,
+            Math.Max(a.Col + a.ColSpan, b.Col + b.ColSpan) - col,
+            Math.Max(a.Row + a.RowSpan, b.Row + b.RowSpan) - row);
+        var inside = new List<int>();
+        var cut = new List<int>();
+        for (int i = 0; i < Cells.Count; i++)
+        {
+            if (Contains(rect, Cells[i])) inside.Add(i);
+            else if (Overlaps(rect, Cells[i])) cut.Add(i);
+        }
+        return (rect, inside, cut);
+    }
+
+    /// <summary>
+    /// Une los cuadros de <paramref name="from"/> a <paramref name="to"/>. Los
+    /// cuadros quedan en orden de lectura: Placement[i] es el lugar nuevo del
+    /// cuadro i (los que se unen van todos al cuadro unido, StripCells[0]).
+    /// </summary>
+    public LayoutGrowth? Merge(int from, int to, out string? reason)
+    {
+        var (rect, inside, cut) = MergeSelection(from, to);
+        reason = cut.Count > 0 ? "La selección corta un cuadro por la mitad: tiene que formar un rectángulo completo."
+            : inside.Count < 2 ? "Arrastre hasta otro cuadro para unirlos."
+            : null;
+        if (reason is not null) return null;
+        var layout = FromCells(Columns, Rows, Cells.Where((_, i) => !inside.Contains(i)).Append(rect).ToList());
+        if (layout is null)
+        {
+            reason = $"La grilla ya tiene {MaxBigCells} cuadros unidos, el máximo.";
+            return null;
+        }
+        int merged = IndexOf(layout, rect);
+        var placement = Cells.Select((c, i) => inside.Contains(i) ? merged : IndexOf(layout, c)).ToArray();
+        return new LayoutGrowth(layout, placement, [merged]);
+    }
+
+    /// <summary>Separa un cuadro unido en cuadros simples (la cámara queda en
+    /// el de arriba a la izquierda, StripCells[0]); null si ya es simple.</summary>
+    public LayoutGrowth? Split(int index)
+    {
+        var big = Cells[index];
+        if (big.ColSpan == 1 && big.RowSpan == 1) return null;
+        var cells = Cells.Where((_, i) => i != index).ToList();
+        for (int y = big.Row; y < big.Row + big.RowSpan; y++)
+            for (int x = big.Col; x < big.Col + big.ColSpan; x++)
+                cells.Add(new LayoutCell(x, y));
+        var layout = FromCells(Columns, Rows, cells)!; // separar nunca agrega cuadros grandes
+        var placement = Cells.Select((c, i) => IndexOf(layout, i == index ? new LayoutCell(big.Col, big.Row) : c)).ToArray();
+        return new LayoutGrowth(layout, placement, [placement[index]]);
+    }
+
+    private static int IndexOf(VideoLayout layout, LayoutCell cell)
+    {
+        for (int i = 0; i < layout.Cells.Count; i++)
+            if (layout.Cells[i] == cell) return i;
+        throw new InvalidOperationException("El cuadro no está en la división nueva.");
     }
 
     /// <summary>

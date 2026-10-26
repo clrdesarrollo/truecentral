@@ -1162,12 +1162,22 @@ public partial class MainViewModel : ObservableObject
     /// hace por tandas cediendo ciclos al dispatcher, así la UI sigue viva
     /// (sin el "no responde" de Windows) y los cuadros aparecen progresivos.
     /// </summary>
-    public async Task ApplyLayoutAsync(VideoLayout layout)
+    public async Task ApplyLayoutAsync(VideoLayout layout, IReadOnlyList<int>? placement = null)
     {
         MaximizedIndex = -1; // los índices cambian con la división
         ForgetPromotion();
-        CurrentLayout = layout;
+        // Al ampliar la grilla la división cambia recién con los cuadros nuevos
+        // creados y las cámaras ya en su lugar: así no se ven saltar.
+        if (placement is null) CurrentLayout = layout;
         int count = layout.CellCount;
+        // Al unir cuadros la grilla achica: las cámaras se reacomodan ANTES de
+        // quitar los cuadros sobrantes (que quedan libres al final).
+        if (placement is not null && placement.Count >= count)
+        {
+            VideoCellViewModel.Rearrange(Cells, placement);
+            CurrentLayout = layout;
+            placement = null;
+        }
         // Cediendo un ciclo por CADA celda: liberar un player con video andando
         // puede tomar cientos de milisegundos y el bombeo de mensajes debe
         // seguir corriendo entre uno y otro.
@@ -1190,12 +1200,130 @@ public partial class MainViewModel : ObservableObject
             Cells.Add(cell);
             await BreatheAsync();
         }
+        if (placement is not null)
+        {
+            VideoCellViewModel.Rearrange(Cells, placement);
+            CurrentLayout = layout;
+        }
         for (int i = 0; i < Cells.Count; i++)
             Cells[i].Index = i + 1;
         if (SelectedCell is not null && !Cells.Contains(SelectedCell))
             SelectedCell = null;
         RefreshLiveChannels(); // cuadros liberados y números de cuadro nuevos
     }
+
+    /// <summary>
+    /// Modo «Unir cuadros»: arrastrar de un cuadro a otro une el rectángulo en
+    /// un solo cuadro; un clic en un cuadro unido lo separa.
+    /// </summary>
+    [ObservableProperty] private bool _isMergeMode;
+
+    partial void OnIsMergeModeChanged(bool value)
+    {
+        if (value) IsDigitalZoomMode = false;
+        StatusMessage = value
+            ? "Unir cuadros: arrastre de un cuadro a otro para unirlos en uno; clic en un cuadro unido lo separa. Esc termina."
+            : HintMessage;
+    }
+
+    /// <summary>Marca en los bordes lo que uniría la selección de <paramref name="from"/> a <paramref name="to"/>.</summary>
+    public void PreviewMerge(VideoCellViewModel from, VideoCellViewModel? to)
+    {
+        int a = Cells.IndexOf(from), b = to is null ? -1 : Cells.IndexOf(to);
+        foreach (var cell in Cells) cell.MergeMark = 0;
+        if (a < 0 || b < 0 || a >= CurrentLayout.CellCount || b >= CurrentLayout.CellCount) return;
+        var (_, inside, cut) = CurrentLayout.MergeSelection(a, b);
+        foreach (int i in inside) Cells[i].MergeMark = cut.Count > 0 ? 2 : 1;
+        foreach (int i in cut) Cells[i].MergeMark = 2;
+    }
+
+    /// <summary>
+    /// Une los cuadros de <paramref name="from"/> a <paramref name="to"/>. Queda
+    /// la cámara del cuadro donde empezó la selección (o la primera que haya);
+    /// las demás de la selección se cierran.
+    /// </summary>
+    public async Task MergeCellsAsync(VideoCellViewModel from, VideoCellViewModel to)
+    {
+        foreach (var c in Cells) c.MergeMark = 0;
+        if (_layoutBusy || MaximizedIndex >= 0) return;
+        int a = Cells.IndexOf(from), b = Cells.IndexOf(to);
+        if (a < 0 || b < 0) return;
+        if (CurrentLayout.Merge(a, b, out var reason) is not { } merge)
+        {
+            if (a != b) StatusMessage = reason ?? "";
+            return;
+        }
+        var inside = Enumerable.Range(0, Cells.Count).Where(i => merge.Placement[i] == merge.StripCells[0]).ToList();
+        var keep = !from.IsEmpty ? from : inside.Select(i => Cells[i]).FirstOrDefault(c => !c.IsEmpty);
+        var closed = inside.Select(i => Cells[i]).Where(c => c != keep && !c.IsEmpty).Select(c => c.Title).ToList();
+        foreach (int i in inside)
+            if (Cells[i] != keep) Cells[i].Clear();
+        // Permutación completa: lo que se une va al cuadro unido (la cámara que
+        // queda) o, vacío, a los lugares sobrantes del final.
+        var target = new int[Cells.Count];
+        int spare = merge.Layout.CellCount;
+        for (int i = 0; i < Cells.Count; i++)
+            target[i] = !inside.Contains(i) || Cells[i] == keep || (keep is null && i == inside[0])
+                ? merge.Placement[i] : spare++;
+        _layoutBusy = true;
+        try { await ApplyLayoutAsync(merge.Layout, target); }
+        finally { _layoutBusy = false; }
+        SelectedCell = Cells[merge.StripCells[0]];
+        StatusMessage = $"{inside.Count} cuadros unidos en uno." +
+            (closed.Count > 0 ? $" Se cerró: {string.Join(", ", closed.Select(t => $"\"{t}\""))}." : "");
+    }
+
+    /// <summary>Separa un cuadro unido en cuadros simples (la cámara queda arriba a la izquierda).</summary>
+    public async Task SplitCellAsync(VideoCellViewModel cell)
+    {
+        if (_layoutBusy || MaximizedIndex >= 0) return;
+        int index = Cells.IndexOf(cell);
+        if (index < 0 || index >= CurrentLayout.CellCount || CurrentLayout.Split(index) is not { } split)
+        {
+            StatusMessage = "Ese cuadro no está unido: arrastre hasta otro cuadro para unirlos.";
+            return;
+        }
+        _layoutBusy = true;
+        try { await ApplyLayoutAsync(split.Layout, split.Placement); }
+        finally { _layoutBusy = false; }
+        SelectedCell = Cells[split.StripCells[0]];
+        StatusMessage = $"Cuadro separado: la grilla queda en {split.Layout.CellCount} cuadros.";
+    }
+
+    /// <summary>Cámaras que el puesto puede ver (el árbol ya trae solo los
+    /// canales habilitados por la licencia): la grilla ampliada no pasa de ahí.</summary>
+    private int GrowCellLimit => Math.Max(Cells.Count, Devices.Sum(d => d.Channels.Count));
+
+    /// <summary>Por qué no se puede ampliar la grilla en ese borde (null = se puede).</summary>
+    public string? GrowBlockedReason(GridEdge edge) =>
+        MaximizedIndex >= 0 ? "Restaure el cuadro maximizado para ampliar la grilla."
+        : CurrentLayout.GrowBlockedReason(edge, GrowCellLimit);
+
+    /// <summary>
+    /// Ampliar la grilla: agrega una franja (fila o columna) en el borde donde
+    /// se soltó la cámara y la abre en el cuadro <paramref name="slot"/> de la
+    /// franja. Las cámaras que ya estaban siguen con su video.
+    /// </summary>
+    public async Task GrowLayoutAsync(GridEdge edge, int slot, ChannelNode node)
+    {
+        if (_layoutBusy || CurrentLayout.Grow(edge, GrowCellLimit) is not { } growth) return;
+        _layoutBusy = true;
+        try { await ApplyLayoutAsync(growth.Layout, growth.Placement); }
+        finally { _layoutBusy = false; }
+        var cell = Cells[growth.StripCells[Math.Clamp(slot, 0, growth.StripCells.Count - 1)]];
+        SelectedCell = cell;
+        StatusMessage = $"{GrowthText(edge)}: la grilla pasa a {growth.Layout.Columns}×{growth.Layout.Rows} " +
+                        $"({growth.Layout.CellCount} cuadros).";
+        await OpenChannelInCellAsync(node, cell);
+    }
+
+    internal static string GrowthText(GridEdge edge) => edge switch
+    {
+        GridEdge.Left => "Columna nueva a la izquierda",
+        GridEdge.Right => "Columna nueva a la derecha",
+        GridEdge.Top => "Fila nueva arriba",
+        _ => "Fila nueva abajo",
+    };
 
     /// <summary>Tope de la pausa entre celda y celda (ver BreatheAsync).</summary>
     private static readonly TimeSpan BreathTimeout = TimeSpan.FromMilliseconds(250);
