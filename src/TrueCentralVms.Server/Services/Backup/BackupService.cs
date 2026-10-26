@@ -38,7 +38,6 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
     public const string StateBlob = "backup.state";
     private const string TestDatabase = "truecentral_vms_prueba";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static readonly string[] NotCompressed = [".jpg", ".jpeg", ".png", ".mp3", ".ogg", ".m4a", ".zip", ".dump"];
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly DateTime _startedUtc = DateTime.UtcNow;
@@ -111,7 +110,11 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
 
     // ------------------------------------------------------------------ crear
 
-    /// <summary>Hace un respaldo completo (uno a la vez). Lanza si falla; el estado queda guardado igual.</summary>
+    /// <summary>
+    /// Hace un respaldo completo (uno a la vez). Lanza si falla; el estado queda guardado igual. El diario y el a pedido
+    /// corren en un proceso aparte (<see cref="BackupWorker"/>): el servidor sigue atendiendo pase lo que pase con el
+    /// respaldo. El previo a una actualización corre aquí mismo: el servidor todavía no atiende a nadie.
+    /// </summary>
     public async Task<BackupFileDto> CreateAsync(string kind, CancellationToken ct, IProgress<BackupProgress>? progress = null)
     {
         if (!await _gate.WaitAsync(0, ct))
@@ -120,9 +123,13 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         DateTime attempt = DateTime.UtcNow;
         try
         {
-            var file = await CreateCoreAsync(kind, ct, progress);
-            int removed = ApplyRetention(Directory, _settings);
-            string? secondaryError = CopyToSecondary(Path.Combine(Directory, file.Name), _settings);
+            var job = await NewJobAsync(kind, ct);
+            var result = kind == BackupKinds.PreUpdate
+                ? await BackupJobRunner.RunAsync(job, ct, progress)
+                : await BackupWorker.RunAsync(job, WorkerTimeout, ct, progress, logger);
+            foreach (string warning in result.Warnings) logger.LogWarning("Respaldos: {Warning}", warning);
+            var file = result.File;
+            string? secondaryError = result.SecondaryError;
             await SaveStateAsync(_state with
             {
                 LastSuccessUtc = DateTime.UtcNow,
@@ -135,7 +142,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
                     ? DateTime.UtcNow : _state.LastSecondaryUtc,
             });
             logger.LogInformation("Respaldo {Name} creado ({Size:N0} bytes, {Seconds:0.0} s; {Removed} respaldo(s) viejo(s) borrado(s)).",
-                file.Name, file.Size, watch.Elapsed.TotalSeconds, removed);
+                file.Name, file.Size, watch.Elapsed.TotalSeconds, result.Removed);
             if (secondaryError is not null) logger.LogWarning("Respaldos: {Error}", secondaryError);
             return file;
         }
@@ -150,9 +157,11 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         }
     }
 
-    private async Task<BackupFileDto> CreateCoreAsync(string kind, CancellationToken ct, IProgress<BackupProgress>? progress)
+    /// <summary>Tope del proceso aparte: si se cuelga (p. ej. una carpeta de red que no responde), se mata.</summary>
+    private TimeSpan WorkerTimeout => TimeSpan.FromMinutes(Math.Clamp(config.GetValue("Backup:TimeoutMinutes", 180), 5, 1440));
+
+    private async Task<BackupJob> NewJobAsync(string kind, CancellationToken ct)
     {
-        System.IO.Directory.CreateDirectory(Directory);
         // Lo que se espera escribir: el último respaldo bueno es la mejor referencia (la base crece de a poco).
         long expected = 0;
         try
@@ -161,62 +170,29 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
                 expected = info.Length;
         }
         catch (Exception) { /* sin referencia: el avance va sin porcentaje */ }
-        var settings = _settings;
         string? password = BackupPassword;
-        string name = BackupPaths.NewName(DateTime.Now, kind);
-        string target = Path.Combine(Directory, name);
-        string part = target + ".part";
-
-        var template = new BackupHeader
+        var (user, dumpPassword) = pg.DumpCredentials;
+        return new BackupJob
         {
-            CreatedUtc = DateTime.UtcNow,
             Kind = kind,
-            ServerVersion = ServerVersion,
+            Directory = Directory,
+            PgDumpPath = pg.ToolPath("pg_dump.exe"),
+            PgPort = pg.Port,
+            DumpUser = user,
+            DumpPassword = dumpPassword,
+            DatabaseName = EmbeddedPostgres.DatabaseName,
+            Password = password,
+            MachineKey = password is null ? MachineKey() : null,
+            DataKeyPath = BackupPaths.DataKey(pg),
+            WorkflowsDirectory = BackupPaths.Workflows(config, pg),
+            LicenseDirectory = BackupPaths.License(pg),
+            AnprDirectory = BackupPaths.Anpr(config, pg),
             LastMigration = await LastMigrationAsync(ct),
-            Machine = Environment.MachineName,
-            IncludesAnpr = settings.IncludeAnpr,
+            ExpectedBytes = expected,
+            Settings = _settings,
+            SecondaryPassword = Unprotect(_settings.SecondaryPasswordCipher),
         };
-        var (header, key) = BackupFormat.NewHeader(template, password, password is null ? MachineKey() : null);
-        var entries = new List<ManifestEntry>();
-        try
-        {
-            await using (var file = new FileStream(part, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16))
-            {
-                byte[] raw = BackupFormat.WriteHeader(file, header);
-                using var encrypted = new BackupFormat.EncryptingStream(file, key, header, raw);
-                using (var zip = new ZipArchive(encrypted, ZipArchiveMode.Create, leaveOpen: true))
-                {
-                    long dumped = 0;
-                    await AddDumpAsync(zip, entries, ct,
-                        progress is null ? null : bytes => progress.Report(new BackupProgress("dump", dumped = bytes, expected)));
-                    progress?.Report(new BackupProgress("files", dumped, expected));
-                    AddFile(zip, "secrets/tcvms-data.key", BackupPaths.DataKey(pg), entries);
-                    AddDirectory(zip, "files/workflows", BackupPaths.Workflows(config, pg), entries, ct);
-                    AddDirectory(zip, "files/license", BackupPaths.License(pg), entries, ct);
-                    if (settings.IncludeAnpr) AddDirectory(zip, "files/anpr", BackupPaths.Anpr(config, pg), entries, ct);
-                    await using var manifest = zip.CreateEntry("manifest.json", CompressionLevel.Optimal).Open();
-                    await JsonSerializer.SerializeAsync(manifest, new Manifest(header, entries), Json, ct);
-                }
-            }
-            // Releer todo: cada bloque cifrado se valida con su etiqueta, así que un archivo que se lee entero está sano.
-            progress?.Report(new BackupProgress("verify", new FileInfo(part).Length, expected));
-            await using (var check = File.OpenRead(part))
-            {
-                var (readHeader, raw) = BackupFormat.ReadHeader(check);
-                BackupFormat.Decrypt(check, key, readHeader, raw, Stream.Null);
-            }
-            File.Move(part, target);
-        }
-        catch
-        {
-            try { File.Delete(part); } catch { /* mejor esfuerzo */ }
-            throw;
-        }
-        return ToDto(target, header, onSecondary: null);
     }
-
-    private sealed record ManifestEntry(string Path, long Size, string Sha256);
-    private sealed record Manifest(BackupHeader Header, List<ManifestEntry> Entries);
 
     private async Task<string?> LastMigrationAsync(CancellationToken ct)
     {
@@ -229,71 +205,12 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         catch (Exception) { return null; }
     }
 
-    private async Task AddDumpAsync(ZipArchive zip, List<ManifestEntry> entries, CancellationToken ct, Action<long>? onBytes = null)
-    {
-        const string path = "db/truecentral_vms.dump";
-        var (user, password) = pg.DumpCredentials;
-        var psi = PgTool("pg_dump.exe", password,
-            ["-h", "127.0.0.1", "-p", pg.Port.ToString(), "-U", user, "-d", EmbeddedPostgres.DatabaseName, "-Fc", "--no-password"]);
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("No se pudo ejecutar pg_dump.");
-        var stderr = process.StandardError.ReadToEndAsync(ct);
-        long size;
-        string sha;
-        await using (var target = zip.CreateEntry(path, CompressionLevel.NoCompression).Open())
-            (size, sha) = await CopyHashingAsync(process.StandardOutput.BaseStream, target, ct, onBytes);
-        await process.WaitForExitAsync(ct);
-        string errors = await stderr;
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"pg_dump falló (código {process.ExitCode}): {errors.Trim()}");
-        entries.Add(new ManifestEntry(path, size, sha));
-    }
+    internal static ProcessStartInfo PgToolStart(EmbeddedPostgres pg, string exe, string password, IEnumerable<string> args) =>
+        PgToolStart(pg.ToolPath(exe), password, args);
 
-    private static void AddFile(ZipArchive zip, string path, string source, List<ManifestEntry> entries)
+    internal static ProcessStartInfo PgToolStart(string toolPath, string password, IEnumerable<string> args)
     {
-        if (!File.Exists(source)) return;
-        string ext = Path.GetExtension(source).ToLowerInvariant();
-        using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var target = zip.CreateEntry(path, NotCompressed.Contains(ext) ? CompressionLevel.NoCompression : CompressionLevel.Fastest).Open();
-        var (size, sha) = CopyHashingAsync(input, target, CancellationToken.None).GetAwaiter().GetResult();
-        entries.Add(new ManifestEntry(path, size, sha));
-    }
-
-    private static void AddDirectory(ZipArchive zip, string prefix, string source, List<ManifestEntry> entries, CancellationToken ct)
-    {
-        if (!System.IO.Directory.Exists(source)) return;
-        foreach (string file in System.IO.Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
-        {
-            ct.ThrowIfCancellationRequested();
-            string relative = Path.GetRelativePath(source, file).Replace('\\', '/');
-            try { AddFile(zip, $"{prefix}/{relative}", file, entries); }
-            catch (FileNotFoundException) { /* se purgó mientras se respaldaba */ }
-            catch (DirectoryNotFoundException) { }
-        }
-    }
-
-    private static async Task<(long Size, string Sha256)> CopyHashingAsync(Stream input, Stream output, CancellationToken ct,
-        Action<long>? onBytes = null)
-    {
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        byte[] buffer = new byte[1 << 16];
-        long total = 0, reported = 0;
-        int read;
-        while ((read = await input.ReadAsync(buffer, ct)) > 0)
-        {
-            hash.AppendData(buffer, 0, read);
-            output.Write(buffer, 0, read);   // el ZIP escribe sincrónico sobre el flujo cifrado
-            total += read;
-            if (onBytes is not null && total - reported >= 4 << 20) onBytes(reported = total);   // cada 4 MB
-        }
-        onBytes?.Invoke(total);
-        return (total, Convert.ToHexStringLower(hash.GetHashAndReset()));
-    }
-
-    internal ProcessStartInfo PgTool(string exe, string password, IEnumerable<string> args) => PgToolStart(pg, exe, password, args);
-
-    internal static ProcessStartInfo PgToolStart(EmbeddedPostgres pg, string exe, string password, IEnumerable<string> args)
-    {
-        var psi = new ProcessStartInfo(pg.ToolPath(exe))
+        var psi = new ProcessStartInfo(toolPath)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -307,51 +224,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         return psi;
     }
 
-    // ------------------------------------------------------------------ retención y segundo destino
-
-    private int ApplyRetention(string dir, BackupSettings settings)
-    {
-        int removed = 0;
-        try
-        {
-            var names = System.IO.Directory.EnumerateFiles(dir, "*.tcbak").Select(Path.GetFileName).OfType<string>();
-            foreach (string name in BackupPaths.ToDelete(names, settings))
-            {
-                File.Delete(Path.Combine(dir, name));
-                removed++;
-            }
-            // Restos de respaldos interrumpidos (corte de luz a mitad de uno).
-            foreach (string part in System.IO.Directory.EnumerateFiles(dir, "*.part"))
-                if (File.GetLastWriteTimeUtc(part) < DateTime.UtcNow.AddDays(-1)) File.Delete(part);
-        }
-        catch (Exception ex) { logger.LogWarning(ex, "Respaldos: no se pudo aplicar la retención en {Dir}.", dir); }
-        return removed;
-    }
-
-    /// <summary>Copia el respaldo al segundo destino y aplica allí la misma retención. Devuelve el error o null.</summary>
-    private string? CopyToSecondary(string file, BackupSettings settings)
-    {
-        if (string.IsNullOrWhiteSpace(settings.SecondaryPath)) return null;
-        string dir = settings.SecondaryPath.Trim();
-        try
-        {
-            if (SecondaryShare.Connect(dir, settings.SecondaryUser, Unprotect(settings.SecondaryPasswordCipher)) is { } connectError)
-                return connectError;
-            System.IO.Directory.CreateDirectory(dir);
-            string target = Path.Combine(dir, Path.GetFileName(file));
-            File.Copy(file, target + ".part", overwrite: true);
-            if (new FileInfo(target + ".part").Length != new FileInfo(file).Length)
-                return $"La copia en {dir} quedó incompleta.";
-            File.Move(target + ".part", target, overwrite: true);
-            ApplyRetention(dir, settings);
-            return null;
-        }
-        catch (Exception ex)
-        {
-            return $"No se pudo copiar al segundo destino ({dir}): {ex.Message}";
-        }
-    }
-
+    // ------------------------------------------------------------------ segundo destino
     /// <summary>Prueba el segundo destino escribiendo y borrando un archivo. Devuelve el error o null.</summary>
     public string? TestSecondary(BackupSettings settings)
     {
@@ -394,7 +267,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         return result.OrderByDescending(f => f.CreatedUtc).ToList();
     }
 
-    private static BackupFileDto ToDto(string path, BackupHeader h, bool? onSecondary) =>
+    internal static BackupFileDto ToDto(string path, BackupHeader h, bool? onSecondary) =>
         new(Path.GetFileName(path), h.Kind, h.CreatedUtc, new FileInfo(path).Length, h.KeyMode, h.ServerVersion,
             h.LastMigration, h.IncludesAnpr, onSecondary);
 
@@ -452,9 +325,9 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
     internal static int VerifyManifest(ZipArchive zip)
     {
         var manifestEntry = zip.GetEntry("manifest.json") ?? throw new InvalidDataException("El respaldo no tiene manifiesto.");
-        Manifest manifest;
+        BackupJobRunner.Manifest manifest;
         using (var stream = manifestEntry.Open())
-            manifest = JsonSerializer.Deserialize<Manifest>(stream, Json) ?? throw new InvalidDataException("Manifiesto ilegible.");
+            manifest = JsonSerializer.Deserialize<BackupJobRunner.Manifest>(stream, Json) ?? throw new InvalidDataException("Manifiesto ilegible.");
         foreach (var e in manifest.Entries)
         {
             var entry = zip.GetEntry(e.Path) ?? throw new InvalidDataException($"Falta {e.Path} en el respaldo.");

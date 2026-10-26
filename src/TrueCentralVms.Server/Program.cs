@@ -24,6 +24,14 @@ if (args.Length > 0 && args[0] == LicenseCatalogExport.Argument)
     return;
 }
 
+// Proceso aparte de un respaldo: lo lanza el propio servidor y recibe el trabajo
+// por la entrada estándar. No levanta nada más (ver BackupWorker).
+if (TrueCentralVms.Server.Services.Backup.BackupWorker.IsRequested(args))
+{
+    Environment.ExitCode = await TrueCentralVms.Server.Services.Backup.BackupWorker.RunChildAsync();
+    return;
+}
+
 // El servidor corre igual como consola (desarrollo) o como servicio de Windows
 // (instalado). Como servicio, el directorio de trabajo inicial es System32, así
 // que el content root debe apuntar a la carpeta del ejecutable (appsettings,
