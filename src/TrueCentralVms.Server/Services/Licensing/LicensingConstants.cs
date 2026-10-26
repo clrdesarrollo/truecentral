@@ -80,5 +80,8 @@ public static class LicensingConstants
         [LicenseFeatures.AlarmScreens] = 2,
         [LicenseFeatures.ModuleAutomation] = true,
         [LicenseFeatures.AutomationRules] = 10,
+        [LicenseFeatures.ModulePatrol] = true,
+        [LicenseFeatures.PatrolReaders] = 1,
+        [LicenseFeatures.PatrolCheckpoints] = 10,
     };
 }

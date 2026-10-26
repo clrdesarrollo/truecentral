@@ -52,6 +52,21 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     // Módulos de entradas y salidas (relés de barreras, portones, balizas)
     public DbSet<IoModule> IoModules => Set<IoModule>();
     public DbSet<IoPoint> IoPoints => Set<IoPoint>();
+    public DbSet<PatrolAgent> PatrolAgents => Set<PatrolAgent>();
+    public DbSet<PatrolReader> PatrolReaders => Set<PatrolReader>();
+    public DbSet<PatrolAgentCommandRow> PatrolAgentCommands => Set<PatrolAgentCommandRow>();
+    public DbSet<PatrolCheckpoint> PatrolCheckpoints => Set<PatrolCheckpoint>();
+    public DbSet<PatrolGuard> PatrolGuards => Set<PatrolGuard>();
+    public DbSet<PatrolTag> PatrolTags => Set<PatrolTag>();
+    public DbSet<PatrolDownload> PatrolDownloads => Set<PatrolDownload>();
+    public DbSet<PatrolRawRead> PatrolRawReads => Set<PatrolRawRead>();
+    public DbSet<PatrolPass> PatrolPasses => Set<PatrolPass>();
+    public DbSet<PatrolRoute> PatrolRoutes => Set<PatrolRoute>();
+    public DbSet<PatrolRouteStop> PatrolRouteStops => Set<PatrolRouteStop>();
+    public DbSet<PatrolRouteAgent> PatrolRouteAgents => Set<PatrolRouteAgent>();
+    public DbSet<PatrolSchedule> PatrolSchedules => Set<PatrolSchedule>();
+    public DbSet<PatrolRun> PatrolRuns => Set<PatrolRun>();
+    public DbSet<PatrolRunStop> PatrolRunStops => Set<PatrolRunStop>();
 
     // Citofonía (frentes de videoportero y su historial de llamadas)
     public DbSet<Intercom> Intercoms => Set<Intercom>();
@@ -125,6 +140,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         (typeof(Speaker), nameof(Speaker.Enabled), nameof(Speaker.DisabledByLicense)),
         (typeof(Intercom), nameof(Intercom.Enabled), nameof(Intercom.DisabledByLicense)),
         (typeof(IoModule), nameof(IoModule.Enabled), nameof(IoModule.DisabledByLicense)),
+        (typeof(PatrolReader), nameof(PatrolReader.Enabled), nameof(PatrolReader.DisabledByLicense)),
+        (typeof(PatrolCheckpoint), nameof(PatrolCheckpoint.Enabled), nameof(PatrolCheckpoint.DisabledByLicense)),
         (typeof(Vehicle), nameof(Vehicle.Enabled), nameof(Vehicle.DisabledByLicense)),
         (typeof(Workflow), nameof(Workflow.Enabled), nameof(Workflow.DisabledByLicense)),
         (typeof(User), nameof(User.Enabled), nameof(User.DisabledByLicense)),
@@ -404,6 +421,150 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(p => p.Name).HasMaxLength(64);
             e.Property(p => p.Kind).HasConversion<string>().HasMaxLength(8);
             e.HasIndex(p => new { p.IoModuleId, p.Kind, p.Number }).IsUnique();
+        });
+
+        // -------------------------------------------------------------------
+        // Control de rondas
+        modelBuilder.Entity<PatrolAgent>(e =>
+        {
+            e.Property(a => a.Name).HasMaxLength(128);
+            e.Property(a => a.TokenHash).HasMaxLength(64);
+            e.Property(a => a.EnrollmentCodeHash).HasMaxLength(64);
+            e.Property(a => a.MachineName).HasMaxLength(128);
+            e.Property(a => a.Version).HasMaxLength(32);
+            e.Property(a => a.RemoteAddress).HasMaxLength(64);
+            e.Property(a => a.LastError).HasMaxLength(512);
+            e.HasIndex(a => a.TokenHash).IsUnique().HasFilter("\"TokenHash\" IS NOT NULL");
+            e.HasIndex(a => a.EnrollmentCodeHash).HasFilter("\"EnrollmentCodeHash\" IS NOT NULL");
+            e.HasOne<Location>().WithMany().HasForeignKey(a => a.LocationId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<PatrolReader>(e =>
+        {
+            e.Property(r => r.Name).HasMaxLength(128);
+            e.Property(r => r.DriverKey).HasMaxLength(32);
+            e.Property(r => r.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(r => r.LastError).HasMaxLength(512);
+            e.HasIndex(r => r.Serial).IsUnique();
+            e.HasOne(r => r.Agent).WithMany().HasForeignKey(r => r.AgentId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<Location>().WithMany().HasForeignKey(r => r.LocationId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<PatrolAgentCommandRow>(e =>
+        {
+            e.ToTable("PatrolAgentCommands");
+            e.Property(c => c.Kind).HasMaxLength(16);
+            e.Property(c => c.RequestedBy).HasMaxLength(128);
+            e.Property(c => c.Message).HasMaxLength(512);
+            e.HasIndex(c => new { c.AgentId, c.CompletedAt });
+            e.HasOne<PatrolAgent>().WithMany().HasForeignKey(c => c.AgentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<PatrolReader>().WithMany().HasForeignKey(c => c.ReaderId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<PatrolCheckpoint>(e =>
+        {
+            e.Property(c => c.Name).HasMaxLength(128);
+            e.Property(c => c.Kind).HasConversion<string>().HasMaxLength(8);
+            e.Property(c => c.TagId).HasMaxLength(16);
+            e.Property(c => c.Notes).HasMaxLength(1024);
+            e.HasIndex(c => c.TagId).IsUnique().HasFilter("\"TagId\" IS NOT NULL");
+            e.HasOne<Location>().WithMany().HasForeignKey(c => c.LocationId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<AccessDoor>().WithMany().HasForeignKey(c => c.AccessDoorId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<PatrolGuard>(e =>
+        {
+            e.Property(g => g.Notes).HasMaxLength(1024);
+            e.Property(g => g.DeactivatedBy).HasMaxLength(128);
+            e.Property(g => g.DeactivationReason).HasMaxLength(512);
+            e.HasIndex(g => g.AccessPersonId).IsUnique();
+            // Borrar la persona (borrado definitivo, excepcional) se lleva el rol;
+            // los pasos conservan la copia del nombre (PatrolPass.GuardName).
+            e.HasOne(g => g.AccessPerson).WithMany().HasForeignKey(g => g.AccessPersonId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(g => g.Tags).WithOne(t => t.PatrolGuard)
+                .HasForeignKey(t => t.PatrolGuardId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<PatrolTag>(e =>
+        {
+            e.Property(t => t.TagId).HasMaxLength(16);
+            e.Property(t => t.Label).HasMaxLength(128);
+            e.HasIndex(t => t.TagId).IsUnique();
+        });
+        modelBuilder.Entity<PatrolDownload>(e =>
+        {
+            e.Property(d => d.Origin).HasConversion<string>().HasMaxLength(16);
+            e.Property(d => d.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(d => d.Actor).HasMaxLength(128);
+            e.Property(d => d.Error).HasMaxLength(512);
+            e.HasIndex(d => new { d.ReaderId, d.StartedAt });
+            e.HasOne<PatrolReader>().WithMany().HasForeignKey(d => d.ReaderId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<PatrolRawRead>(e =>
+        {
+            e.Property(r => r.TagId).HasMaxLength(16);
+            e.HasIndex(r => new { r.ReaderId, r.TagId, r.ReadAt }).IsUnique();
+            e.HasIndex(r => new { r.ReaderId, r.ReadAt });
+            e.HasIndex(r => r.TagId);
+            e.HasOne<PatrolReader>().WithMany().HasForeignKey(r => r.ReaderId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<PatrolDownload>().WithMany().HasForeignKey(r => r.DownloadId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<PatrolPass>(e =>
+        {
+            e.Property(p => p.Source).HasConversion<string>().HasMaxLength(16);
+            e.Property(p => p.GuardName).HasMaxLength(256);
+            e.Property(p => p.GuardEmployeeNo).HasMaxLength(64);
+            e.Property(p => p.VoidReason).HasMaxLength(512);
+            e.Property(p => p.EditedBy).HasMaxLength(128);
+            e.Property(p => p.EditReason).HasMaxLength(512);
+            e.HasIndex(p => p.ReadAt);
+            e.HasIndex(p => new { p.CheckpointId, p.ReadAt });
+            e.HasIndex(p => new { p.PatrolGuardId, p.ReadAt });
+            e.HasIndex(p => p.CheckpointReadId).IsUnique().HasFilter("\"CheckpointReadId\" IS NOT NULL");
+            e.HasOne<PatrolCheckpoint>().WithMany().HasForeignKey(p => p.CheckpointId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<PatrolGuard>().WithMany().HasForeignKey(p => p.PatrolGuardId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<PatrolTag>().WithMany().HasForeignKey(p => p.PatrolTagId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<PatrolReader>().WithMany().HasForeignKey(p => p.ReaderId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<PatrolRawRead>().WithMany().HasForeignKey(p => p.CheckpointReadId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<PatrolRawRead>().WithMany().HasForeignKey(p => p.GuardReadId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PatrolRoute>(e =>
+        {
+            e.Property(r => r.Name).HasMaxLength(128);
+            e.Property(r => r.Notes).HasMaxLength(1024);
+            e.Property(r => r.OrderMode).HasConversion<string>().HasMaxLength(8);
+            e.HasOne<Location>().WithMany().HasForeignKey(r => r.LocationId).OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(r => r.Stops).WithOne().HasForeignKey(s => s.RouteId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(r => r.Agents).WithOne().HasForeignKey(a => a.RouteId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(r => r.Schedules).WithOne().HasForeignKey(s => s.RouteId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<PatrolRouteStop>(e =>
+        {
+            e.HasIndex(s => new { s.RouteId, s.Sequence }).IsUnique();
+            e.HasOne(s => s.Checkpoint).WithMany().HasForeignKey(s => s.CheckpointId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<PatrolRouteAgent>(e =>
+        {
+            e.HasKey(a => new { a.RouteId, a.AgentId });
+            e.HasOne<PatrolAgent>().WithMany().HasForeignKey(a => a.AgentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<PatrolRun>(e =>
+        {
+            e.Property(r => r.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(r => r.Cause).HasMaxLength(512);
+            e.Property(r => r.CancelledBy).HasMaxLength(128);
+            // Una ronda por horario y hora de inicio: materializar dos veces no duplica.
+            e.HasIndex(r => new { r.ScheduleId, r.ExpectedStart }).IsUnique().HasFilter("\"ScheduleId\" IS NOT NULL");
+            e.HasIndex(r => new { r.RouteId, r.ExpectedStart });
+            e.HasIndex(r => new { r.Status, r.ExpectedStart });
+            e.HasOne<PatrolRoute>().WithMany().HasForeignKey(r => r.RouteId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<PatrolSchedule>().WithMany().HasForeignKey(r => r.ScheduleId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<PatrolReader>().WithMany().HasForeignKey(r => r.ReaderId).OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(r => r.Stops).WithOne().HasForeignKey(s => s.RunId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<PatrolRunStop>(e =>
+        {
+            e.Property(s => s.Status).HasConversion<string>().HasMaxLength(16);
+            e.HasIndex(s => new { s.RunId, s.Sequence }).IsUnique();
+            e.HasIndex(s => s.PassId);
+            e.HasOne<PatrolCheckpoint>().WithMany().HasForeignKey(s => s.CheckpointId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<PatrolPass>().WithMany().HasForeignKey(s => s.PassId).OnDelete(DeleteBehavior.SetNull);
         });
 
         // -------------------------------------------------------------------

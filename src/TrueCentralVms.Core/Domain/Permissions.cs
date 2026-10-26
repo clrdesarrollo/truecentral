@@ -38,6 +38,14 @@ public static class Permissions
     public const string IoOperate = "io.operate";
     public const string IntercomAnswer = "intercom.answer";
 
+    // Control de rondas
+    public const string PatrolView = "patrol.view";
+    public const string PatrolRead = "patrol.read";
+    public const string PatrolErase = "patrol.erase";
+    public const string PatrolEdit = "patrol.edit";
+    public const string PatrolExport = "patrol.export";
+    public const string PatrolConfigure = "patrol.configure";
+
     // Personas
     public const string PersonsView = "persons.view";
     public const string PersonsManage = "persons.manage";
@@ -133,6 +141,19 @@ public static class Permissions
         new(IntercomAnswer, "Monitoreo y operación", "Atender citofonía",
             "Contestar, rechazar y cortar llamadas, y abrir la puerta del frente.", []),
 
+        new(PatrolView, "Control de rondas", "Ver rondas",
+            "Ver la bitácora de rondas, los guardias, los puntos de control y el estado de los bastones y sus bases.", []),
+        new(PatrolRead, "Control de rondas", "Leer bastones a pedido",
+            "Leer un bastón desde el navegador o pedirle a una base que lo lea ahora.", [PatrolView]),
+        new(PatrolErase, "Control de rondas", "Vaciar bastones a pedido",
+            "Borrar la memoria de un bastón después de leerlo a pedido (la base lo hace sola tras cada descarga).", [PatrolRead]),
+        new(PatrolEdit, "Control de rondas", "Corregir la bitácora de rondas",
+            "Cambiar el guardia de un paso o anularlo, siempre con motivo (queda registrado).", [PatrolView]),
+        new(PatrolExport, "Control de rondas", "Exportar rondas",
+            "Exportar la bitácora y los informes de rondas.", [PatrolView]),
+        new(PatrolConfigure, "Control de rondas", "Configurar rondas",
+            "Administrar guardias, llaveros, puntos de control, bastones y bases de descarga.", [PatrolView]),
+
         new(PersonsView, "Personas", "Ver personas",
             "Ver las personas registradas, sus fotos, tarjetas y niveles de acceso.", []),
         new(PersonsManage, "Personas", "Administrar personas",
@@ -225,7 +246,7 @@ public static class Permissions
         LiveView, LivePtz, LiveViewsManage, PlaybackView, PlaybackExport, WallOperate, WallLayouts, FleetView, FleetLive,
         EventsAttend, LocationsCommand, AlarmsMonitor, AlarmsOperate, CercoMonitor, CercoOperate,
         AccessMonitor, AccessDoors, AccessRecordsExport, AnprView, SpeakersPlay, IntercomAnswer, IoOperate,
-        PersonsView, WorkflowsView, MaintenanceView,
+        PersonsView, WorkflowsView, MaintenanceView, PatrolView, PatrolExport,
     ];
 
     /// <summary>Punto de partida para crear un rol (no se guardan: se copian al formulario).</summary>

@@ -205,6 +205,9 @@ builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Ada
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.ZkTeco.C3IoDriverFactory>();
 builder.Services.AddSingleton<IoModuleDriverRegistry>();
 builder.Services.AddSingleton<IoModuleService>();
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Patrol.PatrolService>();
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Patrol.PatrolRoundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Patrol.PatrolRoundService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IoModuleService>());
 // Citofonía: frentes de videoportero (enlace de llamadas por SDK, voz bidireccional y apertura de puerta).
 builder.Services.AddSingleton<IIntercomDriverFactory, HikvisionIntercomDriverFactory>();
@@ -529,6 +532,10 @@ app.MapGet("/api/health", () => Results.Ok(new { ok = true, time = DateTime.UtcN
 
 app.MapSetupApi(serverVersion);
 app.MapAuthApi();
+app.MapPatrolApi();
+app.MapPatrolAgentApi();
+app.MapPatrolRoutesApi();
+app.MapPatrolReportsApi();
 app.MapUsersApi();
 app.MapRolesApi();
 app.MapDevicesApi();

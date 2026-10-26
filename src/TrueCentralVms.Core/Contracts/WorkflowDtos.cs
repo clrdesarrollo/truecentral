@@ -32,9 +32,11 @@ public static class WorkflowTriggerTypes
     public const string IoInput = "io-input";
     /// <summary>Evento de un vehículo de la flota: pánico, choque, conducción, geocerca, conexión… (ver FleetEventKinds).</summary>
     public const string FleetEvent = "fleet-event";
+    /// <summary>Control de rondas: ronda no iniciada, sin terminar, incompleta, cumplida; memoria del bastón; base sin conexión (ver PatrolEventKinds).</summary>
+    public const string PatrolEvent = "patrol-event";
 
     public static readonly string[] All =
-        [AlarmEvent, PanelStatus, DeviceStatus, VideoEvent, PlateRecognized, AccessEvent, Schedule, Webhook, IoInput, FleetEvent];
+        [AlarmEvent, PanelStatus, DeviceStatus, VideoEvent, PlateRecognized, AccessEvent, Schedule, Webhook, IoInput, FleetEvent, PatrolEvent];
 }
 
 /// <summary>Acciones disponibles. La clave se guarda en la base.</summary>
@@ -275,7 +277,13 @@ public sealed record WorkflowConditionsDto(
     /// <summary>Tipos de evento de vehículo (FleetEventKinds: "panic", "geofence-enter"…). Vacío = cualquiera.</summary>
     IReadOnlyList<string>? FleetEventKinds = null,
     /// <summary>Geocercas (Ids de Geofences) para los eventos de geocerca. Vacío = cualquiera.</summary>
-    IReadOnlyList<int>? GeofenceIds = null);
+    IReadOnlyList<int>? GeofenceIds = null,
+
+    // --- Control de rondas (disparador patrol-event) ---
+    /// <summary>Rutas (Ids de PatrolRoutes). Vacío = todas.</summary>
+    IReadOnlyList<int>? PatrolRouteIds = null,
+    /// <summary>Tipos de evento de rondas (PatrolEventKinds). Vacío = cualquiera.</summary>
+    IReadOnlyList<string>? PatrolEventKinds = null);
 
 /// <summary>
 /// Franja horaria semanal: días de la semana (0 = domingo; vacío = todos) y

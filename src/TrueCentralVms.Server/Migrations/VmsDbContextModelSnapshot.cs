@@ -2451,6 +2451,769 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("PasswordHistories");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolAgent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EnrollmentCodeHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("EnrollmentExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MachineName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("RemoteAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Version")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnrollmentCodeHash")
+                        .HasFilter("\"EnrollmentCodeHash\" IS NOT NULL");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasFilter("\"TokenHash\" IS NOT NULL");
+
+                    b.ToTable("PatrolAgents");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolAgentCommandRow", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("AgentId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int>("ReaderId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RequestedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int?>("RequestedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool?>("Success")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReaderId");
+
+                    b.HasIndex("AgentId", "CompletedAt");
+
+                    b.ToTable("PatrolAgentCommands", (string)null);
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolCheckpoint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AccessDoorId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("TagId")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccessDoorId");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("TagId")
+                        .IsUnique()
+                        .HasFilter("\"TagId\" IS NOT NULL");
+
+                    b.ToTable("PatrolCheckpoints");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolDownload", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Actor")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int?>("AgentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Blocks")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("ClockSet")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Erased")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("NewPasses")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("NewReads")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("ReaderId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Reads")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReaderId", "StartedAt");
+
+                    b.ToTable("PatrolDownloads");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolGuard", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccessPersonId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeactivatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeactivatedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("DeactivationReason")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccessPersonId")
+                        .IsUnique();
+
+                    b.ToTable("PatrolGuards");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolPass", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("CheckpointId")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("CheckpointReadId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EditReason")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("EditedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EditedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("GuardEmployeeNo")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("GuardName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<long?>("GuardReadId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("PatrolGuardId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PatrolTagId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ReaderId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<bool>("Voided")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckpointReadId")
+                        .IsUnique()
+                        .HasFilter("\"CheckpointReadId\" IS NOT NULL");
+
+                    b.HasIndex("GuardReadId");
+
+                    b.HasIndex("PatrolTagId");
+
+                    b.HasIndex("ReadAt");
+
+                    b.HasIndex("ReaderId");
+
+                    b.HasIndex("CheckpointId", "ReadAt");
+
+                    b.HasIndex("PatrolGuardId", "ReadAt");
+
+                    b.ToTable("PatrolPasses");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRawRead", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("DownloadId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ReaderId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TagId")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DownloadId");
+
+                    b.HasIndex("TagId");
+
+                    b.HasIndex("ReaderId", "ReadAt");
+
+                    b.HasIndex("ReaderId", "TagId", "ReadAt")
+                        .IsUnique();
+
+                    b.ToTable("PatrolRawReads");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolReader", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AgentId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("DisabledByLicense")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Docked")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("DockedChangedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DriverKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastClockSetAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastDownloadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int?>("LastMemoryBlocks")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<long>("Serial")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AgentId");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("Serial")
+                        .IsUnique();
+
+                    b.ToTable("PatrolReaders");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRoute", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaxDurationMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("OrderMode")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<int>("ReminderMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RepeatMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("StartWindowMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LocationId");
+
+                    b.ToTable("PatrolRoutes");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRouteAgent", b =>
+                {
+                    b.Property<int>("RouteId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AgentId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("RouteId", "AgentId");
+
+                    b.HasIndex("AgentId");
+
+                    b.ToTable("PatrolRouteAgents");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRouteStop", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CheckpointId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("OffsetMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Required")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("RouteId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ToleranceMinutes")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckpointId");
+
+                    b.HasIndex("RouteId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("PatrolRouteStops");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRun", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ActualEnd")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ActualStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CancelledBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Cause")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("DueEnd")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EvaluatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpectedStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastReminderAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ReaderId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RouteId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ScheduleId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartDeadline")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReaderId");
+
+                    b.HasIndex("RouteId", "ExpectedStart");
+
+                    b.HasIndex("ScheduleId", "ExpectedStart")
+                        .IsUnique()
+                        .HasFilter("\"ScheduleId\" IS NOT NULL");
+
+                    b.HasIndex("Status", "ExpectedStart");
+
+                    b.ToTable("PatrolRuns");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRunStop", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ActualAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CheckpointId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ExpectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("PassId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("Required")
+                        .HasColumnType("boolean");
+
+                    b.Property<long>("RunId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int?>("ToleranceMinutes")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckpointId");
+
+                    b.HasIndex("PassId");
+
+                    b.HasIndex("RunId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("PatrolRunStops");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolSchedule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("DaysMask")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("RouteId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("SkipHolidays")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("StartMinutes")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RouteId");
+
+                    b.ToTable("PatrolSchedules");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolTag", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AssignedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int?>("PatrolGuardId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TagId")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PatrolGuardId");
+
+                    b.HasIndex("TagId")
+                        .IsUnique();
+
+                    b.ToTable("PatrolTags");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PlateEvent", b =>
                 {
                     b.Property<long>("Id")
@@ -4105,6 +4868,224 @@ namespace TrueCentralVms.Server.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolAgent", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolAgentCommandRow", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolAgent", null)
+                        .WithMany()
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolReader", null)
+                        .WithMany()
+                        .HasForeignKey("ReaderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolCheckpoint", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessDoor", null)
+                        .WithMany()
+                        .HasForeignKey("AccessDoorId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolDownload", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolReader", null)
+                        .WithMany()
+                        .HasForeignKey("ReaderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolGuard", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
+                        .WithMany()
+                        .HasForeignKey("AccessPersonId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AccessPerson");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolPass", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolCheckpoint", null)
+                        .WithMany()
+                        .HasForeignKey("CheckpointId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolRawRead", null)
+                        .WithMany()
+                        .HasForeignKey("CheckpointReadId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolRawRead", null)
+                        .WithMany()
+                        .HasForeignKey("GuardReadId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolGuard", null)
+                        .WithMany()
+                        .HasForeignKey("PatrolGuardId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolTag", null)
+                        .WithMany()
+                        .HasForeignKey("PatrolTagId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolReader", null)
+                        .WithMany()
+                        .HasForeignKey("ReaderId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRawRead", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolDownload", null)
+                        .WithMany()
+                        .HasForeignKey("DownloadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolReader", null)
+                        .WithMany()
+                        .HasForeignKey("ReaderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolReader", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolAgent", "Agent")
+                        .WithMany()
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Agent");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRoute", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRouteAgent", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolAgent", null)
+                        .WithMany()
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolRoute", null)
+                        .WithMany("Agents")
+                        .HasForeignKey("RouteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRouteStop", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolCheckpoint", "Checkpoint")
+                        .WithMany()
+                        .HasForeignKey("CheckpointId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolRoute", null)
+                        .WithMany("Stops")
+                        .HasForeignKey("RouteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Checkpoint");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRun", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolReader", null)
+                        .WithMany()
+                        .HasForeignKey("ReaderId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolRoute", null)
+                        .WithMany()
+                        .HasForeignKey("RouteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolSchedule", null)
+                        .WithMany()
+                        .HasForeignKey("ScheduleId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRunStop", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolCheckpoint", null)
+                        .WithMany()
+                        .HasForeignKey("CheckpointId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolPass", null)
+                        .WithMany()
+                        .HasForeignKey("PassId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolRun", null)
+                        .WithMany("Stops")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolSchedule", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolRoute", null)
+                        .WithMany("Schedules")
+                        .HasForeignKey("RouteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolTag", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.PatrolGuard", "PatrolGuard")
+                        .WithMany("Tags")
+                        .HasForeignKey("PatrolGuardId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("PatrolGuard");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PlateEvent", b =>
                 {
                     b.HasOne("TrueCentralVms.Server.Data.Entities.Device", "Device")
@@ -4444,6 +5425,25 @@ namespace TrueCentralVms.Server.Migrations
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Location", b =>
                 {
                     b.Navigation("Children");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolGuard", b =>
+                {
+                    b.Navigation("Tags");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRoute", b =>
+                {
+                    b.Navigation("Agents");
+
+                    b.Navigation("Schedules");
+
+                    b.Navigation("Stops");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.PatrolRun", b =>
+                {
+                    b.Navigation("Stops");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.ResourceProfile", b =>

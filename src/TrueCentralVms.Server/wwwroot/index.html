@@ -6,7 +6,7 @@
   <title>CLR TrueCentral VMS</title>
   <link rel="icon" href="favicon.ico">
   <link rel="stylesheet" href="vendor/mdi/css/materialdesignicons.min.css?v=1">
-  <link rel="stylesheet" href="styles.css?v=72">
+  <link rel="stylesheet" href="styles.css?v=74">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -80,6 +80,8 @@
         <a href="#/playback" data-route="playback" data-module="module_playback" data-perm="playback.view"><i class="mdi mdi-history" aria-hidden="true"></i><span class="nav-text">Reproducción</span></a>
         <a href="#/alarms" data-route="alarms" data-module="module_alarms" data-perm="alarms.monitor"><i class="mdi mdi-shield" aria-hidden="true"></i><span class="nav-text">Alarmas</span></a>
         <a href="#/cerco" data-route="cerco" data-module="module_fence" data-perm="cerco.monitor"><i class="mdi mdi-flash" aria-hidden="true"></i><span class="nav-text">Cerco eléctrico</span></a>
+        <a href="#/patrol" data-route="patrol" data-module="module_patrol" data-perm="patrol.view"><i class="mdi mdi-walk" aria-hidden="true"></i><span class="nav-text">Control de rondas</span></a>
+        <a href="#/patrol-reports" data-route="patrol-reports" data-module="module_patrol" data-perm="patrol.export"><i class="mdi mdi-file-chart" aria-hidden="true"></i><span class="nav-text">Informes de rondas</span></a>
         <a href="#/event-center" data-route="event-center" data-needs-license data-perm="events.attend"><i class="mdi mdi-bell-ring" aria-hidden="true"></i><span class="nav-text">Centro de eventos</span></a>
         <a href="#/videowall" data-route="videowall" data-module="module_videowall" data-perm="wall.operate"><i class="mdi mdi-monitor-multiple" aria-hidden="true"></i><span class="nav-text">Videowall</span></a>
         <a href="#/intercom-console" data-route="intercom-console" data-module="module_intercom" data-perm="intercom.answer"><i class="mdi mdi-deskphone" aria-hidden="true"></i><span class="nav-text">Citofonía</span></a>
@@ -197,6 +199,9 @@
   <script src="alarms.js?v=17"></script>
   <script src="speakers.js?v=14"></script>
   <script src="io-modules.js?v=3"></script>
+  <script src="patrol.js?v=2"></script>
+  <script src="patrol-serial.js?v=1"></script>
+  <script src="patrol-reports.js?v=1"></script>
   <script src="fleet.js?v=1"></script>
   <script src="fleet-map.js?v=3"></script>
   <script src="fleet-events.js?v=2"></script>
@@ -208,13 +213,13 @@
   <script src="enroll.js?v=2"></script>
   <script src="access-catalog.js?v=20"></script>
   <script src="access-monitor.js?v=7"></script>
-  <script src="workflows.js?v=23"></script>
+  <script src="workflows.js?v=24"></script>
   <script src="mail-settings.js?v=2"></script>
   <script src="backups.js?v=2"></script>
   <script src="certificate.js?v=2"></script>
   <script src="account.js?v=1"></script>
   <script src="wan.js?v=1"></script>
-  <script src="workflow-editor.js?v=13"></script>
+  <script src="workflow-editor.js?v=14"></script>
   <script src="services.js?v=4"></script>
   <script src="license.js?v=7"></script>
   <script src="anpr.js?v=4"></script>
@@ -234,6 +239,6 @@
   <script src="playback.js?v=6"></script>
   <script src="roles.js?v=3"></script>
   <script src="dashboard.js?v=9"></script>
-  <script src="app.js?v=80"></script>
+  <script src="app.js?v=81"></script>
 </body>
 </html>

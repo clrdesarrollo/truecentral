@@ -67,7 +67,11 @@ public sealed record WorkflowTrigger(
     /// <summary>Foto que llegó con el evento (analíticas con captura), disponible para las acciones.</summary>
     byte[]? Image = null,
     /// <summary>Recorte de la patente que mandó la cámara ANPR: segunda foto del evento, después de la escena.</summary>
-    byte[]? PlateImage = null)
+    byte[]? PlateImage = null,
+    // --- Control de rondas ---
+    int? PatrolRouteId = null,
+    /// <summary>PatrolEventKinds del evento.</summary>
+    string? PatrolKind = null)
 {
     /// <summary>Etiquetas en español de la naturaleza de un evento de panel.</summary>
     public static string KindLabel(AlarmEventKind kind) => kind switch
@@ -451,6 +455,40 @@ public sealed record WorkflowTrigger(
     }
 
     // ------------------------------------------------------------------
+    // Control de rondas
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Evento de rondas. <paramref name="routeId"/>/<paramref name="routeName"/> vacíos para los eventos
+    /// de bastón o base (memoria, base sin conexión).
+    /// </summary>
+    public static WorkflowTrigger FromPatrolEvent(string kind, int? routeId, string? routeName, DateTime atUtc,
+        string detail, string? location = null, DateTime? expectedStartUtc = null, string? guards = null)
+    {
+        var local = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc).ToLocalTime();
+        var fields = NewFields(local);
+        string label = PatrolEventKinds.All.FirstOrDefault(k => k.Key == kind).Label ?? kind;
+        fields["ruta"] = routeName ?? "";
+        fields["evento"] = label;
+        fields["tipo"] = label;
+        fields["detalle"] = detail;
+        fields["ubicacion"] = location ?? "";
+        fields["horaprogramada"] = expectedStartUtc is { } e
+            ? DateTime.SpecifyKind(e, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm") : "";
+        fields["guardias"] = guards ?? "";
+        var severity = kind switch
+        {
+            PatrolEventKinds.RoundNotStarted or PatrolEventKinds.RoundUnfinished => AlarmSeverity.Critical,
+            PatrolEventKinds.RoundPartial or PatrolEventKinds.ReaderMemoryHigh or PatrolEventKinds.AgentOffline => AlarmSeverity.Warning,
+            _ => AlarmSeverity.Info,
+        };
+        fields["severidad"] = SeverityLabel(severity);
+        string summary = routeName is null ? $"{label} · {detail}" : $"{label} · {routeName} · {detail}";
+        return new WorkflowTrigger(WorkflowTriggerTypes.PatrolEvent, Truncate(summary, 256), fields, local,
+            Severity: severity, Text: detail, PatrolRouteId: routeId, PatrolKind: kind);
+    }
+
+    // ------------------------------------------------------------------
     // Horario y llamada externa
     // ------------------------------------------------------------------
 
@@ -583,6 +621,11 @@ public sealed record WorkflowTrigger(
                     -33.45, -70.66, 0, null, null, null);
                 return FromFleetEvent(evt, "ABCD12") with { Summary = $"Prueba manual · {evt.VehicleCode} · botón de pánico" };
             }
+
+            case WorkflowTriggerTypes.PatrolEvent:
+                return FromPatrolEvent(PatrolEventKinds.RoundNotStarted, null, "Ruta de prueba", DateTime.UtcNow,
+                    "Ningún bastón salió de su base (prueba manual).", expectedStartUtc: DateTime.UtcNow.AddMinutes(-10))
+                    with { Summary = "Prueba manual · ronda no iniciada" };
 
             case WorkflowTriggerTypes.Webhook:
             {
