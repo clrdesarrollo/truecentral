@@ -5,14 +5,18 @@
 // con el agente truecentral-patrol) vacía el bastón cuando vuelve y sube las
 // lecturas; el servidor las arma en pasos de la bitácora (punto + guardia).
 //
-// Pestañas: bitácora, guardias, llaveros, puntos de control y bastones/bases.
-// La lectura desde el navegador (Web Serial) está en patrol-serial.js.
+// Pestañas: cumplimiento (rondas esperadas y su resultado), rutas (puntos,
+// horarios y bases), bitácora, guardias, llaveros, puntos de control y
+// bastones/bases. La lectura desde el navegador (Web Serial) está en
+// patrol-serial.js.
 //
 // Se carga ANTES que app.js: este archivo solo declara funciones (sin efectos
 // al cargar) y app.js las referencia desde su tabla de rutas.
 "use strict";
 
 const PATROL_TABS = [
+  { key: "compliance", label: "Cumplimiento", icon: "mdi-clipboard-check" },
+  { key: "routes", label: "Rutas", icon: "mdi-routes" },
   { key: "log", label: "Bitácora", icon: "mdi-format-list-bulleted" },
   { key: "guards", label: "Guardias", icon: "mdi-account-multiple" },
   { key: "tags", label: "Llaveros", icon: "mdi-key-variant" },
@@ -22,20 +26,23 @@ const PATROL_TABS = [
 
 /** Qué pestañas se recargan con cada aviso PatrolChanged del hub. */
 const PATROL_TOPIC_TABS = {
-  passes: ["log"],
+  passes: ["log", "compliance"],
   guards: ["guards", "tags", "log"],
-  checkpoints: ["checkpoints", "log"],
+  checkpoints: ["checkpoints", "log", "routes"],
   readers: ["readers"],
-  agents: ["readers"],
-  downloads: ["readers", "checkpoints", "log", "guards", "tags"],
+  agents: ["readers", "routes"],
+  downloads: ["readers", "checkpoints", "log", "guards", "tags", "compliance"],
+  routes: ["routes", "compliance"],
+  runs: ["compliance"],
 };
 
 /** Bloques de memoria del bastón (Captor 4): para mostrar el uso en %. */
 const PATROL_MEMORY_BLOCKS = 12000;
 
 const patrolState = {
-  tab: "log",
+  tab: "compliance",
   log: null,          // filtros de la bitácora (se inicializan la primera vez)
+  runs: null,         // filtros del tablero de cumplimiento
 };
 
 let patrolHubBound = null;
@@ -186,12 +193,696 @@ async function patrolRenderTab(quiet) {
   if (!body) return;
   if (!quiet) body.innerHTML = `<div class="info-box">Cargando…</div>`;
   switch (patrolState.tab) {
+    case "compliance": return patrolRenderCompliance(body, quiet);
+    case "routes": return patrolRenderRoutes(body);
+    case "log": return patrolRenderLog(body, quiet);
     case "guards": return patrolRenderGuards(body);
     case "tags": return patrolRenderTags(body);
     case "checkpoints": return patrolRenderCheckpoints(body);
     case "readers": return patrolRenderReaders(body);
     default: return patrolRenderLog(body, quiet);
   }
+}
+
+// ---------------------------------------------------------------------------
+// A. Cumplimiento: rondas esperadas del periodo y su resultado
+
+/** Estado de una ronda → [etiqueta, clase del tag]. */
+const PATROL_RUN_STATUS = {
+  Scheduled: ["Programada", "operator"],
+  InProgress: ["En curso", "admin"],
+  AwaitingData: ["Esperando descarga", "admin"],
+  Completed: ["Cumplida", "on"],
+  Partial: ["Incompleta", "warn"],
+  NotStarted: ["No iniciada", "off"],
+  Unfinished: ["Sin terminar", "off"],
+  Cancelled: ["Anulada", "operator"],
+};
+const PATROL_RUN_STATUS_HELP = {
+  Scheduled: "Todavía no llega su hora (o está dentro del margen para salir).",
+  InProgress: "El bastón salió de la base: la ronda está en curso.",
+  AwaitingData: "El bastón volvió y falta evaluar sus lecturas (o descargar otro bastón que pudo hacerla).",
+  Completed: "Se marcaron todos los puntos requeridos a tiempo.",
+  Partial: "Faltó algún punto requerido o se marcó fuera de orden o de horario.",
+  NotStarted: "Pasó el margen para salir y el bastón no salió de la base.",
+  Unfinished: "El bastón salió pero no volvió dentro de la duración máxima.",
+  Cancelled: "Saltada por feriado o anulada a mano: no cuenta en el cumplimiento.",
+};
+/** Estado de un punto de la ronda → [etiqueta, clase del tag]. */
+const PATROL_STOP_STATUS = {
+  Pending: ["Pendiente", "operator"],
+  OnTime: ["A tiempo", "on"],
+  Early: ["Antes de hora", "warn"],
+  Late: ["Atrasado", "warn"],
+  OutOfOrder: ["Fuera de orden", "warn"],
+  Done: ["Marcado", "on"],
+  Missed: ["Omitido", "off"],
+  SkippedOptional: ["Opcional, sin marcar", "operator"],
+};
+
+function patrolStatusTag(map, key, title) {
+  const [label, cls] = map[key] ?? [key, "operator"];
+  return `<span class="tag ${cls}"${title ? ` title="${esc(title)}"` : ""}>${esc(label)}</span>`;
+}
+
+function patrolValidDate(iso) { return iso && !String(iso).startsWith("0001-") ? new Date(iso) : null; }
+
+/** Hora local "HH:mm" de una fecha UTC de la API; con `day` antepone "dd-mm". */
+function patrolHm(iso, day) {
+  const d = patrolValidDate(iso);
+  if (!d) return "—";
+  const hm = d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  return day ? `${d.toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" })} ${hm}` : hm;
+}
+
+/** Hora de un instante relativa a otro: solo la hora si cae el mismo día, si no con la fecha. */
+function patrolHmFrom(iso, refIso) {
+  const d = patrolValidDate(iso), ref = patrolValidDate(refIso);
+  if (!d) return "—";
+  return patrolHm(iso, !ref || d.toDateString() !== ref.toDateString());
+}
+
+/** "yyyy-MM-dd" local (valor de un input date). */
+function patrolDateText(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function patrolParseDate(text) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text || "");
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+
+/** [desde, hasta) del periodo elegido, en hora local. */
+function patrolRunsRange(s) {
+  const day = (offset, base) => {
+    const d = base ? new Date(base) : new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + offset);
+    return d;
+  };
+  switch (s.preset) {
+    case "yesterday": return [day(-1), day(0)];
+    case "week": return [day(-6), day(1)];
+    case "range": {
+      let a = patrolParseDate(s.fromDate) ?? day(0), b = patrolParseDate(s.toDate) ?? a;
+      if (b < a) [a, b] = [b, a];
+      return [a, day(1, b)];
+    }
+    default: return [day(0), day(1)];
+  }
+}
+
+const PATROL_PRESETS = [["today", "Hoy"], ["yesterday", "Ayer"], ["week", "Últimos 7 días"], ["range", "Rango"]];
+
+async function patrolRenderCompliance(body, quiet) {
+  if (!patrolState.runs) {
+    const today = patrolDateText(new Date());
+    patrolState.runs = { preset: "today", fromDate: today, toDate: today, routeId: "", status: "" };
+  }
+  const s = patrolState.runs;
+  // Una recarga silenciosa (hub) no rehace los filtros: solo las tarjetas y la tabla.
+  if (quiet && $("#prn-results")) { await patrolLoadRuns(); return; }
+
+  let routes;
+  try { routes = await Api.get("/api/patrol/routes"); }
+  catch (err) { body.innerHTML = patrolErrorBox(err); return; }
+  if (s.routeId && !routes.some((r) => String(r.id) === String(s.routeId))) s.routeId = "";
+
+  body.innerHTML = `
+    <div class="filter-bar">
+      <div class="field"><label>Periodo</label>
+        <div class="pt-presets" role="group" aria-label="Periodo">
+          ${PATROL_PRESETS.map(([k, l]) => `<button type="button" class="btn small ${s.preset === k ? "" : "ghost"} prn-preset" data-preset="${k}" aria-pressed="${s.preset === k}">${l}</button>`).join("")}
+        </div></div>
+      <div class="field prn-range"><label for="prn-from">Desde</label>
+        <input id="prn-from" type="date" value="${esc(s.fromDate)}"></div>
+      <div class="field prn-range"><label for="prn-to">Hasta</label>
+        <input id="prn-to" type="date" value="${esc(s.toDate)}"></div>
+      <div class="field"><label for="prn-route">Ruta</label>
+        <select id="prn-route"><option value="">Todas</option>
+          ${routes.map((r) => `<option value="${r.id}" ${String(s.routeId) === String(r.id) ? "selected" : ""}>${esc(r.name)}${r.enabled ? "" : " (deshabilitada)"}</option>`).join("")}
+        </select></div>
+      <div class="field"><label for="prn-status">Estado</label>
+        <select id="prn-status"><option value="">Todos</option>
+          ${Object.entries(PATROL_RUN_STATUS).map(([k, [l]]) => `<option value="${k}" ${s.status === k ? "selected" : ""}>${esc(l)}</option>`).join("")}
+        </select></div>
+      <div class="filter-actions">
+        <button class="btn ghost" id="prn-refresh" title="Volver a consultar"><i class="mdi mdi-refresh" aria-hidden="true"></i> Actualizar</button>
+      </div>
+    </div>
+    <div id="prn-results"><div class="info-box">Cargando…</div></div>`;
+
+  const showRange = () => $$("#patrol-body .prn-range").forEach((f) => { f.style.display = s.preset === "range" ? "" : "none"; });
+  showRange();
+  $$("#patrol-body .prn-preset").forEach((b) => b.addEventListener("click", () => {
+    s.preset = b.dataset.preset;
+    $$("#patrol-body .prn-preset").forEach((x) => {
+      const on = x === b;
+      x.classList.toggle("ghost", !on);
+      x.setAttribute("aria-pressed", String(on));
+    });
+    showRange();
+    patrolLoadRuns();
+  }));
+  $("#prn-from").addEventListener("change", (e) => { s.fromDate = e.target.value; patrolLoadRuns(); });
+  $("#prn-to").addEventListener("change", (e) => { s.toDate = e.target.value; patrolLoadRuns(); });
+  $("#prn-route").addEventListener("change", (e) => { s.routeId = e.target.value; patrolLoadRuns(); });
+  $("#prn-status").addEventListener("change", (e) => { s.status = e.target.value; patrolLoadRuns(); });
+  $("#prn-refresh").addEventListener("click", () => patrolLoadRuns());
+
+  await patrolLoadRuns();
+}
+
+let patrolRunsSeq = 0;
+
+async function patrolLoadRuns() {
+  const box = $("#prn-results");
+  if (!box) return;
+  const s = patrolState.runs;
+  const seq = ++patrolRunsSeq;
+  const [from, to] = patrolRunsRange(s);
+  const q = new URLSearchParams({ from: patrolLocalText(from), to: patrolLocalText(to) });
+  if (s.routeId) q.set("routeId", s.routeId);
+
+  // Las tarjetas cuentan TODO el periodo (sin el filtro de estado): se traen todas las páginas.
+  let items = [], total = 0;
+  try {
+    for (let page = 1; page <= 50; page++) {
+      const data = await Api.get(`/api/patrol/runs?${q}&page=${page}`);
+      items = items.concat(data.items);
+      total = data.total;
+      if (data.items.length === 0 || items.length >= total) break;
+    }
+  } catch (err) { if (seq === patrolRunsSeq) box.innerHTML = patrolErrorBox(err); return; }
+  if (seq !== patrolRunsSeq || !box.isConnected) return; // llegó una consulta más nueva
+
+  const count = (...st) => items.filter((r) => st.includes(r.status)).length;
+  const scheduled = count("Scheduled"), completed = count("Completed"), partial = count("Partial");
+  const notStarted = count("NotStarted"), unfinished = count("Unfinished");
+  const running = count("InProgress", "AwaitingData"), cancelled = count("Cancelled");
+  const evaluated = items.length - scheduled - running - cancelled;
+  const pct = evaluated > 0 ? Math.round((completed * 100) / evaluated) : null;
+  const tile = (label, value, icon, cls, sub, unit) => `
+    <div class="db-kpi ${cls}">
+      <div class="db-kpi-head"><span class="db-kpi-label">${esc(label)}</span><span class="db-kpi-ico"><i class="mdi ${icon}" aria-hidden="true"></i></span></div>
+      <div class="db-kpi-value">${value}${unit ? `<small>${esc(unit)}</small>` : ""}</div>
+      <div class="db-kpi-sub">${sub || ""}</div>
+    </div>`;
+
+  const multiDay = to - from > 24 * 3600 * 1000 + 3600 * 1000;
+  const rows = s.status ? items.filter((r) => r.status === s.status) : items;
+  const truncated = items.length < total;
+
+  box.innerHTML = `
+    <div class="db-kpis pt-kpis">
+      ${tile("Programadas", scheduled, "mdi-calendar-clock", "", "por venir")}
+      ${tile("Cumplidas", completed, "mdi-check-circle-outline", "ok")}
+      ${tile("Incompletas", partial, "mdi-alert-circle-outline", "warn")}
+      ${tile("No iniciadas", notStarted, "mdi-close-circle-outline", "danger")}
+      ${tile("Sin terminar", unfinished, "mdi-timer-sand", "danger")}
+      ${tile("En curso", running, "mdi-walk", "", running ? "bastón fuera o por evaluar" : "")}
+      ${tile("Cumplimiento", pct == null ? "—" : pct, "mdi-percent",
+        pct == null ? "" : pct >= 90 ? "ok" : pct >= 70 ? "warn" : "danger",
+        evaluated > 0 ? `${completed} de ${evaluated} evaluada${evaluated === 1 ? "" : "s"}${cancelled ? ` · ${cancelled} anulada${cancelled === 1 ? "" : "s"} no cuenta${cancelled === 1 ? "" : "n"}` : ""}`
+          : "sin rondas evaluadas", pct == null ? "" : "%")}
+    </div>
+    ${truncated ? `<div class="warn-box">El periodo tiene ${total.toLocaleString("es-CL")} rondas: se muestran las ${items.length.toLocaleString("es-CL")} más recientes. Acote el periodo o elija una ruta.</div>` : ""}
+    ${rows.length === 0 ? `<div class="info-box">${items.length === 0
+      ? "No hay rondas en ese periodo. Las rondas se crean solas según los horarios de cada ruta (pestaña <b>Rutas</b>)."
+      : "No hay rondas con ese estado en el periodo."}</div>` : `
+    <div class="table-scroll"><table class="grid pt-grid pt-runs">
+      <thead><tr>
+        <th>Programada</th><th>Ruta</th><th>Salida real</th><th>Vuelta</th><th>Guardias</th><th>Bastón</th>
+        <th title="Puntos requeridos marcados a tiempo / puntos requeridos">Puntos</th><th>Estado</th><th>Causa</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map((r) => `
+          <tr data-id="${r.id}" tabindex="0" title="Ver el detalle por punto">
+            <td style="white-space:nowrap"><b>${esc(patrolHm(r.expectedStart, multiDay))}</b></td>
+            <td>${esc(r.routeName)}${r.location ? `<div class="muted pt-note">${esc(r.location)}</div>` : ""}</td>
+            <td class="muted" style="white-space:nowrap">${esc(patrolHmFrom(r.actualStart, r.expectedStart))}</td>
+            <td class="muted" style="white-space:nowrap">${esc(patrolHmFrom(r.actualEnd, r.expectedStart))}</td>
+            <td>${r.guards?.length ? esc(r.guards.join(", ")) : `<span class="muted">—</span>`}</td>
+            <td class="muted">${esc(r.readerName ?? "—")}</td>
+            <td style="white-space:nowrap">${r.requiredStops ? `${r.doneRequiredStops}/${r.requiredStops}` : `<span class="muted">—</span>`}</td>
+            <td>${patrolStatusTag(PATROL_RUN_STATUS, r.status, PATROL_RUN_STATUS_HELP[r.status])}</td>
+            <td class="muted">${r.cause ? `<span class="pt-cause" title="${esc(r.cause)}">${esc(r.cause)}</span>` : "—"}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>
+    <div class="muted pt-foot">${rows.length.toLocaleString("es-CL")} ronda${rows.length === 1 ? "" : "s"} · horas en la hora local de este equipo · haga clic en una ronda para ver el detalle por punto.</div>`}`;
+
+  $$("#prn-results tbody tr").forEach((tr) => {
+    const open = () => patrolRunModal(Number(tr.dataset.id));
+    tr.addEventListener("click", open);
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+  });
+}
+
+/** Detalle de una ronda: punto por punto, con anular y volver a evaluar. */
+async function patrolRunModal(id) {
+  let run;
+  try { run = await Api.get(`/api/patrol/runs/${id}`); }
+  catch (err) { toast(err.error ?? "No se pudo leer la ronda.", true); return; }
+  const canEdit = Perms.can("patrol.edit");
+  const canReevaluate = !["Scheduled", "Cancelled"].includes(run.status);
+  const stops = run.stops ?? [];
+  const fact = (label, value) => `<div><b>${esc(label)}</b>${value}</div>`;
+
+  openModal(`
+    <h3>${esc(run.routeName)} · ${esc(patrolHm(run.expectedStart, true))}</h3>
+    <div class="pt-run-status">${patrolStatusTag(PATROL_RUN_STATUS, run.status)}
+      <span class="muted">${esc(PATROL_RUN_STATUS_HELP[run.status] ?? "")}</span></div>
+    ${run.cause ? `<div class="${["NotStarted", "Unfinished"].includes(run.status) ? "error-box" : run.status === "Partial" ? "warn-box" : "info-box"}">${esc(run.cause)}</div>` : ""}
+    <div class="pt-run-facts">
+      ${fact("Hora programada", esc(patrolHm(run.expectedStart)))}
+      ${fact("Debía salir antes de", esc(patrolHmFrom(run.startDeadline, run.expectedStart)))}
+      ${fact("Debía volver antes de", esc(patrolHmFrom(run.dueEnd, run.expectedStart)))}
+      ${fact("Salida real", esc(patrolHmFrom(run.actualStart, run.expectedStart)))}
+      ${fact("Vuelta", esc(patrolHmFrom(run.actualEnd, run.expectedStart)))}
+      ${fact("Puntos requeridos", run.requiredStops ? `${run.doneRequiredStops} de ${run.requiredStops}` : "—")}
+      ${fact("Guardias", run.guards?.length ? esc(run.guards.join(", ")) : "—")}
+      ${fact("Bastón", esc(run.readerName ?? "—"))}
+    </div>
+    ${stops.length === 0 ? `<div class="info-box">La ronda no tiene puntos.</div>` : `
+    <div class="table-scroll" style="max-height:50vh"><table class="grid pt-grid">
+      <thead><tr><th>#</th><th>Punto</th><th>Hora esperada</th><th>Margen</th><th>Hora real</th><th>Guardia</th><th>Estado</th></tr></thead>
+      <tbody>
+        ${stops.map((p) => `
+          <tr>
+            <td class="muted">${p.sequence + 1}</td>
+            <td>${esc(p.checkpointName)}${p.required ? "" : ` <span class="tag operator" title="Si no se marca, la ronda igual se cumple">opcional</span>`}</td>
+            <td style="white-space:nowrap">${p.expectedAt ? esc(patrolHmFrom(p.expectedAt, run.expectedStart)) : `<span class="muted" title="Ruta en orden libre: cualquier hora dentro de la duración">libre</span>`}</td>
+            <td class="muted" style="white-space:nowrap">${p.toleranceMinutes != null ? `± ${p.toleranceMinutes} min` : "—"}</td>
+            <td style="white-space:nowrap">${esc(patrolHmFrom(p.actualAt, run.expectedStart))}</td>
+            <td>${esc(p.guardName ?? "—")}</td>
+            <td>${patrolStatusTag(PATROL_STOP_STATUS, p.status)}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>`}
+    <div class="modal-actions">
+      ${canEdit ? `
+        <button class="btn ghost" type="button" id="prd-reevaluate" ${canReevaluate ? `title="Vuelve a cruzar la ronda con la bitácora (por ejemplo, después de corregir o anular pasos)"` : `disabled title="Solo se evalúan rondas que ya pasaron y no están anuladas"`}>
+          <i class="mdi mdi-refresh" aria-hidden="true"></i> Volver a evaluar</button>
+        ${run.status !== "Cancelled" ? `<button class="btn danger" type="button" id="prd-cancel">Anular</button>` : ""}` : ""}
+      <button class="btn" type="button" id="prd-close">Cerrar</button>
+    </div>`, "wider");
+
+  $("#prd-close").addEventListener("click", closeModal);
+  $("#prd-reevaluate")?.addEventListener("click", async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      await Api.post(`/api/patrol/runs/${id}/reevaluate`);
+      toast("Ronda evaluada de nuevo.");
+      patrolLoadRuns();
+      patrolRunModal(id);
+    } catch (err) {
+      toast(err.error ?? String(err), true);
+      if (button.isConnected) button.disabled = false;
+    }
+  });
+  $("#prd-cancel")?.addEventListener("click", () => patrolReasonModal({
+    title: "Anular ronda",
+    intro: `La ronda <b>${esc(run.routeName)}</b> de las ${esc(patrolHm(run.expectedStart, true))} deja de contar en el
+      cumplimiento. No se borra: queda como anulada, con el motivo y quién la anuló.`,
+    confirmText: "Anular", danger: true,
+    onSubmit: async (reason) => {
+      await Api.post(`/api/patrol/runs/${id}/cancel`, { reason });
+      toast("Ronda anulada.");
+      patrolLoadRuns();
+    },
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// B. Rutas: puntos, horarios y bases
+
+/** Letra de cada día; índice = bit de daysMask (bit 0 = domingo … bit 6 = sábado). */
+const PATROL_DAY_LETTERS = ["D", "L", "M", "X", "J", "V", "S"];
+const PATROL_DAY_NAMES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+/** Orden en pantalla: lunes primero. */
+const PATROL_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+/** daysMask → "L-V", "S D", "Todos los días"… */
+function patrolDaysText(mask) {
+  mask &= 0x7f;
+  if (mask === 0x7f) return "Todos los días";
+  if (mask === 0) return "Sin días";
+  const idx = PATROL_DAY_ORDER.map((d, i) => (mask & (1 << d) ? i : -1)).filter((i) => i >= 0);
+  const letter = (i) => PATROL_DAY_LETTERS[PATROL_DAY_ORDER[i]];
+  const parts = [];
+  for (let start = 0, i = 1; i <= idx.length; i++) {
+    if (i < idx.length && idx[i] === idx[i - 1] + 1) continue;
+    const run = idx.slice(start, i);
+    parts.push(run.length >= 3 ? `${letter(run[0])}-${letter(run[run.length - 1])}` : run.map(letter).join(" "));
+    start = i;
+  }
+  return parts.join(" ");
+}
+
+/** Horarios agrupados por días: "L-V 22:00, 02:00 · S D 23:00". */
+function patrolSchedulesText(schedules) {
+  const groups = new Map();
+  [...schedules].filter((x) => x.enabled).sort((a, b) => a.startTime.localeCompare(b.startTime)).forEach((x) => {
+    const key = patrolDaysText(x.daysMask);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(x.startTime);
+  });
+  return [...groups].map(([days, times]) => `${days} ${times.join(", ")}`).join(" · ");
+}
+
+async function patrolRenderRoutes(body) {
+  let routes, agents, checkpoints, places;
+  try {
+    [routes, agents, checkpoints, places] = await Promise.all([
+      Api.get("/api/patrol/routes"), Api.get("/api/patrol/agents"), Api.get("/api/patrol/checkpoints"), loadLocationChoices(),
+    ]);
+  } catch (err) { body.innerHTML = patrolErrorBox(err); return; }
+  const canConfigure = Perms.can("patrol.configure");
+  const agentName = (id) => agents.find((a) => a.id === id)?.name ?? `Base ${id}`;
+  const placeName = (id) => (places || []).find((p) => p.id === id)?.name ?? null;
+
+  body.innerHTML = `
+    <p class="muted res-tab-intro">Una ruta es la lista de puntos que el guardia debe marcar con el bastón, a qué horas
+      sale y desde qué base. Con eso el sistema arma las rondas de cada día, avisa en el PC de la guardia cuando toca
+      salir y verifica cada ronda cuando el bastón vuelve a la base.</p>
+    ${canConfigure ? `<div class="row-actions pt-tab-actions"><button class="btn" id="prt-new"${checkpoints.length ? "" : ` disabled title="Primero agregue puntos de control"`}>Agregar ruta</button></div>` : ""}
+    ${routes.length === 0 ? `<div class="info-box">No hay rutas. ${canConfigure
+      ? (checkpoints.length ? "Agregue una con <b>Agregar ruta</b>: elija sus puntos, los horarios y la base de la guardia."
+        : "Primero dé de alta los puntos de control (pestaña <b>Puntos de control</b>).")
+      : "Un administrador debe crearlas."}</div>` : `
+    <div class="table-scroll"><table class="grid pt-grid">
+      <thead><tr><th>Ruta</th><th>Orden</th><th>Puntos</th><th>Horarios</th><th>Bases</th><th>Tiempos</th><th>Estado</th>${canConfigure ? "<th></th>" : ""}</tr></thead>
+      <tbody>
+        ${routes.map((r) => {
+          const loc = r.location ?? (r.locationId ? placeName(r.locationId) : null);
+          const sched = patrolSchedulesText(r.schedules);
+          const paused = r.schedules.filter((x) => !x.enabled).length;
+          return `
+          <tr data-id="${r.id}">
+            <td>${esc(r.name)}${loc ? `<div class="muted pt-note">${esc(loc)}</div>` : ""}${r.notes ? `<div class="muted pt-note">${esc(r.notes)}</div>` : ""}</td>
+            <td>${r.orderMode === "Strict"
+              ? `<span class="tag admin" title="En orden y a su hora">Estricto</span>`
+              : `<span class="tag operator" title="Cualquier orden: basta con marcar todos los requeridos">Libre</span>`}</td>
+            <td title="${esc(r.stops.map((p) => p.checkpointName ?? `#${p.checkpointId}`).join(" → "))}">${r.stops.length}
+              ${r.stops.some((p) => !p.required) ? (() => {
+                const n = r.stops.filter((p) => p.required).length;
+                return `<div class="muted pt-note">${n} requerido${n === 1 ? "" : "s"}</div>`;
+              })() : ""}</td>
+            <td>${sched ? esc(sched) : `<span class="muted">Sin horarios</span>`}
+              ${paused ? `<div class="muted pt-note">${paused} pausado${paused === 1 ? "" : "s"}</div>` : ""}
+              ${r.schedules.some((x) => x.enabled && x.skipHolidays) ? `<div class="muted pt-note">salta feriados</div>` : ""}</td>
+            <td>${r.agentIds.length ? esc(r.agentIds.map(agentName).join(", "))
+              : `<span class="tag warn" title="Sin base no se puede verificar la salida ni avisar al guardia">Sin base</span>`}</td>
+            <td class="muted" style="white-space:nowrap">${r.reminderMinutes ? `aviso ${r.reminderMinutes} min antes` : "sin aviso previo"}
+              <div class="pt-note">margen ${r.startWindowMinutes} min · máx. ${r.maxDurationMinutes} min</div></td>
+            <td>${r.enabled ? `<span class="tag on">Habilitada</span>` : `<span class="tag operator">Deshabilitada</span>`}</td>
+            ${canConfigure ? `<td><div class="row-actions">
+              <button class="btn ghost small prt-edit">Editar</button>
+              <button class="btn danger small prt-delete">Eliminar</button>
+            </div></td>` : ""}
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table></div>`}`;
+
+  const byRow = (e) => routes.find((r) => r.id === Number(e.target.closest("tr").dataset.id));
+  const lists = { agents, checkpoints, places };
+  $("#prt-new")?.addEventListener("click", () => patrolRouteModal(null, lists));
+  $$("#patrol-body .prt-edit").forEach((b) => b.addEventListener("click", (e) => patrolRouteModal(byRow(e), lists)));
+  $$("#patrol-body .prt-delete").forEach((b) => b.addEventListener("click", async (e) => {
+    const r = byRow(e);
+    if (!confirm(`¿Eliminar la ruta "${r.name}"? Se borran con ella sus rondas programadas que aún no empiezan. Si ya tiene rondas registradas no se puede: deshabilítela.`)) return;
+    try {
+      await Api.delete(`/api/patrol/routes/${r.id}`);
+      toast("Ruta eliminada.");
+      patrolRenderTab(true);
+    } catch (err) { toast(err.error ?? String(err), true); }
+  }));
+}
+
+/** Alta o edición de una ruta (puntos y horarios incluidos). */
+function patrolRouteModal(route, { agents, checkpoints, places }) {
+  const isNew = !route;
+  const draft = {
+    orderMode: route?.orderMode ?? "Strict",
+    stops: (route?.stops ?? []).map((p) => ({
+      checkpointId: p.checkpointId, required: p.required,
+      offsetMinutes: p.offsetMinutes ?? 0, toleranceMinutes: p.toleranceMinutes ?? 5,
+    })),
+    schedules: (route?.schedules ?? []).map((x) => ({
+      daysMask: x.daysMask, startTime: x.startTime, skipHolidays: x.skipHolidays, enabled: x.enabled,
+    })),
+  };
+  const agentIds = new Set(route?.agentIds ?? (agents.length === 1 ? [agents[0].id] : []));
+  const number = (id, value, min, max) =>
+    `<input id="${id}" type="number" min="${min}" max="${max}" step="1" required value="${value}">`;
+  const timeField = (id, label, value, min, max, hint) => `
+    <div class="field"><label for="${id}">${label}</label>${number(id, value, min, max)}
+      <div class="muted field-hint">${hint}</div></div>`;
+
+  openModal(`
+    <h3>${isNew ? "Agregar ruta" : `Editar ruta · ${esc(route.name)}`}</h3>
+    <div id="prt-error"></div>
+    <form id="prt-form" class="pt-route-form" novalidate>
+      <div class="form-grid">
+        <div class="field"><label for="prt-name">Nombre</label>
+          <input id="prt-name" required maxlength="128" placeholder="Perímetro noche" value="${esc(route?.name ?? "")}"></div>
+        ${locationFieldHtml("prt-location", places, route?.locationId ?? null, "Los operadores con alcance restringido ven solo las rutas (y sus rondas) de sus ubicaciones.")}
+      </div>
+      <label class="checkbox-row"><input type="checkbox" id="prt-enabled" ${route ? (route.enabled ? "checked" : "") : "checked"}> Habilitada (se programan sus rondas y se avisa al guardia)</label>
+
+      <h4 class="pt-section-title">Cómo se verifica</h4>
+      <div class="pt-mode">
+        <label class="checkbox-row"><input type="radio" name="prt-mode" value="Strict" ${draft.orderMode === "Strict" ? "checked" : ""}>
+          <span><b>Estricto</b> (en orden y a su hora): cada punto se marca en la secuencia de la lista y dentro de su minuto ± margen.</span></label>
+        <label class="checkbox-row"><input type="radio" name="prt-mode" value="Free" ${draft.orderMode === "Free" ? "checked" : ""}>
+          <span><b>Libre</b> (cualquier orden, basta con marcar todos los requeridos) dentro de la duración máxima.</span></label>
+      </div>
+
+      <h4 class="pt-section-title">Tiempos (minutos)</h4>
+      <div class="form-grid pt-times">
+        ${timeField("prt-reminder", "Aviso previo", route?.reminderMinutes ?? 10, 0, 240,
+          "Cuántos minutos antes de la hora se avisa en el PC de la guardia que prepare el bastón. 0 = sin aviso previo.")}
+        ${timeField("prt-window", "Margen para salir", route?.startWindowMinutes ?? 10, 1, 240,
+          "Tiempo que tiene el guardia para sacar el bastón de la base desde la hora de la ronda. Si no sale en ese margen, la ronda queda «no iniciada» y se avisa a la central.")}
+        ${timeField("prt-repeat", "Repetir el aviso cada", route?.repeatMinutes ?? 5, 1, 60,
+          "Mientras el bastón siga en la base después de la hora, el aviso se vuelve a mostrar cada tantos minutos.")}
+        ${timeField("prt-duration", "Duración máxima", route?.maxDurationMinutes ?? 60, 1, 1440,
+          "Tiempo para recorrer la ruta y dejar el bastón de vuelta en la base. Si no vuelve antes, la ronda queda «sin terminar».")}
+      </div>
+
+      <h4 class="pt-section-title">Bases que hacen la ruta</h4>
+      ${agents.length === 0 ? `<div class="muted">No hay bases de descarga (pestaña <b>Bastones y bases</b>).</div>` :
+        agents.map((a) => `<label class="checkbox-row" style="margin-bottom:6px">
+          <input type="checkbox" class="prt-agent" value="${a.id}" ${agentIds.has(a.id) ? "checked" : ""}> ${esc(a.name)}
+          ${a.status === "Online" ? "" : ` <span class="tag operator">${a.status === "Offline" ? "sin conexión" : "pendiente de enrolar"}</span>`}</label>`).join("")}
+      <div class="warn-box" id="prt-noagent">Sin base no se puede verificar la salida: no hay quién avise al guardia ni
+        quién informe cuándo el bastón sale y vuelve. La ronda solo se evaluará con las lecturas cuando se descargue un bastón.</div>
+      <div class="muted field-hint">Los avisos salen en el PC de estas bases. La ronda cuenta como iniciada cuando sale de
+        ellas cualquier bastón.</div>
+
+      <h4 class="pt-section-title">Puntos</h4>
+      <div id="prt-stops"></div>
+      <div class="row-actions" style="margin-top:8px"><button type="button" class="btn ghost" id="prt-stop-add"><i class="mdi mdi-plus" aria-hidden="true"></i> Agregar punto</button></div>
+
+      <h4 class="pt-section-title">Horarios</h4>
+      <div id="prt-schedules"></div>
+      <div class="row-actions" style="margin-top:8px"><button type="button" class="btn ghost" id="prt-sched-add"><i class="mdi mdi-plus" aria-hidden="true"></i> Agregar horario</button></div>
+      <div class="muted field-hint">Hora local de inicio de cada ronda. Para una ronda que cruza la medianoche, marque el día en que empieza.</div>
+
+      <div class="field" style="margin-top:14px"><label for="prt-notes">Notas</label>
+        <textarea id="prt-notes" rows="2" maxlength="1024">${esc(route?.notes ?? "")}</textarea></div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" id="prt-cancel">Cancelar</button>
+        <button class="btn" type="submit" id="prt-save">${isNew ? "Guardar" : "Guardar cambios"}</button>
+      </div>
+    </form>`, true);
+
+  const strict = () => draft.orderMode === "Strict";
+  const showNoAgent = () => { $("#prt-noagent").style.display = $$("#prt-form .prt-agent:checked").length ? "none" : ""; };
+
+  const renderStops = () => {
+    const box = $("#prt-stops");
+    if (draft.stops.length === 0) {
+      box.innerHTML = `<div class="muted">La ruta necesita al menos un punto.</div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="table-scroll"><table class="grid pt-stops">
+        <thead><tr><th>#</th><th>Punto</th><th>Requerido</th>
+          ${strict() ? `<th title="Minutos desde la salida en que debe marcarse">Minutos desde el inicio</th><th title="Cuánto antes o después se acepta">Margen ±</th>` : ""}
+          <th></th></tr></thead>
+        <tbody>
+          ${draft.stops.map((p, i) => `
+            <tr data-i="${i}">
+              <td class="muted">${i + 1}</td>
+              <td><select data-f="checkpointId" aria-label="Punto ${i + 1}">
+                ${checkpoints.some((c) => c.id === p.checkpointId) ? "" : `<option value="${p.checkpointId}" selected>Punto ${p.checkpointId} (ya no existe)</option>`}
+                ${checkpoints.map((c) => `<option value="${c.id}" ${c.id === p.checkpointId ? "selected" : ""}>${esc(c.name)}${c.enabled ? "" : " (deshabilitado)"}</option>`).join("")}
+              </select></td>
+              <td><label class="checkbox-row"><input type="checkbox" data-f="required" ${p.required ? "checked" : ""}> requerido</label></td>
+              ${strict() ? `
+                <td><input type="number" data-f="offsetMinutes" min="0" max="1440" step="1" required value="${p.offsetMinutes ?? 0}" aria-label="Minutos desde el inicio"></td>
+                <td><input type="number" data-f="toleranceMinutes" min="0" max="240" step="1" required value="${p.toleranceMinutes ?? 5}" aria-label="Margen en minutos"></td>` : ""}
+              <td><div class="row-actions">
+                <button type="button" class="btn ghost small" data-act="up" ${i === 0 ? "disabled" : ""} title="Subir" aria-label="Subir"><i class="mdi mdi-arrow-up" aria-hidden="true"></i></button>
+                <button type="button" class="btn ghost small" data-act="down" ${i === draft.stops.length - 1 ? "disabled" : ""} title="Bajar" aria-label="Bajar"><i class="mdi mdi-arrow-down" aria-hidden="true"></i></button>
+                <button type="button" class="btn ghost small" data-act="remove" title="Quitar" aria-label="Quitar"><i class="mdi mdi-close" aria-hidden="true"></i></button>
+              </div></td>
+            </tr>`).join("")}
+        </tbody>
+      </table></div>
+      ${strict() ? `<div class="muted field-hint">En modo estricto el primer punto marca el inicio de la ronda; cada punto debe marcarse a «inicio + minutos», con el margen indicado.</div>` : ""}`;
+  };
+
+  const renderSchedules = () => {
+    const box = $("#prt-schedules");
+    if (draft.schedules.length === 0) {
+      box.innerHTML = `<div class="muted">Sin horarios: la ruta no genera rondas hasta que agregue uno.</div>`;
+      return;
+    }
+    box.innerHTML = draft.schedules.map((x, i) => `
+      <div class="pt-sched-row" data-i="${i}">
+        <div class="pt-days" role="group" aria-label="Días">
+          ${PATROL_DAY_ORDER.map((d) => `<button type="button" class="pt-day${x.daysMask & (1 << d) ? " on" : ""}" data-bit="${d}"
+            aria-pressed="${!!(x.daysMask & (1 << d))}" title="${PATROL_DAY_NAMES[d]}">${PATROL_DAY_LETTERS[d]}</button>`).join("")}
+        </div>
+        <input type="time" data-f="startTime" required value="${esc(x.startTime)}" aria-label="Hora de inicio">
+        <label class="checkbox-row"><input type="checkbox" data-f="skipHolidays" ${x.skipHolidays ? "checked" : ""}> Saltar feriados</label>
+        <label class="checkbox-row"><input type="checkbox" data-f="enabled" ${x.enabled ? "checked" : ""}> Habilitado</label>
+        <button type="button" class="btn ghost small" data-act="remove" title="Quitar este horario">Quitar</button>
+      </div>`).join("");
+  };
+
+  // Puntos: los cambios van directo al borrador; subir/bajar/quitar redibujan la lista.
+  $("#prt-stops").addEventListener("change", (e) => {
+    const tr = e.target.closest("tr[data-i]"), f = e.target.dataset.f;
+    if (!tr || !f) return;
+    const p = draft.stops[Number(tr.dataset.i)];
+    p[f] = f === "required" ? e.target.checked : Number(e.target.value);
+  });
+  $("#prt-stops").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    const i = Number(b.closest("tr").dataset.i), list = draft.stops;
+    if (b.dataset.act === "up" && i > 0) [list[i - 1], list[i]] = [list[i], list[i - 1]];
+    else if (b.dataset.act === "down" && i < list.length - 1) [list[i + 1], list[i]] = [list[i], list[i + 1]];
+    else if (b.dataset.act === "remove") list.splice(i, 1);
+    renderStops();
+  });
+  $("#prt-stop-add").addEventListener("click", () => {
+    if (checkpoints.length === 0) { toast("No hay puntos de control: agréguelos en la pestaña Puntos de control.", true); return; }
+    const used = new Set(draft.stops.map((p) => p.checkpointId));
+    const next = checkpoints.find((c) => c.enabled && !used.has(c.id)) ?? checkpoints.find((c) => !used.has(c.id)) ?? checkpoints[0];
+    const last = draft.stops[draft.stops.length - 1];
+    draft.stops.push({
+      checkpointId: next.id, required: true,
+      offsetMinutes: last ? (last.offsetMinutes ?? 0) + 5 : 0, toleranceMinutes: last?.toleranceMinutes ?? 5,
+    });
+    renderStops();
+  });
+
+  // Horarios.
+  $("#prt-schedules").addEventListener("change", (e) => {
+    const row = e.target.closest(".pt-sched-row"), f = e.target.dataset.f;
+    if (!row || !f) return;
+    const x = draft.schedules[Number(row.dataset.i)];
+    x[f] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+  });
+  $("#prt-schedules").addEventListener("click", (e) => {
+    const row = e.target.closest(".pt-sched-row");
+    if (!row) return;
+    const x = draft.schedules[Number(row.dataset.i)];
+    const day = e.target.closest("button[data-bit]");
+    if (day) {
+      x.daysMask ^= 1 << Number(day.dataset.bit);
+      const on = !!(x.daysMask & (1 << Number(day.dataset.bit)));
+      day.classList.toggle("on", on);
+      day.setAttribute("aria-pressed", String(on));
+      return;
+    }
+    if (e.target.closest("button[data-act=remove]")) {
+      draft.schedules.splice(Number(row.dataset.i), 1);
+      renderSchedules();
+    }
+  });
+  $("#prt-sched-add").addEventListener("click", () => {
+    const last = draft.schedules[draft.schedules.length - 1];
+    draft.schedules.push({ daysMask: last?.daysMask ?? 0x7f, startTime: last ? "" : "22:00", skipHolidays: last?.skipHolidays ?? false, enabled: true });
+    renderSchedules();
+    $(`#prt-schedules .pt-sched-row:last-child input[type=time]`)?.focus();
+  });
+
+  $$("#prt-form input[name=prt-mode]").forEach((r) => r.addEventListener("change", () => {
+    draft.orderMode = $("#prt-form input[name=prt-mode]:checked").value;
+    renderStops();
+  }));
+  $$("#prt-form .prt-agent").forEach((c) => c.addEventListener("change", showNoAgent));
+  $("#prt-cancel").addEventListener("click", closeModal);
+
+  renderStops();
+  renderSchedules();
+  showNoAgent();
+  if (isNew) $("#prt-name").focus();
+
+  $("#prt-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const errorBox = $("#prt-error");
+    const fail = (message) => {
+      errorBox.innerHTML = `<div class="error-box">${esc(message)}</div>`;
+      errorBox.scrollIntoView({ block: "nearest" });
+    };
+    const name = $("#prt-name").value.trim();
+    if (!name) return fail("Indique el nombre de la ruta.");
+    if (draft.stops.length === 0) return fail("La ruta necesita al menos un punto.");
+    const bad = draft.schedules.findIndex((x) => !(x.daysMask & 0x7f) || !/^\d{2}:\d{2}$/.test(x.startTime || ""));
+    if (bad >= 0) return fail(`Horario ${bad + 1}: elija al menos un día y la hora de inicio.`);
+    const minutes = (id) => {
+      const v = $(`#${id}`).value.trim();
+      return v === "" ? NaN : Number(v);
+    };
+    const times = {
+      reminderMinutes: minutes("prt-reminder"), startWindowMinutes: minutes("prt-window"),
+      repeatMinutes: minutes("prt-repeat"), maxDurationMinutes: minutes("prt-duration"),
+    };
+    if (Object.values(times).some((v) => !Number.isInteger(v))) return fail("Complete los tiempos con minutos enteros.");
+
+    const body = {
+      name,
+      locationId: locationFieldValue("prt-location"),
+      enabled: $("#prt-enabled").checked,
+      orderMode: draft.orderMode,
+      ...times,
+      agentIds: $$("#prt-form .prt-agent:checked").map((c) => Number(c.value)),
+      stops: draft.stops.map((p, i) => ({
+        sequence: i, checkpointId: p.checkpointId, checkpointName: null, required: p.required,
+        offsetMinutes: strict() ? (Number.isFinite(p.offsetMinutes) ? p.offsetMinutes : 0) : null,
+        toleranceMinutes: strict() ? (Number.isFinite(p.toleranceMinutes) ? p.toleranceMinutes : 5) : null,
+      })),
+      schedules: draft.schedules.map((x) => ({
+        daysMask: x.daysMask & 0x7f, startTime: x.startTime, skipHolidays: !!x.skipHolidays, enabled: !!x.enabled,
+      })),
+      notes: $("#prt-notes").value.trim() || null,
+    };
+    const button = $("#prt-save");
+    button.disabled = true;
+    errorBox.innerHTML = "";
+    try {
+      if (isNew) await Api.post("/api/patrol/routes", body);
+      else await Api.put(`/api/patrol/routes/${route.id}`, body);
+      closeModal();
+      toast(isNew ? (body.enabled && body.schedules.some((x) => x.enabled) ? "Ruta agregada: sus rondas ya están programadas." : "Ruta agregada.")
+        : "Ruta actualizada.");
+      patrolRenderTab(true);
+    } catch (err) {
+      errorBox.innerHTML = patrolErrorBox(err);
+      errorBox.scrollIntoView({ block: "nearest" });
+      button.disabled = false;
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ public sealed class PatrolRoundService(
     private static readonly TimeSpan Horizon = TimeSpan.FromHours(24);
     private DateTime _lastMaterialize = DateTime.MinValue;
     private readonly HashSet<int> _offlineAgents = [];
+    private readonly HashSet<(int ReaderId, DateTime At)> _falseStarts = [];
 
     protected override async Task RunAsync(CancellationToken ct)
     {
@@ -136,6 +137,7 @@ public sealed class PatrolRoundService(
         foreach (var reader in undocked)
         {
             if (await db.PatrolRuns.AnyAsync(r => r.ReaderId == reader.Id && r.ActualStart == reader.At, ct)) continue;
+            if (_falseStarts.Contains((reader.Id, reader.At))) continue;
             var routeIds = await db.PatrolRouteAgents.Where(a => a.AgentId == reader.AgentId).Select(a => a.RouteId).ToListAsync(ct);
             if (routeIds.Count == 0) continue;
             // Se acepta salir desde que empieza el aviso previo hasta el fin del margen.
@@ -171,6 +173,22 @@ public sealed class PatrolRoundService(
         {
             var reader = await db.PatrolRuns.Where(r => r.Id == id)
                 .Join(db.PatrolReaders, r => r.ReaderId, rd => rd.Id, (r, rd) => rd).FirstAsync(ct);
+            var run = await db.PatrolRuns.FirstAsync(r => r.Id == id, ct);
+            // Salida en falso: volvió sin ninguna lectura antes de que venza el margen para salir (lo sacaron y lo
+            // devolvieron, un golpe...). La ronda sigue esperando la salida real en vez de quedar incompleta.
+            if (run.Status == PatrolRunStatus.InProgress && now < run.StartDeadline
+                && !await db.PatrolRawReads.AnyAsync(r => r.ReaderId == reader.Id && r.ReadAt >= run.ActualStart, ct))
+            {
+                logger.LogInformation("Ronda {Run}: el bastón {Reader} volvió sin lecturas dentro del margen; sigue esperando la salida.", id, reader.Name);
+                _falseStarts.Add((reader.Id, run.ActualStart!.Value));
+                run.Status = PatrolRunStatus.Scheduled;
+                run.ActualStart = null;
+                run.ReaderId = null;
+                run.DueEnd = run.StartDeadline.AddMinutes((await db.PatrolRoutes.AsNoTracking().FirstAsync(r => r.Id == run.RouteId, ct)).MaxDurationMinutes);
+                await db.SaveChangesAsync(ct);
+                await patrol.NotifyAsync("runs", ct);
+                continue;
+            }
             await EvaluateAsync(db, engine, id, reader.DockedChangedAt ?? now, ct);
         }
     }

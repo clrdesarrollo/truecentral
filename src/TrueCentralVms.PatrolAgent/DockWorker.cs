@@ -112,6 +112,11 @@ public sealed class DockWorker(string port, PatrolAgentService service, ILogger 
                     Error = $"El puerto {Port} está ocupado por otro programa (¿la app Ronda antigua abierta?).";
                     service.ReportError(Serial, Error);
                 }
+                else if (!wasDocked && Serial is null)
+                {
+                    // El puerto recién apareció y el bastón aún no contesta: se reintenta en silencio.
+                    logger.LogDebug("Puerto {Port} todavía no listo ({Message}).", Port, ex.Message);
+                }
                 else if (wasDocked || ex is UnauthorizedAccessException or IOException)
                 {
                     // El chip USB va en el bastón: sacarlo (aun a mitad de una descarga) hace

@@ -14,9 +14,33 @@ let wfCatalogCache = null;
 let wfCamerasCache = null;
 
 async function wfCatalog() {
-  wfCatalogCache ??= await Api.get("/api/workflows/catalog");
+  if (!wfCatalogCache) {
+    const catalog = await Api.get("/api/workflows/catalog");
+    // Disparador de Control de rondas: si el servidor todavía no lo publica en
+    // su catálogo (lo ejecuta igual: WorkflowTriggerTypes.PatrolEvent), se
+    // agrega aquí para poder abrir y editar las automatizaciones que lo usan.
+    if (!catalog.triggers.some((t) => t.key === WF_PATROL_TRIGGER.key) && Perms.licensed("module_patrol")) {
+      catalog.triggers.push(WF_PATROL_TRIGGER);
+    }
+    wfCatalogCache = catalog;
+  }
   return wfCatalogCache;
 }
+
+/** Disparador "patrol-event" (Control de rondas): rótulo, ayuda y marcas para los textos. */
+const WF_PATROL_TRIGGER = {
+  key: "patrol-event",
+  label: "Evento de rondas",
+  description: "Cuando una ronda no se inicia a tiempo, queda sin terminar o incompleta, se cumple o empieza; o cuando un bastón llega al 80 % de memoria o una base de descarga pierde la conexión.",
+  placeholders: [
+    { key: "ruta", label: "Nombre de la ruta" },
+    { key: "detalle", label: "Detalle: puntos omitidos, causa, bastón…" },
+    { key: "ubicacion", label: "Ubicación de la ruta" },
+    { key: "horaprogramada", label: "Hora programada de la ronda (hh:mm)" },
+    { key: "guardias", label: "Guardias que hicieron la ronda" },
+  ],
+  group: "Control de rondas",
+};
 let wfSpeakersCache = null;
 async function wfSpeakers() {
   wfSpeakersCache ??= await Api.get("/api/workflows/speakers");
