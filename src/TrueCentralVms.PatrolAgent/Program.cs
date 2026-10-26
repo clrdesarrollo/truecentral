@@ -106,6 +106,8 @@ builder.Services.AddWindowsService(o => o.ServiceName = "TrueCentralRondas");
 builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; });
 builder.Services.AddSingleton(new AgentStore(dataDirectory));
 builder.Services.AddSingleton(new AgentOptions(ports.Count > 0 ? ports : null, spoolErase));
+builder.Services.AddSingleton<ProgressBroadcaster>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ProgressBroadcaster>());
 builder.Services.AddHostedService<PatrolAgentService>();
 await builder.Build().RunAsync();
 return 0;

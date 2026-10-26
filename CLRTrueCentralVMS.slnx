@@ -12,6 +12,7 @@
     <Project Path="src/TrueCentralVms.IsupHost/TrueCentralVms.IsupHost.csproj" />
     <Project Path="src/TrueCentralVms.Migrator/TrueCentralVms.Migrator.csproj" />
     <Project Path="src/TrueCentralVms.PatrolAgent/TrueCentralVms.PatrolAgent.csproj" />
+    <Project Path="src/TrueCentralVms.PatrolNotifier/TrueCentralVms.PatrolNotifier.csproj" />
     <Project Path="src/TrueCentralVms.Server/TrueCentralVms.Server.csproj" />
     <Project Path="src/TrueCentralVms.SpeakerAgent/TrueCentralVms.SpeakerAgent.csproj" />
     <Project Path="src/TrueCentralVms.Watchdog/TrueCentralVms.Watchdog.csproj" />

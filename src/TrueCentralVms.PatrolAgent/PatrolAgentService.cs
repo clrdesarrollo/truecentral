@@ -12,7 +12,8 @@ public sealed record SubmitOutcome(PatrolUploadResultDto? Result, bool Queued, s
 /// estado de cada uno (y recibe la hora del servidor y las órdenes del panel) y
 /// reintenta lo que quedó en la cola local.
 /// </summary>
-public sealed class PatrolAgentService(AgentStore store, AgentOptions options, ILogger<PatrolAgentService> logger) : BackgroundService
+public sealed class PatrolAgentService(AgentStore store, AgentOptions options, ProgressBroadcaster progress,
+    ILogger<PatrolAgentService> logger) : BackgroundService
 {
     private readonly ConcurrentDictionary<string, DockWorker> _workers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<long, PendingCommand> _commands = new();
@@ -26,6 +27,8 @@ public sealed class PatrolAgentService(AgentStore store, AgentOptions options, I
     public int SpoolEraseThreshold => options.SpoolEraseThreshold;
 
     public void Kick() => _kick.Release();
+
+    public void Publish(PatrolDockProgress p) => progress.Publish(p);
 
     public PendingCommand? TakeCommand(long serial) => _commands.TryRemove(serial, out var c) ? c : null;
 

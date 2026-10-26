@@ -78,6 +78,7 @@ public sealed class DockWorker(string port, PatrolAgentService service, ILogger 
                         Error = null;
                         logger.LogInformation("Bastón {Serial:D6} puesto en {Port}.", Serial, Port);
                         service.Kick();
+                        Progress("detected");
                         Download(reader, null, ct);
                     }
                     else Sleep(TimeSpan.FromSeconds(4), ct);
@@ -101,6 +102,8 @@ public sealed class DockWorker(string port, PatrolAgentService service, ILogger 
             {
                 bool wasDocked = Docked;
                 if (Docked) { Docked = false; service.Kick(); }
+                if (_downloading) Progress("removed", message: "Se desconectó el bastón antes de terminar. Vuelva a ponerlo en la base: no se perdió nada.");
+                _downloading = false;
                 reader?.Dispose();
                 reader = null;
                 if (opening && ex is UnauthorizedAccessException)
@@ -136,18 +139,22 @@ public sealed class DockWorker(string port, PatrolAgentService service, ILogger 
     private void Download(JwmCaptorReader reader, PendingCommand? command, CancellationToken ct)
     {
         long serial = Serial!.Value;
+        _downloading = true;
         DateTime? clockSet = null;
         if (service.ServerNow() is { } now)
         {
+            Progress("clock");
             reader.SetClock(now);
             clockSet = now;
         }
         var started = DateTime.UtcNow;
-        var dump = reader.ReadMemory(ct: ct);
+        Progress("reading");
+        var dump = reader.ReadMemory(new InlineProgress(p => Progress("reading", p.Block, p.Blocks)), ct);
         var upload = new PatrolAgentUpload(serial, dump.Blocks.Select(Convert.ToHexString).ToList(), dump.DeclaredBlocks, clockSet, command?.Id);
         logger.LogInformation("Bastón {Serial:D6}: {Blocks} bloques leídos en {Ms} ms.", serial, dump.Blocks.Count,
             (int)(DateTime.UtcNow - started).TotalMilliseconds);
 
+        Progress("uploading", dump.Blocks.Count, dump.DeclaredBlocks);
         var outcome = service.SubmitAsync(upload, ct).GetAwaiter().GetResult();
         bool wantsErase = command?.Kind != "read" && dump.Blocks.Count > 0;
         bool erase = wantsErase && (outcome.Result?.EraseAllowed == true
@@ -158,6 +165,7 @@ public sealed class DockWorker(string port, PatrolAgentService service, ILogger 
         {
             try
             {
+                Progress("erasing");
                 reader.EraseMemory();
                 erased = reader.ReadMemory(ct: ct).DeclaredBlocks == 0;
                 if (!erased) eraseError = "El bastón no quedó vacío después de borrarlo.";
@@ -166,6 +174,25 @@ public sealed class DockWorker(string port, PatrolAgentService service, ILogger 
             logger.LogInformation("Bastón {Serial:D6}: {Result}.", serial, erased ? "vaciado" : $"no se pudo vaciar ({eraseError})");
         }
         service.AfterDownload(serial, outcome, erased, erase ? eraseError : null, command, ct);
+        _downloading = false;
+        if (outcome.Result is { } result)
+            Progress(eraseError is null ? "done" : "error", message: result.Message +
+                (erased ? " Bastón vaciado." : eraseError is not null ? $" No se pudo vaciar: {eraseError}" : ""));
+        else if (outcome.Queued)
+            Progress("queued", message: "Sin conexión con el servidor: las lecturas quedaron guardadas en este PC y se enviarán solas." +
+                (erased ? " Bastón vaciado." : " El bastón no se vació."));
+        else Progress("error", message: outcome.Error);
+    }
+
+    private bool _downloading;
+
+    private void Progress(string stage, int block = 0, int blocks = 0, string? message = null) =>
+        service.Publish(new PatrolDockProgress(Port, Serial, stage, block, blocks, message, DateTime.Now));
+
+    /// <summary>IProgress que corre en el mismo hilo (Progress&lt;T&gt; lo mandaría al pool).</summary>
+    private sealed class InlineProgress(Action<(int Block, int Blocks)> report) : IProgress<(int Block, int Blocks)>
+    {
+        public void Report((int Block, int Blocks) value) => report(value);
     }
 
     private static void Sleep(TimeSpan delay, CancellationToken ct) => ct.WaitHandle.WaitOne(delay);
