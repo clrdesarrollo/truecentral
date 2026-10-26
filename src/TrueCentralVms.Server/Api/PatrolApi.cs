@@ -771,17 +771,20 @@ public static partial class PatrolApi
     private static PatrolCheckpointDto ToDto(PatrolCheckpoint c, Dictionary<int, string> paths, DateTime? lastPass) => new(
         c.Id, c.Name, c.Kind, c.TagId, c.AccessDoorId, c.LocationId,
         c.LocationId is { } l ? paths.GetValueOrDefault(l) : null, c.Enabled, c.DisabledByLicense, c.Notes,
-        lastPass == default ? null : lastPass);
+        NullIfUnset(lastPass));
 
     private static PatrolTagDto ToDto(PatrolTag t, DateTime? lastRead) => new(
         t.Id, t.TagId, t.Label, t.Enabled, t.PatrolGuardId, t.PatrolGuard?.AccessPerson?.FullName,
-        lastRead == default ? null : lastRead);
+        NullIfUnset(lastRead));
 
     private static PatrolGuardDto ToDto(PatrolGuard g, DateTime? lastPass) => new(
         g.Id, g.AccessPersonId, g.AccessPerson?.FullName ?? "", g.AccessPerson?.EmployeeNo ?? "", g.Active,
         g.AccessPerson?.Enabled ?? false, g.Notes,
         g.Tags.OrderBy(t => t.TagId).Select(t => new PatrolTagDto(t.Id, t.TagId, t.Label, t.Enabled, g.Id, g.AccessPerson?.FullName, null)).ToList(),
-        lastPass == default ? null : lastPass, g.DeactivatedAt, g.DeactivatedBy, g.DeactivationReason);
+        NullIfUnset(lastPass), g.DeactivatedAt, g.DeactivatedBy, g.DeactivationReason);
+
+    /// <summary>GetValueOrDefault de un diccionario de DateTime da DateTime.MinValue, no null.</summary>
+    private static DateTime? NullIfUnset(DateTime? value) => value is { } v && v != default ? v : null;
 
     private static string Csv(string? s) => (s ?? "").Replace(';', ',').Replace('\n', ' ').Replace('\r', ' ');
 

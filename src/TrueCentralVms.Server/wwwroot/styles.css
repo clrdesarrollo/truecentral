@@ -2838,3 +2838,29 @@ table.kv .tag { margin: 0 4px 4px 0; }
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
 body.embedded .topbar, body.embedded .sidebar, body.embedded .page-titles, body.embedded .license-banner { display: none !important; }
 body.embedded .main { margin-left: 0 !important; padding-top: 0 !important; height: 100vh; min-height: 0; }
+
+/* ---------------------------------------------------------------------------
+   Control de rondas (patrol.js, patrol-serial.js)
+--------------------------------------------------------------------------- */
+.pt-mono { font-family: var(--mono); letter-spacing: .3px; }
+.pt-note { font-size: 11.5px; margin-top: 2px; max-width: 320px; }
+.pt-tab-actions { margin-bottom: 12px; }
+.pt-section-title { margin: 22px 0 6px; font-size: 14px; }
+.pt-section-title:first-child { margin-top: 4px; }
+.pt-grid td { padding-top: 8px; padding-bottom: 8px; }
+.pt-grid .row-actions { flex-wrap: wrap; }
+tr.pt-voided td { opacity: .62; }
+tr.pt-voided td:last-child, tr.pt-voided td:nth-last-child(2) { opacity: 1; }
+.pt-error { color: var(--danger-text); font-size: 12px; display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.pt-code { font-family: var(--mono); font-size: 30px; font-weight: 700; letter-spacing: 4px; text-align: center; padding: 14px; margin: 14px 0;
+  background: var(--panel-2); border: 1px dashed var(--border); border-radius: 8px; user-select: all; }
+.pt-command { display: flex; gap: 8px; align-items: flex-start; }
+.pt-command code { flex: 1; min-width: 0; padding: 9px 11px; background: var(--field); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 12.5px; word-break: break-all; user-select: all; }
+.pt-serial-status { margin: 12px 0 8px; font-size: 13px; }
+.pt-serial-status.pt-error { white-space: normal; max-width: none; display: block; }
+.pt-progress { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.pt-progress.hidden { display: none; }
+.pt-progress-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.pt-progress-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+.pt-progress > .muted { font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
