@@ -29,6 +29,10 @@
 //            vacío = todos
 //   final    "true" en la compilación de entrega: falla si queda algún
 //            #pendiente o #captura-pendiente
+//
+// Los mismos capítulos salen en PDF (manual.typ) y como sitio web
+// (manual-web.typ). Cada componente decide su dibujo con target(): en HTML
+// emite elementos con las clases de web/manual.css; los capítulos no cambian.
 
 // ---------------------------------------------------------------------------
 // Parámetros
@@ -46,6 +50,10 @@
 
 #let tiene-modulo(clave) = modulos == none or clave in modulos
 #let modulo(clave, cuerpo) = if tiene-modulo(clave) { cuerpo }
+
+// Elemento HTML con su clase de web/manual.css.
+#let elem(etiqueta, clase: none, ..resto) = html.elem(
+  etiqueta, attrs: if clase == none { (:) } else { (class: clase) }, ..resto)
 
 // ---------------------------------------------------------------------------
 // Identidad (colores del panel web, styles.css)
@@ -107,15 +115,19 @@
 // el lector las asocie de un vistazo. Ámbar porque destaca tanto sobre la
 // interfaz oscura como sobre fondos claros.
 #let marca-imagen(n) = circulo(n, relleno: ambar, color: tinta, radio: 9pt, borde: 1.5pt + white)
-#let marca(n) = circulo-en-linea(n, relleno: ambar, color: tinta, radio: 0.56em)
+#let marca(n) = context if target() == "html" { elem("span", clase: "marca", str(n)) } else {
+  circulo-en-linea(n, relleno: ambar, color: tinta, radio: 0.56em)
+}
 
-#let boton(etiqueta) = box(
-  fill: fondo-suave, stroke: 0.5pt + rgb("#D1D5DB"), radius: 3pt,
-  inset: (x: 0.4em), outset: (y: 0.28em),
-  text(weight: "semibold", size: 0.92em, etiqueta),
-)
+#let boton(etiqueta) = context if target() == "html" { elem("span", clase: "boton", etiqueta) } else {
+  box(
+    fill: fondo-suave, stroke: 0.5pt + rgb("#D1D5DB"), radius: 3pt,
+    inset: (x: 0.4em), outset: (y: 0.28em),
+    text(weight: "semibold", size: 0.92em, etiqueta),
+  )
+}
 
-#let tecla(etiqueta) = {
+#let tecla(etiqueta) = context if target() == "html" { html.elem("kbd", etiqueta) } else {
   let c = rgb("#9CA3AF")
   box(
     fill: white, radius: 2.5pt, inset: (x: 0.38em), outset: (y: 0.26em),
@@ -124,24 +136,32 @@
   )
 }
 
-#let menu(..partes) = partes.pos().map(p => text(weight: "semibold", p)).join(text(fill: gris)[ › ])
+#let menu(..partes) = context if target() == "html" {
+  elem("span", clase: "menu", partes.pos().map(p => elem("span", p)).join(elem("span", clase: "sep", "›")))
+} else {
+  partes.pos().map(p => text(weight: "semibold", p)).join(text(fill: gris)[ › ])
+}
 
-#let aviso(etiqueta, color, fondo, cuerpo) = block(
-  width: 100%, fill: fondo, radius: (right: 3pt),
-  stroke: (left: 2.5pt + color),
-  inset: (left: 12pt, right: 12pt, top: 9pt, bottom: 10pt),
-  above: 1.2em, below: 1.2em,
-  // Un aviso partido deja su título solo al pie de una página.
-  breakable: false,
-  {
-    block(below: 0.5em, text(size: 7.5pt, weight: "bold", fill: color, tracking: 0.08em, upper(etiqueta)))
-    cuerpo
-  },
-)
+#let aviso(etiqueta, color, fondo, cuerpo, clase: "nota") = context if target() == "html" {
+  elem("aside", clase: "aviso " + clase, elem("p", clase: "aviso-titulo", etiqueta) + cuerpo)
+} else {
+  block(
+    width: 100%, fill: fondo, radius: (right: 3pt),
+    stroke: (left: 2.5pt + color),
+    inset: (left: 12pt, right: 12pt, top: 9pt, bottom: 10pt),
+    above: 1.2em, below: 1.2em,
+    // Un aviso partido deja su título solo al pie de una página.
+    breakable: false,
+    {
+      block(below: 0.5em, text(size: 7.5pt, weight: "bold", fill: color, tracking: 0.08em, upper(etiqueta)))
+      cuerpo
+    },
+  )
+}
 
 #let nota(cuerpo) = aviso("Nota", acento, rgb("#EFF6FF"), cuerpo)
-#let consejo(cuerpo) = aviso("Consejo", rgb("#16A34A"), rgb("#F0FDF4"), cuerpo)
-#let importante(cuerpo) = aviso("Importante", rgb("#D97706"), rgb("#FFFBEB"), cuerpo)
+#let consejo(cuerpo) = aviso("Consejo", rgb("#16A34A"), rgb("#F0FDF4"), cuerpo, clase: "consejo")
+#let importante(cuerpo) = aviso("Importante", rgb("#D97706"), rgb("#FFFBEB"), cuerpo, clase: "importante")
 
 // Marcas que calcula el capturador de la demo (docs/manual/demo): por archivo,
 // la posición de cada marca y su leyenda, medidas sobre los elementos reales.
@@ -153,10 +173,35 @@
 // flotante: true (por omisión) deja que la captura vaya arriba o abajo de la
 // página donde quepa y que el texto siga llenando: una captura grande que no
 // entra en lo que queda de página ya no deja media página en blanco.
-#let captura(archivo, marcas: auto, leyenda: auto, ancho: 100%, pie: none, flotante: true) = {
+// En HTML la imagen va como archivo aparte (manual-web.typ la publica en
+// capturas/) y las marcas se ubican en porcentaje, así siguen en su lugar a
+// cualquier ancho de pantalla.
+#let captura-web(archivo, puntos, textos, ancho, pie) = {
+  let png = read("capturas/" + archivo, encoding: none)
+  // Ancho y alto del PNG (cabecera IHDR): reservan el espacio antes de cargar.
+  let lado(desde) = str(int.from-bytes(png.slice(desde, desde + 4), endian: "big", signed: false))
+  let porcentaje(f) = str(calc.round(f * 100, digits: 2)) + "%"
+  figure(kind: image, caption: pie, {
+    html.elem("div", attrs: (class: "captura", style: "max-width: " + repr(ancho)), {
+      html.elem("img", attrs: (
+        src: "capturas/" + archivo, width: lado(16), height: lado(20),
+        alt: "Captura de pantalla", loading: "lazy",
+      ))
+      for (i, (x, y)) in puntos.enumerate() {
+        html.elem("span", attrs: (class: "marca", style: "left: " + porcentaje(x) + "; top: " + porcentaje(y)), str(i + 1))
+      }
+    })
+    if textos.len() > 0 {
+      elem("ol", clase: "leyenda", textos.map(t => html.elem("li", t)).join())
+    }
+  })
+}
+
+#let captura(archivo, marcas: auto, leyenda: auto, ancho: 100%, pie: none, flotante: true) = context {
   let medidas = if marcas == auto { marcas-capturadas.at(archivo, default: ()) } else { () }
   let puntos = if marcas == auto { medidas.map(m => (m.x, m.y)) } else { marcas }
   let textos = if leyenda == auto { medidas.map(m => m.etiqueta) } else if leyenda == none { () } else { leyenda }
+  if target() == "html" { return captura-web(archivo, puntos, textos, ancho, pie) }
   figure(
     kind: image,
     caption: pie,
@@ -191,10 +236,15 @@
 
 // Permisos que necesita una función, con los nombres que muestra la página
 // de Roles (Permissions.cs). Va justo debajo del título de la sección.
-#let requiere(..permisos) = block(above: 0.2em, below: 1em, text(size: 8.5pt, fill: gris)[
-  #text(weight: "bold", tracking: 0.06em)[PERMISOS] #h(0.4em)
-  #permisos.pos().map(p => text(fill: tinta, p)).join([ · ])
-])
+#let requiere(..permisos) = context if target() == "html" {
+  elem("p", clase: "requiere", elem("span", clase: "rotulo", "Permisos")
+    + " " + permisos.pos().map(p => elem("span", clase: "permiso", p)).join(" "))
+} else {
+  block(above: 0.2em, below: 1em, text(size: 8.5pt, fill: gris)[
+    #text(weight: "bold", tracking: 0.06em)[PERMISOS] #h(0.4em)
+    #permisos.pos().map(p => text(fill: tinta, p)).join([ · ])
+  ])
+}
 
 #let sin-terminar(que) = panic(
   "El manual tiene " + que + " sin terminar: compílelo sin final=true para ubicarlas.")
@@ -219,8 +269,11 @@
   }
 }
 
-#let captura-pendiente(descripcion, alto: 4.5cm) = {
+#let captura-pendiente(descripcion, alto: 4.5cm) = context {
   if final { sin-terminar("capturas") }
+  if target() == "html" {
+    return elem("div", clase: "captura-pendiente", elem("strong", "Captura pendiente") + elem("span", descripcion))
+  }
   block(
     width: 100%, height: alto, radius: 5pt, fill: rgb("#FDF4FF"),
     stroke: (paint: magenta, thickness: 0.8pt, dash: "dashed"),
@@ -234,7 +287,7 @@
 
 #let pendiente(cuerpo) = {
   if final { sin-terminar("secciones") }
-  aviso("Por escribir", magenta, rgb("#FDF4FF"), cuerpo)
+  aviso("Por escribir", magenta, rgb("#FDF4FF"), cuerpo, clase: "pendiente")
 }
 
 // ---------------------------------------------------------------------------

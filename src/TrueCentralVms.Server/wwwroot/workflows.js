@@ -271,6 +271,15 @@ const WF_FIELDS = {
       when: (c) => c.command === "Blink",
       help: "Parpadear seguido desgasta los contactos de un relé: para una baliza permanente conviene una con destellador propio." },
   ],
+  "vehicle-access": [
+    { k: "direction", t: "select", label: "Sentido", def: "Entry", options: [["Entry", "Ingreso"], ["Exit", "Salida"]] },
+    { k: "accessPoint", t: "text", label: "Nombre del acceso", def: "Acceso principal",
+      help: "Así aparece en el registro de accesos vehiculares y en sus reportes; use el mismo nombre en la automatización de ingreso y en la de salida." },
+    { k: "result", t: "select", label: "Resultado que se anota", def: "AutoOpened",
+      options: [["AutoOpened", "Apertura automática"], ["OutsideSchedule", "Fuera de horario: abre el guardia"],
+        ["Rejected", "Rechazado (no registrado o no autorizado)"], ["OpenFailed", "Falló la apertura"], ["Logged", "Solo registrar"]],
+      help: "Póngala al final de cada rama del diagrama con el resultado de esa rama; en la rama de error de los relés, «Falló la apertura». Quién es (persona y vehículo) lo toma del padrón." },
+  ],
 };
 
 // --- Vista previa de sonidos ------------------------------------------------

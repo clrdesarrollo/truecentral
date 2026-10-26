@@ -62,8 +62,10 @@ public static class WorkflowActionTypes
     public const string PtzPreset = "ptz-preset";
     /// <summary>Operar salidas (relés) de un módulo de E/S: pulso, encender, apagar, alternar o parpadear.</summary>
     public const string Relay = "relay";
+    /// <summary>Anotar un ingreso o salida de vehículo en el registro de accesos vehiculares (con su resultado).</summary>
+    public const string VehicleAccess = "vehicle-access";
 
-    public static readonly string[] All = [Snapshot, Email, Ftp, Http, Speaker, Notify, Door, Panel, PtzPreset, Relay];
+    public static readonly string[] All = [Snapshot, Email, Ftp, Http, Speaker, Notify, Door, Panel, PtzPreset, Relay, VehicleAccess];
 }
 
 /// <summary>Tipos de nodo del diagrama de una automatización.</summary>
@@ -206,6 +208,11 @@ public sealed record WorkflowConditionsDto(
     /// sábado y domingo todo el día" cabe en una sola automatización.
     /// </summary>
     IReadOnlyList<WorkflowTimeBandDto>? TimeBands = null,
+    /// <summary>
+    /// true = en los feriados del calendario único (Control de acceso → Horarios →
+    /// Feriados) la automatización NO está activa, aunque la franja horaria se cumpla.
+    /// </summary>
+    bool? ExcludeHolidays = null,
 
     // --- Conexión de equipos (disparador device-status) ---
     /// <summary>Clase de equipo: "video" (cámara/grabador), "access" (terminal de acceso), "speaker" (parlante), "io" (módulo de E/S). Vacío = todas.</summary>
@@ -248,6 +255,18 @@ public sealed record WorkflowConditionsDto(
     string? PlateMatch = null,
     /// <summary>Confianza mínima de la lectura (0–100); null = sin mínimo.</summary>
     int? MinConfidence = null,
+    /// <summary>
+    /// Estado de la patente en el padrón de vehículos (ver <see cref="PlateRegistryStatuses"/>):
+    /// "authorized" | "unauthorized" | "unregistered". Vacío = cualquiera.
+    /// </summary>
+    IReadOnlyList<string>? PlateStatuses = null,
+    /// <summary>
+    /// Solo en el disparador: la MISMA patente no vuelve a ejecutar la automatización
+    /// dentro de esta ventana de segundos (la cámara suele informar varias veces el
+    /// mismo vehículo). A diferencia del tiempo mínimo entre ejecuciones, no frena al
+    /// vehículo siguiente. 0 o null = sin ventana.
+    /// </summary>
+    int? SamePlateSeconds = null,
 
     // --- Control de acceso (disparador access-event) ---
     IReadOnlyList<AccessEventKind>? AccessKinds = null,

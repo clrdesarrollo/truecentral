@@ -85,6 +85,10 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private bool _isEmpty = true;
 
+    /// <summary>Selección de «Unir cuadros» en curso: 0 fuera, 1 se une, 2 la
+    /// selección corta este cuadro (no se puede unir). El borde lo muestra.</summary>
+    [ObservableProperty] private int _mergeMark;
+
     /// <summary>
     /// El cuadro está pidiendo la concesión y abriendo el stream. Sin aviso, el
     /// par de segundos hasta el primer cuadro parece un cuadro colgado.
@@ -691,6 +695,39 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     // ------------------------------------------------------------------
     // Intercambio de cuadros (arrastrar un cuadro sobre otro en la grilla)
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Reubica el contenido de la grilla tras ampliarla: lo del cuadro i pasa
+    /// al cuadro placement[i]; los cuadros nuevos (al final, vacíos) llenan los
+    /// lugares que quedan. Se hace con intercambios, así el video no se corta.
+    /// </summary>
+    public static void Rearrange(IReadOnlyList<VideoCellViewModel> cells, IReadOnlyList<int> placement)
+    {
+        // Destino de lo que hay en cada cuadro: completar la permutación con
+        // los vacíos del final hacia los lugares libres, en orden.
+        var target = new int[cells.Count];
+        var taken = new bool[cells.Count];
+        for (int i = 0; i < placement.Count; i++)
+        {
+            target[i] = placement[i];
+            taken[placement[i]] = true;
+        }
+        int free = 0;
+        for (int i = placement.Count; i < cells.Count; i++)
+        {
+            while (taken[free]) free++;
+            target[i] = free;
+            taken[free] = true;
+        }
+        // Cada intercambio deja al menos un contenido en su lugar definitivo.
+        for (int i = 0; i < cells.Count; i++)
+            while (target[i] != i)
+            {
+                int j = target[i];
+                if (!cells[i].IsEmpty || !cells[j].IsEmpty) SwapContent(cells[i], cells[j]);
+                (target[i], target[j]) = (target[j], target[i]);
+            }
+    }
 
     /// <summary>
     /// Intercambia el CONTENIDO de dos cuadros: las cámaras cambian de

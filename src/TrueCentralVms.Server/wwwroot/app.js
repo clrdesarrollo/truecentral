@@ -839,12 +839,12 @@ async function renderDevices() {
       </table></div>`}
     ${isAdmin ? `
     <div class="toolbar" style="margin-top:28px">
-      <h3>Equipos en línea <span class="muted" style="font-weight:normal;font-size:12px">(SADP · Dahua · ONVIF en la red local · se actualiza cada 30 s)</span></h3>
-      <button class="btn ghost" id="btn-device-scan">Buscar</button>
+      <h3>Equipos en línea <span class="muted hint">Buscando equipos compatibles en la red local; se actualiza cada 30 segundos.</span></h3>
+      <button class="btn ghost" id="btn-device-scan" title="Volver a buscar ahora, sin esperar los 30 segundos">Actualizar</button>
     </div>
     <div id="online-devices">
       ${lastScan ? "" : `<div class="info-box">Sondeando el segmento de red del servidor…
-        (SADP para Hikvision, DHDiscover para Dahua y WS-Discovery para cualquier marca ONVIF).
+        (Hikvision, Dahua y cualquier marca ONVIF).
         Solo se listan equipos de video (cámaras, DVR, NVR, decodificadores); los controles de acceso y alarmas se omiten.</div>`}
     </div>` : ""}`;
 
@@ -918,7 +918,7 @@ let lastScanAt = 0;
 /**
  * Los equipos entran y salen de la red sin avisar, así que la lista se sondea
  * al abrir la página y se refresca sola cada 30 s (el sondeo dura ~4 s: es la
- * ventana que espera el servidor por SADP, DHDiscover y WS-Discovery).
+ * ventana que espera el servidor por la búsqueda en la red).
  */
 // Opciones por defecto: la página Fuentes de video. Decodificadores reutiliza
 // el mismo sondeo con kind=decoders y su propio contenedor/modal.
@@ -965,7 +965,7 @@ async function runDiscovery(devices, showProgress = true) {
   if (!$(opt.container)) return;
   discoveryBusy = opt;
   const scanButton = $(opt.button);
-  if (scanButton) { scanButton.disabled = true; scanButton.textContent = "Buscando…"; }
+  if (scanButton) { scanButton.disabled = true; scanButton.textContent = "Actualizando…"; }
   if (showProgress) {
     const box = $(opt.container);
     box.innerHTML = `<div class="info-box">Sondeando la red… (unos segundos)</div>`;
@@ -988,7 +988,7 @@ async function runDiscovery(devices, showProgress = true) {
   } finally {
     if (discoveryBusy === opt) discoveryBusy = null;
     const btn = $(opt.button);
-    if (btn) { btn.disabled = false; btn.textContent = "Buscar"; }
+    if (btn) { btn.disabled = false; btn.textContent = "Actualizar"; }
   }
 }
 
@@ -1006,6 +1006,8 @@ function renderOnlineDevices(devices) {
     return;
   }
   const knownHosts = new Set(devices.map((d) => d.host));
+  // Lo que el equipo no informa se muestra con raya, no como celda vacía.
+  const cell = (v) => (v == null || String(v).trim() === "" ? "—" : esc(v));
   box.innerHTML = `
     <div class="table-scroll"><table class="grid">
       <thead><tr>
@@ -1016,13 +1018,13 @@ function renderOnlineDevices(devices) {
         const added = knownHosts.has(d.ip);
         return `
         <tr>
-          <td>${esc(d.ip)}</td>
-          <td>${esc(d.brand)}</td>
-          <td>${esc(d.category)}</td>
-          <td>${esc(d.model)}</td>
-          <td class="muted">${esc(d.serial)}</td>
-          <td class="muted">${opt.portOf ? opt.portOf(d) : d.commandPort}</td>
-          <td class="muted">${esc(d.mac)}</td>
+          <td>${cell(d.ip)}</td>
+          <td>${cell(d.brand)}</td>
+          <td>${cell(d.category)}</td>
+          <td>${cell(d.model)}</td>
+          <td class="muted">${cell(d.serial)}</td>
+          <td class="muted">${cell(opt.portOf ? opt.portOf(d) : d.commandPort)}</td>
+          <td class="muted">${cell(d.mac)}</td>
           <td>${added ? `<span class="tag on">Agregado</span>`
                 : d.canInitialize ? `<span class="tag off">${d.brand === "Hikvision" ? "Sin activar" : "Sin inicializar"}</span>`
                 : d.activated === false ? `<span class="tag off">Sin activar</span>`
@@ -1033,7 +1035,7 @@ function renderOnlineDevices(devices) {
               : ""}
             ${d.canInitialize && !added
               ? (d.brand === "Hikvision"
-                ? `<button class="btn scan-init" data-i="${i}" title="Fija la contraseña del usuario admin del equipo de fábrica (como Activate de SADP)">Activar</button>`
+                ? `<button class="btn scan-init" data-i="${i}" title="Fija la contraseña del usuario admin del equipo de fábrica">Activar</button>`
                 : `<button class="btn scan-init" data-i="${i}" title="Crea el usuario admin del equipo de fábrica">Inicializar</button>`)
               : `<button class="btn ghost scan-use" data-i="${i}" ${added ? "disabled" : ""}
                   ${d.reachable === false ? `title="El equipo está en otra subred: cámbiele la IP antes de agregarlo"` : ""}>Agregar</button>`}
@@ -1052,7 +1054,7 @@ const isIPv4 = (s) => /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d))
 
 /**
  * Cambia la red de un equipo Dahua o Hikvision sin entrar a él (multicast por
- * MAC), como "Change IP" de SmartPSS o SADP Tool: IP fija o DHCP, y los DNS
+ * MAC), como "Change IP" de las herramientas del fabricante: IP fija o DHCP, y los DNS
  * (que el servidor aplica después por la API web del equipo). Si el equipo
  * está fuera de la subred del servidor se propone una IP de la red del servidor.
  * @param {string} [knownPassword] la que se acaba de elegir al inicializarlo (no se vuelve a pedir).
@@ -1282,7 +1284,7 @@ function hikvisionPasswordProblem(p) {
  * Deja listo un equipo de fábrica (cualquier tipo: cámara, grabador, control
  * de acceso, citofonía...): Dahua se inicializa (se le crea el usuario admin,
  * como "Initialize" de SmartPSS) y Hikvision se activa (se fija la contraseña
- * de admin, como "Activate" de SADP). Al terminar ofrece agregarlo de
+ * de admin, como la activación de las herramientas del fabricante). Al terminar ofrece agregarlo de
  * inmediato, o cambiarle la IP si quedó fuera de la red del servidor.
  */
 function initModal(d, devices) {
@@ -2219,6 +2221,7 @@ const routes = {
   "#/workflow-runs": renderWorkflowRuns,
   "#/sounds": renderSounds,
   "#/anpr": renderAnpr,
+  "#/vehicle-access": renderVehicleAccess,
   "#/alarms": renderAlarmMonitor,
   "#/cerco": renderCercoMonitor,
   "#/cerco-panels": renderCercoPanels,
@@ -2247,6 +2250,8 @@ const routes = {
   "#/certificate": renderCertificate,
   "#/account": renderAccount,
   "#/wan": renderWan,
+  "#/time": renderTime,
+
   "#/license": renderLicense,
 };
 
@@ -2424,6 +2429,9 @@ function navigate() {
   });
   revealActiveNav(active);
   showBreadcrumb(active);
+  const help = active?.dataset.help ?? "";
+  $("#page-help").textContent = help;
+  $("#page-help").classList.toggle("hidden", !help);
   // Una página que sus roles no permiten (enlace guardado, historial, o le
   // quitaron el permiso estando en ella) no se dibuja: el servidor la
   // rechazaría a medias, solicitud por solicitud.

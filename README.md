@@ -146,7 +146,8 @@ Qué hace la suite en el equipo, además de copiar archivos:
 
 - Crea (o reconfigura) el servicio `CLRTrueCentralVMS` (LocalSystem, inicio
   automático) con acciones de recuperación del SCM (reinicio a los 5, 15 y
-  60 s si el proceso muere; contador reseteado tras un día estable). Las
+  60 s si el proceso muere o si el servidor se detiene sin que Windows lo
+  pida, porque entonces sale con código 1067; contador reseteado tras un día estable). Las
   caídas de los servicios internos las cubre el supervisor del servidor.
 - Antes de instalar revisa que 443 y 80 estén libres (IIS u otro servidor web):
   si no, se detiene, salvo que `appsettings.Local.json` defina otros en `Web`.
@@ -1167,6 +1168,22 @@ servicio** / **Detener servicio** / **Abrir panel web**.
   una API perfectamente sana.
 - Pide elevación en su manifiesto (`requireAdministrator`): controlar el
   servicio la exige, y así el aviso de UAC aparece UNA vez, al abrirlo.
+- **Mantiene vivo el servicio**: si lo encuentra detenido más de 15 s (antes
+  actúa el SCM, que lo relanza a los 5 s) y nadie pidió detenerlo, lo vuelve a
+  iniciar (reintentos a los 30 s, 1, 2 y cada 5 min). La única forma de
+  pedirlo es **Detener servicio** en el Watchdog: queda marcado en
+  `HKLM\SOFTWARE\CLRobotics\TrueCentralVMS\Watchdog` (sobrevive a cerrarlo y a
+  reiniciar el equipo) y se borra al iniciarlo desde cualquier lado. Detenerlo
+  con `services.msc` o `sc stop` NO cuenta: lo vuelve a iniciar. Tampoco lo
+  toca si el servicio está deshabilitado en Windows o si hay otro proceso del
+  servidor corriendo (restauración por consola, servidor a mano).
+- **Segundo plano**: cerrar la ventana la oculta; queda un ícono junto al reloj
+  con el color del estado, avisos cuando el servicio cae o vuelve, y un menú
+  (abrir, iniciar, detener, panel web, salir). Una sola instancia por sesión:
+  abrirlo de nuevo muestra la que ya corre. El instalador crea la tarea
+  programada `CLR TrueCentral VMS Watchdog` (al iniciar sesión cualquier
+  administrador, privilegios máximos —sin aviso de UAC—, `--background`) y la
+  lanza al terminar; desinstalar la borra junto con la marca del registro.
 - En un equipo de desarrollo —servidor corriendo como consola, sin servicio
   instalado— informa "Servidor en ejecución (sin servicio de Windows)" con la
   API y la base en verde, en vez de dar el sistema por caído.
@@ -1174,6 +1191,19 @@ servicio** / **Detener servicio** / **Abrir panel web**.
 Cada apagado ordenado del servidor (lo pida el Watchdog, `services.msc` o el
 SCM al apagar el equipo) queda en la bitácora como `server-stopped`, al lado
 del `server-started` de cada arranque.
+
+Y cada apagado **de mala forma** también: mientras corre, el servidor mantiene
+`server-run.json` en la carpeta de datos (arranque, hora de inicio de Windows y
+un latido cada 30 s), y al detenerse en orden anota el motivo (Windows detuvo el
+servicio, se apagó o reinició el equipo, el servidor se detuvo solo por una
+falla, o consola). Si al arrancar ese archivo no tiene motivo, la ejecución
+anterior terminó de golpe: queda `server-unexpected-stop` (fallido) en la
+bitácora y un error en el registro de eventos, con la última señal de vida, si
+fue el EQUIPO (corte de luz, reinicio forzado, pantallazo azul) o solo el
+PROCESO (matado o caído), y los eventos de Windows de ese lapso (41/6008
+apagado inesperado, 1074 quién pidió reiniciar, 1001 pantallazo azul). El
+`server-started` y el `server-stopped` también dicen cómo terminó la ejecución
+anterior y por qué se detiene esta.
 
 ## Panel web
 

@@ -162,8 +162,7 @@ resumen). A la derecha está el editor del rol elegido.
   [Operador],
   [Rol para la operación diaria. Se puede ajustar, pero no eliminar ni
     renombrar. En una instalación nueva incluye todos los permisos de los
-    grupos _Video_ y _Monitoreo y operación_ salvo _Borrar lecturas de
-    patentes_, más _Ver personas_, _Ver automatizaciones_ y _Ver hora y
+    grupos _Video_ y _Monitoreo y operación_, más _Ver personas_, _Ver automatizaciones_ y _Ver hora y
     mantenimiento_.],
 )
 
@@ -281,7 +280,6 @@ control sobre la seguridad del sistema.
   [Abrir y cerrar puertas], [Abrir, cerrar o dejar fijas las puertas a distancia. #incluye[Ver control de acceso]],
   [Exportar registros de acceso], [Descargar los registros de acceso en PDF o Excel. #incluye[Ver control de acceso]],
   [Ver patentes], [Ver las lecturas de patentes con sus fotos.],
-  [Borrar lecturas de patentes], [Eliminar lecturas de patentes guardadas. #incluye[Ver patentes]],
   [Usar parlantes], [Reproducir audios, hablar y ajustar el volumen de los parlantes IP.],
   [Operar relés], [Ver las entradas y salidas de los módulos de E/S y activar sus relés a mano (barreras, portones, balizas).],
   [Atender citofonía], [Contestar, rechazar y cortar llamadas, y abrir la puerta del frente.],

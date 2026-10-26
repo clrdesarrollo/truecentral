@@ -17,6 +17,12 @@ namespace TrueCentralVms.Watchdog;
 /// servicio. Es la capa EXTERNA de vigilancia: el supervisor que corre DENTRO
 /// del servidor (panel web, Sistema > Servicios) reinicia los subsistemas
 /// caídos, pero no puede levantarse a sí mismo si el proceso entero se cae.
+///
+/// Mantiene el servicio en ejecución: si lo encuentra detenido sin que alguien
+/// lo haya pedido con «Detener servicio» (<see cref="StopIntent"/>), lo vuelve
+/// a iniciar. Vive en segundo plano con un ícono junto al reloj: cerrar la
+/// ventana solo la oculta, y se inicia solo al iniciar sesión un administrador
+/// (tarea programada que crea el instalador, con <c>--background</c>).
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -36,6 +42,21 @@ public partial class MainWindow : Window
     private bool? _lastApiOk;
     /// <summary>Lectura anterior, para confirmar un cambio antes de anunciarlo.</summary>
     private bool? _previousApiRead;
+
+    /// <summary>
+    /// Detenido menos que esto no se toca: deja actuar primero a las acciones de
+    /// recuperación del SCM (reinicio a los 5 s) y a un reinicio en curso (el
+    /// del panel web detiene y vuelve a iniciar el servicio).
+    /// </summary>
+    private static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(15);
+    private DateTime? _stoppedSinceUtc;
+    private DateTime _nextAutoStartUtc = DateTime.MinValue;
+    private int _autoStartAttempts;
+    private string? _keepAliveNote;     // último motivo para NO reiniciar (se anuncia una vez)
+
+    private readonly TrayIcon _tray = new();
+    private bool _exiting;
+    private bool _hiddenNoticeShown;
 
     private Brush Ok => (Brush)FindResource("OkBrush");
     private Brush Danger => (Brush)FindResource("DangerBrush");
@@ -58,15 +79,63 @@ public partial class MainWindow : Window
         if (!_env.ServerFound)
             AddActivity("No se encontró la instalación del servidor junto al Watchdog; se usan los puertos por defecto.", Warn);
 
+        _tray.OpenRequested += ShowFromTray;
+        _tray.StartRequested += () => _ = StartServiceAsync(automatic: false);
+        _tray.StopRequested += () => _ = StopServiceAsync();
+        _tray.OpenPanelRequested += OpenPanel;
+        _tray.ExitRequested += ExitWatchdog;
+
+        // Con --background la ventana nunca se muestra (Loaded no llega): el
+        // primer sondeo no puede depender de ella.
         _timer.Tick += async (_, _) => await CheckAsync();
         _timer.Start();
-        Loaded += async (_, _) => await CheckAsync();
+        Dispatcher.BeginInvoke(async () => await CheckAsync());
+    }
+
+    public void ShowFromTray()
+    {
+        Show();
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    /// <summary>Cerrar la ventana la oculta: el Watchdog sigue vigilando junto al reloj.</summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (!_exiting)
+        {
+            e.Cancel = true;
+            Hide();
+            if (!_hiddenNoticeShown)
+            {
+                _hiddenNoticeShown = true;
+                _tray.Notify("El Watchdog sigue funcionando",
+                    "Sigue vigilando el servidor en segundo plano. Ábralo desde el ícono junto al reloj.",
+                    System.Windows.Forms.ToolTipIcon.Info);
+            }
+        }
+        base.OnClosing(e);
+    }
+
+    private void ExitWatchdog()
+    {
+        var answer = MessageBox.Show(
+            "Si sale del Watchdog, nadie volverá a iniciar el servidor si se detiene.\n\n" +
+            "Vuelve a abrirse solo la próxima vez que inicie sesión. ¿Salir igual?",
+            "Salir del Watchdog", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes)
+            return;
+        _exiting = true;
+        Close();
+        Application.Current.Shutdown();
     }
 
     protected override void OnClosed(EventArgs e)
     {
         _timer.Stop();
         _http.Dispose();
+        _tray.Dispose();
         base.OnClosed(e);
     }
 
@@ -90,6 +159,7 @@ public partial class MainWindow : Window
             bool dbOk = dbTask.Result;
 
             ReportTransitions(svc, apiOk);
+            KeepAlive(svc);
             UpdateUi(svc, svcDetail, apiOk, serverVersion, apiDetail, dbOk);
             FooterRight.Text = $"Última verificación: {DateTime.Now:HH:mm:ss}";
         }
@@ -171,6 +241,9 @@ public partial class MainWindow : Window
                 {
                     AddActivity("El servicio se detuvo inesperadamente.", Danger);
                     DumpRecentEventLog();
+                    if (StopIntent.Read() is null)
+                        _tray.Notify("El servidor se detuvo", "Se detuvo sin que nadie lo pidiera. El Watchdog lo volverá a iniciar.",
+                            System.Windows.Forms.ToolTipIcon.Warning);
                 }
             }
             else if (svc == SvcState.NotInstalled && _lastSvc != SvcState.Unknown)
@@ -228,17 +301,101 @@ public partial class MainWindow : Window
 
         StartButton.IsEnabled = !_busy && svc == SvcState.Stopped;
         StopButton.IsEnabled = !_busy && svc == SvcState.Running;
+
+        var trayState = dot == Ok ? TrayState.Ok : dot == Warn ? TrayState.Warn : dot == Danger ? TrayState.Danger : TrayState.Unknown;
+        _tray.Update(trayState, text, StartButton.IsEnabled, StopButton.IsEnabled);
+
+        KeepAliveText.Text = StopIntent.Read() is { } stopped
+            ? $"Detenido a propósito el {stopped.ToLocalTime():dd-MM HH:mm}: no se reinicia solo."
+            : "Vigilancia activa: si el servicio se detiene sin que se pida, se vuelve a iniciar.";
+    }
+
+    // ------------------------------------------------------------------
+    // Mantener vivo
+    // ------------------------------------------------------------------
+    /// <summary>
+    /// Vuelve a iniciar el servicio si lleva detenido más de <see cref="StopGrace"/>
+    /// y nadie lo pidió. No lo toca si está deshabilitado en Windows (también es
+    /// una decisión explícita) ni si hay otro proceso del servidor corriendo
+    /// (una restauración por consola o un servidor lanzado a mano).
+    /// </summary>
+    private void KeepAlive(SvcState svc)
+    {
+        if (svc == SvcState.Running && !_busy)
+        {
+            // Lo inició alguien (o volvió solo): ya no vale el pedido de detenerlo.
+            // Con margen: otro Watchdog (otra sesión) puede verlo todavía en
+            // ejecución justo entre que se marcó el pedido y empezó a detenerse.
+            if (StopIntent.Read() is { } requested && DateTime.UtcNow - requested > TimeSpan.FromSeconds(30))
+                StopIntent.Clear();
+            if (_autoStartAttempts > 0)
+                _tray.Notify("Servidor en ejecución", "El Watchdog volvió a iniciar el servidor.", System.Windows.Forms.ToolTipIcon.Info);
+            _autoStartAttempts = 0;
+            _keepAliveNote = null;
+        }
+        if (svc != SvcState.Stopped || _busy)
+        {
+            if (svc != SvcState.Stopped)
+                _stoppedSinceUtc = null;
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        _stoppedSinceUtc ??= now;
+        if (StopIntent.Read() is not null || now - _stoppedSinceUtc < StopGrace || now < _nextAutoStartUtc)
+            return;
+        if (WhyNotRestart() is { } reason)
+        {
+            if (reason != _keepAliveNote)
+                AddActivity(reason, Muted);
+            _keepAliveNote = reason;
+            return;
+        }
+
+        _autoStartAttempts++;
+        // Si no arranca, se insiste con calma: 30 s, 1 min, 2 min y luego cada 5 min.
+        _nextAutoStartUtc = now + TimeSpan.FromSeconds(_autoStartAttempts switch { 1 => 30, 2 => 60, 3 => 120, _ => 300 });
+        _ = StartServiceAsync(automatic: true);
+    }
+
+    private static string? WhyNotRestart()
+    {
+        try
+        {
+            using var sc = new ServiceController(ServiceName);
+            if (sc.StartType == ServiceStartMode.Disabled)
+                return "El servicio está deshabilitado en Windows: el Watchdog no lo inicia.";
+        }
+        catch
+        {
+            return null;
+        }
+        var others = Process.GetProcessesByName("TrueCentralVms.Server");
+        foreach (var p in others)
+            p.Dispose();
+        return others.Length > 0
+            ? "Hay otro proceso del servidor en ejecución (¿una restauración?): el Watchdog espera a que termine."
+            : null;
     }
 
     // ------------------------------------------------------------------
     // Acciones
     // ------------------------------------------------------------------
-    private async void OnStartClick(object sender, RoutedEventArgs e)
+    private async void OnStartClick(object sender, RoutedEventArgs e) => await StartServiceAsync(automatic: false);
+
+    private async void OnStopClick(object sender, RoutedEventArgs e) => await StopServiceAsync();
+
+    private async Task StartServiceAsync(bool automatic)
     {
+        if (_busy)
+            return;
         _busy = true;
         _stopRequested = false;
+        StopIntent.Clear();
         StartButton.IsEnabled = StopButton.IsEnabled = false;
-        AddActivity("Iniciando el servicio...", Muted);
+        AddActivity(automatic
+            ? $"El servicio está detenido y nadie pidió detenerlo: iniciándolo (intento {_autoStartAttempts})..."
+            : "Iniciando el servicio...", automatic ? Warn : Muted);
         try
         {
             await Task.Run(() =>
@@ -259,6 +416,8 @@ public partial class MainWindow : Window
         {
             AddActivity($"No se pudo iniciar el servicio: {Root(ex).Message}", Danger);
             DumpRecentEventLog();
+            if (automatic)
+                _tray.Notify("No se pudo iniciar el servidor", Root(ex).Message, System.Windows.Forms.ToolTipIcon.Error);
         }
         finally
         {
@@ -267,10 +426,28 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnStopClick(object sender, RoutedEventArgs e)
+    private async Task StopServiceAsync()
     {
+        if (_busy)
+            return;
+        var answer = MessageBox.Show(
+            "El servidor quedará detenido y el Watchdog NO lo volverá a iniciar hasta que usted lo inicie.\n\n" +
+            "Mientras tanto no habrá video, alarmas ni control de acceso. ¿Detener el servicio?",
+            "Detener el servicio", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes)
+            return;
         _busy = true;
         _stopRequested = true;
+        try
+        {
+            StopIntent.Set();
+        }
+        catch (Exception ex)
+        {
+            AddActivity($"No se pudo guardar el pedido de detención: {Root(ex).Message}", Danger);
+            _busy = false;
+            return;
+        }
         StartButton.IsEnabled = StopButton.IsEnabled = false;
         AddActivity("Deteniendo el servicio (el apagado ordenado puede tardar unos segundos)...", Muted);
         try
@@ -282,7 +459,7 @@ public partial class MainWindow : Window
                     sc.Stop();
                 sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(90));
             });
-            AddActivity("Servicio detenido.", Ok);
+            AddActivity("Servicio detenido. El Watchdog no lo volverá a iniciar hasta que usted lo inicie.", Ok);
         }
         catch (System.ServiceProcess.TimeoutException)
         {
@@ -299,7 +476,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnOpenPanelClick(object sender, RoutedEventArgs e)
+    private void OnOpenPanelClick(object sender, RoutedEventArgs e) => OpenPanel();
+
+    private void OpenPanel()
     {
         try
         {

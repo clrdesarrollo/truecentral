@@ -164,6 +164,13 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
         var clock = Task.Run(() => ScheduleLoopAsync(ct), ct);
         try { await GetWorkflowsAsync(ct); }
         catch (Exception ex) { _logger.LogWarning(ex, "No se pudieron cargar las automatizaciones al arrancar."); }
+        // Los feriados se leen antes del primer disparo: «excluir feriados» no
+        // puede dejar pasar una lectura por llegar justo al arrancar.
+        try { await _services.GetRequiredService<HolidayCalendar>().LoadAsync(ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "No se pudo leer el calendario de feriados al arrancar.");
+        }
         try
         {
             await foreach (var trigger in _incoming.Reader.ReadAllAsync(ct))
@@ -188,6 +195,7 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
             if (workflow.TriggerType != trigger.Type) continue;
             if (!Matches(workflow, trigger)) continue;
             if (!AllRulesCrossed(workflow, trigger)) continue;
+            if (IsRepeatedPlate(workflow, trigger)) continue;
 
             // Tiempo mínimo entre ejecuciones (anti-avalancha). Solo se
             // CONSULTA aquí: se consume al ejecutar de verdad, más abajo. Si
@@ -312,6 +320,37 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
         _logger.LogInformation(
             "Automatización '{Name}': línea {Rule} cruzada; faltan {Missing} dentro de {Seconds} s.",
             workflow.Name, ruleId, string.Join(", ", ordered.Where(r => !hits.ContainsKey(r))), (int)window.TotalSeconds);
+        return false;
+    }
+
+    /// <summary>Última vez que cada patente disparó cada automatización: (workflow, patente) → hora UTC.</summary>
+    private readonly ConcurrentDictionary<(int Workflow, string Plate), DateTime> _plateHits = new();
+
+    /// <summary>
+    /// «No repetir la misma patente en N s»: la cámara suele informar varias
+    /// veces el mismo vehículo (y la de salida puede ver al que recién entró).
+    /// La ventana es por automatización y patente, así que el auto de atrás,
+    /// con otra patente, sí pasa. La primera lectura cuenta aunque después las
+    /// condiciones «en vivo» la descarten. Solo lo llama el despachador (un hilo).
+    /// </summary>
+    private bool IsRepeatedPlate(Workflow workflow, WorkflowTrigger trigger)
+    {
+        var conditions = WorkflowJson.Conditions(workflow.ConditionsJson);
+        if (conditions.SamePlateSeconds is not > 0 || trigger.Plate is not { Length: > 0 } plate) return false;
+        var now = DateTime.UtcNow;
+        var window = TimeSpan.FromSeconds(conditions.SamePlateSeconds.Value);
+        var key = (workflow.Id, VehicleRegistry.Normalize(plate));
+        if (_plateHits.TryGetValue(key, out var last) && now - last < window)
+        {
+            _logger.LogInformation("Automatización '{Name}' omitida: la patente {Plate} ya la disparó hace {Seconds} s.",
+                workflow.Name, plate, (int)(now - last).TotalSeconds);
+            return true;
+        }
+        _plateHits[key] = now;
+        // Limpieza perezosa: no dejar crecer el diccionario con patentes de paso.
+        if (_plateHits.Count > 2000)
+            foreach (var stale in _plateHits.Where(h => now - h.Value > TimeSpan.FromHours(1)).Select(h => h.Key).ToList())
+                _plateHits.TryRemove(stale, out _);
         return false;
     }
 
@@ -461,6 +500,11 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
             if (mode == "listed" && !inList) return false;
             if (mode == "unlisted" && inList) return false;
         }
+        // Padrón de vehículos: el estado lo resolvió quien armó el disparo.
+        if (Has(conditions.PlateStatuses) &&
+            (trigger.PlateStatus is null ||
+             !conditions.PlateStatuses!.Any(s => string.Equals(s, trigger.PlateStatus, StringComparison.OrdinalIgnoreCase))))
+            return false;
 
         // --- Control de acceso ---
         if (Has(conditions.AccessKinds) && (trigger.AccessKind is null || !conditions.AccessKinds!.Contains(trigger.AccessKind.Value)))
@@ -506,6 +550,11 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
     /// </summary>
     private static bool InSchedule(WorkflowConditionsDto conditions, DateTime localTime)
     {
+        // Feriado del calendario único: fuera, aunque la franja se cumpla. Se
+        // mira el día de la hora del evento (una franja nocturna que empezó
+        // el día anterior también queda fuera si hoy es feriado).
+        if (conditions.ExcludeHolidays == true && HolidayCalendar.Current?.IsHoliday(DateOnly.FromDateTime(localTime)) == true)
+            return false;
         bool anyBand = false;
         if (Has(conditions.DaysOfWeek) || !string.IsNullOrWhiteSpace(conditions.FromTime) || !string.IsNullOrWhiteSpace(conditions.ToTime))
         {
@@ -735,7 +784,8 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
     /// Hace lo mismo que haría en producción: manda el correo, sube el
     /// archivo, abre la puerta y suena el parlante de verdad.
     /// </summary>
-    public async Task<WorkflowRunDto?> TestAsync(int workflowId, string startedBy, CancellationToken ct)
+    /// <param name="plate">Disparador de patente: la patente con que se prueba (se busca en el padrón).</param>
+    public async Task<WorkflowRunDto?> TestAsync(int workflowId, string startedBy, CancellationToken ct, string? plate = null)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
@@ -786,8 +836,27 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
         if (ioModule is not null && inputKey is { } chosen && int.TryParse(chosen[1], out int inputNumber))
             ioModule.Points = ioModule.Points.Where(p => p.Kind != IoPointKind.Input || p.Number == inputNumber).ToList();
 
-        return await ExecuteWorkflowAsync(workflow,
-            WorkflowTrigger.Sample(workflow, panel, device, channel, accessDevice, door, ioModule), startedBy, ct);
+        var sample = WorkflowTrigger.Sample(workflow, panel, device, channel, accessDevice, door, ioModule);
+        // Patente: con una patente indicada se prueba como si la cámara la
+        // hubiera leído (estado real del padrón); sin ella, el ejemplo pasa
+        // como autorizada para recorrer el camino de apertura.
+        if (workflow.TriggerType == WorkflowTriggerTypes.PlateRecognized)
+        {
+            string number = VehicleRegistry.Normalize(plate) is { Length: > 0 } typed ? typed : "ABCD12";
+            var match = plate is { Length: > 0 }
+                ? await _services.GetRequiredService<VehicleRegistry>().ResolveAsync(number, ct)
+                : new VehicleRegistry.Match(PlateRegistryStatuses.Authorized, "Ejemplo de la prueba manual.",
+                    VehicleLabel: "Vehículo de prueba", PersonName: "Persona de prueba", EmployeeNo: "1001");
+            var evt = new PlateEvent
+            {
+                DeviceId = device?.Id ?? 0, ChannelNumber = channel?.ChannelNumber ?? 1, PlateNumber = number,
+                CapturedAt = DateTime.Now, ReceivedAt = DateTime.UtcNow, Confidence = 95, VehicleType = "Automóvil",
+            };
+            sample = WorkflowTrigger.FromPlate(evt, device?.Name ?? "Equipo de prueba", channel?.Name ?? "Cámara de prueba",
+                channel?.Id, registry: match) with
+            { Summary = $"Prueba manual · patente {number} ({PlateRegistryStatuses.Label(match.Status).ToLowerInvariant()})" };
+        }
+        return await ExecuteWorkflowAsync(workflow, sample, startedBy, ct);
     }
 
     /// <summary>Lo que se acumula mientras se recorre el diagrama de una ejecución.</summary>

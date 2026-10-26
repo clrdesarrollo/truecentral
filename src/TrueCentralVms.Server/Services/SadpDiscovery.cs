@@ -121,7 +121,7 @@ public static class SadpDiscovery
                 found[device.Mac.Length > 0 ? device.Mac : device.Ip] = device;
         }
 
-        logger?.LogInformation("SADP: {Count} equipo(s) en {Window}s", found.Count, window.TotalSeconds);
+        logger?.LogInformation("Búsqueda Hikvision: {Count} equipo(s) en {Window}s", found.Count, window.TotalSeconds);
         return found.Values.OrderBy(d => d.Ip, StringComparer.OrdinalIgnoreCase).ToList();
     }
 

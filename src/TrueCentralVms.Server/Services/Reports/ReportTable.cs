@@ -84,8 +84,8 @@ public sealed record ReportTable(
 
     /// <summary>Tono con que se pinta un resultado (verde, rojo, ámbar o nada).</summary>
     public static ReportTone ToneOf(string text) =>
-        text.StartsWith("Acceso concedido") || text is "Cumplida" or "A tiempo" or "Marcado" ? ReportTone.Good
-        : text.StartsWith("Acceso denegado") || text.StartsWith("Alarma")
+        text.StartsWith("Acceso concedido") || text.StartsWith("Apertura automática") || text is "Cumplida" or "A tiempo" or "Marcado" ? ReportTone.Good
+        : text.StartsWith("Acceso denegado") || text.StartsWith("Alarma") || text.StartsWith("Rechazado") || text.StartsWith("Falló")
           || text is "No iniciada" or "Incompleta" or "Sin terminar" or "No marcado" ? ReportTone.Bad
         : text is "Tarde" or "Temprano" or "Fuera de orden" ? ReportTone.Warn
         : ReportTone.None;

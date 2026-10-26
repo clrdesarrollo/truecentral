@@ -49,6 +49,13 @@ public sealed record WorkflowTrigger(
     // --- Patentes ---
     string? Plate = null,
     int? Confidence = null,
+    /// <summary>Estado de la patente en el padrón de vehículos (<see cref="PlateRegistryStatuses"/>).</summary>
+    string? PlateStatus = null,
+    /// <summary>Lectura ANPR que originó el disparo.</summary>
+    long? PlateEventId = null,
+    /// <summary>Vehículo del padrón y su persona, si la patente está registrada.</summary>
+    int? AccessVehicleId = null,
+    int? AccessPersonId = null,
     // --- Control de acceso ---
     AccessEventKind? AccessKind = null,
     AccessCredentialKind? Credential = null,
@@ -317,12 +324,19 @@ public sealed record WorkflowTrigger(
 
     /// <param name="sceneImage">Escena que mandó la cámara con la lectura (la foto principal del evento).</param>
     /// <param name="plateImage">Recorte de la patente, si la cámara lo mandó.</param>
+    /// <param name="registry">La patente frente al padrón de vehículos (null = no se consultó).</param>
     public static WorkflowTrigger FromPlate(PlateEvent evt, string deviceName, string channelName, int? channelId,
-        byte[]? sceneImage = null, byte[]? plateImage = null)
+        byte[]? sceneImage = null, byte[]? plateImage = null, VehicleRegistry.Match? registry = null)
     {
         var local = DateTime.Now;
         var fields = NewFields(local);
         fields["patente"] = evt.PlateNumber;
+        fields["padron"] = PlateRegistryStatuses.Label(registry?.Status);
+        fields["motivopadron"] = registry?.Reason ?? "";
+        fields["persona"] = registry?.PersonName ?? "";
+        fields["empleado"] = registry?.EmployeeNo ?? "";
+        fields["departamento"] = registry?.Department ?? "";
+        fields["vehiculo"] = registry?.VehicleLabel ?? "";
         fields["confianza"] = evt.Confidence >= 0 ? evt.Confidence.ToString() : "";
         fields["equipo"] = deviceName;
         fields["equipoid"] = evt.DeviceId.ToString();
@@ -349,6 +363,8 @@ public sealed record WorkflowTrigger(
             Severity: AlarmSeverity.Info, Text: fields["evento"],
             DeviceKind: "video", DeviceId: evt.DeviceId, ChannelId: channelId,
             Plate: evt.PlateNumber, Confidence: evt.Confidence >= 0 ? evt.Confidence : null,
+            PlateStatus: registry?.Status, PlateEventId: evt.Id > 0 ? evt.Id : null,
+            AccessVehicleId: registry?.VehicleId, AccessPersonId: registry?.PersonId,
             Image: sceneImage, PlateImage: plateImage);
     }
 

@@ -96,7 +96,7 @@ internal static class FpModuleSdk
     public static string DescribeError(int code) => code switch
     {
         FP_SUCCESS => "Operación correcta.",
-        FP_CONNECTION_ERR => "No se pudo comunicar con el lector: revise que esté conectado por USB y que ningún otro programa (SADP, iVMS, otra pestaña) lo tenga tomado.",
+        FP_CONNECTION_ERR => "No se pudo comunicar con el lector: revise que esté conectado por USB y que ningún otro programa (iVMS, otra pestaña) lo tenga tomado.",
         FP_TIMEOUT => "Se agotó el tiempo de espera: no se apoyó el dedo a tiempo.",
         FP_ENROLL_FAIL => "No se pudo generar la plantilla: limpie el sensor y repita apoyando bien el mismo dedo.",
         FP_PARAM_ERR => "Parámetro inválido en la llamada al SDK.",

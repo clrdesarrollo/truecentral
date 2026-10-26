@@ -149,7 +149,8 @@ function maintDraw() {
         <div class="card-label">Cómo deben estar</div>
         <div class="card-value small">${p.timeZoneId ? esc(p.timeZoneName) : "La zona del servidor"}</div>
         <div class="muted" style="font-size:12px">${maintZoneHtml(p.zoneDescription)} · ${p.mode === "Ntp"
-          ? `hora por NTP de ${esc(p.ntpServer ?? "")}` : "hora del servidor"}</div>
+          ? (p.ntpFromServer ? `hora por NTP de este servidor (<a href="#/time">Hora (NTP)</a>)` : `hora por NTP de ${esc(p.ntpServer ?? "")}`)
+          : "hora del servidor"}</div>
       </div>
       <div class="card">
         <div class="card-label">Supervisión</div>
@@ -273,7 +274,7 @@ async function maintSyncSelected(button) {
   const aviso = [
     `¿Poner en hora ${picked.length ? `${targets.length} equipo(s) elegido(s)` : `los ${targets.length} equipos en línea`}?`,
     "",
-    `Quedan en ${p.zoneDescription}, ${p.mode === "Ntp" ? `tomando la hora de ${p.ntpServer}` : "con la hora del servidor"}.`,
+    `Quedan en ${p.zoneDescription}, ${p.mode === "Ntp" ? `tomando la hora de ${p.ntpFromServer ? "este servidor por NTP" : p.ntpServer}` : "con la hora del servidor"}.`,
   ].join("\n");
   if (!confirm(aviso)) return;
 
@@ -420,10 +421,14 @@ async function maintPolicyModal() {
       <label>Origen de la hora</label>
       <label class="checkbox-row"><input type="radio" name="mp-mode" value="Manual" ${p.mode !== "Ntp" ? "checked" : ""}>
         La del servidor: el VMS los pone en hora</label>
-      <label class="checkbox-row"><input type="radio" name="mp-mode" value="Ntp" ${p.mode === "Ntp" ? "checked" : ""}>
-        Un servidor NTP <span class="muted">(los equipos que no saben NTP reciben la hora del servidor)</span></label>
+      <label class="checkbox-row"><input type="radio" name="mp-mode" value="Server" ${p.mode === "Ntp" && p.ntpFromServer ? "checked" : ""}>
+        Este servidor, por NTP <span class="muted">(recomendado: la misma hora que guarda la base; ver
+        <a href="#/time">Sistema → Red → Hora (NTP)</a>)</span></label>
+      <label class="checkbox-row"><input type="radio" name="mp-mode" value="Ntp" ${p.mode === "Ntp" && !p.ntpFromServer ? "checked" : ""}>
+        Otro servidor NTP</label>
+      <div class="muted" style="font-size:12px;margin-left:24px">Con NTP, los equipos que no lo saben usar reciben la hora del servidor.</div>
       <div class="form-grid" style="margin-left:24px">
-        <div class="field"><label>Servidor NTP</label><input id="mp-ntp" value="${esc(p.ntpServer ?? "")}" placeholder="pool.ntp.org o 192.168.1.10"></div>
+        <div class="field"><label>Otro servidor NTP</label><input id="mp-ntp" value="${esc(p.ntpServer ?? "")}" placeholder="pool.ntp.org o 192.168.1.10"></div>
         <div class="field"><label>Sincronizar cada (minutos)</label><input id="mp-ntp-every" type="number" min="1" max="10080" value="${p.ntpIntervalMinutes}"></div>
       </div>
     </div>
@@ -443,10 +448,13 @@ async function maintPolicyModal() {
 
   $("#mp-cancel").addEventListener("click", closeModal);
   $("#mp-save").addEventListener("click", async () => {
+    const source = document.querySelector('input[name="mp-mode"]:checked').value;
     const body = {
       timeZoneId: $("#mp-zone").value || null,
-      mode: document.querySelector('input[name="mp-mode"]:checked').value,
+      mode: source === "Manual" ? "Manual" : "Ntp",
+      ntpFromServer: source === "Server",
       ntpServer: $("#mp-ntp").value.trim() || null,
+
       ntpIntervalMinutes: Number($("#mp-ntp-every").value),
       autoCorrect: $("#mp-auto").checked,
       thresholdSeconds: Number($("#mp-threshold").value),

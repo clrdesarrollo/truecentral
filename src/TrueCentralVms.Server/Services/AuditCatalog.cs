@@ -143,8 +143,17 @@ public static class AuditCatalog
         [
             new("source-enabled", "Fuente de patentes activada"),
             new("source-disabled", "Fuente de patentes desactivada"),
-            new("event-deleted", "Reconocimiento eliminado"),
+            new("event-deleted", "Reconocimiento eliminado"), // ya no se puede borrar a mano: queda por los registros antiguos
+            new("event-exported", "Reconocimiento descargado"),
             new("search", "Búsqueda en el historial"),
+        ]),
+        new("vehicles", "Acceso vehicular",
+        [
+            new("vehicle-created", "Vehículo agregado al padrón"),
+            new("vehicle-updated", "Vehículo modificado"),
+            new("vehicle-deleted", "Vehículo eliminado del padrón"),
+            new("records-search", "Consulta del registro de accesos vehiculares"),
+            new("report-exported", "Registro de accesos vehiculares exportado"),
         ]),
         new("cerco", "Paneles de cerco eléctrico",
         [
@@ -444,10 +453,22 @@ public static class AuditCatalog
             new("backup-password-changed", "Contraseña de respaldo definida o cambiada"),
             new("backup-restored", "Instalación restaurada desde un respaldo"),
         ]),
+        new("time", "Hora oficial (NTP)",
+        [
+            new("time-settings-changed", "Ajustes de la hora oficial cambiados (fuentes, reloj, servidor NTP)"),
+            new("time-sync-requested", "Consulta de la hora oficial pedida a mano"),
+            new("time-sync-failed", "Hora oficial no disponible (ninguna fuente respondió o no coinciden)"),
+            new("time-sync-restored", "Hora oficial disponible de nuevo"),
+            new("time-clock-stepped", "Reloj del servidor corregido (o intento fallido)"),
+            new("time-server-failed", "Servidor NTP sin poder atender (puerto ocupado)"),
+            new("time-windows-time-disabled", "Servicio Hora de Windows detenido y deshabilitado"),
+        ]),
         new("system", "Sistema",
         [
+
             new("server-started", "Servidor iniciado"),
             new("server-stopped", "Servidor detenido"),
+            new("server-unexpected-stop", "Apagado inesperado del servidor (corte de luz, reinicio forzado, proceso matado o caído)"),
             new("audit-purged", "Bitácora purgada por retención"),
             new("audit-exported", "Bitácora exportada a CSV"),
             new("service-started", "Servicio iniciado"),

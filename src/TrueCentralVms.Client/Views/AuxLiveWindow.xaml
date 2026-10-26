@@ -298,7 +298,7 @@
                         <TextBlock Text="División:" VerticalAlignment="Center" Margin="0,0,8,0"
                                    Foreground="{StaticResource MutedBrush}"/>
                         <ToggleButton x:Name="LayoutPickerToggle" Style="{StaticResource GhostToggle}" Margin="0,0,6,0"
-                                      ToolTip="{Binding CurrentLayout.Key}">
+                                      ToolTip="{Binding CurrentLayout.Label}">
                             <StackPanel Orientation="Horizontal">
                                 <ItemsControl ItemsSource="{Binding CurrentLayout.Cells}" Width="24" Height="17"
                                               IsHitTestVisible="False" ItemTemplate="{StaticResource LayoutPreview}"
@@ -353,6 +353,16 @@
                                 <TextBlock Text="Zoom" Margin="6,0,0,0" VerticalAlignment="Center"/>
                             </StackPanel>
                         </ToggleButton>
+                        <!-- Unir cuadros: arrastrar de un cuadro a otro los une en uno; clic en uno unido lo separa -->
+                        <ToggleButton Style="{StaticResource GhostToggle}" Padding="10,5" Margin="0,0,6,0"
+                                      IsChecked="{Binding IsMergeMode, Mode=TwoWay}" Unchecked="OnMergeModeOff"
+                                      ToolTip="Unir cuadros: arrastre de un cuadro a otro para unir el rectángulo en uno solo; un clic en un cuadro unido lo separa">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE80A;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="Unir" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
                         <Button Content="Limpiar todo" Style="{StaticResource GhostButton}" Padding="12,5"
                                 Command="{Binding ClearAllCommand}"/>
                         <StackPanel Orientation="Horizontal" Margin="16,0,0,0"
@@ -368,25 +378,32 @@
             </Border>
 
             <!-- Grilla de video (mismo template de cuadro que la Vista en Vivo) -->
-            <ItemsControl ItemsSource="{Binding Cells}" Margin="4">
+            <!-- Ampliar la grilla: una cámara llevada a un borde abre ahí la franja
+                 nueva (la dibuja GridGrowOverlay, encima de la grilla y fuera del video). -->
+            <Grid x:Name="GridHost" Background="Transparent" AllowDrop="True"
+                  DragOver="OnGridHostDragOver" DragLeave="OnGridHostDragLeave" Drop="OnGridHostDrop">
+            <ItemsControl ItemsSource="{Binding Cells}" Margin="1">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
                         <views:VideoLayoutPanel Layout="{Binding CurrentLayout}"
-                                                MaximizedIndex="{Binding MaximizedIndex}"/>
+                                                MaximizedIndex="{Binding MaximizedIndex}"
+                                                Loaded="OnGridPanelLoaded"/>
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type vm:VideoCellViewModel}">
                         <!-- El video de FlyleafLib vive en ventanas nativas superpuestas:
                              los clics sobre el video no llegan a WPF (ver code-behind). -->
-                        <Border Margin="3" Background="{StaticResource CellBgBrush}" CornerRadius="4"
-                                BorderThickness="2" MouseLeftButtonDown="OnCellClick"
+                        <Border Margin="0.5" Background="{StaticResource CellBgBrush}" CornerRadius="2"
+                                MouseLeftButtonDown="OnCellClick"
                                 MouseMove="OnCellMouseMove"
                                 AllowDrop="True" Drop="OnCellDrop"
                                 DragOver="OnCellDragOver" DragLeave="OnCellDragLeave">
                             <Border.Style>
                                 <Style TargetType="Border">
                                     <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+                                    <!-- En el estilo y no en el elemento: la selección de «Unir» lo engruesa -->
+                                    <Setter Property="BorderThickness" Value="1"/>
                                     <Style.Triggers>
                                         <DataTrigger Value="True">
                                             <DataTrigger.Binding>
@@ -405,6 +422,15 @@
                                                 </MultiBinding>
                                             </DataTrigger.Binding>
                                             <Setter Property="BorderBrush" Value="#FCD34D"/>
+                                        </DataTrigger>
+                                        <!-- Selección de «Unir cuadros»: se une (acento) o la selección lo corta (rojo) -->
+                                        <DataTrigger Binding="{Binding MergeMark}" Value="1">
+                                            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            <Setter Property="BorderThickness" Value="2"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding MergeMark}" Value="2">
+                                            <Setter Property="BorderBrush" Value="{StaticResource DangerBrush}"/>
+                                            <Setter Property="BorderThickness" Value="2"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -545,6 +571,8 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <Canvas x:Name="GridGrowOverlay" ClipToBounds="True"/>
+            </Grid>
         </DockPanel>
 
         <!-- ===== Barra de estado (oculta en pantalla completa) ===== -->

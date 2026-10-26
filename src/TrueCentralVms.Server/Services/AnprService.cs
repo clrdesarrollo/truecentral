@@ -30,6 +30,7 @@ public sealed class AnprService(
     DriverRegistry drivers,
     CredentialProtector credentials,
     AnprStore store,
+    VehicleRegistry registry,
     ScopedHub hub,
     IConfiguration config,
     ILogger<AnprService> logger) : SupervisedBackgroundService
@@ -304,12 +305,14 @@ public sealed class AnprService(
         logger.LogInformation("Patente {Plate} reconocida en '{Device}' ({Confidence}%).",
             entity.PlateNumber, device.Name, entity.Confidence);
 
-        // Automatizaciones ("patente de la lista → abrir el portón"). Las fotos
+        // Automatizaciones ("patente del padrón → abrir el portón"). Las fotos
         // de la lectura viajan con el disparo: la alerta, el correo y el FTP
-        // las llevan sin tener que capturar otra del canal.
+        // las llevan sin tener que capturar otra del canal. El padrón se
+        // consulta acá, una vez por lectura, y el resultado viaja con el disparo.
+        var match = await registry.ResolveAsync(entity.PlateNumber, ct);
         scope.ServiceProvider.GetRequiredService<Workflows.WorkflowEngine>().Publish(
             Workflows.WorkflowTrigger.FromPlate(entity, device.Name, channel?.Name ?? $"Canal {entity.ChannelNumber}", channel?.Id,
-                plate.SceneImage, plateImage));
+                plate.SceneImage, plateImage, match));
     }
 
     /// <summary>Recorta al largo de la columna: un firmware raro no debe reventar el insert.</summary>
@@ -327,6 +330,7 @@ public sealed class AnprService(
             try
             {
                 await PurgeAsync(ct);
+                await PurgeVehicleAccessAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception ex)
@@ -374,5 +378,28 @@ public sealed class AnprService(
         await db.SaveChangesAsync(ct);
         store.PruneEmptyDirectories();
         logger.LogInformation("Purga de patentes: {Count} reconocimiento(s) eliminado(s).", doomed.Count);
+    }
+
+    /// <summary>
+    /// El registro de accesos vehiculares tiene su propia retención (por
+    /// omisión dos años): es la base de los reportes de ingresos y salidas y
+    /// dura mucho más que las lecturas crudas. 0 = no se purga.
+    /// </summary>
+    private async Task PurgeVehicleAccessAsync(CancellationToken ct)
+    {
+        int retentionDays = config.GetValue("Anpr:VehicleAccessRetentionDays", 730);
+        if (retentionDays <= 0) return;
+        var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+        var doomed = await db.VehicleAccessRecords.Where(r => r.At < cutoff).Take(20_000).ToListAsync(ct);
+        if (doomed.Count == 0) return;
+        store.Delete(doomed.Select(r => r.PlateImagePath));
+        db.VehicleAccessRecords.RemoveRange(doomed);
+        await db.SaveChangesAsync(ct);
+        store.PruneEmptyDirectories();
+        logger.LogInformation("Purga de accesos vehiculares: {Count} registro(s) de más de {Days} días eliminado(s).",
+            doomed.Count, retentionDays);
     }
 }

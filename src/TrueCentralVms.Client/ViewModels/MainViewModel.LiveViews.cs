@@ -74,7 +74,7 @@ public partial class MainViewModel
             ? $" · compartida por {view.Owner}"
             : view.Shared ? " · compartida" : "";
         return new SavedViewItem(view.Id, view.Name,
-            $"{view.Items.Count} cámara(s) · división {VideoLayout.Find(view.LayoutName)?.Key ?? view.LayoutName}{owner}",
+            $"{view.Items.Count} cámara(s) · división {VideoLayout.Find(view.LayoutName)?.Label ?? view.LayoutName}{owner}",
             view.Shared, view.CanEdit && CanSaveViews);
     }
 

@@ -24,6 +24,14 @@ if (args.Length > 0 && args[0] == LicenseCatalogExport.Argument)
     return;
 }
 
+// Proceso aparte de un respaldo: lo lanza el propio servidor y recibe el trabajo
+// por la entrada estándar. No levanta nada más (ver BackupWorker).
+if (TrueCentralVms.Server.Services.Backup.BackupWorker.IsRequested(args))
+{
+    Environment.ExitCode = await TrueCentralVms.Server.Services.Backup.BackupWorker.RunChildAsync();
+    return;
+}
+
 // El servidor corre igual como consola (desarrollo) o como servicio de Windows
 // (instalado). Como servicio, el directorio de trabajo inicial es System32, así
 // que el content root debe apuntar a la carpeta del ejecutable (appsettings,
@@ -35,10 +43,12 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 builder.Host.UseWindowsService(o => o.ServiceName = ServiceSupervisor.WindowsServiceName);
 // Como servicio, conectarse con Windows antes del arranque pesado (base, certificado,
-// respaldo y migraciones): Windows da solo 30 s (ver EarlyServiceLifetime).
+// respaldo y migraciones): Windows da solo 30 s (ver EarlyServiceLifetime). Si el
+// servidor se detiene sin que Windows lo pida, sale con código de error para que el
+// SCM lo vuelva a levantar (ver ScmAwareServiceLifetime).
 if (WindowsServiceHelpers.IsWindowsService())
 {
-    builder.Services.AddSingleton<WindowsServiceLifetime>();
+    builder.Services.AddSingleton<WindowsServiceLifetime, ScmAwareServiceLifetime>();
     builder.Services.AddSingleton<IHostLifetime, EarlyServiceLifetime>();
 }
 // El apagado ordenado incluye detener PostgreSQL embebido (pg_ctl stop): darle
@@ -71,6 +81,7 @@ if (TrueCentralVms.Server.Services.Backup.BackupRestore.IsRequested(args))
     return;
 }
 builder.Services.AddSingleton(postgres);
+builder.Services.AddSingleton<RunJournal>();
 var protector = new CredentialProtector(postgres);
 builder.Services.AddSingleton(protector);
 
@@ -152,6 +163,8 @@ builder.Services.AddScoped<WallService>();
 // canal de eventos ANPR de cada equipo marcado como fuente y guarda las fotos
 // en disco (la base solo lleva la ruta).
 builder.Services.AddSingleton<AnprStore>();
+builder.Services.AddSingleton<VehicleRegistry>();
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Workflows.HolidayCalendar>();
 builder.Services.AddSingleton<AnprService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprService>());
 
@@ -189,6 +202,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessEventService
 // Hora de los equipos: revisa su reloj y su zona, y los pone en hora solos.
 builder.Services.AddSingleton<DeviceClockService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceClockService>());
+// Hora oficial: toma la hora de las fuentes NTP, corrige el reloj de Windows y
+// se la da a los equipos como servidor NTP (UDP 123).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Time.TimeService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Time.TimeService>());
 
 // Parlantes IP: drivers, registro y servicio (sondeo de estado, reproducción sincronizada, voz en vivo).
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
@@ -250,6 +267,7 @@ builder.Services.AddSingleton<IWorkflowActionExecutor, DoorAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, PanelAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, TrueCentralVms.Server.Services.Workflows.Actions.PtzPresetAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, RelayAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, VehicleAccessAction>();
 // Pantallas de alarma de las casetas (Raspberry Pi): emparejamiento, hub propio,
 // entrega de los avisos de las automatizaciones y acuse sincronizado con la
 // ventana de alarma de los operadores. Va antes del motor: la acción de aviso
@@ -413,6 +431,17 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// Internet Explorer 11 y anteriores no corren el panel: se les muestra un aviso para usar Edge.
+app.Use(async (context, next) =>
+{
+    if (LegacyBrowserGate.IsLegacyPageRequest(context.Request))
+    {
+        await LegacyBrowserGate.WriteNoticeAsync(context.Response);
+        return;
+    }
+    await next();
+});
+
 app.UseCors();
 // WebSocket propio (fuera de SignalR) para la voz del operador hacia los parlantes.
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(15) });
@@ -547,6 +576,8 @@ app.MapSystemApi();
 app.MapBackupApi();
 app.MapCertificateApi();
 app.MapWanApi();
+app.MapTimeApi();
+
 app.MapLicenseApi();
 app.MapDecodersApi();
 app.MapWallsApi();
@@ -554,6 +585,7 @@ app.MapLiveViewsApi();
 app.MapLocationsApi();
 app.MapResourcesApi();
 app.MapAnprApi();
+app.MapVehicleAccessApi();
 app.MapAuditApi();
 app.MapAlarmsApi();
 app.MapIsupApi();
@@ -582,9 +614,23 @@ app.MapFallbackToFile("index.html");
 app.Logger.LogInformation("CLR TrueCentral VMS v{Version} escuchando en HTTPS :{Https}, HTTP :{Http} (solo equipos sin TLS) e interno 127.0.0.1:{Internal}.",
     serverVersion, webPorts.HttpsPort, webPorts.HttpPort > 0 ? webPorts.HttpPort : "cerrado", webPorts.InternalPort);
 
-// Evidencia de disponibilidad: cada arranque del servidor queda en la bitácora.
-await app.Services.GetRequiredService<AuditService>().LogSystemAsync("system", "server-started",
-    detail: $"Servidor CLR TrueCentral VMS v{serverVersion} iniciado.");
+// Evidencia de disponibilidad: cada arranque del servidor queda en la bitácora,
+// con cómo terminó la ejecución anterior. Si terminó de mala forma (corte de luz,
+// reinicio forzado del equipo, proceso matado o caído) va además como evento
+// propio y como error en el registro de eventos de Windows (ver RunJournal).
+var runJournal = app.Services.GetRequiredService<RunJournal>();
+var previousRun = runJournal.Start(serverVersion);
+var startupAudit = app.Services.GetRequiredService<AuditService>();
+if (previousRun is { Unexpected: true })
+{
+    app.Logger.LogError("{Detail}", previousRun.Detail);
+    await startupAudit.LogSystemAsync("system", "server-unexpected-stop", detail: previousRun.Detail,
+        success: false, data: previousRun.Data);
+}
+else if (previousRun is not null)
+    app.Logger.LogInformation("{Detail}", previousRun.Detail);
+await startupAudit.LogSystemAsync("system", "server-started",
+    detail: $"Servidor CLR TrueCentral VMS v{serverVersion} iniciado." + (previousRun is null ? "" : " " + previousRun.Detail));
 
 // ...y cada apagado ordenado, lo pida el Watchdog, services.msc o el propio
 // SCM al apagar el equipo. Va en ApplicationStopping y no en ApplicationStopped
@@ -592,11 +638,14 @@ await app.Services.GetRequiredService<AuditService>().LogSystemAsync("system", "
 // punto la base sigue viva para recibir el evento.
 app.Lifetime.ApplicationStopping.Register(() =>
 {
+    // Primero el archivo (no depende de la base): si el registro en la
+    // bitácora falla, la próxima ejecución igual sabe que esta terminó en orden.
+    string stopCause = runJournal.Stop();
     try
     {
         app.Services.GetRequiredService<AuditService>()
             .LogSystemAsync("system", "server-stopped",
-                detail: $"Servidor CLR TrueCentral VMS v{serverVersion} detenido.")
+                detail: $"Servidor CLR TrueCentral VMS v{serverVersion} detenido: {stopCause}.")
             .GetAwaiter().GetResult();
     }
     catch (Exception ex)

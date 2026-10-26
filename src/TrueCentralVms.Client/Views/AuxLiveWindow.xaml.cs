@@ -19,11 +19,21 @@ public partial class AuxLiveWindow : Window
 {
     public AuxScreenViewModel Vm { get; }
 
+    /// <summary>Ampliar la grilla soltando una cámara en un borde.</summary>
+    private readonly GridGrowController _grow;
+    /// <summary>Unir cuadros arrastrando de uno a otro (modo «Unir»).</summary>
+    private readonly CellMergeController _merge;
+    private VideoLayoutPanel? _gridPanel;
+
     public AuxLiveWindow(AuxScreenViewModel vm)
     {
         Vm = vm;
         DataContext = vm;
         InitializeComponent();
+        _grow = new GridGrowController(GridHost, GridGrowOverlay,
+            edge => Vm.GrowBlockedReason(edge), message => Vm.StatusMessage = message);
+        _merge = new CellMergeController(() => _gridPanel, (from, to) => Vm.PreviewMerge(from, to),
+            (from, to) => Vm.MergeCellsAsync(from, to), cell => Vm.SplitCellAsync(cell));
         vm.OwnerWindow = this;
         // Las capturas y cápsulas hechas aquí avisan en ESTE monitor.
         vm.MediaSaved += (title, glyph, path) =>
@@ -180,6 +190,12 @@ public partial class AuxLiveWindow : Window
     /// de video de Flyleaf, que se enganchan aparte).</summary>
     private void OnWindowKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.Escape && Vm.IsMergeMode)
+        {
+            Vm.IsMergeMode = false;
+            e.Handled = true;
+            return;
+        }
         if (e.Key != Key.Escape || !Vm.IsGridFullscreen) return;
         Vm.IsGridFullscreen = false;
         e.Handled = true;
@@ -302,8 +318,32 @@ public partial class AuxLiveWindow : Window
         if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _dragCandidate = null;
-        DragDrop.DoDragDrop(DeviceTree, new DataObject(typeof(ChannelNode), node), DragDropEffects.Copy);
+        try { DragDrop.DoDragDrop(DeviceTree, new DataObject(typeof(ChannelNode), node), DragDropEffects.Copy); }
+        finally { _grow.Cancel(); }
     }
+
+    private void OnGridPanelLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not VideoLayoutPanel panel) return;
+        _gridPanel = panel;
+        _grow.Attach(panel);
+    }
+
+    /// <summary>Apagar el modo «Unir» corta la selección en curso.</summary>
+    private void OnMergeModeOff(object sender, RoutedEventArgs e) => _merge.Cancel();
+
+    // La franja nueva y el margen del alejamiento son de la grilla, no de una celda.
+    private void OnGridHostDragOver(object sender, DragEventArgs e)
+    {
+        if (!_grow.Track(e, GridHost)) e.Effects = DragDropEffects.None;
+        Vm.DropTargetCell = null;
+        e.Handled = true;
+    }
+
+    private void OnGridHostDragLeave(object sender, DragEventArgs e) => _grow.Leave(e, GridHost);
+
+    private async void OnGridHostDrop(object sender, DragEventArgs e) =>
+        await _grow.TryDropAsync(e, Vm.GrowLayoutAsync);
 
     /// <summary>Elegir una división cierra el popup (el comando ya la aplicó).</summary>
     private void OnLayoutPicked(object sender, RoutedEventArgs e) => LayoutPickerToggle.IsChecked = false;
@@ -320,19 +360,26 @@ public partial class AuxLiveWindow : Window
 
     private void OnCellDragOver(object sender, DragEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell })
-            HandleCellDragOver(cell, e);
+        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell } element)
+            HandleCellDragOver(cell, e, element);
     }
 
     private void OnCellDragLeave(object sender, DragEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell })
-            HandleCellDragLeave(cell);
+        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell } element)
+            HandleCellDragLeave(cell, e, element);
     }
 
     private void OnCellClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: VideoCellViewModel cell } element) return;
+        // Modo «Unir»: el gesto marca los cuadros a unir (no selecciona ni maximiza).
+        if (Vm.IsMergeMode)
+        {
+            _merge.Start(cell);
+            e.Handled = true;
+            return;
+        }
         if (e.ClickCount == 2)
         {
             Vm.ToggleMaximize(cell);
@@ -378,21 +425,28 @@ public partial class AuxLiveWindow : Window
             ? ReferenceEquals(dragged, cell) ? DragDropEffects.None : DragDropEffects.Move
             : e.Data.GetDataPresent(typeof(ChannelNode)) ? DragDropEffects.Copy : DragDropEffects.None;
 
-    private void HandleCellDragOver(VideoCellViewModel cell, DragEventArgs e)
+    private void HandleCellDragOver(VideoCellViewModel cell, DragEventArgs e, Visual source)
     {
+        if (_grow.Track(e, source))
+        {
+            Vm.DropTargetCell = null;
+            return;
+        }
         e.Effects = CellDropEffect(e, cell);
         Vm.DropTargetCell = e.Effects == DragDropEffects.None ? null : cell;
         e.Handled = true;
     }
 
-    private void HandleCellDragLeave(VideoCellViewModel cell)
+    private void HandleCellDragLeave(VideoCellViewModel cell, DragEventArgs e, Visual source)
     {
         if (Vm.DropTargetCell == cell) Vm.DropTargetCell = null;
+        _grow.Leave(e, source);
     }
 
     private async Task HandleCellDropAsync(VideoCellViewModel cell, DragEventArgs e)
     {
         Vm.DropTargetCell = null;
+        if (await _grow.TryDropAsync(e, Vm.GrowLayoutAsync)) return;
         if (e.Data.GetData(typeof(VideoCellViewModel)) is VideoCellViewModel dragged)
         {
             e.Handled = true;
@@ -438,8 +492,11 @@ public partial class AuxLiveWindow : Window
         }));
 
     /// <summary>El botón de la barra enciende el modo zoom en todas las ventanas de video.</summary>
-    private void OnDigitalZoomToggled(object sender, RoutedEventArgs e) =>
+    private void OnDigitalZoomToggled(object sender, RoutedEventArgs e)
+    {
+        if (Vm.IsDigitalZoomMode) Vm.IsMergeMode = false;
         _zoom.SetEnabled(Vm.IsDigitalZoomMode);
+    }
 
     private void HookVideoWindow(FlyleafLib.Controls.WPF.FlyleafHost host, Window? window)
     {
@@ -449,6 +506,11 @@ public partial class AuxLiveWindow : Window
         {
             if (_zoom.IsEnabled) return;
             if (host.DataContext is not VideoCellViewModel cell) return;
+            if (Vm.IsMergeMode)
+            {
+                _merge.Start(cell);
+                return;
+            }
             if (e.ClickCount == 2)
             {
                 Vm.ToggleMaximize(cell);
@@ -459,17 +521,17 @@ public partial class AuxLiveWindow : Window
         }), handledEventsToo: true);
         window.AddHandler(MouseMoveEvent, new MouseEventHandler((_, e) =>
         {
-            if (_zoom.IsEnabled) return;
+            if (_zoom.IsEnabled || Vm.IsMergeMode) return;
             TryStartCellDrag(window, e);
         }), handledEventsToo: true);
         window.AllowDrop = true;
         window.AddHandler(DragDrop.DragOverEvent, new DragEventHandler((_, e) =>
         {
-            if (host.DataContext is VideoCellViewModel cell) HandleCellDragOver(cell, e);
+            if (host.DataContext is VideoCellViewModel cell) HandleCellDragOver(cell, e, window);
         }), handledEventsToo: true);
         window.AddHandler(DragDrop.DragLeaveEvent, new DragEventHandler((_, e) =>
         {
-            if (host.DataContext is VideoCellViewModel cell) HandleCellDragLeave(cell);
+            if (host.DataContext is VideoCellViewModel cell) HandleCellDragLeave(cell, e, window);
         }), handledEventsToo: true);
         window.AddHandler(DragDrop.DropEvent, new DragEventHandler(async (_, e) =>
         {

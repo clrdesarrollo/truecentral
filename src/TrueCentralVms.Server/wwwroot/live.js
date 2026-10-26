@@ -123,8 +123,156 @@ const LV_LEGACY_KEYS = { "6": "6 con principal", "8": "8 con principal", "13": "
 
 function lvFindLayout(key) {
   if (!key) return null;
+  if (key.startsWith("m")) {
+    const layout = lvDecodeLayout(key);
+    return layout && layout.cells.length <= LV_MAX_CELLS ? layout : null;
+  }
   key = LV_LEGACY_KEYS[key] ?? key;
   return LV_LAYOUTS.find((l) => l.key === key) ?? null;
+}
+
+/** Cómo se nombra la división en los textos (una ampliada dice de cuál salió). */
+function lvLayoutLabel(layout) { return layout.key.startsWith("m") ? `a medida ${layout.columns}×${layout.rows}` : layout.key; }
+
+// ---------------------------------------------------------------------------
+// Divisiones a medida (grilla ampliada o con cuadros unidos en el cliente):
+// misma clave compacta que VideoLayout.FromCells: "m" + columnas + filas + 2
+// caracteres por cada cuadro de más de una celda (columna, fila, ancho-1 y
+// alto-1 en 3 bits cada uno); las celdas libres son cuadros simples.
+// ---------------------------------------------------------------------------
+const LV_GROW_MAX_COLUMNS = 8, LV_GROW_MAX_ROWS = 8, LV_GROW_MAX_CELLS = 64;
+const LV_CUSTOM_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const LV_MAX_BIG_CELLS = 14;
+
+/** La división de esos cuadros: la del selector si coincide, "C×R" si es uniforme o una a medida (null si no cabe en la clave). */
+function lvFromCells(columns, rows, cells) {
+  cells.sort((a, b) => a.row - b.row || a.col - b.col);
+  const same = (l) => l.columns === columns && l.rows === rows && l.cells.length === cells.length &&
+    l.cells.every((c, i) => c.col === cells[i].col && c.row === cells[i].row && c.colSpan === cells[i].colSpan && c.rowSpan === cells[i].rowSpan);
+  const standard = LV_LAYOUTS.find(same);
+  if (standard) return standard;
+  const big = cells.filter((c) => c.colSpan > 1 || c.rowSpan > 1);
+  if (!big.length && cells.length === columns * rows) return lvGrid(columns, rows);
+  if (big.length > LV_MAX_BIG_CELLS || columns > 8 || rows > 8) return null;
+  const key = `m${columns}${rows}` + big.map((c) => {
+    const v = (c.col << 9) | (c.row << 6) | ((c.colSpan - 1) << 3) | (c.rowSpan - 1);
+    return LV_CUSTOM_ALPHABET[v >> 6] + LV_CUSTOM_ALPHABET[v & 63];
+  }).join("");
+  return { key, name: String(cells.length), columns, rows, cells };
+}
+
+/** Rearma una división a medida desde su clave (null si no es válida). */
+function lvDecodeLayout(key) {
+  if (key.length < 3 || (key.length - 3) % 2) return null;
+  const columns = Number(key[1]), rows = Number(key[2]);
+  if (!(columns >= 1 && columns <= 8 && rows >= 1 && rows <= 8)) return null;
+  const taken = new Set(), cells = [];
+  for (let i = 3; i < key.length; i += 2) {
+    const hi = LV_CUSTOM_ALPHABET.indexOf(key[i]), lo = LV_CUSTOM_ALPHABET.indexOf(key[i + 1]);
+    if (hi < 0 || lo < 0) return null;
+    const v = (hi << 6) | lo;
+    const c = lvCellRect((v >> 9) & 7, (v >> 6) & 7, ((v >> 3) & 7) + 1, (v & 7) + 1);
+    if (c.col + c.colSpan > columns || c.row + c.rowSpan > rows) return null;
+    for (let x = c.col; x < c.col + c.colSpan; x++)
+      for (let y = c.row; y < c.row + c.rowSpan; y++) {
+        if (taken.has(`${x},${y}`)) return null;
+        taken.add(`${x},${y}`);
+      }
+    cells.push(c);
+  }
+  for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) if (!taken.has(`${x},${y}`)) cells.push(lvCellRect(x, y));
+  return lvFromCells(columns, rows, cells);
+}
+
+// Ampliar la grilla: soltar una cámara en un borde agrega una franja (fila o
+// columna) de ese lado. Mismo algoritmo que el cliente (VideoLayout.Grow).
+const lvSideways = (edge) => edge === "left" || edge === "right";
+
+/** Por qué no se puede agregar una franja en ese borde (null = se puede). */
+function lvGrowBlocked(layout, edge, maxCells) {
+  const sideways = lvSideways(edge);
+  if (sideways && layout.columns >= LV_GROW_MAX_COLUMNS) return `La grilla ya tiene ${LV_GROW_MAX_COLUMNS} columnas, el máximo.`;
+  if (!sideways && layout.rows >= LV_GROW_MAX_ROWS) return `La grilla ya tiene ${LV_GROW_MAX_ROWS} filas, el máximo.`;
+  const count = layout.cells.length + (sideways ? layout.rows : layout.columns);
+  if (count > Math.min(maxCells, LV_GROW_MAX_CELLS))
+    return maxCells >= LV_MAX_CELLS
+      ? `El panel web muestra hasta ${LV_MAX_CELLS} cuadros; para una grilla más grande use el cliente de escritorio.`
+      : `Con ${count} cuadros la grilla superaría las ${maxCells} cámaras disponibles.`;
+  return null;
+}
+
+/**
+ * La división con una franja más en edge, o null si se pasa de los topes.
+ * placement[i] dice dónde queda el cuadro i actual y strip son los cuadros de
+ * la franja (de izquierda a derecha o de arriba abajo).
+ */
+function lvGrow(layout, edge, maxCells) {
+  if (lvGrowBlocked(layout, edge, maxCells)) return null;
+  const sideways = lvSideways(edge);
+  const columns = layout.columns + (sideways ? 1 : 0), rows = layout.rows + (sideways ? 0 : 1);
+  const dx = edge === "left" ? 1 : 0, dy = edge === "top" ? 1 : 0;
+  const all = layout.cells.map((c, i) => ({ cell: { ...c, col: c.col + dx, row: c.row + dy }, from: i }));
+  const stripLength = sideways ? layout.rows : layout.columns;
+  for (let k = 0; k < stripLength; k++)
+    all.push({
+      cell: sideways ? lvCellRect(edge === "left" ? 0 : layout.columns, k) : lvCellRect(k, edge === "top" ? 0 : layout.rows),
+      from: -1 - k,
+    });
+  all.sort((a, b) => a.cell.row - b.cell.row || a.cell.col - b.cell.col);
+  const placement = new Array(layout.cells.length), strip = new Array(stripLength);
+  all.forEach((x, i) => { if (x.from >= 0) placement[x.from] = i; else strip[-1 - x.from] = i; });
+
+  const grown = lvFromCells(columns, rows, all.map((x) => x.cell));
+  if (!grown) return null;
+  return { layout: grown, placement, strip };
+}
+
+// ---------------------------------------------------------------------------
+// Unir y separar cuadros (mismo algoritmo que VideoLayout.Merge/Split del
+// cliente): el rectángulo de un cuadro a otro se une en uno solo, siempre que
+// no corte a otro cuadro por la mitad (un cuadro grande que asoma, o una L).
+// ---------------------------------------------------------------------------
+const lvOverlaps = (a, b) => a.col < b.col + b.colSpan && b.col < a.col + a.colSpan && a.row < b.row + b.rowSpan && b.row < a.row + a.rowSpan;
+const lvContains = (o, i) => i.col >= o.col && i.row >= o.row && i.col + i.colSpan <= o.col + o.colSpan && i.row + i.rowSpan <= o.row + o.rowSpan;
+const lvSameCell = (a, b) => a.col === b.col && a.row === b.row && a.colSpan === b.colSpan && a.rowSpan === b.rowSpan;
+const lvIndexOfCell = (layout, cell) => layout.cells.findIndex((c) => lvSameCell(c, cell));
+
+/** Rectángulo de los cuadros a y b, los cuadros que quedan adentro y los que lo cortan. */
+function lvMergeSelection(layout, a, b) {
+  const x = layout.cells[a], y = layout.cells[b];
+  const col = Math.min(x.col, y.col), row = Math.min(x.row, y.row);
+  const rect = lvCellRect(col, row,
+    Math.max(x.col + x.colSpan, y.col + y.colSpan) - col, Math.max(x.row + x.rowSpan, y.row + y.rowSpan) - row);
+  const inside = [], cut = [];
+  layout.cells.forEach((c, i) => { if (lvContains(rect, c)) inside.push(i); else if (lvOverlaps(rect, c)) cut.push(i); });
+  return { rect, inside, cut };
+}
+
+/** Une los cuadros de a a b: { layout, placement, merged, inside } o { reason }. */
+function lvMerge(layout, a, b) {
+  const { rect, inside, cut } = lvMergeSelection(layout, a, b);
+  if (cut.length) return { reason: "La selección corta un cuadro por la mitad: tiene que formar un rectángulo completo." };
+  if (inside.length < 2) return { reason: "Arrastre hasta otro cuadro para unirlos." };
+  const merged = lvFromCells(layout.columns, layout.rows,
+    [...layout.cells.filter((_, i) => !inside.includes(i)).map((c) => ({ ...c })), rect]);
+  if (!merged) return { reason: `La grilla ya tiene ${LV_MAX_BIG_CELLS} cuadros unidos, el máximo.` };
+  const target = lvIndexOfCell(merged, rect);
+  return {
+    layout: merged, merged: target, inside,
+    placement: layout.cells.map((c, i) => (inside.includes(i) ? target : lvIndexOfCell(merged, c))),
+  };
+}
+
+/** Separa un cuadro unido en cuadros simples (null si ya es simple). */
+function lvSplit(layout, index) {
+  const big = layout.cells[index];
+  if (big.colSpan === 1 && big.rowSpan === 1) return null;
+  const cells = layout.cells.filter((_, i) => i !== index).map((c) => ({ ...c }));
+  for (let y = big.row; y < big.row + big.rowSpan; y++)
+    for (let x = big.col; x < big.col + big.colSpan; x++) cells.push(lvCellRect(x, y));
+  const split = lvFromCells(layout.columns, layout.rows, cells);
+  const placement = layout.cells.map((c, i) => lvIndexOfCell(split, i === index ? lvCellRect(big.col, big.row) : c));
+  return { layout: split, placement, first: placement[index] };
 }
 /**
  * División de una vista guardada: la del selector, o una grilla a medida del
@@ -259,10 +407,14 @@ const lv = {
   promoted: null,          // feed subido a principal por estar maximizado
   promotedChannel: null,
   zoomMode: false,
+  mergeMode: false,        // modo «Unir cuadros»
   search: "",
   selChannelId: null,
   dropCell: null,
-  bulk: null,              // texto de la apertura masiva en curso
+  grow: null,              // franja nueva a la vista al arrastrar al borde: { edge, slot, el, slots }
+  growBlockedShown: null,  // borde cuyo aviso de tope ya se mostró
+  growWired: false,
+  bulk: null,             // texto de la apertura masiva en curso
   views: [],
   activeView: "",
   ptzChain: Promise.resolve(),
@@ -1298,6 +1450,7 @@ async function renderLiveView(fleet = false) {
   lv.maximized = -1;
   lv.promoted = null;
   lv.zoomMode = false;
+  lv.mergeMode = false;
   lv.search = "";
   lv.activeView = "";
   $("#page-title").textContent = lv.fleet ? "Flota en vivo" : lv.aux ? `Pantalla auxiliar ${lv.aux}` : "Vista en vivo";
@@ -1372,6 +1525,7 @@ async function renderLiveView(fleet = false) {
               <div class="lv-pop lv-layout-pop" id="lv-layout-pop" hidden></div>
             </span>
             <button type="button" class="btn ghost lv-tb lv-toggle" id="lv-zoom-btn" title="Zoom digital: arrastre sobre el video para marcar el área a acercar (clic derecho vuelve a 1×). La rueda del mouse acerca en cualquier momento.">${lvSvg(LV_ICO.zoom, 14)}<span>Zoom</span></button>
+            <button type="button" class="btn ghost lv-tb lv-toggle" id="lv-merge-btn" title="Unir cuadros: arrastre de un cuadro a otro para unir el rectángulo en uno solo; un clic en un cuadro unido lo separa">${lvSvg(LV_ICO.views, 14)}<span>Unir</span></button>
             <button type="button" class="btn ghost lv-tb" id="lv-clear-all">Limpiar todo</button>
             <span class="lv-bulk" id="lv-bulk" hidden><i></i></span>
           </div>
@@ -1480,12 +1634,14 @@ function lvWirePage() {
   $("#lv-layout-btn").addEventListener("click", () => lvTogglePop("lv-layout-pop", lvRenderLayoutPop));
   $("#lv-zoom-btn").addEventListener("click", () => {
     lv.zoomMode = !lv.zoomMode;
+    if (lv.zoomMode && lv.mergeMode) lvSetMergeMode(false);
     $("#lv-zoom-btn").classList.toggle("on", lv.zoomMode);
     $("#lv-grid").classList.toggle("zoom-mode", lv.zoomMode);
     lvStatus(lv.zoomMode
       ? "Zoom digital: arrastre sobre el video para marcar el área a acercar; clic derecho vuelve a 1×."
       : "Zoom digital desactivado (la rueda del mouse sigue acercando; clic derecho vuelve a 1×).");
   });
+  $("#lv-merge-btn").addEventListener("click", () => lvSetMergeMode(!lv.mergeMode));
   $("#lv-clear-all").addEventListener("click", () => {
     lvForgetPromotion();
     lv.maximized = -1;
@@ -1622,7 +1778,7 @@ function lvRenderLayoutButton() {
   const btn = $("#lv-layout-btn");
   if (!btn || !l) return;
   btn.innerHTML = `${lvLayoutPreview(l, 22, 15)}<span>${esc(l.name)}</span><span class="lv-caret-down">▾</span>`;
-  btn.title = l.key;
+  btn.title = lvLayoutLabel(l);
 }
 
 function lvRenderLayoutPop() {
@@ -1738,6 +1894,215 @@ function lvApplyGridGeometry() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Ampliar la grilla arrastrando: una cámara del árbol llevada al borde de la
+// grilla muestra la franja nueva (sus cuadros, el de destino resaltado) y la
+// grilla se aleja un poco para dejarla ver; al soltar se agrega la franja con
+// la cámara en el cuadro marcado. Los cuadros que ya estaban conservan su
+// video (el <video> viaja al cuadro nuevo, no se reabre).
+// ---------------------------------------------------------------------------
+
+/** No más cuadros que cámaras en el árbol (las habilitadas por la licencia) ni que el tope web. */
+function lvGrowLimit() { return Math.min(LV_MAX_CELLS, Math.max(lv.cells.length, lv.channels.size)); }
+
+function lvIsChannelDrag(e) {
+  const types = e.dataTransfer?.types ?? [];
+  return types.includes("text/x-tcvms-channel") && !types.includes("text/x-tcvms-cell");
+}
+
+/** Borde bajo el puntero; con la franja abierta, todo su ancho la mantiene (no parpadea). */
+function lvGrowEdgeAt(e) {
+  const wrap = $("#lv-gridwrap");
+  if (!wrap || lv.maximized >= 0) return null;
+  const r = wrap.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (x < 0 || y < 0 || x > r.width || y > r.height) return null;
+  const strip = lv.grow?.el.getBoundingClientRect();
+  if (strip && ({
+    left: e.clientX <= strip.right, right: e.clientX >= strip.left,
+    top: e.clientY <= strip.bottom, bottom: e.clientY >= strip.top,
+  })[lv.grow.edge]) return lv.grow.edge;
+  const bandX = Math.min(Math.max(r.width * 0.06, 14), 48), bandY = Math.min(Math.max(r.height * 0.06, 14), 48);
+  let best = null, depth = 1;
+  for (const [edge, dist, band] of [["left", x, bandX], ["right", r.width - x, bandX], ["top", y, bandY], ["bottom", r.height - y, bandY]])
+    if (dist < band && dist / band < depth) { best = edge; depth = dist / band; }
+  return best;
+}
+
+/** Arrastre sobre la grilla: true si quedó (o sigue) la franja a la vista; el arrastre es de ella. */
+function lvGrowTrack(e) {
+  if (!lvIsChannelDrag(e) || !lv.layout) return false;
+  let edge = lvGrowEdgeAt(e);
+  const blocked = edge && lvGrowBlocked(lv.layout, edge, lvGrowLimit());
+  if (blocked) {
+    if (lv.growBlockedShown !== edge) lvStatus(blocked, true);
+    lv.growBlockedShown = edge;
+    edge = null;
+  } else if (!edge) lv.growBlockedShown = null;
+  if (!edge) { lvGrowEnd(); return false; }
+  if (lv.grow?.edge !== edge) lvGrowShow(edge);
+  const strip = lv.grow.el.getBoundingClientRect();
+  const count = lv.grow.slots.length;
+  const along = lvSideways(edge) ? (e.clientY - strip.top) / strip.height : (e.clientX - strip.left) / strip.width;
+  const slot = Math.min(Math.max(Math.floor(along * count), 0), count - 1);
+  if (slot !== lv.grow.slot) {
+    lv.grow.slot = slot;
+    lv.grow.slots.forEach((s, i) => s.classList.toggle("on", i === slot));
+  }
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+  if (lv.dropCell) { const prev = lv.dropCell; lv.dropCell = null; lvRenderCell(prev); }
+  return true;
+}
+
+/** Dibuja la grilla como quedaría: los cuadros corridos y la franja en la fila o columna nueva. */
+function lvGrowShow(edge) {
+  lvGrowEnd();
+  const grid = $("#lv-grid"), l = lv.layout;
+  const sideways = lvSideways(edge);
+  const columns = l.columns + (sideways ? 1 : 0), rows = l.rows + (sideways ? 0 : 1);
+  const dx = edge === "left" ? 1 : 0, dy = edge === "top" ? 1 : 0;
+  grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  lv.cells.forEach((c, i) => {
+    const r = l.cells[i];
+    c.el.style.gridColumn = `${r.col + 1 + dx} / span ${r.colSpan}`;
+    c.el.style.gridRow = `${r.row + 1 + dy} / span ${r.rowSpan}`;
+  });
+  const count = sideways ? l.rows : l.columns;
+  const el = document.createElement("div");
+  el.className = `lv-strip ${sideways ? "col" : "row"}`;
+  el.style.gridColumn = sideways ? `${edge === "left" ? 1 : columns} / span 1` : "1 / -1";
+  el.style.gridRow = sideways ? "1 / -1" : `${edge === "top" ? 1 : rows} / span 1`;
+  el.style.setProperty("--n", count);
+  el.innerHTML = Array.from({ length: count }, () => `
+    <i><span class="lv-strip-plus">+</span><b>${sideways ? "Columna nueva" : "Fila nueva"}</b><em>${l.columns}×${l.rows} → ${columns}×${rows}</em></i>`).join("");
+  grid.append(el);
+  grid.classList.add("growing");
+  lv.grow = { edge, slot: -1, el, slots: [...el.children] };
+}
+
+/** La franja se recoge (el arrastre salió del borde, terminó o se soltó). */
+function lvGrowEnd() {
+  if (!lv.grow) return;
+  lv.grow.el.remove();
+  lv.grow = null;
+  $("#lv-grid")?.classList.remove("growing");
+  lvApplyGridGeometry();
+}
+
+/** Soltar con la franja abierta: se agrega la franja y la cámara abre en el cuadro marcado. */
+function lvGrowDrop(e) {
+  if (!lv.grow) return false;
+  e.preventDefault();
+  const { edge } = lv.grow, slot = Math.max(lv.grow.slot, 0);
+  lvGrowEnd();
+  const ch = lv.channels.get(Number(e.dataTransfer.getData("text/x-tcvms-channel")));
+  const growth = ch && lvGrow(lv.layout, edge, lvGrowLimit());
+  if (!growth) return true;
+  // El video viaja: se sueltan todas las cámaras y cada una vuelve en su
+  // lugar nuevo, todo en el mismo turno (el <video> no alcanza a pausarse).
+  const feeds = lv.cells.map((c) => c.detach());
+  lvApplyLayout(growth.layout);
+  feeds.forEach((f, i) => { if (f) lv.cells[growth.placement[i]].attach(f); });
+  const cell = lv.cells[growth.strip[Math.min(slot, growth.strip.length - 1)]];
+  lvSelectCell(cell);
+  lvOpenInCell(ch, cell, lvDefaultProfile());
+  if (lvFindLayout(growth.layout.key)) { lv.prefs.layout = growth.layout.key; lvSavePrefs(); }
+  lvScheduleLastSave();
+  lvStatus(`${({ left: "Columna nueva a la izquierda", right: "Columna nueva a la derecha", top: "Fila nueva arriba", bottom: "Fila nueva abajo" })[edge]}: ` +
+    `la grilla pasa a ${growth.layout.columns}×${growth.layout.rows} (${growth.layout.cells.length} cuadros).`);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Modo «Unir» (botón de la barra; Esc termina): apretar en un cuadro y
+// arrastrar hasta otro dibuja el recuadro de lo que quedaría unido (acento, o
+// rojo si corta un cuadro); al soltar se une. Un clic en un cuadro unido lo
+// separa. Queda la cámara del cuadro de inicio (o la primera); las demás de la
+// selección se cierran.
+// ---------------------------------------------------------------------------
+function lvSetMergeMode(on) {
+  lv.mergeMode = on;
+  $("#lv-merge-btn")?.classList.toggle("on", on);
+  $("#lv-grid")?.classList.toggle("merge-mode", on);
+  if (on && lv.zoomMode) $("#lv-zoom-btn")?.click();
+  lvStatus(on
+    ? "Unir cuadros: arrastre de un cuadro a otro para unirlos en uno; clic en un cuadro unido lo separa. Esc termina."
+    : "Clic en la barra de un cuadro para seleccionarlo (borde azul); doble clic en un canal del árbol lo abre ahí.");
+}
+
+function lvMergeStart(cell, e) {
+  if (lv.maximized >= 0) { lvStatus("Restaure el cuadro maximizado para unir cuadros.", true); return; }
+  const from = lv.cells.indexOf(cell);
+  const band = document.createElement("div");
+  band.className = "lv-mergeband";
+  band.innerHTML = "<span></span>";
+  $("#lv-grid").append(band);
+  let to = from;
+  const draw = () => {
+    const { rect, inside, cut } = lvMergeSelection(lv.layout, from, to);
+    band.style.gridColumn = `${rect.col + 1} / span ${rect.colSpan}`;
+    band.style.gridRow = `${rect.row + 1} / span ${rect.rowSpan}`;
+    band.classList.toggle("bad", cut.length > 0);
+    band.firstChild.textContent = cut.length ? "Corta un cuadro: no se puede unir"
+      : inside.length < 2 ? "Arrastre hasta otro cuadro" : `Unir ${inside.length} cuadros`;
+    lv.cells.forEach((c, i) => {
+      c.el.classList.toggle("merge-in", inside.includes(i) && !cut.length);
+      c.el.classList.toggle("merge-cut", cut.includes(i) || (cut.length > 0 && inside.includes(i)));
+    });
+  };
+  const move = (ev) => {
+    const under = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.(".lv-cell")?._lvCell;
+    const index = under ? lv.cells.indexOf(under) : -1;
+    if (index >= 0 && index !== to) { to = index; draw(); }
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    band.remove();
+    lv.cells.forEach((c) => c.el.classList.remove("merge-in", "merge-cut"));
+    if (to === from) lvSplitCell(from);
+    else lvMergeCells(from, to);
+  };
+  draw();
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  e.preventDefault();
+}
+
+/** Reacomoda las cámaras en la división nueva sin reabrirlas (el <video> viaja de cuadro). */
+function lvRelayout(layout, placement, keep = () => true) {
+  const feeds = lv.cells.map((c) => c.detach());
+  lvApplyLayout(layout);
+  feeds.forEach((f, i) => { if (f && keep(f, i)) lv.cells[placement[i]].attach(f); });
+  if (lvFindLayout(layout.key)) { lv.prefs.layout = layout.key; lvSavePrefs(); }
+  lvRefreshTreeLive();
+  lvScheduleLastSave();
+}
+
+function lvMergeCells(from, to) {
+  const m = lvMerge(lv.layout, from, to);
+  if (!m.layout) { lvStatus(m.reason, true); return; }
+  const keep = lv.cells[from].feed ?? m.inside.map((i) => lv.cells[i].feed).find(Boolean) ?? null;
+  const closed = [];
+  for (const i of m.inside) {
+    const f = lv.cells[i].feed;
+    if (f && f !== keep) { closed.push(f.title); lv.cells[i].clear(); }
+  }
+  lvRelayout(m.layout, m.placement);
+  lvSelectCell(lv.cells[m.merged]);
+  lvStatus(`${m.inside.length} cuadros unidos en uno.` + (closed.length ? ` Se cerró: ${closed.map((t) => `"${t}"`).join(", ")}.` : ""));
+}
+
+function lvSplitCell(index) {
+  const s = lvSplit(lv.layout, index);
+  if (!s) { lvStatus("Ese cuadro no está unido: arrastre hasta otro cuadro para unirlos."); return; }
+  lvRelayout(s.layout, s.placement);
+  lvSelectCell(lv.cells[s.first]);
+  lvStatus(`Cuadro separado: la grilla queda en ${s.layout.cells.length} cuadros.`);
+}
+
 function lvSelectCell(cell) {
   if (lv.selected === cell) return;
   const prev = lv.selected;
@@ -1758,6 +2123,7 @@ function lvWireGrid() {
   grid.addEventListener("pointerdown", (e) => {
     const cell = lvCellFromEvent(e);
     if (!cell) return;
+    if (lv.mergeMode && e.button === 0 && !e.target.closest(".lv-act")) { lvMergeStart(cell, e); return; }
     lvSelectCell(cell);
     if (e.button !== 0 || !e.target.closest(".lv-body") || !cell.feed) return;
     const f = cell.feed;
@@ -1843,6 +2209,15 @@ function lvWireGrid() {
     e.preventDefault();
     cell.feed.resetZoom();
   });
+
+  // Ampliar la grilla: el borde se mira ANTES que el cuadro de abajo (captura
+  // en el contenedor, que también recibe el margen que deja el alejamiento).
+  const wrap = $("#lv-gridwrap");
+  wrap.addEventListener("dragover", (e) => { if (lvGrowTrack(e)) e.stopPropagation(); }, true);
+  wrap.addEventListener("drop", (e) => { if (lvGrowDrop(e)) e.stopPropagation(); }, true);
+  wrap.addEventListener("dragleave", (e) => { if (!wrap.contains(e.relatedTarget)) lvGrowEnd(); });
+  // Arrastre terminado en cualquier lado (soltado fuera, Esc): la franja se recoge.
+  if (!lv.growWired) { document.addEventListener("dragend", () => lvGrowEnd()); lv.growWired = true; }
 
   // Arrastre de un cuadro sobre otro.
   grid.addEventListener("dragstart", (e) => {
@@ -2374,7 +2749,8 @@ async function lvRenderViewsPop() {
 }
 
 function lvViewDetail(v) {
-  const layout = lvFindLayout(v.layoutName)?.key ?? v.layoutName;
+  const found = lvFindLayout(v.layoutName);
+  const layout = found ? lvLayoutLabel(found) : v.layoutName;
   const owner = v.shared ? ` · compartida${v.owner && v.owner !== Api.username ? ` por ${v.owner}` : ""}` : "";
   return `${v.items.length} cámara(s) · división ${layout}${owner}`;
 }
@@ -2671,7 +3047,7 @@ function lvSetPrecision(on) {
 /** Teclado: flechas = pan/tilt, +/− = zoom, Shift sostenido = modo precisión (velocidad 1). */
 function lvOnKeyDown(e) {
   if (!lv.active) return;
-  if (e.key === "Escape") { lvClosePops(); $("#lv-ctx")?.remove(); return; }
+  if (e.key === "Escape") { lvClosePops(); $("#lv-ctx")?.remove(); if (lv.mergeMode) lvSetMergeMode(false); return; }
   if (lv.aux) return;
   if (e.key === "Shift") { lvSetPrecision(true); return; }
   if (lvKeyTargetIsInput(e) || !$("#modal-backdrop").classList.contains("hidden")) return;

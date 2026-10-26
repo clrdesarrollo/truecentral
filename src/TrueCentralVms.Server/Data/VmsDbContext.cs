@@ -30,6 +30,9 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
 
     /// <summary>Reconocimientos de patentes (módulo Aplicaciones → ANPR).</summary>
     public DbSet<PlateEvent> PlateEvents => Set<PlateEvent>();
+    /// <summary>Padrón de vehículos de las personas y registro de ingresos y salidas (acceso vehicular).</summary>
+    public DbSet<AccessVehicle> AccessVehicles => Set<AccessVehicle>();
+    public DbSet<VehicleAccessRecord> VehicleAccessRecords => Set<VehicleAccessRecord>();
 
     /// <summary>Bitácora de auditoría (solo-agregar; ver Services\AuditService).</summary>
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
@@ -723,6 +726,45 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Ignore(p => p.FullName);
             e.HasIndex(p => p.EmployeeNo).IsUnique();
             e.HasIndex(p => new { p.LastName, p.FirstName });
+        });
+
+        modelBuilder.Entity<AccessVehicle>(e =>
+        {
+            e.Property(v => v.Plate).HasMaxLength(16);
+            e.Property(v => v.Label).HasMaxLength(64);
+            e.Property(v => v.Brand).HasMaxLength(64);
+            e.Property(v => v.Model).HasMaxLength(64);
+            e.Property(v => v.Color).HasMaxLength(32);
+            e.Property(v => v.Notes).HasMaxLength(512);
+            e.HasOne(v => v.AccessPerson)
+                .WithMany()
+                .HasForeignKey(v => v.AccessPersonId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Una patente es de un solo vehículo: si no, la lectura no sabría de quién es.
+            e.HasIndex(v => v.Plate).IsUnique();
+            e.HasIndex(v => v.AccessPersonId);
+        });
+
+        modelBuilder.Entity<VehicleAccessRecord>(e =>
+        {
+            e.Property(r => r.AccessPoint).HasMaxLength(96);
+            e.Property(r => r.Direction).HasConversion<string>().HasMaxLength(8);
+            e.Property(r => r.Result).HasConversion<string>().HasMaxLength(24);
+            e.Property(r => r.Plate).HasMaxLength(24);
+            e.Property(r => r.PlateStatus).HasMaxLength(16);
+            e.Property(r => r.CameraName).HasMaxLength(256);
+            e.Property(r => r.VehicleLabel).HasMaxLength(64);
+            e.Property(r => r.PersonName).HasMaxLength(256);
+            e.Property(r => r.EmployeeNo).HasMaxLength(64);
+            e.Property(r => r.Department).HasMaxLength(128);
+            e.Property(r => r.WorkflowName).HasMaxLength(128);
+            e.Property(r => r.PlateImagePath).HasMaxLength(160);
+            e.Property(r => r.Detail).HasMaxLength(512);
+            // Sin claves foráneas: el registro sobrevive a que se borren la
+            // persona, el vehículo, la cámara o la automatización.
+            e.HasIndex(r => r.At);
+            e.HasIndex(r => new { r.Plate, r.At });
+            e.HasIndex(r => new { r.AccessPersonId, r.At });
         });
 
         modelBuilder.Entity<AccessCard>(e =>

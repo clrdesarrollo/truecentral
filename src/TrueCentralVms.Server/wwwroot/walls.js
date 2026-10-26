@@ -121,8 +121,8 @@ async function renderDecoders() {
       </table></div>`}
     ${isAdmin ? `
     <div class="toolbar" style="margin-top:28px">
-      <h3>Decodificadores en línea <span class="muted" style="font-weight:normal;font-size:12px">(SADP · Dahua en la red local · se actualiza cada 30 s)</span></h3>
-      <button class="btn ghost" id="btn-decoder-scan">Buscar</button>
+      <h3>Decodificadores en línea <span class="muted hint">Buscando decodificadores compatibles en la red local; se actualiza cada 30 segundos.</span></h3>
+      <button class="btn ghost" id="btn-decoder-scan" title="Volver a buscar ahora, sin esperar los 30 segundos">Actualizar</button>
     </div>
     <div id="online-decoders">
       <div class="info-box">Sondeando el segmento de red del servidor… Solo se listan decodificadores y controladores de muro

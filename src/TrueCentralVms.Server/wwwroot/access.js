@@ -1,7 +1,7 @@
 // CLR TrueCentral VMS — panel: control de acceso (administrador de dispositivos).
 //
 // Primera etapa del módulo: alta, edición, prueba, revalidación y baja de
-// terminales y controladoras, más la tabla de equipos en línea (SADP) filtrada
+// terminales y controladoras, más la tabla de equipos en línea filtrada
 // a lo COMPATIBLE. Las órdenes sobre puertas, el padrón de personas y el
 // historial de accesos llegan después y se cuelgan de esta misma página.
 //
@@ -144,12 +144,12 @@ async function renderAccessDevices() {
       </table></div>`}
     ${isAdmin ? `
     <div class="toolbar" style="margin-top:28px">
-      <h3>Equipos en línea <span class="muted" style="font-weight:normal;font-size:12px">(SADP · DHDiscover · ZKTeco en la red local · se actualiza cada 30 s)</span></h3>
-      <button class="btn ghost" id="btn-access-scan">Buscar</button>
+      <h3>Equipos en línea <span class="muted hint">Buscando equipos compatibles en la red local; se actualiza cada 30 segundos.</span></h3>
+      <button class="btn ghost" id="btn-access-scan" title="Volver a buscar ahora, sin esperar los 30 segundos">Actualizar</button>
     </div>
     <div id="access-online">
       ${scanReady ? "" : `<div class="info-box">Sondeando el segmento de red del servidor…
-        Solo se listan equipos de <b>control de acceso compatibles</b>: Hikvision DS-K (SADP), Dahua ASI/ASC/ASG
+        Solo se listan equipos de <b>control de acceso compatibles</b>: Hikvision DS-K, Dahua ASI/ASC/ASG
         (DHDiscover), terminales ZKTeco (protocolo propio, puerto 4370) y controladoras ZKTeco inBio/C3 (búsqueda C3, UDP 65535).
         Las cámaras, los videoporteros y las alarmas se
         administran en sus propias páginas.</div>`}

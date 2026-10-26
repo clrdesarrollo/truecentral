@@ -118,9 +118,15 @@ public static class WorkflowsApi
                 new("horaequipo", "Hora según el equipo"),
             ], "Video"),
         new(WorkflowTriggerTypes.PlateRecognized, "Lectura de patente",
-            "Cuando una cámara ANPR lee una patente (lista blanca/negra, confianza mínima).",
+            "Cuando una cámara ANPR lee una patente (padrón de vehículos, lista blanca/negra, confianza mínima).",
             [
                 new("patente", "Patente leída"),
+                new("padron", "Estado en el padrón (Autorizada, No autorizada, No registrada)"),
+                new("motivopadron", "Por qué no está autorizada"),
+                new("persona", "Dueño del vehículo (padrón)"),
+                new("empleado", "Identificador del dueño"),
+                new("departamento", "Departamento del dueño"),
+                new("vehiculo", "Nombre del vehículo en el padrón"),
                 new("confianza", "Confianza de la lectura (0–100)"),
                 new("camara", "Nombre de la cámara"),
                 new("tipovehiculo", "Tipo de vehículo"),
@@ -196,6 +202,7 @@ public static class WorkflowsApi
         WorkflowActionTypes.Snapshot => "Capturar",
         WorkflowActionTypes.Notify or WorkflowActionTypes.Email or WorkflowActionTypes.Speaker => "Avisar",
         WorkflowActionTypes.Door or WorkflowActionTypes.Panel or WorkflowActionTypes.PtzPreset or WorkflowActionTypes.Relay => "Equipos",
+        WorkflowActionTypes.VehicleAccess => "Registrar",
         _ => "Integración",
     };
 
@@ -603,7 +610,7 @@ public static class WorkflowsApi
 
         // Prueba manual: ejecuta las acciones DE VERDAD con un evento de ejemplo.
         app.MapPost("/api/workflows/{id:int}/test", async (HttpContext ctx, int id, WorkflowEngine engine,
-            VmsDbContext db, AuditService audit, CancellationToken ct) =>
+            VmsDbContext db, AuditService audit, string? plate, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out var session) is { } failure) return failure;
             // Probar a mano es ejecutarla ahora: exige alcance sobre todo lo que toca.
@@ -612,12 +619,13 @@ public static class WorkflowsApi
             if (await OutOfScopeAsync(ctx, WorkflowResourceScope.References(tested.Actions), db, audit, tested.Name, "probar", ct)
                 is { } outOfScope)
                 return outOfScope;
-            var run = await engine.TestAsync(id, session.Username, ct);
+            var run = await engine.TestAsync(id, session.Username, ct, plate);
             if (run is null) return Results.NotFound();
 
             await audit.LogAsync(ctx, "workflows", "workflow-tested",
                 targetType: "workflow", targetId: id.ToString(), targetName: run.WorkflowName,
-                detail: $"Probó a mano la automatización '{run.WorkflowName}': " +
+                detail: $"Probó a mano la automatización '{run.WorkflowName}'" +
+                        (string.IsNullOrWhiteSpace(plate) ? ": " : $" con la patente {plate.Trim()}: ") +
                         (run.Success ? "todos los pasos se ejecutaron." : $"falló — {run.Error}"),
                 success: run.Success, data: new { run.Steps });
             return Results.Ok(run);

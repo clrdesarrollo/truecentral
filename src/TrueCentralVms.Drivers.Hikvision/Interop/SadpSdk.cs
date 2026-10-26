@@ -84,7 +84,7 @@ internal static class SadpSdk
     /// <summary>Errores del SDK de SADP (manual del SADP SDK).</summary>
     public static string DescribeError(uint code) => code switch
     {
-        2002 => "la sesión de SADP no está iniciada",
+        2002 => "la búsqueda en la red no está iniciada",
         2003 or 2004 or 2006 => "no se pudo usar la tarjeta de red del servidor",
         2005 => "parámetros inválidos",
         2009 => "el equipo rechazó el cambio",
@@ -94,6 +94,6 @@ internal static class SadpSdk
         2020 => "el equipo rechazó la contraseña por débil; use una más robusta",
         2021 => "el equipo ya está activado",
         2024 => "contraseña incorrecta",
-        _ => $"error {code} del SDK de SADP",
+        _ => $"error {code} de la búsqueda en la red",
     };
 }

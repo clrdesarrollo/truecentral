@@ -1806,6 +1806,36 @@ vivo, 2 posiciones y mapa, 3 recorridos y grabaciones, 4 eventos y geocercas, 5 
   una geocerca cruzada en movimiento; MDVR ISUP 5.0 (sus alarmas vienen como texto ISAPI, no como alarma básica: no se clasifican
   todavía); aviso sonoro propio del mapa (hoy el sonido va por una automatización con «Avisar a los operadores»).
 
+## Acceso vehicular por patente (funcionarios) — 2026-10-26
+
+Pedido: el acceso principal abre solo de lunes a viernes de 09:00 a 16:00 (el guardia se va a otro acceso). Cámara ANPR de
+entrada → ADAM DO2 (portón), 5 s después DO3 (barrera de entrada); cámara de salida → DO2 y 5 s después DO4 (barrera de
+salida). Todo paso queda registrado (quién, vehículo, cámara, hora, resultado) para los reportes.
+
+- **Padrón de vehículos** (`AccessVehicle`, no confundir con `Vehicle` de Flota): la patente es credencial de la persona del
+  control de acceso; una persona tiene N vehículos. Patente normalizada (letras y dígitos, mayúsculas) y única. Autorizada =
+  vehículo habilitado y vigente + persona habilitada y vigente (decisión del usuario: sin nivel ni horario personal). Las 5
+  camionetas de la empresa van en una persona creada para eso (decisión del usuario). `VehicleRegistry` lo tiene en memoria
+  (se recarga al editar vehículos o personas y cada minuto). Web: botón «Vehículos» en Control de acceso → Personas.
+- **Disparador de patente**: `AnprService` busca cada lectura en el padrón y el disparo lleva `PlateStatus`, vehículo y persona
+  (marcas `{padron}`, `{motivopadron}`, `{persona}`, `{empleado}`, `{departamento}`, `{vehiculo}`). Condiciones nuevas:
+  `PlateStatuses` (también en nodos Condición), `SamePlateSeconds` (misma patente no repite en N s, por automatización; no
+  frena al auto de atrás como el tiempo mínimo) y `ExcludeHolidays` (calendario único de feriados, `HolidayCalendar`).
+- **Acción «Registrar paso vehicular»** (`vehicle-access`): sentido, nombre del acceso y resultado (apertura automática, fuera
+  de horario, rechazado, falló la apertura). Va al final de cada rama. Tabla `VehicleAccessRecords` sin claves foráneas (copia
+  nombres) + copia del recorte en `anpr\vehicular\…`; retención propia `Anpr:VehicleAccessRetentionDays` (730).
+- **Registro**: Aplicaciones → Accesos vehiculares (`/api/vehicle-access/records`, filtros, refresco cada 10 s, Excel/PDF).
+  Ver con `anpr.view`; exportar además con `access.records.export`; alcance por la cámara que leyó. Bitácora: categoría
+  `vehicles` (altas/cambios/bajas, consultas con filtros, exportaciones). Licencia: dentro de `module_anpr` (decisión del usuario).
+- **Probar**: el botón Probar de una automatización de patente pide una patente y la busca en el padrón (vacío = ejemplo autorizado).
+- **Diagrama sugerido** (uno por cámara): disparador patente (cámara, confianza ≥ 80, sin repetir 20 s) → ¿autorizada? → Sí:
+  ¿L-V 09–16 sin feriados? → Sí: relé DO2 pulso 1 s → espera 5 s → DO3/DO4 pulso 1 s → registrar (apertura automática), «Si
+  falla» → registrar (falló la apertura); No: registrar (fuera de horario) · No autorizada: registrar (rechazado) → aviso al operador.
+- **Probado** con servidor aislado + simulador ADAM-6066 (38 verificaciones: tiempos DO2→DO3/DO4 de 5 s medidos en el
+  simulador, rechazos, feriado, módulo pausado → rama de error, registro, filtros, Excel/PDF, bitácora) y la web en Edge.
+- **Pendiente**: probar con las cámaras reales (la ventana «no repetir» solo corre con lecturas reales, el botón Probar no la
+  pasa) y con el ADAM real (requiere autorización); reporte de permanencia (ingreso ↔ salida) cuando exista el módulo de reportes.
+
 ## Pendientes (al 2026-10-07)
 
 Para cerrar lo hecho:

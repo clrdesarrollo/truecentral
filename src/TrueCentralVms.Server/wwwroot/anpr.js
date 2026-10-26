@@ -69,6 +69,11 @@ function anprDetailRows(ev) {
     ["Canal", `${ev.channelName} (n.º ${ev.channelNumber})`],
     ["Confianza de lectura", anprConfidence(ev)],
   ];
+  // Validación como patente chilena (formato, serie y dígito verificador según el Registro Civil).
+  const cl = ev.chile;
+  if (cl) rows.push(cl.valid
+    ? ["Patente chilena", `Válida · ${cl.format} · dígito verificador ${cl.checkDigit}`]
+    : ["Patente chilena", `No válida: ${cl.problem}`, "anpr-fact-bad"]);
   const add = (label, value) => { if (value != null && String(value).trim() !== "") rows.push([label, value]); };
   if (ev.charConfidences?.length) {
     add("Confianza por carácter", ev.charConfidences
@@ -323,21 +328,7 @@ function renderAnprDetail(ev) {
   if (box.dataset.id === String(ev.id)) return; // ya está a la vista
   box.dataset.id = ev.id;
 
-  const isAdmin = Perms.can("anpr.delete");
-  const fileBase = `${ev.plateNumber}_${anprDate(ev.capturedAt).split("-").reverse().join("")}_${anprTime(ev.capturedAt).slice(0, 8).replace(/:/g, "")}`;
   box.innerHTML = `
-    <div class="anpr-detail-head">
-      <div>
-        <div class="anpr-plate-big">${esc(ev.plateNumber)}</div>
-        <div class="muted">${anprDate(ev.capturedAt)} · ${anprTime(ev.capturedAt)} · ${esc(anprSourceText(ev))} · confianza ${anprConfidence(ev)}</div>
-      </div>
-      <div class="anpr-detail-actions">
-        <button class="btn ghost" id="anpr-copy">Copiar patente</button>
-        ${ev.hasSceneImage ? `<a class="btn ghost" href="${anprImageUrl(ev.id, "scene")}" download="${esc(fileBase)}_escena.jpg">Guardar escena</a>` : ""}
-        ${ev.hasPlateImage ? `<a class="btn ghost" href="${anprImageUrl(ev.id, "plate")}" download="${esc(fileBase)}_placa.jpg">Guardar placa</a>` : ""}
-        ${isAdmin ? `<button class="btn danger" id="anpr-delete" title="Elimina la lectura y sus fotos">Eliminar</button>` : ""}
-      </div>
-    </div>
     <div class="anpr-detail-body">
       <div class="anpr-scene">
         ${ev.hasSceneImage
@@ -347,10 +338,12 @@ function renderAnprDetail(ev) {
       <aside class="anpr-side">
         <div class="anpr-plate-img">
           ${ev.hasPlateImage ? `<img src="${anprImageUrl(ev.id, "plate")}" alt="Placa">` : `<span class="muted">Sin primer plano de la placa</span>`}
+          <button type="button" class="anpr-plate-big${ev.chile && !ev.chile.valid ? " invalid" : ""}" id="anpr-copy" title="Patente leída por el equipo${ev.chile && !ev.chile.valid ? " (no es una patente chilena válida)" : ""}. Clic para copiarla.">${esc(ev.plateNumber)}</button>
         </div>
         <dl class="anpr-facts">
-          ${anprDetailRows(ev).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}
+          ${anprDetailRows(ev).map(([k, v, cls]) => `<dt>${esc(k)}</dt><dd${cls ? ` class="${cls}"` : ""}>${esc(v)}</dd>`).join("")}
         </dl>
+        <a class="btn ghost anpr-zip" href="${anprImageUrl(ev.id, "zip")}" title="Fotos de la lectura y un JSON con todos sus datos"><i class="mdi mdi-folder-zip-outline" aria-hidden="true"></i> Descargar ZIP</a>
       </aside>
     </div>`;
 
@@ -371,18 +364,5 @@ function renderAnprDetail(ev) {
   $("#anpr-copy").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(ev.plateNumber); toast(`Patente ${ev.plateNumber} copiada.`); }
     catch { toast("No se pudo copiar al portapapeles.", true); }
-  });
-  $("#anpr-delete")?.addEventListener("click", async () => {
-    if (!confirm(`¿Eliminar la lectura de ${ev.plateNumber} y sus fotos? No se puede deshacer.`)) return;
-    try {
-      await Api.delete(`/api/anpr/events/${ev.id}`);
-      const i = anprEvents.findIndex((x) => x.id === ev.id);
-      anprEvents.splice(i, 1);
-      $(`#anpr-list .anpr-row[data-id="${ev.id}"]`)?.remove();
-      delete $("#anpr-detail").dataset.id;
-      const next = anprEvents[Math.min(i, anprEvents.length - 1)];
-      if (next) selectAnprEvent(next.id, false); else renderAnprDetail(null);
-      toast("Lectura eliminada.");
-    } catch (err) { toast(err.error, true); }
   });
 }

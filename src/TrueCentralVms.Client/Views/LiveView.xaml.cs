@@ -1,6 +1,7 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using TrueCentralVms.Client.ViewModels;
 
 namespace TrueCentralVms.Client.Views;
@@ -14,6 +15,10 @@ public partial class LiveView : UserControl
     public LiveView()
     {
         InitializeComponent();
+        _grow = new GridGrowController(GridHost, GridGrowOverlay,
+            edge => Vm.GrowBlockedReason(edge), message => Vm.StatusMessage = message);
+        _merge = new CellMergeController(() => _gridPanel, (from, to) => Vm.PreviewMerge(from, to),
+            (from, to) => Vm.MergeCellsAsync(from, to), cell => Vm.SplitCellAsync(cell));
         // El teclado PTZ se captura a nivel de ventana: el foco puede estar en
         // el árbol, en la grilla o en cualquier control del shell.
         Loaded += (_, _) =>
@@ -35,6 +40,11 @@ public partial class LiveView : UserControl
 
     private Window? _hostWindow;
     private JoystickPtzController? _joystick;
+    /// <summary>Ampliar la grilla soltando una cámara en un borde.</summary>
+    private readonly GridGrowController _grow;
+    /// <summary>Unir cuadros arrastrando de uno a otro (modo «Unir»).</summary>
+    private readonly CellMergeController _merge;
+    private VideoLayoutPanel? _gridPanel;
 
     private MainViewModel Vm => (MainViewModel)DataContext;
 
@@ -67,7 +77,13 @@ public partial class LiveView : UserControl
     private void OnPtzKeyDown(object sender, KeyEventArgs e)
     {
         if (!IsVisible) return; // la Vista en Vivo está oculta (página Inicio)
-        // Esc sale de la pantalla completa de la grilla.
+        // Esc termina el modo «Unir» y sale de la pantalla completa de la grilla.
+        if (e.Key == Key.Escape && Vm.IsMergeMode)
+        {
+            Vm.IsMergeMode = false;
+            e.Handled = true;
+            return;
+        }
         if (e.Key == Key.Escape && Vm.IsGridFullscreen)
         {
             Vm.IsGridFullscreen = false;
@@ -191,8 +207,32 @@ public partial class LiveView : UserControl
         if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _dragCandidate = null;
-        DragDrop.DoDragDrop(DeviceTree, new DataObject(typeof(ChannelNode), node), DragDropEffects.Copy);
+        try { DragDrop.DoDragDrop(DeviceTree, new DataObject(typeof(ChannelNode), node), DragDropEffects.Copy); }
+        finally { _grow.Cancel(); }
     }
+
+    private void OnGridPanelLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not VideoLayoutPanel panel) return;
+        _gridPanel = panel;
+        _grow.Attach(panel);
+    }
+
+    /// <summary>Apagar el modo «Unir» corta la selección en curso.</summary>
+    private void OnMergeModeOff(object sender, RoutedEventArgs e) => _merge.Cancel();
+
+    // La franja nueva y el margen del alejamiento son de la grilla, no de una celda.
+    private void OnGridHostDragOver(object sender, DragEventArgs e)
+    {
+        if (!_grow.Track(e, GridHost)) e.Effects = DragDropEffects.None;
+        Vm.DropTargetCell = null;
+        e.Handled = true;
+    }
+
+    private void OnGridHostDragLeave(object sender, DragEventArgs e) => _grow.Leave(e, GridHost);
+
+    private async void OnGridHostDrop(object sender, DragEventArgs e) =>
+        await _grow.TryDropAsync(e, Vm.GrowLayoutAsync);
 
     /// <summary>Elegir una división cierra el popup (el comando ya la aplicó).</summary>
     private void OnLayoutPicked(object sender, RoutedEventArgs e) => LayoutPickerToggle.IsChecked = false;
@@ -206,20 +246,27 @@ public partial class LiveView : UserControl
 
     private void OnCellDragOver(object sender, DragEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell })
-            HandleCellDragOver(cell, e);
+        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell } element)
+            HandleCellDragOver(cell, e, element);
     }
 
     private void OnCellDragLeave(object sender, DragEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell })
-            HandleCellDragLeave(cell);
+        if (sender is FrameworkElement { DataContext: VideoCellViewModel cell } element)
+            HandleCellDragLeave(cell, e, element);
     }
 
     /// <summary>Clic en la barra del cuadro (o en el hueco vacío): seleccionarlo.</summary>
     private void OnCellClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: VideoCellViewModel cell } element) return;
+        // Modo «Unir»: el gesto marca los cuadros a unir (no selecciona ni maximiza).
+        if (Vm.IsMergeMode)
+        {
+            _merge.Start(cell);
+            e.Handled = true;
+            return;
+        }
         // Doble clic: alternar entre el cuadro maximizado y la grilla.
         if (e.ClickCount == 2)
         {
@@ -288,22 +335,30 @@ public partial class LiveView : UserControl
             : e.Data.GetDataPresent(typeof(ChannelNode)) ? DragDropEffects.Copy : DragDropEffects.None;
 
     /// <summary>El cuadro bajo el puntero se ilumina mientras el arrastre está
-    /// encima (el borde es WPF y se ve alrededor del video).</summary>
-    private void HandleCellDragOver(VideoCellViewModel cell, DragEventArgs e)
+    /// encima (el borde es WPF y se ve alrededor del video). Cerca del borde
+    /// de la grilla, una cámara del árbol abre en cambio la franja nueva.</summary>
+    private void HandleCellDragOver(VideoCellViewModel cell, DragEventArgs e, Visual source)
     {
+        if (_grow.Track(e, source))
+        {
+            Vm.DropTargetCell = null;
+            return;
+        }
         e.Effects = CellDropEffect(e, cell);
         Vm.DropTargetCell = e.Effects == DragDropEffects.None ? null : cell;
         e.Handled = true;
     }
 
-    private void HandleCellDragLeave(VideoCellViewModel cell)
+    private void HandleCellDragLeave(VideoCellViewModel cell, DragEventArgs e, Visual source)
     {
         if (Vm.DropTargetCell == cell) Vm.DropTargetCell = null;
+        _grow.Leave(e, source);
     }
 
     private async Task HandleCellDropAsync(VideoCellViewModel cell, DragEventArgs e)
     {
         Vm.DropTargetCell = null;
+        if (await _grow.TryDropAsync(e, Vm.GrowLayoutAsync)) return;
         if (e.Data.GetData(typeof(VideoCellViewModel)) is VideoCellViewModel dragged)
         {
             e.Handled = true;
@@ -359,8 +414,11 @@ public partial class LiveView : UserControl
         }));
 
     /// <summary>El botón de la barra enciende el modo zoom en todas las ventanas de video.</summary>
-    private void OnDigitalZoomToggled(object sender, RoutedEventArgs e) =>
+    private void OnDigitalZoomToggled(object sender, RoutedEventArgs e)
+    {
+        if (Vm.IsDigitalZoomMode) Vm.IsMergeMode = false;
         _zoom.SetEnabled(Vm.IsDigitalZoomMode);
+    }
 
     private void HookVideoWindow(FlyleafLib.Controls.WPF.FlyleafHost host, Window? window)
     {
@@ -372,6 +430,11 @@ public partial class LiveView : UserControl
         {
             if (_zoom.IsEnabled) return;
             if (host.DataContext is not VideoCellViewModel cell) return;
+            if (Vm.IsMergeMode)
+            {
+                _merge.Start(cell);
+                return;
+            }
             // Doble clic sobre el video: maximizar/restaurar el cuadro
             // (el fullscreen propio de Flyleaf está deshabilitado).
             if (e.ClickCount == 2)
@@ -386,7 +449,7 @@ public partial class LiveView : UserControl
         window.AddHandler(MouseMoveEvent, new MouseEventHandler((_, e) =>
         {
             // Con el modo zoom encendido el arrastre marca el área a acercar.
-            if (_zoom.IsEnabled) return;
+            if (_zoom.IsEnabled || Vm.IsMergeMode) return;
             TryStartCellDrag(window, e);
         }), handledEventsToo: true);
         // El video tapa la celda WPF: lo que se suelte sobre él (un canal del
@@ -395,11 +458,11 @@ public partial class LiveView : UserControl
         window.AllowDrop = true;
         window.AddHandler(DragDrop.DragOverEvent, new DragEventHandler((_, e) =>
         {
-            if (host.DataContext is VideoCellViewModel cell) HandleCellDragOver(cell, e);
+            if (host.DataContext is VideoCellViewModel cell) HandleCellDragOver(cell, e, window);
         }), handledEventsToo: true);
         window.AddHandler(DragDrop.DragLeaveEvent, new DragEventHandler((_, e) =>
         {
-            if (host.DataContext is VideoCellViewModel cell) HandleCellDragLeave(cell);
+            if (host.DataContext is VideoCellViewModel cell) HandleCellDragLeave(cell, e, window);
         }), handledEventsToo: true);
         window.AddHandler(DragDrop.DropEvent, new DragEventHandler(async (_, e) =>
         {
