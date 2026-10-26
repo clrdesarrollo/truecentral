@@ -215,18 +215,18 @@ public sealed class PatrolRoundService(
             // Como en Ronda: el tiempo de cada punto se cuenta desde el primer punto de la ruta.
             var anchor = passes.FirstOrDefault(p => p.CheckpointId == stops.FirstOrDefault()?.CheckpointId)?.ReadAt ?? from;
             var last = DateTime.MinValue;
+            var offsets = await db.PatrolRouteStops.AsNoTracking().Where(r => r.RouteId == route.Id)
+                .ToDictionaryAsync(r => r.Sequence, r => r.OffsetMinutes, ct);
             foreach (var stop in stops)
             {
+                // Hora esperada de TODOS los puntos (marcados o no) desde el ancla, para que se lean parejas.
+                if (offsets.GetValueOrDefault(stop.Sequence) is { } off) stop.ExpectedAt = anchor.AddMinutes(off);
                 var pass = passes.FirstOrDefault(p => p.CheckpointId == stop.CheckpointId && !taken.Contains(p.Id) && p.ReadAt >= last)
                            ?? passes.FirstOrDefault(p => p.CheckpointId == stop.CheckpointId && !taken.Contains(p.Id));
                 if (pass is null) { stop.Status = stop.Required ? PatrolStopStatus.Missed : PatrolStopStatus.SkippedOptional; continue; }
                 taken.Add(pass.Id);
                 stop.PassId = pass.Id;
                 stop.ActualAt = pass.ReadAt;
-                var expectedOffset = route.OrderMode == PatrolOrderMode.Strict
-                    ? (await db.PatrolRouteStops.AsNoTracking().Where(r => r.RouteId == route.Id && r.Sequence == stop.Sequence)
-                        .Select(r => r.OffsetMinutes).FirstOrDefaultAsync(ct)) : null;
-                stop.ExpectedAt = expectedOffset is { } off ? anchor.AddMinutes(off) : stop.ExpectedAt;
                 if (pass.ReadAt < last) stop.Status = PatrolStopStatus.OutOfOrder;
                 else if (stop.ExpectedAt is { } exp && stop.ToleranceMinutes is { } tol)
                 {

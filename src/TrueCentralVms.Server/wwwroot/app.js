@@ -2209,6 +2209,7 @@ const routes = {
   "#/speakers": renderSpeakers,
   "#/io-modules": renderIoModules,
   "#/patrol": renderPatrol,
+  "#/patrol-reports": renderPatrolReports,
   "#/alarm-screens": renderAlarmScreens,
   "#/intercoms": renderIntercoms,
   "#/device-maintenance": renderDeviceMaintenance,

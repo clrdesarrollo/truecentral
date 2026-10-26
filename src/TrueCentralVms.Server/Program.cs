@@ -535,6 +535,7 @@ app.MapAuthApi();
 app.MapPatrolApi();
 app.MapPatrolAgentApi();
 app.MapPatrolRoutesApi();
+app.MapPatrolReportsApi();
 app.MapUsersApi();
 app.MapRolesApi();
 app.MapDevicesApi();
