@@ -7,6 +7,7 @@
     <Project Path="src/TrueCentralVms.Drivers.Dahua/TrueCentralVms.Drivers.Dahua.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.Hikvision/TrueCentralVms.Drivers.Hikvision.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.Onvif/TrueCentralVms.Drivers.Onvif.csproj" />
+    <Project Path="src/TrueCentralVms.Drivers.Patrol/TrueCentralVms.Drivers.Patrol.csproj" />
     <Project Path="src/TrueCentralVms.Drivers.ZkTeco/TrueCentralVms.Drivers.ZkTeco.csproj" />
     <Project Path="src/TrueCentralVms.IsupHost/TrueCentralVms.IsupHost.csproj" />
     <Project Path="src/TrueCentralVms.Migrator/TrueCentralVms.Migrator.csproj" />
