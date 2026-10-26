@@ -421,6 +421,17 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// Internet Explorer 11 y anteriores no corren el panel: se les muestra un aviso para usar Edge.
+app.Use(async (context, next) =>
+{
+    if (LegacyBrowserGate.IsLegacyPageRequest(context.Request))
+    {
+        await LegacyBrowserGate.WriteNoticeAsync(context.Response);
+        return;
+    }
+    await next();
+});
+
 app.UseCors();
 // WebSocket propio (fuera de SignalR) para la voz del operador hacia los parlantes.
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(15) });
