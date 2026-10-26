@@ -146,7 +146,8 @@ Qué hace la suite en el equipo, además de copiar archivos:
 
 - Crea (o reconfigura) el servicio `CLRTrueCentralVMS` (LocalSystem, inicio
   automático) con acciones de recuperación del SCM (reinicio a los 5, 15 y
-  60 s si el proceso muere; contador reseteado tras un día estable). Las
+  60 s si el proceso muere o si el servidor se detiene sin que Windows lo
+  pida, porque entonces sale con código 1067; contador reseteado tras un día estable). Las
   caídas de los servicios internos las cubre el supervisor del servidor.
 - Antes de instalar revisa que 443 y 80 estén libres (IIS u otro servidor web):
   si no, se detiene, salvo que `appsettings.Local.json` defina otros en `Web`.

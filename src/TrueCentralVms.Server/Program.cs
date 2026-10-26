@@ -35,10 +35,12 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 builder.Host.UseWindowsService(o => o.ServiceName = ServiceSupervisor.WindowsServiceName);
 // Como servicio, conectarse con Windows antes del arranque pesado (base, certificado,
-// respaldo y migraciones): Windows da solo 30 s (ver EarlyServiceLifetime).
+// respaldo y migraciones): Windows da solo 30 s (ver EarlyServiceLifetime). Si el
+// servidor se detiene sin que Windows lo pida, sale con código de error para que el
+// SCM lo vuelva a levantar (ver ScmAwareServiceLifetime).
 if (WindowsServiceHelpers.IsWindowsService())
 {
-    builder.Services.AddSingleton<WindowsServiceLifetime>();
+    builder.Services.AddSingleton<WindowsServiceLifetime, ScmAwareServiceLifetime>();
     builder.Services.AddSingleton<IHostLifetime, EarlyServiceLifetime>();
 }
 // El apagado ordenado incluye detener PostgreSQL embebido (pg_ctl stop): darle
