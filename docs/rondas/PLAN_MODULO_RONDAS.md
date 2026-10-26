@@ -410,7 +410,8 @@ Recomendación: hacer las fases 0 y 1 juntas para tener algo usable pronto. La 2
 - **Conector y carga del bastón:** hay que saber qué conector tiene (USB estándar o propio), si carga por el mismo
   cable de datos y si aguanta estar siempre cargando. Esto define el diseño mecánico de la base (guía para que el
   conector calce solo al dejarlo, o pines pogo).
-- **¿Dónde está el chip USB, en el bastón o en el cable?** Si está en el cable, el puerto COM existe aunque el
+- **El chip USB (CP210x) está en el bastón (comprobado el 26/10/2026):** al sacarlo, Windows elimina el puerto COM; al devolverlo, el puerto reaparece. La aparición del puerto ya indica que el bastón volvió. El agente lo trata como retiro normal, aun a mitad de una descarga (nada se vacía sin confirmación).
+- ~~¿Dónde está el chip USB, en el bastón o en el cable?~~ Si está en el cable, el puerto COM existe aunque el
   bastón no esté conectado, y «aparece el puerto» no significa «llegó un bastón». Por eso el agente, además del
   evento de llegada del puerto, sondea (despertar + `0A`) cada pocos segundos los puertos CP210x sin bastón.
   **Pendiente de comprobar con el equipo real.**

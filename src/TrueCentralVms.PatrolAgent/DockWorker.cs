@@ -64,9 +64,11 @@ public sealed class DockWorker(string port, PatrolAgentService service, ILogger 
         JwmCaptorReader? reader = null;
         while (!ct.IsCancellationRequested)
         {
+            bool opening = reader is null;
             try
             {
                 reader ??= JwmCaptorReader.Open(Port);
+                opening = false;
                 if (!Docked)
                 {
                     if (reader.Probe())
@@ -95,18 +97,31 @@ public sealed class DockWorker(string port, PatrolAgentService service, ILogger 
                     service.Kick();
                 }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
-                                           or TimeoutException or PatrolReaderException)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Puerto ocupado por otro programa (la Ronda antigua), cable sacado a mitad, etc.
-                Error = ex is UnauthorizedAccessException
-                    ? $"El puerto {Port} está ocupado por otro programa (¿la app Ronda antigua abierta?)."
-                    : ex.Message;
+                bool wasDocked = Docked;
                 if (Docked) { Docked = false; service.Kick(); }
-                service.ReportError(Serial, Error);
                 reader?.Dispose();
                 reader = null;
-                Sleep(TimeSpan.FromSeconds(5), ct);
+                if (opening && ex is UnauthorizedAccessException)
+                {
+                    // Al abrir: otro programa tiene el puerto (la app Ronda antigua, por ejemplo).
+                    Error = $"El puerto {Port} está ocupado por otro programa (¿la app Ronda antigua abierta?).";
+                    service.ReportError(Serial, Error);
+                }
+                else if (wasDocked || ex is UnauthorizedAccessException or IOException)
+                {
+                    // El chip USB va en el bastón: sacarlo (aun a mitad de una descarga) hace
+                    // desaparecer el puerto. No es un error: lo descargado y no confirmado
+                    // sigue en la cola y nada se vació sin confirmación.
+                    logger.LogInformation("Bastón {Serial} retirado de {Port} ({Message}).", Serial?.ToString("D6"), Port, ex.Message);
+                }
+                else
+                {
+                    Error = ex.Message;
+                    service.ReportError(Serial, Error);
+                }
+                Sleep(TimeSpan.FromSeconds(3), ct);
             }
         }
         reader?.Dispose();

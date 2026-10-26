@@ -208,5 +208,14 @@ public sealed class JwmCaptorReader : IDisposable
         return null;
     }
 
-    public void Dispose() => _port.Dispose();
+    /// <summary>
+    /// El chip USB está en el bastón: al sacarlo, Windows elimina el puerto y
+    /// cerrarlo lanza UnauthorizedAccessException/IOException. No hay nada que
+    /// cerrar ya; se ignora.
+    /// </summary>
+    public void Dispose()
+    {
+        try { _port.Dispose(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { }
+    }
 }
