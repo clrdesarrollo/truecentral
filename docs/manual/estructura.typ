@@ -4,6 +4,9 @@
 //
 // modulo: clave de LicenseFeatures sin "module_"; sin modulo = va en todas
 // las ediciones.
+// icono: ícono del menú del sitio web, el mismo del menú del panel cuando el
+// módulo tiene uno (Material Design Icons de wwwroot/vendor/mdi, sin "mdi-";
+// es una versión antigua: confirmar que el nombre exista en su css).
 #import "plantilla.typ": tiene-modulo
 
 #let titulo = "Manual de usuario"
@@ -15,8 +18,8 @@
     descripcion: [Qué es el sistema, cómo ingresar y cómo moverse por el cliente
       de monitoreo y el panel web.],
     capitulos: (
-      (archivo: "01-introduccion"),
-      (archivo: "02-primeros-pasos"),
+      (archivo: "01-introduccion", icono: "information-outline"),
+      (archivo: "02-primeros-pasos", icono: "rocket"),
     ),
   ),
   (
@@ -24,20 +27,20 @@
     descripcion: [El uso diario de cada módulo y, al final de cada capítulo, su
       configuración para administradores.],
     capitulos: (
-      (archivo: "03-vista-en-vivo", modulo: "video"),
-      (archivo: "04-reproduccion", modulo: "playback"),
+      (archivo: "03-vista-en-vivo", modulo: "video", icono: "video"),
+      (archivo: "04-reproduccion", modulo: "playback", icono: "history"),
       // Las alertas del Centro de eventos solo las crean las automatizaciones.
-      (archivo: "05-centro-de-eventos", modulo: "automation"),
-      (archivo: "06-paneles-de-alarma", modulo: "alarms"),
-      (archivo: "07-cerco-electrico"),
-      (archivo: "08-control-de-acceso", modulo: "access"),
-      (archivo: "09-citofonia", modulo: "intercom"),
-      (archivo: "10-parlantes-ip", modulo: "speakers"),
-      (archivo: "10b-modulos-de-es", modulo: "io"),
-      (archivo: "10c-pantallas-de-alarma", modulo: "alarm_screens"),
-      (archivo: "11-muro-de-video", modulo: "videowall"),
-      (archivo: "12-reconocimiento-de-patentes", modulo: "anpr"),
-      (archivo: "13-automatizaciones", modulo: "automation"),
+      (archivo: "05-centro-de-eventos", modulo: "automation", icono: "bell-ring"),
+      (archivo: "06-paneles-de-alarma", modulo: "alarms", icono: "shield"),
+      (archivo: "07-cerco-electrico", icono: "flash"),
+      (archivo: "08-control-de-acceso", modulo: "access", icono: "key-variant"),
+      (archivo: "09-citofonia", modulo: "intercom", icono: "deskphone"),
+      (archivo: "10-parlantes-ip", modulo: "speakers", icono: "volume-high"),
+      (archivo: "10b-modulos-de-es", modulo: "io", icono: "toggle-switch"),
+      (archivo: "10c-pantallas-de-alarma", modulo: "alarm_screens", icono: "monitor"),
+      (archivo: "11-muro-de-video", modulo: "videowall", icono: "monitor-multiple"),
+      (archivo: "12-reconocimiento-de-patentes", modulo: "anpr", icono: "car"),
+      (archivo: "13-automatizaciones", modulo: "automation", icono: "sitemap"),
     ),
   ),
   (
@@ -45,17 +48,17 @@
     descripcion: [Equipos de video, ubicaciones, usuarios y permisos, y el estado
       del sistema.],
     capitulos: (
-      (archivo: "14-fuentes-de-video"),
-      (archivo: "15-recursos-y-ubicaciones"),
-      (archivo: "16-usuarios-y-roles"),
-      (archivo: "17-sistema"),
+      (archivo: "14-fuentes-de-video", icono: "server-network"),
+      (archivo: "15-recursos-y-ubicaciones", icono: "file-tree"),
+      (archivo: "16-usuarios-y-roles", icono: "account-key"),
+      (archivo: "17-sistema", icono: "settings"),
     ),
   ),
 )
 
 #let apendices-del-manual = (
-  (archivo: "a1-atajos"),
-  (archivo: "a2-servidor"),
+  (archivo: "a1-atajos", icono: "keyboard"),
+  (archivo: "a2-servidor", icono: "server"),
 )
 
 #let en-la-edicion(capitulo) = {

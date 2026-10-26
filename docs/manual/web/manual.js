@@ -1,21 +1,43 @@
 // Manual de usuario de CLR TrueCentral VMS: salida web (manual-web.typ).
-// Índice lateral en pantallas angostas, sección visible en el índice y
-// búsqueda en todo el manual. La búsqueda lee las páginas del capítulo la
-// primera vez que se usa: necesita el sitio servido por HTTP (servidor, typst
-// watch); abierto como archivo busca solo en los títulos de los capítulos.
+// Menú lateral como el del panel (mismas clases y misma preferencia de menú
+// contraído), sección visible en el menú y búsqueda en todo el manual. La
+// búsqueda lee las páginas del capítulo la primera vez que se usa: necesita el
+// sitio servido por HTTP (servidor, typst watch); abierto como archivo busca
+// solo en los títulos de los capítulos.
 (() => {
-  const cuerpo = document.body;
+  const shell = document.getElementById('app-shell');
+  const botonMenu = document.getElementById('btn-menu');
 
-  // ---------- Índice lateral ----------
-  document.querySelector('.abrir-menu')?.addEventListener('click', () => cuerpo.classList.toggle('menu-abierto'));
-  document.querySelector('.lateral')?.addEventListener('click', e => {
-    if (e.target.closest('a')) cuerpo.classList.remove('menu-abierto');
+  // ---------- Menú lateral ----------
+  // Botón ☰: en pantallas angostas el menú sale encima del contenido; en el
+  // resto se contrae a una columna de íconos, recordado como en el panel.
+  const MINI = 'tcvms.sidebar.mini';
+  const cerrarMenu = () => {
+    shell.classList.remove('sidebar-open');
+    botonMenu.setAttribute('aria-expanded', 'false');
+  };
+  botonMenu.addEventListener('click', () => {
+    if (matchMedia('(max-width: 900px)').matches) {
+      botonMenu.setAttribute('aria-expanded', String(shell.classList.toggle('sidebar-open')));
+      return;
+    }
+    const mini = shell.classList.toggle('sidebar-mini');
+    try { localStorage.setItem(MINI, mini ? '1' : '0'); } catch { /* modo privado */ }
   });
-  document.querySelector('.lateral li.actual')?.scrollIntoView({ block: 'center' });
+  // Con el menú encima del contenido, elegir una página o tocar fuera lo cierra.
+  document.addEventListener('click', e => {
+    if (!shell.classList.contains('sidebar-open') || e.target.closest('#btn-menu')) return;
+    if (e.target.closest('.sidebar') && !e.target.closest('#nav a')) return;
+    cerrarMenu();
+  });
+  // El capítulo abierto, a la vista en el menú.
+  const nav = document.getElementById('nav');
+  const abierto = nav.querySelector('a.capitulo.active');
+  if (abierto) nav.scrollTop = abierto.offsetTop - nav.clientHeight / 3;
 
-  // Marca en el índice la sección que se está leyendo.
-  const enlaces = new Map([...document.querySelectorAll('.nav-secciones a')].map(a => [decodeURIComponent(a.hash.slice(1)), a]));
-  const titulos = [...document.querySelectorAll('.contenido h2[id]')];
+  // Marca en el menú la sección que se está leyendo.
+  const enlaces = new Map([...nav.querySelectorAll('.nav-children a')].map(a => [decodeURIComponent(a.hash.slice(1)), a]));
+  const titulos = [...document.querySelectorAll('.articulo h2[id]')];
   if (enlaces.size && titulos.length) {
     let previo = null;
     const marcar = () => {
@@ -23,8 +45,8 @@
       for (const h of titulos) { if (h.getBoundingClientRect().top < 150) visible = h; else break; }
       const enlace = visible && enlaces.get(visible.id);
       if (enlace === previo) return;
-      previo?.classList.remove('visible');
-      enlace?.classList.add('visible');
+      previo?.classList.remove('active');
+      enlace?.classList.add('active');
       previo = enlace;
     };
     addEventListener('scroll', marcar, { passive: true });
@@ -54,18 +76,18 @@
   }
 
   function secciones(href, doc) {
-    const main = doc.querySelector('.contenido');
-    if (!main) return [];
-    const capitulo = main.querySelector('.cabecera-capitulo h1')?.textContent ?? '';
-    const rotulo = main.querySelector('.cabecera-capitulo .rotulo')?.textContent ?? '';
+    const articulo = doc.querySelector('.articulo');
+    if (!articulo) return [];
+    const capitulo = doc.querySelector('.page-titles h2')?.textContent ?? '';
+    const rotulo = doc.querySelector('.page-titles .breadcrumb li:last-child')?.textContent ?? '';
     const lista = [];
     let actual = { href, titulo: capitulo, donde: rotulo, texto: '' };
-    for (const el of main.children) {
+    for (const el of articulo.children) {
       if (el.matches('h2[id]')) {
         lista.push(actual);
         const num = el.querySelector('.num')?.textContent ?? '';
         actual = { href: `${href}#${el.id}`, titulo: `${num} ${el.textContent.slice(num.length)}`.trim(), donde: `${rotulo} · ${capitulo}`, texto: '' };
-      } else if (!el.matches('.cabecera-capitulo, .paginacion, .pie')) {
+      } else {
         actual.texto += ' ' + texto(el);
       }
     }
@@ -76,7 +98,7 @@
   let indice = null;
   async function cargar() {
     if (indice) return indice;
-    const capitulos = [...document.querySelectorAll('.lateral a.capitulo')];
+    const capitulos = [...document.querySelectorAll('#nav a.capitulo')];
     const lector = new DOMParser();
     const paginas = await Promise.all([...new Set(capitulos.map(a => a.getAttribute('href')))].map(async href => {
       try {
@@ -86,7 +108,7 @@
     }));
     let lista = paginas.flat();
     // Abierto como archivo el navegador no deja leer las otras páginas.
-    if (!lista.length) lista = capitulos.map(a => ({ href: a.getAttribute('href'), titulo: a.textContent, donde: 'Capítulo', texto: '' }));
+    if (!lista.length) lista = capitulos.map(a => ({ href: a.getAttribute('href'), titulo: a.querySelector('.nav-text').textContent, donde: 'Capítulo', texto: '' }));
     indice = lista.map(s => {
       const texto = s.texto.replace(/\s+/g, ' ').trim();
       return { ...s, texto, nTitulo: normal(s.titulo), nTexto: normal(texto) };
@@ -164,7 +186,7 @@
       entrada.focus();
       entrada.select();
     } else if (e.key === 'Escape') {
-      cuerpo.classList.remove('menu-abierto');
+      cerrarMenu();
     }
   });
 })();

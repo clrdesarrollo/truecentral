@@ -61,9 +61,11 @@ if ($Modulos.Count) { $comunes += '--input', ('modulos=' + ($Modulos -join ','))
 if ($Final) { $comunes += '--input', 'final=true' }
 
 # El sitio usa la exportación "bundle" de Typst (experimental): una página por
-# capítulo, capturas como archivos y el PDF al lado para descargarlo.
+# capítulo, capturas como archivos y el PDF al lado para descargarlo. La raíz
+# es la del repositorio porque toma el tema del panel web de su wwwroot.
 $sitio = Join-Path (Split-Path $Salida) ([IO.Path]::GetFileNameWithoutExtension($Salida) + '-web')
-$argumentosWeb = @('--features', 'html,bundle', '--format', 'bundle', (Join-Path $PSScriptRoot 'manual-web.typ'), $sitio) + $comunes
+$argumentosWeb = @('--features', 'html,bundle', '--format', 'bundle', '--root', $raiz,
+    (Join-Path $PSScriptRoot 'manual-web.typ'), $sitio) + $comunes
 
 if ($Watch) {
     if ($Web) { & $typst.Source watch @argumentosWeb --input "pdf=$(Split-Path $Salida -Leaf)" }

@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Mismo dibujo que logo() de plantilla.typ: cuadro grafito y cuatro cuadrados azules. -->
-  <rect x="0.64" y="0.64" width="62.72" height="62.72" rx="14" fill="#11161D" stroke="#2A3542" stroke-width="1.28"/>
-  <rect x="10.88" y="10.88" width="18.24" height="18.24" rx="3.65" fill="#6BB0F9"/>
-  <rect x="34.88" y="10.88" width="18.24" height="18.24" rx="3.65" fill="#2D7CF3"/>
-  <rect x="10.88" y="34.88" width="18.24" height="18.24" rx="3.65" fill="#2D7CF3"/>
-  <rect x="34.88" y="34.88" width="18.24" height="18.24" rx="3.65" fill="#2D7CF3"/>
-</svg>
