@@ -766,6 +766,67 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("AccessScheduleSegments");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessVehicle", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccessPersonId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Brand")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Color")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Plate")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ValidFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ValidTo")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccessPersonId");
+
+                    b.HasIndex("Plate")
+                        .IsUnique();
+
+                    b.ToTable("AccessVehicles");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmArea", b =>
                 {
                     b.Property<int>("Id")
@@ -3227,6 +3288,107 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("Vehicles");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.VehicleAccessRecord", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int?>("AccessPersonId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AccessPoint")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<int?>("AccessVehicleId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CameraName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("ChannelId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Confidence")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Department")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int?>("DeviceId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<string>("EmployeeNo")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PersonName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Plate")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<long?>("PlateEventId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("PlateImagePath")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("PlateStatus")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Result")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<string>("VehicleLabel")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("WorkflowId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("WorkflowName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("At");
+
+                    b.HasIndex("AccessPersonId", "At");
+
+                    b.HasIndex("Plate", "At");
+
+                    b.ToTable("VehicleAccessRecords");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.VideoWall", b =>
                 {
                     b.Property<int>("Id")
@@ -3899,6 +4061,17 @@ namespace TrueCentralVms.Server.Migrations
                         .IsRequired();
 
                     b.Navigation("AccessSchedule");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessVehicle", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
+                        .WithMany()
+                        .HasForeignKey("AccessPersonId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AccessPerson");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AlarmArea", b =>

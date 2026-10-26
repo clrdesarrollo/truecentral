@@ -160,8 +160,8 @@ public static class PdfReportWriter
                 }
                 if (column.Kind == ReportCellKind.Result)
                 {
-                    if (text.StartsWith("Acceso concedido")) paragraph.Format.Font.Color = Green;
-                    else if (text.StartsWith("Acceso denegado") || text.StartsWith("Alarma")) paragraph.Format.Font.Color = Red;
+                    if (text.StartsWith("Acceso concedido") || text.StartsWith("Apertura automática")) paragraph.Format.Font.Color = Green;
+                    else if (text.StartsWith("Acceso denegado") || text.StartsWith("Alarma") || text.StartsWith("Rechazado") || text.StartsWith("Falló")) paragraph.Format.Font.Color = Red;
                 }
             }
         }

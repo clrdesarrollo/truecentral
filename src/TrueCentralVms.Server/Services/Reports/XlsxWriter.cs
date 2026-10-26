@@ -93,8 +93,8 @@ public static class XlsxWriter
             (ReportCellKind.Time, TimeSpan t) => Number(t.TotalDays, STime),
             (ReportCellKind.Duration, TimeSpan t) => Number(t.TotalDays, SDuration),
             (ReportCellKind.Int, int i) => Number(i, SInt),
-            (ReportCellKind.Result, string s) => TextCell(reference, s, s.StartsWith("Acceso concedido") ? SGranted
-                : s.StartsWith("Acceso denegado") || s.StartsWith("Alarma") ? SDenied : SText),
+            (ReportCellKind.Result, string s) => TextCell(reference, s, s.StartsWith("Acceso concedido") || s.StartsWith("Apertura automática") ? SGranted
+                : s.StartsWith("Acceso denegado") || s.StartsWith("Alarma") || s.StartsWith("Rechazado") || s.StartsWith("Falló") ? SDenied : SText),
             _ => TextCell(reference, Convert.ToString(value, CultureInfo.CurrentCulture) ?? "", SText),
         };
     }
