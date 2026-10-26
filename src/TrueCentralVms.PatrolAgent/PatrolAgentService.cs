@@ -128,6 +128,7 @@ public sealed class PatrolAgentService(AgentStore store, AgentOptions options, P
             _serverLocal = response.ServerLocal;
             _sinceHeartbeat.Restart();
             foreach (var c in response.Commands) _commands.TryAdd(c.Serial, new PendingCommand(c.Id, c.Kind));
+            ForwardReminders(response.Reminders ?? []);
         }
         catch (ServerRejectedException ex) when (ex.Status == 401)
         {
@@ -138,6 +139,36 @@ public sealed class PatrolAgentService(AgentStore store, AgentOptions options, P
             logger.LogWarning("Sin conexión con el servidor: {Message}", ex.Message);
         }
     }
+
+    /// <summary>
+    /// Recordatorios de ronda hacia el aviso en pantalla: se muestran al aparecer o cambiar de tipo y se
+    /// repiten cada RepeatMinutes; cuando la ronda ya no figura (el bastón salió) se cierra el aviso.
+    /// </summary>
+    private void ForwardReminders(IReadOnlyList<PatrolAgentReminder> reminders)
+    {
+        var now = DateTime.UtcNow;
+        foreach (var r in reminders)
+        {
+            bool show = !_reminders.TryGetValue(r.RunId, out var last) || last.Kind != r.Kind
+                        || now - last.At >= TimeSpan.FromMinutes(r.RepeatMinutes);
+            if (!show) continue;
+            _reminders[r.RunId] = (r.Kind, now);
+            string text = r.Kind switch
+            {
+                "upcoming" => $"«{r.RouteName}» a las {r.ExpectedStartLocal:HH:mm}. Prepare el bastón.",
+                "due" => $"«{r.RouteName}», programada a las {r.ExpectedStartLocal:HH:mm}. Tiene hasta las {r.DeadlineLocal:HH:mm} para salir.",
+                _ => $"«{r.RouteName}», programada a las {r.ExpectedStartLocal:HH:mm}. Se avisó a la central.",
+            };
+            progress.Publish(new PatrolDockProgress("", null, "reminder-" + r.Kind, 0, 0, text, DateTime.Now) { RunId = r.RunId });
+        }
+        foreach (var gone in _reminders.Keys.Where(id => reminders.All(r => r.RunId != id)).ToList())
+        {
+            _reminders.Remove(gone);
+            progress.Publish(new PatrolDockProgress("", null, "reminder-clear", 0, 0, null, DateTime.Now) { RunId = gone });
+        }
+    }
+
+    private readonly Dictionary<long, (string Kind, DateTime At)> _reminders = [];
 
     private async Task FlushQueueAsync(CancellationToken ct)
     {

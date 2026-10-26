@@ -185,3 +185,102 @@ public class PatrolPass
     public string? EditReason { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
+// ---------------------------------------------------------------------------
+// Fase 2: rutas, programación y rondas esperadas.
+
+/// <summary>Ruta de ronda: puntos a recorrer, en orden estricto o libre, y las bases que la hacen.</summary>
+public class PatrolRoute : ILocatable
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public int? LocationId { get; set; }
+    public bool Enabled { get; set; } = true;
+    public PatrolOrderMode OrderMode { get; set; } = PatrolOrderMode.Strict;
+    /// <summary>Minutos antes de la hora en que se avisa a la guardia (0 = sin aviso previo).</summary>
+    public int ReminderMinutes { get; set; } = 10;
+    /// <summary>Margen para salir: pasado esto sin que salga un bastón, la ronda queda «no iniciada».</summary>
+    public int StartWindowMinutes { get; set; } = 10;
+    /// <summary>Cada cuántos minutos se repite el aviso mientras el bastón siga en la base.</summary>
+    public int RepeatMinutes { get; set; } = 5;
+    /// <summary>Duración máxima desde la salida; pasado esto sin volver, «sin terminar».</summary>
+    public int MaxDurationMinutes { get; set; } = 60;
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public List<PatrolRouteStop> Stops { get; set; } = [];
+    public List<PatrolRouteAgent> Agents { get; set; } = [];
+    public List<PatrolSchedule> Schedules { get; set; } = [];
+}
+
+public class PatrolRouteStop
+{
+    public int Id { get; set; }
+    public int RouteId { get; set; }
+    public int Sequence { get; set; }
+    public int CheckpointId { get; set; }
+    public PatrolCheckpoint? Checkpoint { get; set; }
+    public bool Required { get; set; } = true;
+    /// <summary>Modo estricto: minutos desde el inicio de la ronda.</summary>
+    public int? OffsetMinutes { get; set; }
+    /// <summary>Modo estricto: margen ± en minutos.</summary>
+    public int? ToleranceMinutes { get; set; }
+}
+
+/// <summary>Base de descarga que hace la ruta: sus avisos salen en el PC de esa base.</summary>
+public class PatrolRouteAgent
+{
+    public int RouteId { get; set; }
+    public int AgentId { get; set; }
+}
+
+/// <summary>Horario de una ruta: días de la semana y hora local de inicio.</summary>
+public class PatrolSchedule
+{
+    public int Id { get; set; }
+    public int RouteId { get; set; }
+    /// <summary>Bit 0 = domingo … bit 6 = sábado.</summary>
+    public int DaysMask { get; set; } = 0x7F;
+    /// <summary>Minutos desde la medianoche, hora local del servidor.</summary>
+    public int StartMinutes { get; set; }
+    public bool SkipHolidays { get; set; }
+    public bool Enabled { get; set; } = true;
+}
+
+/// <summary>Ronda esperada (una por horario y día). Se crea con anticipación y se va evaluando.</summary>
+public class PatrolRun
+{
+    public long Id { get; set; }
+    public int RouteId { get; set; }
+    public int? ScheduleId { get; set; }
+    public DateTime ExpectedStart { get; set; }
+    public DateTime StartDeadline { get; set; }
+    /// <summary>Límite para volver: ExpectedStart + margen + duración máxima (se recalcula con la salida real).</summary>
+    public DateTime DueEnd { get; set; }
+    public DateTime? ActualStart { get; set; }
+    public DateTime? ActualEnd { get; set; }
+    /// <summary>Bastón que salió de la base para esta ronda.</summary>
+    public int? ReaderId { get; set; }
+    public PatrolRunStatus Status { get; set; } = PatrolRunStatus.Scheduled;
+    /// <summary>Causa legible de un resultado malo («ningún bastón salió de la base», «base sin conexión»...).</summary>
+    public string? Cause { get; set; }
+    public DateTime? LastReminderAt { get; set; }
+    public DateTime? EvaluatedAt { get; set; }
+    public string? CancelledBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public List<PatrolRunStop> Stops { get; set; } = [];
+}
+
+public class PatrolRunStop
+{
+    public long Id { get; set; }
+    public long RunId { get; set; }
+    public int Sequence { get; set; }
+    public int CheckpointId { get; set; }
+    public bool Required { get; set; } = true;
+    public DateTime? ExpectedAt { get; set; }
+    public int? ToleranceMinutes { get; set; }
+    public long? PassId { get; set; }
+    public DateTime? ActualAt { get; set; }
+    public PatrolStopStatus Status { get; set; } = PatrolStopStatus.Pending;
+}

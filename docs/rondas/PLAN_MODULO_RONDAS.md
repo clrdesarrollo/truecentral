@@ -298,6 +298,28 @@ Diferencias importantes con Ronda:
 - **Dos rondas de la misma ruta solapadas** (por ejemplo, cada 30 min con duración de 40): cada paso se asigna a una
   sola ronda, la más antigua que aún lo necesite. Así un mismo paso no cumple dos rondas.
 
+### 5.2.1 Verificación con la base y recordatorio al guardia (pedido del usuario, 26/10/2026)
+
+La base sabe cuándo el bastón **sale** y cuándo **vuelve**, y eso permite verificar la ronda en tres momentos
+y avisarle al guardia antes de que le toque salir:
+
+| Momento | Qué pasa | Cómo se verifica |
+|---|---|---|
+| **N min antes** (p. ej. 10) | Aviso en el PC de la guardia: «Ronda *Perímetro* a las 22:00 — prepare el bastón». | — |
+| **Hora de la ronda** | Aviso: «Es hora de salir a la ronda *Perímetro*». Se repite cada pocos minutos mientras el bastón siga en la base. | — |
+| **El bastón sale de la base** | El aviso se cierra solo. La ronda queda **«en curso»** con hora real de salida. | Base: evento de retiro |
+| **No sale dentro del margen** | Aviso rojo en la guardia y **alerta a la central** (automatización): «Ronda *Perímetro* no iniciada». | Base: el bastón sigue puesto |
+| **Vuelve a la base** | Descarga automática y **evaluación inmediata**: puntos marcados, orden, tiempos y guardia. | Lecturas del bastón |
+| **No vuelve** dentro de la duración máxima + margen | Alerta: «Ronda *Perímetro* sin terminar / bastón fuera». | Base: el bastón no volvió |
+
+- Cada ruta se asocia a una o más **bases** (la guardia que la hace); los avisos salen en el PC de esas bases.
+  Como cualquier guardia puede hacer la ronda con cualquier bastón, sale de la base el primero que se retire.
+- Los avisos usan el mismo canal que el de la descarga (la app `truecentral-patrol-aviso`) y suenan. Las
+  automatizaciones pueden sumar otros canales que TrueCentral ya tiene: parlante IP con voz, pantallas de alarma
+  de la caseta y correo a supervisión.
+- Si el PC o la base están fuera de línea a la hora de la ronda, la central lo ve igual: la ronda queda
+  «no iniciada» por falta de señal, con la causa «base sin conexión».
+
 ### 5.3 Avisos (disparador `patrol` en automatizaciones)
 - Ronda incumplida o parcial (con detalle de las paradas).
 - Paso fuera de tolerancia o fuera de orden (opcional, puede ser ruidoso).
@@ -327,10 +349,39 @@ Diferencias importantes con Ronda:
 - `#/patrol/compliance`: tablero de rondas del periodo con su estado y el detalle por parada.
 - `#/patrol/reports`: informes en PDF y XLSX.
 
-### Informes
-De Ronda: lista de puntos, lista de guardias, general de rondas, por guardia, por punto, frecuencias por punto
-(nº de pasos y tiempo mínimo y máximo entre pasos) y cumplimiento de rutas.
-Nuevos: lecturas huérfanas, estado de los bastones (última descarga, memoria, hora puesta) y resumen de cumplimiento por guardia y por ruta.
+### Informes (pedido del usuario: «nada de esto tiene sentido sin sus reportes»)
+
+Todos con filtros de periodo, ubicación, ruta, guardia y punto; en pantalla, **PDF** (para entregar al cliente,
+con logo y firma) y **Excel** (para analizar), con los generadores que ya tiene TrueCentral. Respetan el alcance de
+ubicación del usuario y quedan auditados.
+
+**Cumplimiento (lo que pide un cliente o un supervisor)**
+1. **Resumen ejecutivo del periodo:** % de rondas cumplidas, parciales, no iniciadas y sin terminar; tendencia
+   diaria/semanal; peores rutas, turnos y puntos. Una página, para enviar al cliente.
+2. **Cumplimiento de rutas (detalle):** cada ronda esperada con hora programada, salida real, vuelta, guardia(s) y
+   estado; al abrirla, cada punto con hora esperada, margen, hora real y estado (a tiempo, temprano, tarde, fuera de
+   orden, omitido). Es el informe estrella de Ronda, mejorado con salida/vuelta de la base.
+3. **Rondas no realizadas e incidencias:** solo lo que falló (no iniciada, parcial, sin terminar, puntos omitidos),
+   con la causa detectada (bastón no salió, base sin conexión, punto no marcado...). Para la reunión de supervisión.
+4. **Puntuales vs. atrasadas:** demora promedio en salir a la ronda y en cada punto, por ruta y por guardia.
+
+**Por guardia**
+5. **Desempeño por guardia:** rondas hechas, % cumplimiento, puntualidad, puntos omitidos; ranking del periodo.
+6. **Bitácora del guardia (hoja de servicio):** todos sus pasos de un turno o rango, en orden, con ruta y estado.
+
+**Por punto**
+7. **Frecuencia y cobertura por punto:** cuántas veces se visitó, intervalo mínimo/máximo/promedio entre visitas y
+   **ventanas sin cobertura** (p. ej. «CP-03 estuvo 3 h 20 min sin visita»). Mejora el informe de frecuencias de Ronda.
+8. **Mapa de calor horario:** visitas por punto y hora del día (detecta puntos que solo se visitan a ciertas horas).
+
+**Operación del sistema**
+9. **Estado de bastones y bases:** última descarga, memoria, puesta en hora, tiempo fuera de la base, errores.
+10. **Lecturas sin asignar y correcciones:** tags desconocidos, pasos sin guardia, pasos corregidos o anulados y por
+    quién (respaldo ISO 27001 de que la bitácora no se manipuló sin rastro).
+11. **Listados maestros:** guardias, llaveros, puntos y rutas con su programación.
+
+**Envío programado:** cualquiera de ellos se puede programar (diario, semanal, mensual) para llegar por correo en PDF
+a supervisión o al cliente, con el correo de salida que ya configura TrueCentral para las automatizaciones.
 
 ## 7. Reglas de TrueCentral (checklist)
 
@@ -397,6 +448,11 @@ Recomendación: hacer las fases 0 y 1 juntas para tener algo usable pronto. La 2
 7. ~~Terminales de acceso~~ **Resuelto:** sí, se implementan (fase 4), con el modelo preparado desde la fase 1.
    Detalle a decidir entonces: si el terminal de un punto de ronda **también abre una puerta** o solo registra
    (se puede configurar como «solo lectura» para que marcar ronda no abra nada).
+
+8. **Fase 2 (resuelto 26/10/2026):** recordatorio al guardia configurable por ruta (por defecto 10 min antes, con
+   margen para salir y repetición); la ronda empieza cuando el bastón **sale de la base**; si no se inicia a tiempo,
+   alerta en el **Centro de eventos**; informes prioritarios: los cuatro grupos (cumplimiento + resumen,
+   incidencias, por guardia y cobertura por punto).
 
 ## 10. Riesgos y detalles técnicos
 

@@ -30,8 +30,10 @@ public sealed record PatrolAgentHeartbeat(string Version, IReadOnlyList<PatrolAg
 /// <param name="Kind">"read" o "read-erase".</param>
 public sealed record PatrolAgentCommand(long Id, long Serial, string Kind);
 
+/// <param name="Reminders">Rondas de las rutas de esta base que se acercan o ya debieron salir (fase 2).</param>
 public sealed record PatrolAgentHeartbeatResponse(
-    DateTime ServerLocal, DateTime ServerUtc, IReadOnlyList<PatrolAgentCommand> Commands);
+    DateTime ServerLocal, DateTime ServerUtc, IReadOnlyList<PatrolAgentCommand> Commands,
+    IReadOnlyList<PatrolAgentReminder>? Reminders = null);
 
 /// <summary>Lo que leyó la base de un bastón (bloques crudos en hex).</summary>
 public sealed record PatrolAgentUpload(

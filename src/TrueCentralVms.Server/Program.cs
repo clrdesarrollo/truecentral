@@ -206,6 +206,8 @@ builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.ZkT
 builder.Services.AddSingleton<IoModuleDriverRegistry>();
 builder.Services.AddSingleton<IoModuleService>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Patrol.PatrolService>();
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Patrol.PatrolRoundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Patrol.PatrolRoundService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IoModuleService>());
 // Citofonía: frentes de videoportero (enlace de llamadas por SDK, voz bidireccional y apertura de puerta).
 builder.Services.AddSingleton<IIntercomDriverFactory, HikvisionIntercomDriverFactory>();
@@ -532,6 +534,7 @@ app.MapSetupApi(serverVersion);
 app.MapAuthApi();
 app.MapPatrolApi();
 app.MapPatrolAgentApi();
+app.MapPatrolRoutesApi();
 app.MapUsersApi();
 app.MapRolesApi();
 app.MapDevicesApi();

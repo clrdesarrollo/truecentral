@@ -73,7 +73,7 @@ public static class PatrolAgentApi
 
         // Latido: estado de los bastones que ve la base + hora del servidor + órdenes pendientes.
         app.MapPost("/api/patrol-agent/heartbeat", async (HttpContext ctx, PatrolAgentHeartbeat request, VmsDbContext db,
-            AuditService audit, PatrolService patrol, CancellationToken ct) =>
+            AuditService audit, PatrolService patrol, PatrolRoundService rounds, CancellationToken ct) =>
         {
             var agent = await AuthenticateAsync(ctx, db, ct);
             if (agent is null) return Results.Unauthorized();
@@ -116,9 +116,10 @@ public static class PatrolAgentApi
             if (changed) await patrol.NotifyAsync("readers", ct);
 
             var local = PatrolService.ToLocal(now);
+            var reminders = await rounds.RemindersAsync(db, agent.Id, now, ct);
             return Results.Ok(new PatrolAgentHeartbeatResponse(local, now,
                 commands.Where(c => readerSerials.ContainsKey(c.ReaderId))
-                    .Select(c => new PatrolAgentCommand(c.Id, readerSerials[c.ReaderId], c.Kind)).ToList()));
+                    .Select(c => new PatrolAgentCommand(c.Id, readerSerials[c.ReaderId], c.Kind)).ToList(), reminders));
         });
 
         app.MapPost("/api/patrol-agent/uploads", async (HttpContext ctx, PatrolAgentUpload request, VmsDbContext db,
