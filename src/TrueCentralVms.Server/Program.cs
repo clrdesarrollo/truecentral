@@ -163,6 +163,8 @@ builder.Services.AddScoped<WallService>();
 // canal de eventos ANPR de cada equipo marcado como fuente y guarda las fotos
 // en disco (la base solo lleva la ruta).
 builder.Services.AddSingleton<AnprStore>();
+builder.Services.AddSingleton<VehicleRegistry>();
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Workflows.HolidayCalendar>();
 builder.Services.AddSingleton<AnprService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprService>());
 
@@ -262,6 +264,7 @@ builder.Services.AddSingleton<IWorkflowActionExecutor, DoorAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, PanelAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, TrueCentralVms.Server.Services.Workflows.Actions.PtzPresetAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, RelayAction>();
+builder.Services.AddSingleton<IWorkflowActionExecutor, VehicleAccessAction>();
 // Pantallas de alarma de las casetas (Raspberry Pi): emparejamiento, hub propio,
 // entrega de los avisos de las automatizaciones y acuse sincronizado con la
 // ventana de alarma de los operadores. Va antes del motor: la acción de aviso
@@ -575,6 +578,7 @@ app.MapLiveViewsApi();
 app.MapLocationsApi();
 app.MapResourcesApi();
 app.MapAnprApi();
+app.MapVehicleAccessApi();
 app.MapAuditApi();
 app.MapAlarmsApi();
 app.MapIsupApi();

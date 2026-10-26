@@ -19,8 +19,10 @@ const WFE_NODE_WIDTH = 220;
 const WFE_ICONS = {
   trigger: "⚡", condition: "❓", delay: "⏱", end: "⏹",
   snapshot: "📷", email: "✉️", ftp: "📤", http: "🌐", speaker: "🔊", notify: "🔔",
-  door: "🚪", panel: "🛡️", "ptz-preset": "🎯", relay: "🎛️",
+  door: "🚪", panel: "🛡️", "ptz-preset": "🎯", relay: "🎛️", "vehicle-access": "📝",
 };
+/// Estado de la patente en el padrón de vehículos (PlateRegistryStatuses del servidor).
+const WFE_PLATE_STATUSES = [["authorized", "Autorizada"], ["unauthorized", "No autorizada"], ["unregistered", "No registrada"]];
 const WFE_TRIGGER_ICONS = {
   "alarm-event": "🚨", "panel-status": "📡", "device-status": "🔌", "video-event": "🎥",
   "plate-recognized": "🚗", "access-event": "🪪", schedule: "🕒", webhook: "🔗", "io-input": "🔘", "fleet-event": "🚌",
@@ -452,6 +454,11 @@ function wfeSubtitle(node) {
     case "ptz-preset": {
       const cam = L.cameras.find((x) => x.channelId === c.channelId);
       return cam ? `${cam.channelName} → preset ${c.preset || 1}` : "elija la cámara";
+    }
+    case "vehicle-access": {
+      const results = { AutoOpened: "apertura automática", OutsideSchedule: "fuera de horario", Rejected: "rechazado",
+        OpenFailed: "falló la apertura", Logged: "registrado" };
+      return `${c.direction === "Exit" ? "Salida" : "Ingreso"} · ${c.accessPoint || "(acceso)"} · ${results[c.result] || "registrado"}`;
     }
     case "relay": {
       const names = (c.relayKeys || []).map((key) => {
@@ -1060,6 +1067,11 @@ function wfeConditionsForm(container, node, isTrigger) {
           <textarea id="wfe-plates" rows="4" placeholder="ABCD12&#10;XY*&#10;KL?T88">${esc((c.plates || []).join("\n"))}</textarea>`,
           "Una por línea (o separadas por coma). * = cualquier cosa, ? = un carácter. Sin distinguir mayúsculas ni guiones.");
         field("Confianza mínima de la lectura (0–100)", `<input id="wfe-confidence" type="number" min="0" max="100" value="${c.minConfidence ?? ""}" placeholder="sin mínimo">`);
+        field("Padrón de vehículos", wfeCheckList(WFE_PLATE_STATUSES, c.plateStatuses, "pstatus"),
+          "Nada marcado = cualquiera. «Autorizada»: la patente está en el padrón (Control de acceso → Personas → Vehículos) y el vehículo y su persona están habilitados y vigentes.");
+        if (isTrigger)
+          field("No repetir la misma patente durante (segundos)", `<input id="wfe-sameplate" type="number" min="0" max="3600" value="${c.samePlateSeconds || 0}">`,
+            "0 = sin ventana. La cámara suele informar varias veces el mismo vehículo: con una ventana, la misma patente no vuelve a ejecutar la automatización en ese tiempo, pero el vehículo de atrás (otra patente) sí pasa.");
         break;
 
       case "access-event":
@@ -1128,6 +1140,8 @@ function wfeConditionsForm(container, node, isTrigger) {
       (c.timeBands || []).forEach((b, i) => parts.push(bandCard(`Franja horaria ${i + 2}`,
         `<button class="btn ghost" type="button" data-band-remove="${i}" title="Quitar esta franja">Quitar</button>`,
         wfeCheckList(WF_DAY_ITEMS(), b.daysOfWeek, `band${i}day`), `wfe-band-from-${i}`, b.fromTime, `wfe-band-to-${i}`, b.toTime, `data-band="${i}"`)));
+      parts.push(`<div class="field"><label class="checkbox-row"><input type="checkbox" id="wfe-noholidays" ${c.excludeHolidays ? "checked" : ""}> Excluir feriados</label>
+        <div class="muted" style="font-size:11.5px;margin-top:3px">Los días del calendario de feriados (Control de acceso → Horarios → Feriados) no rige, aunque la franja se cumpla.</div></div>`);
       parts.push(`<div class="field"><button class="btn ghost" type="button" id="wfe-band-add">+ Agregar franja horaria</button>
         <div class="muted" style="font-size:11.5px;margin-top:3px">La automatización rige si se cumple cualquiera de las franjas. Horas en formato 24 h; sin horas (o de 00:00 a 24:00) la franja vale todo el día. Ejemplo: lunes a viernes de 18:00 a 06:00 en la primera y sábado y domingo sin horas (todo el día) en la segunda. Una ventana que cruza la medianoche pertenece al día en que empieza: para que la noche del domingo siga hasta el lunes a las 06:00, marque también el domingo en la primera franja.</div></div>`);
     }
@@ -1196,6 +1210,7 @@ function wfeConditionsForm(container, node, isTrigger) {
         };
       }),
     };
+    if (t !== "schedule") next.excludeHolidays = $("#wfe-noholidays", container)?.checked || null;
     // Los equipos no están en el formulario: los mantiene el selector en node.conditions.
     (WFE_SOURCE_FIELDS[t]?.fields || []).forEach((f) => { next[f] = node.conditions[f] || []; });
     switch (t) {
@@ -1235,6 +1250,8 @@ function wfeConditionsForm(container, node, isTrigger) {
           plates: strings("wfe-plates").map((p) => p.toUpperCase()),
           plateMatch: $("#wfe-platematch", container)?.value || "any",
           minConfidence: number("wfe-confidence"),
+          plateStatuses: marked("pstatus"),
+          samePlateSeconds: isTrigger ? (number("wfe-sameplate") || null) : null,
         });
         break;
       case "access-event":
@@ -1539,6 +1556,9 @@ function wfeConditionsSummary(c, triggerType) {
   }
   if (c.plates?.length) push(`${c.plateMatch === "unlisted" ? "excepto" : "patentes"} ${c.plates.slice(0, 3).join(", ")}${c.plates.length > 3 ? "…" : ""}`);
   if (c.minConfidence > 0) push(`confianza ≥ ${c.minConfidence}%`);
+  if (c.plateStatuses?.length) push("padrón: " + c.plateStatuses.map((k) => WFE_PLATE_STATUSES.find((x) => x[0] === k)?.[1] || k).join(" o ").toLowerCase());
+  if (c.samePlateSeconds > 0) push(`sin repetir patente ${c.samePlateSeconds} s`);
+  if (c.excludeHolidays) push("sin feriados");
   if (c.accessKinds?.length) push(names(c.accessKinds, WFE_ACCESS_KINDS));
   if (c.credentials?.length) push(names(c.credentials, WFE_CREDENTIALS));
   if (c.doorNumbers?.length) push(`puertas ${c.doorNumbers.join(", ")}`);
@@ -1639,8 +1659,16 @@ async function wfeSave(thenTest) {
 
     if (thenTest) {
       if (!confirm("La prueba ejecuta las acciones DE VERDAD (envía el correo, abre la puerta, hace sonar el parlante) con un evento de ejemplo. ¿Continuar?")) return;
+      // Patente: se puede probar con una patente real (se busca en el padrón);
+      // vacío = ejemplo autorizado, para recorrer el camino de apertura.
+      let query = "";
+      if (wfEd.triggerType === "plate-recognized") {
+        const plate = prompt("Patente con que probar (se busca en el padrón). Vacío = un ejemplo autorizado.", "");
+        if (plate === null) return;
+        if (plate.trim()) query = `?plate=${encodeURIComponent(plate.trim())}`;
+      }
       test.textContent = "Probando…";
-      const run = await Api.post(`/api/workflows/${wfEd.id}/test`);
+      const run = await Api.post(`/api/workflows/${wfEd.id}/test${query}`);
       wfEd.results = {};
       run.steps.forEach((s) => { if (s.nodeId) wfEd.results[s.nodeId] = { success: s.success, detail: s.detail }; });
       wfeDraw();

@@ -1113,6 +1113,7 @@ async function loadAccessPersons(levels) {
             <td class="muted" style="white-space:nowrap" title="Desde ${accessDay(p.validFrom)}">${accessDay(p.validTo)}</td>
             <td>${accessSyncTag(p)}</td>
             <td><div class="row-actions" style="flex-wrap:wrap">
+              ${Perms.licensed("module_anpr") ? `<button class="btn ghost btn-person-vehicles" title="Patentes de la persona para el acceso vehicular">Vehículos</button>` : ""}
               ${isAdmin ? `
                 <button class="btn ghost btn-person-edit">Editar</button>
                 ${p.syncState === "Failed" || p.syncState === "Pending"
@@ -1135,6 +1136,8 @@ async function loadAccessPersons(levels) {
   $("#person-next")?.addEventListener("click", () => { accessPersonState.page++; loadAccessPersons(levels); });
   $$("#access-person-results .btn-person-edit").forEach((b) =>
     b.addEventListener("click", (e) => accessPersonModal(byRow(e), levels)));
+  $$("#access-person-results .btn-person-vehicles").forEach((b) =>
+    b.addEventListener("click", (e) => accessVehiclesModal(byRow(e))));
   $$("#access-person-results .btn-person-sync-detail").forEach((b) =>
     b.addEventListener("click", (e) => accessPersonSyncModal(byRow(e), levels)));
   $$("#access-person-results .btn-person-retry").forEach((b) => b.addEventListener("click", async (e) => {

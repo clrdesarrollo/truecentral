@@ -635,6 +635,7 @@ public static class AccessCatalogApi
             await AccessSyncService.MarkHolidayDependentsPendingAsync(db, ct);
             await db.SaveChangesAsync(ct);
             sync.RequestSync();
+            ctx.RequestServices.GetRequiredService<Services.Workflows.HolidayCalendar>().Invalidate();
             await audit.LogAsync(ctx, "access", "holiday-created",
                 targetType: "access-holiday", targetId: holiday.Id.ToString(), targetName: holiday.Name,
                 detail: $"Agregó el feriado '{holiday.Name}' ({Describe(holiday)}).");
@@ -657,6 +658,7 @@ public static class AccessCatalogApi
             await AccessSyncService.MarkHolidayDependentsPendingAsync(db, ct);
             await db.SaveChangesAsync(ct);
             sync.RequestSync();
+            ctx.RequestServices.GetRequiredService<Services.Workflows.HolidayCalendar>().Invalidate();
             await audit.LogAsync(ctx, "access", "holiday-updated",
                 targetType: "access-holiday", targetId: holiday.Id.ToString(), targetName: holiday.Name,
                 detail: $"Modificó el feriado {before} → '{holiday.Name}' ({Describe(holiday)}).");
@@ -673,6 +675,7 @@ public static class AccessCatalogApi
             await AccessSyncService.MarkHolidayDependentsPendingAsync(db, ct);
             await db.SaveChangesAsync(ct);
             sync.RequestSync();
+            ctx.RequestServices.GetRequiredService<Services.Workflows.HolidayCalendar>().Invalidate();
             await audit.LogAsync(ctx, "access", "holiday-deleted",
                 targetType: "access-holiday", targetId: id.ToString(), targetName: holiday.Name,
                 detail: $"Eliminó el feriado '{holiday.Name}' ({Describe(holiday)}).");
@@ -929,6 +932,7 @@ public static class AccessCatalogApi
             if (fingerChanges.Length > 0 || faceChanges.Length > 0) await db.SaveChangesAsync(ct);
             sync.RequestSync();
 
+            ctx.RequestServices.GetRequiredService<VehicleRegistry>().Invalidate();
             await audit.LogAsync(ctx, "access", "person-created",
                 targetType: "access-person", targetId: person.Id.ToString(), targetName: person.FullName,
                 detail: $"Agregó al padrón a '{person.FullName}' (identificador {person.EmployeeNo}" +
@@ -1010,6 +1014,7 @@ public static class AccessCatalogApi
             await db.SaveChangesAsync(ct);
             sync.RequestSync();
 
+            ctx.RequestServices.GetRequiredService<VehicleRegistry>().Invalidate();
             await audit.LogAsync(ctx, "access", "person-updated",
                 targetType: "access-person", targetId: person.Id.ToString(), targetName: person.FullName,
                 detail: $"Modificó a '{person.FullName}' ({person.EmployeeNo}): " +
@@ -1052,6 +1057,7 @@ public static class AccessCatalogApi
             await db.SaveChangesAsync(ct);
             sync.RequestSync();
 
+            ctx.RequestServices.GetRequiredService<VehicleRegistry>().Invalidate();
             await audit.LogAsync(ctx, "access", "person-deleted",
                 targetType: "access-person", targetId: id.ToString(), targetName: person.FullName,
                 detail: $"Eliminó del padrón a '{person.FullName}' ({person.EmployeeNo})." +

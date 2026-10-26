@@ -2219,6 +2219,7 @@ const routes = {
   "#/workflow-runs": renderWorkflowRuns,
   "#/sounds": renderSounds,
   "#/anpr": renderAnpr,
+  "#/vehicle-access": renderVehicleAccess,
   "#/alarms": renderAlarmMonitor,
   "#/cerco": renderCercoMonitor,
   "#/cerco-panels": renderCercoPanels,

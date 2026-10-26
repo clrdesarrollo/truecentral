@@ -34,12 +34,13 @@ public sealed class AnprStore
     /// null si no había imagen o si el disco la rechazó: un evento sin foto
     /// sigue siendo un reconocimiento válido.
     /// </summary>
-    public string? Save(byte[]? image, DateTime capturedLocal, string suffix)
+    /// <param name="area">Subcarpeta propia (p. ej. «vehicular» para el registro de accesos, que se purga aparte).</param>
+    public string? Save(byte[]? image, DateTime capturedLocal, string suffix, string? area = null)
     {
         if (image is null || image.Length == 0) return null;
         try
         {
-            string folder = $"{capturedLocal:yyyy}/{capturedLocal:MM}/{capturedLocal:dd}";
+            string folder = (area is { Length: > 0 } ? area + "/" : "") + $"{capturedLocal:yyyy}/{capturedLocal:MM}/{capturedLocal:dd}";
             Directory.CreateDirectory(Path.Combine(RootDirectory, folder.Replace('/', Path.DirectorySeparatorChar)));
             string name = $"{capturedLocal:HHmmssfff}-{Guid.NewGuid():N}-{suffix}.jpg";
             string relative = $"{folder}/{name}";

@@ -147,6 +147,14 @@ public static class AuditCatalog
             new("event-exported", "Reconocimiento descargado"),
             new("search", "Búsqueda en el historial"),
         ]),
+        new("vehicles", "Acceso vehicular",
+        [
+            new("vehicle-created", "Vehículo agregado al padrón"),
+            new("vehicle-updated", "Vehículo modificado"),
+            new("vehicle-deleted", "Vehículo eliminado del padrón"),
+            new("records-search", "Consulta del registro de accesos vehiculares"),
+            new("report-exported", "Registro de accesos vehiculares exportado"),
+        ]),
         new("cerco", "Paneles de cerco eléctrico",
         [
             new("panel-created", "Panel agregado"),
