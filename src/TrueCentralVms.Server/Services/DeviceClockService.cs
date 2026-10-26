@@ -6,6 +6,8 @@ using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
 using TrueCentralVms.Server.Data.Entities;
 using TrueCentralVms.Server.Services.Supervisor;
+using TrueCentralVms.Server.Services.Time;
+
 
 namespace TrueCentralVms.Server.Services;
 
@@ -159,7 +161,7 @@ public sealed class DeviceClockService(
             if (!await ReadAsync(state, driver, connection, ct)) return;
 
             var zone = policy.Zone();
-            var reasons = Problems(state, policy, zone, driver);
+            var reasons = Problems(state, policy, zone, driver, device.Host);
             if (reasons.Count == 0)
             {
                 state.LoggedProblem = null;
@@ -185,7 +187,7 @@ public sealed class DeviceClockService(
             }
 
             state.LastAutoAttemptAt = DateTime.UtcNow;
-            var setting = SettingFor(policy, zone, driver);
+            var setting = SettingFor(policy, zone, driver, device.Host);
             try
             {
                 string? note = await driver.SetClockAsync(connection, setting, ct);
@@ -320,7 +322,8 @@ public sealed class DeviceClockService(
     }
 
     /// <summary>Lo que está mal en el reloj del equipo según la política, en palabras.</summary>
-    private static List<string> Problems(State state, DeviceClockPolicy policy, TimeZoneInfo zone, IAccessControlDriver driver)
+    private static List<string> Problems(State state, DeviceClockPolicy policy, TimeZoneInfo zone, IAccessControlDriver driver,
+        string host)
     {
         var reasons = new List<string>();
         var clock = state.Clock!;
@@ -329,19 +332,31 @@ public sealed class DeviceClockService(
             reasons.Add($"estaba {(drift > TimeSpan.Zero ? "adelantado" : "atrasado")} {Span(drift)}");
         if (DeviceTimeZones.ZoneMismatch(clock, zone) is { } mismatch && !(mismatch.OnlyDaylight && state.DaylightUnsupported))
             reasons.Add(mismatch.Reason);
-        if (policy.Mode == DeviceTimeMode.Ntp && driver.SupportsNtp && !string.IsNullOrWhiteSpace(policy.NtpServer) &&
+        if (policy.Mode == DeviceTimeMode.Ntp && driver.SupportsNtp && NtpServerFor(policy, host) is { } server &&
             (clock.Mode != DeviceTimeMode.Ntp ||
-             !string.Equals(clock.NtpServer?.Trim(), policy.NtpServer.Trim(), StringComparison.OrdinalIgnoreCase)))
+             !string.Equals(clock.NtpServer?.Trim(), server, StringComparison.OrdinalIgnoreCase)))
             reasons.Add(clock.Mode == DeviceTimeMode.Ntp
-                ? $"tomaba la hora de {clock.NtpServer} y debería tomarla de {policy.NtpServer}"
-                : $"tenía la hora fijada a mano y debería tomarla del servidor NTP {policy.NtpServer}");
+                ? $"tomaba la hora de {clock.NtpServer} y debería tomarla de {server}"
+                : $"tenía la hora fijada a mano y debería tomarla del servidor NTP {server}");
         return reasons;
     }
 
+    /// <summary>
+    /// El servidor NTP que debe usar un equipo: el de la política o, si toman
+    /// la hora de este servidor, la IP de este servidor por la que se llega a
+    /// ese equipo. Null si no corresponde o no se puede saber.
+    /// </summary>
+    public static string? NtpServerFor(DeviceClockPolicy policy, string host)
+    {
+        if (policy.Mode != DeviceTimeMode.Ntp) return null;
+        if (policy.NtpFromServer) return TimeService.LocalAddressToward(host);
+        return string.IsNullOrWhiteSpace(policy.NtpServer) ? null : policy.NtpServer.Trim();
+    }
+
     /// <summary>Cómo dejar un equipo según la política (NTP solo si el equipo lo sabe usar).</summary>
-    public static DeviceClockSetting SettingFor(DeviceClockPolicy policy, TimeZoneInfo zone, IAccessControlDriver driver) =>
-        policy.Mode == DeviceTimeMode.Ntp && driver.SupportsNtp && !string.IsNullOrWhiteSpace(policy.NtpServer)
-            ? new DeviceClockSetting(zone, DeviceTimeMode.Ntp, null, policy.NtpServer, policy.NtpIntervalMinutes)
+    public static DeviceClockSetting SettingFor(DeviceClockPolicy policy, TimeZoneInfo zone, IAccessControlDriver driver, string host) =>
+        driver.SupportsNtp && NtpServerFor(policy, host) is { } server
+            ? new DeviceClockSetting(zone, DeviceTimeMode.Ntp, null, server, policy.NtpIntervalMinutes)
             : new DeviceClockSetting(zone, DeviceTimeMode.Manual);
 
     private static void RememberNote(State state, string? note)

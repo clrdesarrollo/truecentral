@@ -157,11 +157,19 @@
           </button>
           <div class="nav-children">
             <a href="#/services" data-route="services">Servicios</a>
-            <a href="#/isup" data-route="isup" data-needs-license data-perm="system.services">Conexión ISUP</a>
-            <a href="#/mail" data-route="mail" data-module="module_automation" data-perm="workflows.manage">Correo saliente</a>
+            <div class="nav-group" data-group="network">
+              <button type="button" class="nav-toggle">
+                <span class="nav-text">Red</span><span class="caret" aria-hidden="true"></span>
+              </button>
+              <div class="nav-children">
+                <a href="#/time" data-route="time" data-perm="system.network">Hora (NTP)</a>
+                <a href="#/wan" data-route="wan" data-perm="system.network">Acceso desde Internet</a>
+                <a href="#/certificate" data-route="certificate">Certificado HTTPS</a>
+                <a href="#/isup" data-route="isup" data-needs-license data-perm="system.services">Conexión ISUP</a>
+                <a href="#/mail" data-route="mail" data-module="module_automation" data-perm="workflows.manage">Correo saliente</a>
+              </div>
+            </div>
             <a href="#/backups" data-route="backups" data-perm="system.backup">Respaldos</a>
-            <a href="#/certificate" data-route="certificate">Certificado HTTPS</a>
-            <a href="#/wan" data-route="wan" data-perm="system.network">Acceso desde Internet</a>
             <a href="#/license" data-route="license">Licencia</a>
           </div>
         </div>
@@ -209,7 +217,7 @@
   <script src="alarm-screens.js?v=3"></script>
   <script src="intercoms.js?v=11"></script>
   <script src="access.js?v=16"></script>
-  <script src="maintenance.js?v=4"></script>
+  <script src="maintenance.js?v=5"></script>
   <script src="enroll.js?v=2"></script>
   <script src="access-catalog.js?v=20"></script>
   <script src="access-monitor.js?v=7"></script>
@@ -219,6 +227,7 @@
   <script src="certificate.js?v=2"></script>
   <script src="account.js?v=1"></script>
   <script src="wan.js?v=1"></script>
+  <script src="time.js?v=1"></script>
   <script src="workflow-editor.js?v=13"></script>
   <script src="services.js?v=4"></script>
   <script src="license.js?v=7"></script>

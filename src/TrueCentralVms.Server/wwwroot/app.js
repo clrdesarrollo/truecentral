@@ -2247,6 +2247,8 @@ const routes = {
   "#/certificate": renderCertificate,
   "#/account": renderAccount,
   "#/wan": renderWan,
+  "#/time": renderTime,
+
   "#/license": renderLicense,
 };
 

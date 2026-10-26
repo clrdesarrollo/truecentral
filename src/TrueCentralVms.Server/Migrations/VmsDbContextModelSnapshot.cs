@@ -1852,6 +1852,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<bool>("NtpFromServer")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("NtpIntervalMinutes")
                         .HasColumnType("integer");
 

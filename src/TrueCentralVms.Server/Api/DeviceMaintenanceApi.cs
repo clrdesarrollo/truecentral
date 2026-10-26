@@ -77,7 +77,7 @@ public static class DeviceMaintenanceApi
             if (ApiSecurity.Require(ctx, Permissions.MaintenanceManage, out _) is { } failure) return failure;
             if (request.TimeZoneId is { Length: > 0 } zoneId && FindZone(zoneId) is null)
                 return Error($"Zona horaria desconocida: '{zoneId}'.");
-            if (request.Mode == DeviceTimeMode.Ntp && string.IsNullOrWhiteSpace(request.NtpServer))
+            if (request.Mode == DeviceTimeMode.Ntp && !request.NtpFromServer && string.IsNullOrWhiteSpace(request.NtpServer))
                 return Error("Para usar NTP hay que indicar el servidor.");
             if (request.NtpServer?.Trim().Length > 255) return Error("El servidor NTP es demasiado largo.");
             if (request.ThresholdSeconds is < 5 or > 86400) return Error("El desfase tolerado va de 5 segundos a 1 día.");
@@ -94,6 +94,7 @@ public static class DeviceMaintenanceApi
             policy.TimeZoneId = string.IsNullOrWhiteSpace(request.TimeZoneId) ? null : request.TimeZoneId.Trim();
             policy.Mode = request.Mode == DeviceTimeMode.Ntp ? DeviceTimeMode.Ntp : DeviceTimeMode.Manual;
             policy.NtpServer = string.IsNullOrWhiteSpace(request.NtpServer) ? null : request.NtpServer.Trim();
+            policy.NtpFromServer = policy.Mode == DeviceTimeMode.Ntp && request.NtpFromServer;
             policy.NtpIntervalMinutes = request.NtpIntervalMinutes;
             policy.AutoCorrect = request.AutoCorrect;
             policy.ThresholdSeconds = request.ThresholdSeconds;
@@ -136,7 +137,7 @@ public static class DeviceMaintenanceApi
                     results.Add(new(DeviceClockService.AccessKind, device.Id, device.Name, false, "Sin conexión."));
                     continue;
                 }
-                var setting = DeviceClockService.SettingFor(policy, zone, driver);
+                var setting = DeviceClockService.SettingFor(policy, zone, driver, device.Host);
                 try
                 {
                     string? note = await clocks.ApplyAsync(device, setting, ct);
@@ -359,12 +360,13 @@ public static class DeviceMaintenanceApi
     {
         var zone = p.Zone();
         return new DeviceClockPolicyDto(p.TimeZoneId, zone.DisplayName, DeviceTimeZones.Describe(zone), p.Mode, p.NtpServer,
-            p.NtpIntervalMinutes, p.AutoCorrect, p.ThresholdSeconds, p.CheckMinutes);
+            p.NtpIntervalMinutes, p.AutoCorrect, p.ThresholdSeconds, p.CheckMinutes, p.NtpFromServer);
     }
 
     private static DeviceClockPolicy Copy(DeviceClockPolicy p) => new()
     {
-        TimeZoneId = p.TimeZoneId, Mode = p.Mode, NtpServer = p.NtpServer, NtpIntervalMinutes = p.NtpIntervalMinutes,
+        TimeZoneId = p.TimeZoneId, Mode = p.Mode, NtpServer = p.NtpServer, NtpFromServer = p.NtpFromServer,
+        NtpIntervalMinutes = p.NtpIntervalMinutes,
         AutoCorrect = p.AutoCorrect, ThresholdSeconds = p.ThresholdSeconds, CheckMinutes = p.CheckMinutes,
     };
 
@@ -374,7 +376,8 @@ public static class DeviceMaintenanceApi
         var changes = new List<string>();
         if (a.TimeZoneId != b.TimeZoneId)
             changes.Add($"zona {(a.TimeZoneId ?? "del servidor")} → {(b.TimeZoneId ?? "del servidor")}");
-        if (a.Mode != b.Mode || a.NtpServer != b.NtpServer || a.NtpIntervalMinutes != b.NtpIntervalMinutes)
+        if (a.Mode != b.Mode || a.NtpServer != b.NtpServer || a.NtpFromServer != b.NtpFromServer ||
+            a.NtpIntervalMinutes != b.NtpIntervalMinutes)
             changes.Add($"hora {ModeText(a)} → {ModeText(b)}");
         if (a.AutoCorrect != b.AutoCorrect) changes.Add(b.AutoCorrect ? "corrección automática activada" : "corrección automática apagada");
         if (a.ThresholdSeconds != b.ThresholdSeconds) changes.Add($"desfase tolerado {a.ThresholdSeconds} s → {b.ThresholdSeconds} s");
@@ -382,7 +385,8 @@ public static class DeviceMaintenanceApi
         return changes.Count > 0 ? string.Join(", ", changes) : "sin cambios";
 
         static string ModeText(DeviceClockPolicy p) => p.Mode == DeviceTimeMode.Ntp
-            ? $"por NTP ({p.NtpServer}, cada {p.NtpIntervalMinutes} min)" : "del servidor";
+            ? $"por NTP ({(p.NtpFromServer ? "este servidor" : p.NtpServer)}, cada {p.NtpIntervalMinutes} min)" : "del servidor";
+
     }
 
     /// <summary>Lo que se le pidió al equipo, en palabras.</summary>
