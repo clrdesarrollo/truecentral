@@ -189,6 +189,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessEventService
 // Hora de los equipos: revisa su reloj y su zona, y los pone en hora solos.
 builder.Services.AddSingleton<DeviceClockService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceClockService>());
+// Hora oficial: toma la hora de las fuentes NTP, corrige el reloj de Windows y
+// se la da a los equipos como servidor NTP (UDP 123).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Time.TimeService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Time.TimeService>());
 
 // Parlantes IP: drivers, registro y servicio (sondeo de estado, reproducción sincronizada, voz en vivo).
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
@@ -540,6 +544,8 @@ app.MapSystemApi();
 app.MapBackupApi();
 app.MapCertificateApi();
 app.MapWanApi();
+app.MapTimeApi();
+
 app.MapLicenseApi();
 app.MapDecodersApi();
 app.MapWallsApi();

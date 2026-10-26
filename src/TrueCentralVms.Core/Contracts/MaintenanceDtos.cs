@@ -64,7 +64,9 @@ public sealed record DeviceClockPolicyDto(
     int NtpIntervalMinutes,
     bool AutoCorrect,
     int ThresholdSeconds,
-    int CheckMinutes);
+    int CheckMinutes,
+    /// <summary>En modo NTP, que tomen la hora de este servidor (cada equipo recibe la IP por la que lo alcanza).</summary>
+    bool NtpFromServer = false);
 
 public sealed record DeviceClockOverviewDto(
     DateTime ServerUtc,
@@ -108,4 +110,6 @@ public sealed record DeviceClockPolicyWriteDto(
     int NtpIntervalMinutes,
     bool AutoCorrect,
     int ThresholdSeconds,
-    int CheckMinutes);
+    int CheckMinutes,
+    bool NtpFromServer = false);
+

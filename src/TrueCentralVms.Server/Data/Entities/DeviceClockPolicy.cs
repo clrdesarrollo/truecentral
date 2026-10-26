@@ -22,6 +22,14 @@ public class DeviceClockPolicy
     /// <summary>Hora fijada por el VMS (Manual) o que la tomen de un servidor NTP.</summary>
     public DeviceTimeMode Mode { get; set; } = DeviceTimeMode.Manual;
     public string? NtpServer { get; set; }
+
+    /// <summary>
+    /// En modo NTP, que tomen la hora de ESTE servidor (Sistema → Red → Hora):
+    /// a cada equipo se le da la IP del servidor por la que se lo alcanza, así
+    /// que sirve con varias tarjetas de red. <see cref="NtpServer"/> se ignora.
+    /// </summary>
+    public bool NtpFromServer { get; set; }
+
     public int NtpIntervalMinutes { get; set; } = 60;
 
     /// <summary>Ponerlos en hora solo cuando se desfasan o tienen otra zona.</summary>

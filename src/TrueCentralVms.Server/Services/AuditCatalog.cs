@@ -395,8 +395,19 @@ public static class AuditCatalog
             new("backup-password-changed", "Contraseña de respaldo definida o cambiada"),
             new("backup-restored", "Instalación restaurada desde un respaldo"),
         ]),
+        new("time", "Hora oficial (NTP)",
+        [
+            new("time-settings-changed", "Ajustes de la hora oficial cambiados (fuentes, reloj, servidor NTP)"),
+            new("time-sync-requested", "Consulta de la hora oficial pedida a mano"),
+            new("time-sync-failed", "Hora oficial no disponible (ninguna fuente respondió o no coinciden)"),
+            new("time-sync-restored", "Hora oficial disponible de nuevo"),
+            new("time-clock-stepped", "Reloj del servidor corregido (o intento fallido)"),
+            new("time-server-failed", "Servidor NTP sin poder atender (puerto ocupado)"),
+            new("time-windows-time-disabled", "Servicio Hora de Windows detenido y deshabilitado"),
+        ]),
         new("system", "Sistema",
         [
+
             new("server-started", "Servidor iniciado"),
             new("server-stopped", "Servidor detenido"),
             new("audit-purged", "Bitácora purgada por retención"),

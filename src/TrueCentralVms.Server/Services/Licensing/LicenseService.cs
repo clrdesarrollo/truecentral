@@ -205,6 +205,9 @@ public sealed class LicenseService : BackgroundService
                  || path.StartsWithSegments("/api/system/backups")
                  // Ídem el certificado HTTPS: renovarlo no puede esperar a la licencia.
                  || path.StartsWithSegments("/api/system/certificate")
+                 // Y la hora oficial: de ella depende que lo que se guarda tenga fecha fidedigna.
+                 || path.StartsWithSegments("/api/system/time")
+
                  || path.StartsWithSegments("/api/streaming")
                  || path.StartsWithSegments("/api/audit/client-event"));
     }
