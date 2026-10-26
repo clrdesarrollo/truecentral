@@ -41,8 +41,10 @@ public static class BackupRestore
 
         if (RunningServer() is { } running)
         {
-            Console.Error.WriteLine($"El servidor está en ejecución ({running}). Deténgalo antes de restaurar:");
-            Console.Error.WriteLine($"  sc stop {ServiceSupervisor.WindowsServiceName}");
+            // Con «sc stop» el Watchdog lo vuelve a iniciar a los 15 s: hay que pedirlo desde el Watchdog.
+            Console.Error.WriteLine($"El servidor está en ejecución ({running}). Deténgalo antes de restaurar con");
+            Console.Error.WriteLine("«Detener servicio» en el Watchdog (ícono junto al reloj); si lo detiene con");
+            Console.Error.WriteLine($"sc stop {ServiceSupervisor.WindowsServiceName}, el Watchdog lo vuelve a iniciar.");
             return 3;
         }
 

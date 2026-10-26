@@ -59,6 +59,9 @@
 #define ServerPublish  "..\build\publish\server"
 #define WatchdogPublish "..\build\publish\watchdog"
 #define WatchdogExe    "TrueCentralVms.Watchdog.exe"
+; Tarea programada que abre el Watchdog en segundo plano al iniciar sesión.
+#define WatchdogTask   "CLR TrueCentral VMS Watchdog"
+#define WatchdogRegistryKey "SOFTWARE\CLRobotics\TrueCentralVMS\Watchdog"
 #define PgTools        "..\tools\postgres\pgsql"
 #define MediaMtxDir    "..\tools\mediamtx"
 #define FfmpegDir      "..\tools\ffmpeg"
@@ -332,6 +335,34 @@ end;
 procedure KillWatchdog();
 begin
   RunHidden(SysTool('taskkill.exe'), '/F /IM {#WatchdogExe}');
+end;
+
+// El Watchdog se abre solo, en segundo plano (ícono junto al reloj), cada vez
+// que inicia sesión un administrador, y mantiene vivo el servicio. Va como
+// tarea programada y no en "Inicio" ni en la clave Run: pide elevación en su
+// manifiesto, y desde ahí mostraría el aviso de UAC en cada inicio de sesión;
+// la tarea corre con privilegios máximos sin preguntar. Sin tope de duración
+// (por omisión, Windows la cortaría a los 3 días). Al terminar de instalar se
+// lanza también, para no esperar al próximo inicio de sesión.
+procedure ConfigureWatchdogTask();
+begin
+  RunHidden(PowerShellExe(),
+    '-NoProfile -NonInteractive -Command "' +
+    '$admins = (New-Object Security.Principal.SecurityIdentifier ''S-1-5-32-544'').Translate([Security.Principal.NTAccount]).Value; ' +
+    '$a = New-ScheduledTaskAction -Execute ''' + ExpandConstant('{app}') + '\watchdog\{#WatchdogExe}'' -Argument ''--background''; ' +
+    '$t = New-ScheduledTaskTrigger -AtLogOn; ' +
+    '$p = New-ScheduledTaskPrincipal -GroupId $admins -RunLevel Highest; ' +
+    '$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew; ' +
+    'Register-ScheduledTask -TaskName ''{#WatchdogTask}'' -Action $a -Trigger $t -Principal $p -Settings $s ' +
+    '-Description ''Abre el Watchdog de CLR TrueCentral VMS en segundo plano: mantiene el servidor en ejecución.'' -Force | Out-Null; ' +
+    'Start-ScheduledTask -TaskName ''{#WatchdogTask}''"');
+end;
+
+procedure RemoveWatchdogTask();
+begin
+  RunHidden(SysTool('schtasks.exe'), '/Delete /TN "{#WatchdogTask}" /F');
+  // La marca de "detenido a propósito" que guarda el Watchdog.
+  RunHidden(SysTool('reg.exe'), 'delete "HKLM\{#WatchdogRegistryKey}" /f');
 end;
 
 // Si un cierre abrupto dejó el postgres embebido corriendo (el servidor lo
@@ -1018,6 +1049,7 @@ begin
       'HTTPS {#HttpsPort}, HTTP {#HttpPort} (equipos sin cifrado), video, alarmas, cerco e ISUP', -1);
     ConfigureFirewall();
     StartServiceAndVerify();
+    ConfigureWatchdogTask();
     InstallClient();
     AddSummary('Tiempo total después de copiar: ' + Elapsed(StartTick) + '.');
     ShowStep(0, 'Instalación terminada', '', 100);
@@ -1261,6 +1293,7 @@ begin
   if CurUninstallStep = usUninstall then
   begin
     KillWatchdog();
+    RemoveWatchdogTask();
     StopServiceAndWait('');
     if ServiceExists() then
       RunHidden(SysTool('sc.exe'), 'delete {#ServiceName}');

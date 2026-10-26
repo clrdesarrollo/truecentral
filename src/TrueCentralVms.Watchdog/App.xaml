@@ -1,7 +1,7 @@
-<Application x:Class="TrueCentralVms.Watchdog.App"
+﻿<Application x:Class="TrueCentralVms.Watchdog.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="MainWindow.xaml">
+             ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
         <!-- Tema oscuro del producto (DESIGN-BRIEF): los mismos valores del
              cliente de operación y del panel web (wwwroot\styles.css). -->

@@ -1168,6 +1168,22 @@ servicio** / **Detener servicio** / **Abrir panel web**.
   una API perfectamente sana.
 - Pide elevación en su manifiesto (`requireAdministrator`): controlar el
   servicio la exige, y así el aviso de UAC aparece UNA vez, al abrirlo.
+- **Mantiene vivo el servicio**: si lo encuentra detenido más de 15 s (antes
+  actúa el SCM, que lo relanza a los 5 s) y nadie pidió detenerlo, lo vuelve a
+  iniciar (reintentos a los 30 s, 1, 2 y cada 5 min). La única forma de
+  pedirlo es **Detener servicio** en el Watchdog: queda marcado en
+  `HKLM\SOFTWARE\CLRobotics\TrueCentralVMS\Watchdog` (sobrevive a cerrarlo y a
+  reiniciar el equipo) y se borra al iniciarlo desde cualquier lado. Detenerlo
+  con `services.msc` o `sc stop` NO cuenta: lo vuelve a iniciar. Tampoco lo
+  toca si el servicio está deshabilitado en Windows o si hay otro proceso del
+  servidor corriendo (restauración por consola, servidor a mano).
+- **Segundo plano**: cerrar la ventana la oculta; queda un ícono junto al reloj
+  con el color del estado, avisos cuando el servicio cae o vuelve, y un menú
+  (abrir, iniciar, detener, panel web, salir). Una sola instancia por sesión:
+  abrirlo de nuevo muestra la que ya corre. El instalador crea la tarea
+  programada `CLR TrueCentral VMS Watchdog` (al iniciar sesión cualquier
+  administrador, privilegios máximos —sin aviso de UAC—, `--background`) y la
+  lanza al terminar; desinstalar la borra junto con la marca del registro.
 - En un equipo de desarrollo —servidor corriendo como consola, sin servicio
   instalado— informa "Servidor en ejecución (sin servicio de Windows)" con la
   API y la base en verde, en vez de dar el sistema por caído.
