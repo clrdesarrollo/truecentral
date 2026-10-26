@@ -2412,6 +2412,35 @@ function leaveCurrentPage() {
   playbackLeave();              // reproducción de grabaciones (WebRTC) y su línea de tiempo
 }
 
+// Capítulo del manual (sitio HTML en /manual) de cada página del panel. Las
+// que no tienen capítulo abren la portada; un capítulo que la edición no trae
+// también lleva a la portada (lo resuelve el servidor).
+const MANUAL_CHAPTERS = {
+  "#/live": "03-vista-en-vivo", "#/playback": "04-reproduccion", "#/event-center": "05-centro-de-eventos",
+  "#/alarms": "06-paneles-de-alarma", "#/alarm-panels": "06-paneles-de-alarma",
+  "#/cerco": "07-cerco-electrico", "#/cerco-panels": "07-cerco-electrico",
+  "#/access": "08-control-de-acceso", "#/access-events": "08-control-de-acceso", "#/access-levels": "08-control-de-acceso",
+  "#/access-monitor": "08-control-de-acceso", "#/access-persons": "08-control-de-acceso",
+  "#/access-schedules": "08-control-de-acceso", "#/vehicle-access": "08-control-de-acceso",
+  "#/intercoms": "09-citofonia", "#/intercom-console": "09-citofonia",
+  "#/speakers": "10-parlantes-ip", "#/sounds": "10-parlantes-ip", "#/io-modules": "10b-modulos-de-es",
+  "#/alarm-screens": "10c-pantallas-de-alarma",
+  "#/walls": "11-muro-de-video", "#/videowall": "11-muro-de-video", "#/decoders": "11-muro-de-video",
+  "#/anpr": "12-reconocimiento-de-patentes",
+  "#/workflows": "13-automatizaciones", "#/workflow-runs": "13-automatizaciones", "#/workflow-alerts": "13-automatizaciones",
+  "#/devices": "14-fuentes-de-video", "#/device-maintenance": "14-fuentes-de-video",
+  "#/resources": "15-recursos-y-ubicaciones",
+  "#/users": "16-usuarios-y-roles", "#/roles": "16-usuarios-y-roles", "#/audit": "16-usuarios-y-roles",
+  "#/sessions": "17-sistema", "#/services": "17-sistema", "#/isup": "17-sistema", "#/license": "17-sistema",
+  "#/backups": "17-sistema", "#/mail": "17-sistema", "#/time": "17-sistema", "#/wan": "17-sistema",
+  "#/certificate": "17-sistema",
+};
+
+function manualHref(base) {
+  const route = Object.keys(MANUAL_CHAPTERS).find((r) => base === r || base.startsWith(r + "/"));
+  return route ? `manual/${MANUAL_CHAPTERS[route]}.html` : "manual/";
+}
+
 function navigate() {
   leaveCurrentPage();
   // La ruta puede llevar parámetros (#/workflows/edit?id=7): la tabla se
@@ -2432,6 +2461,7 @@ function navigate() {
   const help = active?.dataset.help ?? "";
   $("#page-help").textContent = help;
   $("#page-help").classList.toggle("hidden", !help);
+  $("#btn-manual").href = manualHref(base);
   // Una página que sus roles no permiten (enlace guardado, historial, o le
   // quitaron el permiso estando en ella) no se dibuja: el servidor la
   // rechazaría a medias, solicitud por solicitud.

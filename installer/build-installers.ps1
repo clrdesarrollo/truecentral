@@ -158,6 +158,19 @@ if (-not $SkipPublish) {
         dotnet publish (Join-Path $repo 'src\TrueCentralVms.IsupHost\TrueCentralVms.IsupHost.csproj') -c Release -r win-x64 --self-contained true `
             "-p:Version=$script:Version" -o (Join-Path $publish 'server') --nologo -v q
         if ($LASTEXITCODE -ne 0) { throw "dotnet publish falló para TrueCentralVms.IsupHost." }
+        # Manual de usuario en HTML: el servidor lo publica en /manual (ícono de
+        # ayuda del panel y del cliente). Sin Typst en el equipo la suite sale
+        # igual, sin manual: /manual mostrará un aviso.
+        if (Get-Command typst -ErrorAction SilentlyContinue) {
+            Write-Host ""
+            Write-Host "== Manual de usuario (Typst, PDF + sitio)  (v$script:Version) ==" -ForegroundColor Cyan
+            $manualPdf = Join-Path $publish "manual\CLRTrueCentralVMS-Manual-$Version.pdf"
+            & (Join-Path $repo 'docs\manual\build-manual.ps1') -Web -Salida $manualPdf
+            $manualSitio = Join-Path $publish "manual\CLRTrueCentralVMS-Manual-$Version-web"
+            Copy-Item $manualSitio (Join-Path $publish 'server\manual') -Recurse -Force
+        } else {
+            Write-Warning 'No se encontró typst: la suite sale sin el manual en HTML (winget install --id Typst.Typst -e).'
+        }
         # Watchdog: monitor de escritorio del servidor, va dentro de la suite
         # (se instala en {app}\watchdog).
         Invoke-Publish 'src\TrueCentralVms.Watchdog\TrueCentralVms.Watchdog.csproj' (Join-Path $publish 'watchdog')

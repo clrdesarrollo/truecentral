@@ -167,6 +167,7 @@ Type: filesandordirs; Name: "{app}\tools\postgres\pgsql"
 Type: filesandordirs; Name: "{app}\tools\mediamtx"
 Type: filesandordirs; Name: "{app}\tools\ffmpeg"
 Type: filesandordirs; Name: "{app}\wwwroot"
+Type: filesandordirs; Name: "{app}\manual"
 Type: filesandordirs; Name: "{app}\HCNetSDKCom"
 Type: filesandordirs; Name: "{app}\watchdog"
 ; Instaladores del cliente de versiones anteriores (se publica el nuevo).

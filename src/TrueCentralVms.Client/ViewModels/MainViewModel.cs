@@ -577,6 +577,22 @@ public partial class MainViewModel : ObservableObject
         _downloadWindow.Activate();
     }
 
+    /// <summary>Manual de usuario: el sitio HTML que publica el servidor en
+    /// /manual, abierto en el navegador predeterminado.</summary>
+    [RelayCommand]
+    private void OpenManual()
+    {
+        if (string.IsNullOrEmpty(_api.BaseUrl)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_api.BaseUrl + "/manual/") { UseShellExecute = true })?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"No se pudo abrir el manual en el navegador: {ex.Message}";
+        }
+    }
+
     /// <summary>Ventana de Configuración. Edita la MISMA instancia de ajustes
     /// que usan las celdas (carpetas, formato, stream por defecto): al guardar,
     /// los cambios rigen de inmediato sin reiniciar.</summary>

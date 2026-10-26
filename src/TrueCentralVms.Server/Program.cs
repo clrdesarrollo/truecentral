@@ -453,6 +453,8 @@ app.UseStaticFiles(new StaticFileOptions
 {
     OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "no-cache",
 });
+// Manual de usuario en HTML (ícono de ayuda del panel y del cliente).
+ManualSite.Map(app, app.Logger);
 
 // ---------------------------------------------------------------------------
 // Autenticación por token opaco (Authorization: Bearer <token> o

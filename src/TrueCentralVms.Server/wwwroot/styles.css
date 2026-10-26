@@ -223,6 +223,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 }
 .topbar-icon:hover, .topbar-icon:focus-visible { background: var(--panel-2); color: var(--text); outline: none; }
 .topbar-icon[aria-expanded="true"] { color: var(--accent); }
+a.topbar-icon { text-decoration: none; }
 .topbar-user { display: flex; align-items: center; gap: 6px; position: relative; padding-right: 16px; }
 /* Menú del usuario: el nombre abre la lista (descargar complemento, cerrar sesión). */
 .user-menu-toggle {

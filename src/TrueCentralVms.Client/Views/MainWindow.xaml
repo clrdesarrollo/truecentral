@@ -548,6 +548,9 @@
                                 ToolTip="Centro de descargas"
                                 Command="{Binding OpenDownloadCenterCommand}"
                                 Visibility="{Binding CanDownloads, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <Button Style="{StaticResource RailButton}" Content="&#xE897;"
+                                ToolTip="Manual de usuario"
+                                Command="{Binding OpenManualCommand}"/>
                         <Button Style="{StaticResource RailButton}" Content="&#xE713;"
                                 ToolTip="Configuración"
                                 Command="{Binding OpenSettingsCommand}"/>
