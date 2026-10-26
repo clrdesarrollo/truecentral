@@ -94,8 +94,8 @@ async function renderIntercoms() {
       </table></div>`}
     ${isAdmin ? `
     <div class="toolbar" style="margin-top:22px">
-      <h3>Equipos en línea <span class="muted" style="font-weight:normal;font-size:12px">(SADP en la red local · se actualiza cada 30 s)</span></h3>
-      <button class="btn ghost" id="btn-intercom-scan">Buscar</button>
+      <h3>Equipos en línea <span class="muted hint">Buscando equipos compatibles en la red local; se actualiza cada 30 segundos.</span></h3>
+      <button class="btn ghost" id="btn-intercom-scan" title="Volver a buscar ahora, sin esperar los 30 segundos">Actualizar</button>
     </div>
     <div id="intercom-online">
       ${scanReady ? "" : `<div class="info-box">Sondeando el segmento de red del servidor… Solo se listan

@@ -9,7 +9,7 @@
   <script>if (document.documentMode) { document.write('<p style="font-family:Segoe UI,Arial,sans-serif;margin:40px">Internet Explorer no es compatible con este panel. Ábralo con Microsoft Edge u otro navegador actual.</p>'); document.execCommand('Stop'); }</script>
   <link rel="icon" href="favicon.ico">
   <link rel="stylesheet" href="vendor/mdi/css/materialdesignicons.min.css?v=1">
-  <link rel="stylesheet" href="styles.css?v=72">
+  <link rel="stylesheet" href="styles.css?v=90">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -86,7 +86,7 @@
         <a href="#/event-center" data-route="event-center" data-needs-license data-perm="events.attend"><i class="mdi mdi-bell-ring" aria-hidden="true"></i><span class="nav-text">Centro de eventos</span></a>
         <a href="#/videowall" data-route="videowall" data-module="module_videowall" data-perm="wall.operate"><i class="mdi mdi-monitor-multiple" aria-hidden="true"></i><span class="nav-text">Videowall</span></a>
         <a href="#/intercom-console" data-route="intercom-console" data-module="module_intercom" data-perm="intercom.answer"><i class="mdi mdi-deskphone" aria-hidden="true"></i><span class="nav-text">Citofonía</span></a>
-        <a href="#/anpr" data-route="anpr" data-module="module_anpr" data-perm="anpr.view"><i class="mdi mdi-car" aria-hidden="true"></i><span class="nav-text">ANPR</span></a>
+        <a href="#/anpr" data-route="anpr" data-help="Lecturas de patentes de las cámaras ANPR con sus fotos. Haga clic en una lectura para ver su ficha y en la patente para copiarla." data-module="module_anpr" data-perm="anpr.view"><i class="mdi mdi-car" aria-hidden="true"></i><span class="nav-text">ANPR</span></a>
 
         <div class="nav-divider"><span class="nav-text">Configuración</span></div>
 
@@ -176,6 +176,8 @@
       <div id="license-banner" class="license-banner hidden"></div>
       <div class="page-titles">
         <div class="page-titles-text">
+          <!-- Ayuda bajo el título: sale del data-help del enlace del menú activo (la columna va invertida) -->
+          <p class="page-help hidden" id="page-help"></p>
           <h2 id="page-title">Panel</h2>
           <ol class="breadcrumb" id="breadcrumb" aria-label="Ubicación en el menú"></ol>
         </div>
@@ -195,7 +197,7 @@
 
   <script src="api.js?v=2"></script>
   <!-- walls.js va ANTES: app.js referencia sus funciones al armar las rutas. -->
-  <script src="walls.js?v=7"></script>
+  <script src="walls.js?v=10"></script>
   <script src="isup.js?v=3"></script>
   <script src="alarms.js?v=17"></script>
   <script src="speakers.js?v=14"></script>
@@ -205,8 +207,8 @@
   <script src="fleet-events.js?v=2"></script>
   <script src="fleet-track.js?v=3"></script>
   <script src="alarm-screens.js?v=3"></script>
-  <script src="intercoms.js?v=8"></script>
-  <script src="access.js?v=13"></script>
+  <script src="intercoms.js?v=11"></script>
+  <script src="access.js?v=16"></script>
   <script src="maintenance.js?v=4"></script>
   <script src="enroll.js?v=2"></script>
   <script src="access-catalog.js?v=20"></script>
@@ -220,7 +222,7 @@
   <script src="workflow-editor.js?v=13"></script>
   <script src="services.js?v=4"></script>
   <script src="license.js?v=7"></script>
-  <script src="anpr.js?v=4"></script>
+  <script src="anpr.js?v=9"></script>
   <script src="alarm-monitor.js?v=4"></script>
   <script src="event-center.js?v=3"></script>
   <script src="videowall.js?v=2"></script>
@@ -231,12 +233,12 @@
   <script src="cerco-alarm.js?v=5"></script>
   <script src="resources.js?v=9"></script>
   <!-- live.js va DESPUÉS de resources.js: usa sus íconos de ubicación. -->
-  <script src="live.js?v=10"></script>
+  <script src="live.js?v=12"></script>
   <script src="live-joystick.js?v=2"></script>
   <!-- playback.js usa LvSession y utilidades de live.js. -->
   <script src="playback.js?v=6"></script>
   <script src="roles.js?v=3"></script>
   <script src="dashboard.js?v=9"></script>
-  <script src="app.js?v=80"></script>
+  <script src="app.js?v=86"></script>
 </body>
 </html>

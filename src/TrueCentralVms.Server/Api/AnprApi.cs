@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text.Json;
 using TrueCentralVms.Server.Services.Licensing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -181,23 +183,44 @@ public static class AnprApi
         });
 
         // ------------------------------------------------------------------
-        // Borrado del historial (administrador)
+        // Descarga de un reconocimiento: ZIP con sus fotos y un JSON con todos
+        // sus datos. Las lecturas NO se borran a mano: solo el sistema, por
+        // antigüedad.
         // ------------------------------------------------------------------
-        app.MapDelete("/api/anpr/events/{id:long}", async (HttpContext ctx, VmsDbContext db, AnprStore store,
+        app.MapGet("/api/anpr/events/{id:long}/zip", async (HttpContext ctx, VmsDbContext db, AnprStore store,
             AuditService audit, long id) =>
         {
-            if (ApiSecurity.Require(ctx, Permissions.AnprDelete, out _) is { } failure) return failure;
-            var record = await db.PlateEvents.FirstOrDefaultAsync(p => p.Id == id);
-            if (record is null)
+            if (ApiSecurity.Require(ctx, Permissions.AnprView, out var session) is { } failure) return failure;
+
+            var record = await db.PlateEvents.AsNoTracking().Include(p => p.Device).FirstOrDefaultAsync(p => p.Id == id);
+            if (record is null || !(await ctx.ScopeAsync(session)).CanViewChannel(record.DeviceId, record.ChannelNumber))
                 return Error("El reconocimiento no existe.", StatusCodes.Status404NotFound);
-            store.Delete([record.SceneImagePath, record.PlateImagePath]);
-            db.PlateEvents.Remove(record);
-            await db.SaveChangesAsync();
-            await audit.LogAsync(ctx, "anpr", "event-deleted",
+
+            string channelName = await db.Channels.AsNoTracking()
+                .Where(c => c.DeviceId == record.DeviceId && c.ChannelNumber == record.ChannelNumber)
+                .Select(c => c.Name).FirstOrDefaultAsync() ?? $"Canal {record.ChannelNumber}";
+            var dto = AnprMapper.ToDto(record, record.Device.Name, channelName);
+
+            // Nombre: PATENTE_ddMMyyyy_HHmmss (hora del equipo), igual en el ZIP y en sus archivos.
+            string baseName = $"{record.PlateNumber}_{record.CapturedAt:ddMMyyyy_HHmmss}";
+            using var buffer = new MemoryStream();
+            using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var (relative, suffix) in new[] { (record.SceneImagePath, "escena"), (record.PlateImagePath, "placa") })
+                    if (store.FullPath(relative) is { } path && File.Exists(path))
+                        zip.CreateEntryFromFile(path, $"{baseName}_{suffix}.jpg", CompressionLevel.NoCompression);
+
+                await using var json = zip.CreateEntry($"{baseName}.json").Open();
+                await JsonSerializer.SerializeAsync(json, dto, ZipJson);
+            }
+
+            await audit.LogAsync(ctx, "anpr", "event-exported",
                 targetType: "plate-event", targetId: id.ToString(), targetName: record.PlateNumber,
-                detail: $"Eliminó el reconocimiento {id} (patente {record.PlateNumber}, " +
+                detail: $"Descargó el reconocimiento {id} (patente {record.PlateNumber}, " +
                         $"capturada el {record.CapturedAt:dd-MM-yyyy HH:mm:ss}).");
-            return Results.Ok(new { ok = true });
+            return Results.File(buffer.ToArray(), "application/zip", $"{baseName}.zip");
         });
     }
+
+    private static readonly JsonSerializerOptions ZipJson = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 }

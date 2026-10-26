@@ -153,7 +153,7 @@ cupo (por ejemplo, al ampliarla).
 
 La sección *Equipos en línea* busca equipos de video en el segmento de red del
 servidor al abrir la página y se actualiza sola cada 30 segundos;
-#boton("Buscar") repite la búsqueda en el momento. Encuentra equipos Hikvision,
+#boton("Actualizar") repite la búsqueda en el momento. Encuentra equipos Hikvision,
 Dahua y de cualquier marca ONVIF, y lista solo equipos de video (cámaras, DVR,
 NVR y decodificadores): los controles de acceso y las alarmas se omiten.
 
@@ -487,7 +487,7 @@ Los botones están deshabilitados si el equipo no está en línea.
   [Marque *PTZ / lente* en el canal.],
   [El equipo ya no responde en la red. Vuelva a buscar e intente de nuevo.],
   [Al activar, inicializar o cambiar la IP: el equipo dejó de aparecer en la
-    búsqueda. Pulse #boton("Buscar") y repita.],
+    búsqueda. Pulse #boton("Actualizar") y repita.],
   [La IP … ya está en uso por otro equipo de la red. Elija otra.],
   [Elija otra IP libre.],
   [El equipo no está activado: actívelo antes de cambiarle la IP. \ El equipo

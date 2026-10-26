@@ -66,3 +66,7 @@ src/TrueCentralVms.Server/isup/
 **/build/tmp-migrador/
 # Documento de revisión local (no es parte del producto)
 /revision.pdf
+
+# Archivos de estado que escribe el servidor al correr desde el checkout
+src/TrueCentralVms.Server/server-run.json
+src/TrueCentralVms.Server/startup-status.ini

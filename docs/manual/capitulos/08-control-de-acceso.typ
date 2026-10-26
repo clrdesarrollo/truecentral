@@ -461,7 +461,7 @@ motivo y los botones #boton("Cerrar") y #boton("Reintentar"):
   columns: (1fr, 1fr),
   table.header[Mensaje][Qué hacer],
   [_No se encontró el complemento en este equipo._], [Instale el complemento en este PC (la misma ventana ofrece descargarlo) y haga clic en #boton("Buscar de nuevo").],
-  [_No se pudo comunicar con el lector: revise que esté conectado por USB y que ningún otro programa (SADP, iVMS, otra pestaña) lo tenga tomado._], [Revise el cable y cierre el otro programa o la otra pestaña que esté usando el lector.],
+  [_No se pudo comunicar con el lector: revise que esté conectado por USB y que ningún otro programa (iVMS, otra pestaña) lo tenga tomado._], [Revise el cable y cierre el otro programa o la otra pestaña que esté usando el lector.],
   [_Se agotó el tiempo de espera: no se apoyó el dedo a tiempo._], [Vuelva a iniciar la captura y apoye el dedo apenas lo pida.],
   [_No se pudo generar la plantilla: limpie el sensor y repita apoyando bien el mismo dedo._], [Limpie el sensor y el dedo, y repita.],
   [_Se perdió la comunicación con el complemento: …_], [El complemento se cerró. Ábralo de nuevo desde el menú Inicio de Windows (*CLR TrueCentral VMS Complemento*) y reintente.],
@@ -739,7 +739,7 @@ horarios), leen tarjetas a pedido y se configuran desde las pestañas *Puertas*,
 
 Debajo de la lista, la tabla *Equipos en línea* muestra los equipos de control
 de acceso compatibles que encuentra en la red del servidor (Hikvision DS-K,
-Dahua ASI/ASC/ASG y ZKTeco). Se actualiza cada 30 segundos; #boton("Buscar")
+Dahua ASI/ASC/ASG y ZKTeco). Se actualiza cada 30 segundos; #boton("Actualizar")
 la actualiza en el momento.
 
 La columna *Estado* dice si el equipo es *Nuevo*, ya está *Agregado* o viene de

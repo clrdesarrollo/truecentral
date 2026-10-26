@@ -307,7 +307,7 @@ video. La voz, el video y la apertura de puerta van por esa misma conexión.
 
 Debajo de la tabla, *Equipos en línea* lista los frentes compatibles que el
 servidor encuentra en su segmento de red; se actualiza cada 30 segundos y
-#boton("Buscar") repite la búsqueda. El botón #boton("Agregar") de cada fila
+#boton("Actualizar") repite la búsqueda. El botón #boton("Agregar") de cada fila
 abre el formulario con la dirección y el modelo ya completos. Los equipos de
 fábrica se activan y su IP se cambia desde la misma tabla, igual que en
 Fuentes de video (vea #capitulo(<cap-fuentes-de-video>)).

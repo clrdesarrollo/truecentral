@@ -53,7 +53,7 @@ public static class HikvisionSadp
                 if (!found.TryGetValue(NormalizeMac(mac), out var device))
                 {
                     result = new HikvisionSadpResult(false,
-                        "El equipo no respondió a la búsqueda SADP. Vuelva a buscar e intente de nuevo.");
+                        "El equipo no respondió a la búsqueda en la red. Vuelva a buscar e intente de nuevo.");
                     return Task.FromResult(0);
                 }
                 var param = new SadpSdk.SADP_DEV_NET_PARAM
@@ -77,7 +77,7 @@ public static class HikvisionSadp
                         $"El equipo no aceptó el cambio: {SadpSdk.DescribeError(SadpSdk.SADP_GetLastError())}.");
                 return Task.FromResult(0);
             }, ct);
-            return result ?? new HikvisionSadpResult(false, "No se pudo iniciar la búsqueda SADP.");
+            return result ?? new HikvisionSadpResult(false, "No se pudo iniciar la búsqueda en la red.");
         }
         finally { Gate.Release(); }
     }
@@ -100,7 +100,7 @@ public static class HikvisionSadp
                 if (!found.TryGetValue(NormalizeMac(mac), out var device) || device.Serial.Length == 0)
                 {
                     result = new HikvisionSadpResult(false,
-                        "El equipo no respondió a la búsqueda SADP. Vuelva a buscar e intente de nuevo.");
+                        "El equipo no respondió a la búsqueda en la red. Vuelva a buscar e intente de nuevo.");
                     return Task.FromResult(0);
                 }
                 // El SDK identifica al equipo por su N° de serie completo, no por la MAC.
@@ -110,7 +110,7 @@ public static class HikvisionSadp
                         $"El equipo no aceptó la activación: {SadpSdk.DescribeError(SadpSdk.SADP_GetLastError())}.");
                 return Task.FromResult(0);
             }, ct);
-            return result ?? new HikvisionSadpResult(false, "No se pudo iniciar la búsqueda SADP.");
+            return result ?? new HikvisionSadpResult(false, "No se pudo iniciar la búsqueda en la red.");
         }
         finally { Gate.Release(); }
     }
@@ -150,7 +150,7 @@ public static class HikvisionSadp
 
         if (!await Task.Run(() => SadpSdk.SADP_Start_V30(callback, 0, IntPtr.Zero), ct))
             throw new InvalidOperationException(
-                $"No se pudo iniciar SADP: {SadpSdk.DescribeError(SadpSdk.SADP_GetLastError())}.");
+                $"No se pudo iniciar la búsqueda en la red: {SadpSdk.DescribeError(SadpSdk.SADP_GetLastError())}.");
         try
         {
             SadpSdk.SADP_SendInquiry();

@@ -143,7 +143,8 @@ public static class AuditCatalog
         [
             new("source-enabled", "Fuente de patentes activada"),
             new("source-disabled", "Fuente de patentes desactivada"),
-            new("event-deleted", "Reconocimiento eliminado"),
+            new("event-deleted", "Reconocimiento eliminado"), // ya no se puede borrar a mano: queda por los registros antiguos
+            new("event-exported", "Reconocimiento descargado"),
             new("search", "Búsqueda en el historial"),
         ]),
         new("cerco", "Paneles de cerco eléctrico",

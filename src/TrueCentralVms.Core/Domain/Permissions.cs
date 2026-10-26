@@ -33,7 +33,6 @@ public static class Permissions
     public const string AccessDoors = "access.doors";
     public const string AccessRecordsExport = "access.records.export";
     public const string AnprView = "anpr.view";
-    public const string AnprDelete = "anpr.delete";
     public const string SpeakersPlay = "speakers.play";
     public const string IoOperate = "io.operate";
     public const string IntercomAnswer = "intercom.answer";
@@ -124,8 +123,6 @@ public static class Permissions
             "Descargar los registros de acceso en PDF o Excel.", [AccessMonitor]),
         new(AnprView, "Monitoreo y operación", "Ver patentes",
             "Ver las lecturas de patentes con sus fotos.", []),
-        new(AnprDelete, "Monitoreo y operación", "Borrar lecturas de patentes",
-            "Eliminar lecturas de patentes guardadas.", [AnprView]),
         new(SpeakersPlay, "Monitoreo y operación", "Usar parlantes",
             "Reproducir audios, hablar y ajustar el volumen de los parlantes IP.", []),
         new(IoOperate, "Monitoreo y operación", "Operar relés",

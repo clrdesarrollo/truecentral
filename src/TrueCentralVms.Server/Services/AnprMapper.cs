@@ -1,4 +1,5 @@
 using TrueCentralVms.Core.Contracts;
+using TrueCentralVms.Core.Domain;
 using TrueCentralVms.Server.Data.Entities;
 
 namespace TrueCentralVms.Server.Services;
@@ -13,7 +14,14 @@ public static class AnprMapper
         e.PlateColor, e.PlateType, e.VehicleType, e.VehicleColor, e.VehicleBrand, e.VehicleAttributes,
         e.SpeedKmh, e.VehicleLengthCm, e.Direction, e.Lane, e.DetectionMethod, e.Violation,
         e.PlateX, e.PlateY, e.PlateWidth, e.PlateHeight,
-        e.SceneImagePath is not null, e.PlateImagePath is not null);
+        e.SceneImagePath is not null, e.PlateImagePath is not null,
+        ChileOf(e.PlateNumber));
+
+    private static PlateCheckDto ChileOf(string plate)
+    {
+        var check = ChileanPlate.Validate(plate);
+        return new PlateCheckDto(check.IsValid, check.FormatLabel, check.CheckDigit?.ToString(), check.Problem);
+    }
 
     private static IReadOnlyList<int> ParseConfidences(string? packed)
     {

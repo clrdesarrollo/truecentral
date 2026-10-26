@@ -167,26 +167,16 @@ escena para abrirla en tamaño completo en otra pestaña del navegador.
 no es la más nueva, se desmarca solo, para que la ficha no cambie mientras la
 revisa.
 
-En la ficha:
+En la ficha, la patente leída aparece bajo el primer plano de la placa, para
+compararla de un vistazo con la placa real:
 
-- #boton("Copiar patente") copia la patente al portapapeles;
-- #boton("Guardar escena") y #boton("Guardar placa") descargan cada foto a la
-  carpeta de descargas del navegador.
+- haga clic en la patente para copiarla al portapapeles;
+- #boton("Descargar ZIP") descarga un archivo con las fotos de la lectura
+  (escena y placa) y un JSON con todos sus datos. Cada descarga queda en la
+  bitácora de auditoría.
 
-=== Eliminar una lectura
-
-#requiere("Borrar lecturas de patentes")
-
-+ Seleccione la lectura en la lista.
-+ Haga clic en #boton("Eliminar").
-+ Confirme el mensaje _¿Eliminar la lectura de … y sus fotos? No se puede
-  deshacer._
-
-La lectura desaparece de la lista y aparece el aviso _Lectura eliminada._ Las
-lecturas solo se pueden eliminar desde el panel web.
-
-#importante[La lectura y sus fotos se borran del servidor de forma
-  definitiva.]
+#nota[Las lecturas no se pueden eliminar a mano: solo el sistema las borra al
+  cumplir su antigüedad.]
 
 #modulo("automation")[
   == Actuar cuando pasa una patente

@@ -48,12 +48,12 @@ public static partial class DiscoveryApi
             if (audit.ShouldLog($"scan:{session.UserId}", TimeSpan.FromMinutes(10)))
                 await audit.LogAsync(ctx, accessOnly ? "access" : "devices", "discovery-scan",
                     detail: accessOnly
-                        ? "Sondeó la red en busca de equipos de control de acceso (SADP)."
+                        ? "Sondeó la red en busca de equipos de control de acceso."
                         : intercomOnly
-                        ? "Sondeó la red en busca de frentes de citofonía (SADP)."
+                        ? "Sondeó la red en busca de frentes de citofonía."
                         : decodersOnly
-                            ? "Sondeó la red en busca de decodificadores de muro (SADP, DHDiscover)."
-                            : "Sondeó la red en busca de equipos de video (SADP, DHDiscover, WS-Discovery).");
+                            ? "Sondeó la red en busca de decodificadores de muro."
+                            : "Sondeó la red en busca de equipos de video.");
 
             IPAddress? directed = null;
             if (!string.IsNullOrWhiteSpace(host) && !IPAddress.TryParse(host.Trim(), out directed))

@@ -35,7 +35,14 @@ public sealed record PlateEventDto(
     string? Violation,
     double PlateX, double PlateY, double PlateWidth, double PlateHeight,
     bool HasSceneImage,
-    bool HasPlateImage);
+    bool HasPlateImage,
+    PlateCheckDto? Chile = null);
+
+/// <summary>
+/// Validación de la patente leída como PPU chilena (ver <c>ChileanPlate</c>):
+/// formato, serie y dígito verificador calculado (la placa no lo muestra).
+/// </summary>
+public sealed record PlateCheckDto(bool Valid, string Format, string? CheckDigit, string? Problem);
 
 /// <summary>
 /// Equipo capaz de entregar patentes, con su estado como fuente del módulo.
