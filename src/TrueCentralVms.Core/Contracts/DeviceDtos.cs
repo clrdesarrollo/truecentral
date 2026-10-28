@@ -41,7 +41,10 @@ public sealed record DeviceDto(
     /// <summary>ID ISUP del equipo si se conecta por ISUP (entonces Host y puertos no aplican).</summary>
     string? IsupDeviceId = null,
     /// <summary>Hay clave ISUP guardada (la clave nunca viaja).</summary>
-    bool HasIsupKey = false);
+    bool HasIsupKey = false,
+    /// <summary>Es la cámara de un terminal de acceso: se administra desde Control de acceso
+    /// (dirección y credenciales son las del terminal) y no ocupa canal de video de la licencia.</summary>
+    int? AccessDeviceId = null);
 
 /// <summary>
 /// Alta/edición de dispositivo. En edición, Password null o vacía = mantener

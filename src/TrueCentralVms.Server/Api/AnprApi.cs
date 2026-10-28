@@ -134,8 +134,9 @@ public static class AnprApi
                 .Select(f => f.DriverKey)
                 .ToList();
 
+            // La cámara de un terminal de acceso no es fuente de patentes.
             var devices = await db.Devices.AsNoTracking()
-                .Where(d => capableKeys.Contains(d.DriverKey))
+                .Where(d => capableKeys.Contains(d.DriverKey) && d.AccessDeviceId == null)
                 .OrderBy(d => d.Name)
                 .ToListAsync();
 
@@ -158,7 +159,8 @@ public static class AnprApi
             var device = await db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId);
             if (device is null)
                 return Error("El dispositivo no existe.", StatusCodes.Status404NotFound);
-            if (request.Enabled && (drivers.Find(device.DriverKey) is not { } factory || !factory.Capabilities.SupportsAnpr))
+            if (request.Enabled && (device.AccessDeviceId is not null ||
+                                    drivers.Find(device.DriverKey) is not { } factory || !factory.Capabilities.SupportsAnpr))
                 return Error($"El driver '{device.DriverKey}' no entrega reconocimientos de patentes.");
             if (request.Enabled && !device.AnprEnabled
                 && license.Deny(LicenseFeatures.ModuleAnpr, LicenseFeatures.AnprChannels,

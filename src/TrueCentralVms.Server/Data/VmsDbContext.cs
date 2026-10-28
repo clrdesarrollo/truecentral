@@ -270,6 +270,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(d => d.IsupDeviceId).HasMaxLength(32);
             // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
             e.HasIndex(d => d.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
+            // Cámara de un terminal de acceso: una por terminal, y se va con él (sus canales también).
+            e.HasOne(d => d.AccessDevice).WithOne()
+                .HasForeignKey<Device>(d => d.AccessDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Vehículos de la flota: un grabador por vehículo; borrar el vehículo borra su grabador (y este, sus canales).
@@ -637,6 +641,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(a => a.FirmwareVersion).HasMaxLength(64);
             e.Property(a => a.MacAddress).HasMaxLength(32);
             e.Property(a => a.LastError).HasMaxLength(512);
+            e.Property(a => a.CameraNote).HasMaxLength(256);
             e.Property(a => a.Kind).HasConversion<string>().HasMaxLength(16);
             e.Property(a => a.Status).HasConversion<string>().HasMaxLength(16);
             e.HasIndex(a => new { a.Host, a.Port }).IsUnique().HasFilter("\"IsupDeviceId\" IS NULL");

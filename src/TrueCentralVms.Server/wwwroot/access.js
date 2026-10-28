@@ -341,6 +341,7 @@ async function accessDeviceModal(device, prefill) {
       <div id="ac-isup-wrap">${isupFieldsHtml("ac", device, isNew, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${device ? (device.enabled ? "checked" : "") : "checked"}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
       <label class="checkbox-row" title="Apáguela si otro sistema (por ejemplo el kiosco del casino) necesita la escucha del equipo: hay terminales que admiten una sola."><input type="checkbox" id="ac-live" ${device ? (device.liveEvents === false ? "" : "checked") : "checked"}> Escuchar sus eventos en vivo (apagado: se lee su historial cada 15 s, sin ocupar la escucha del equipo)</label>
+      ${accessCameraFieldHtml(device)}
       <div class="info-box" style="margin-top:10px">Al guardar se leen del equipo el modelo, el firmware, las capacidades y las puertas que administra.</div>
       <div id="ac-probe-result"></div>
       ${isNew ? "" : maintDeviceSectionHtml()}
@@ -428,6 +429,7 @@ function accessReadConnectionForm() {
       host: "", port: 0, useHttps: false, username: "", password: null,
       enabled: $("#ac-enabled").checked,
       liveEvents: $("#ac-live")?.checked ?? true,
+      useCamera: $("#ac-camera")?.checked ?? true,
       locationId: locationFieldValue("ac-location"),
       ...readIsupFields("ac"),
     };
@@ -443,8 +445,28 @@ function accessReadConnectionForm() {
     password: $("#ac-password").value || null,
     enabled: $("#ac-enabled").checked,
     liveEvents: $("#ac-live")?.checked ?? true,
+    useCamera: $("#ac-camera")?.checked ?? true,
     locationId: locationFieldValue("ac-location"),
   };
+}
+
+/**
+ * Cámara propia del terminal (faciales): se muestra como una cámara más,
+ * incluida con el terminal (no ocupa canal de video), y es la principal de
+ * sus puertas. Debajo, lo que se sabe de ella en este equipo.
+ */
+function accessCameraFieldHtml(device) {
+  let state = "";
+  if (device?.cameraNote) state = `<div class="field-hint" style="color:var(--warn-text)">${esc(device.cameraNote)}</div>`;
+  else if (device?.hasCamera && device.useCamera !== false)
+    state = `<div class="muted field-hint">Tiene cámara: se ve como la cámara «${esc(device.name)}» en Vista en vivo y en la ficha de sus puertas.</div>`;
+  else if (device?.hasCamera) state = `<div class="muted field-hint">Tiene cámara, pero no se está mostrando.</div>`;
+  else if (device) state = `<div class="muted field-hint">No se le detectó cámara (se vuelve a mirar al revalidarlo).</div>`;
+  return `
+      <label class="checkbox-row" title="Los terminales faciales tienen cámara: se agrega como una cámara más, sin ocupar canal de video de la licencia, y queda como la cámara principal de sus puertas.">
+        <input type="checkbox" id="ac-camera" ${device?.useCamera === false ? "" : "checked"}>
+        Mostrar su cámara como una cámara más (terminales faciales; incluida, no ocupa canal de video)</label>
+      ${state}`;
 }
 
 function accessProbeResultHtml(r) {
@@ -463,6 +485,7 @@ function accessProbeResultHtml(r) {
         <span>Credenciales</span><b>${[r.supportsCards ? "tarjeta" : null, r.supportsFingerprint ? "huella" : null,
           r.supportsFace ? "rostro" : null].filter(Boolean).join(", ") || "—"}</b>
         <span>Cupos del equipo</span><b>${r.userCapacity ?? "—"} personas · ${r.cardCapacity ?? "—"} tarjetas</b>
+        <span>Cámara</span><b>${r.hasCamera ? "sí (se agrega como cámara, sin ocupar canal de video)" : "no"}</b>
       </div>
     </div>`;
 }
@@ -706,6 +729,7 @@ async function acdDrawConnection(body) {
       <div id="ac-isup-wrap">${isupFieldsHtml("ac", d, false, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${d.enabled ? "checked" : ""}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
       <label class="checkbox-row" title="Apáguela si otro sistema (por ejemplo el kiosco del casino) necesita la escucha del equipo: hay terminales que admiten una sola."><input type="checkbox" id="ac-live" ${d.liveEvents === false ? "" : "checked"}> Escuchar sus eventos en vivo (apagado: se lee su historial cada 15 s, sin ocupar la escucha del equipo)</label>
+      ${accessCameraFieldHtml(d)}
       <div class="info-box">Si cambia la dirección, el puerto, el usuario o la contraseña, al guardar se vuelve a validar contra
         el equipo y se releen su modelo, firmware, capacidades y puertas.</div>
       <div id="ac-probe-result"></div>

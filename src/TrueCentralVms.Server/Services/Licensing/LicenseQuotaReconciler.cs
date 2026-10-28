@@ -265,6 +265,8 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
             await ReportAsync(label + " (cupo de puertas)", LicenseFeatures.ModuleAccess, allowed,
                 off.Select(d => d.Name).ToList(), on.Select(d => d.Name).ToList());
             sp.GetService<AccessControlService>()?.RequestReconcile();
+            // La cámara de un terminal apagado deja de servirse (y vuelve con él).
+            if (sp.GetService<MediaMtxManager>() is { } mtx) await mtx.RefreshPathsAsync(ct);
             await Changed("access-devices");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

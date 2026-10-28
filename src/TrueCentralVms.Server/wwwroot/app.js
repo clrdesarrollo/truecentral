@@ -177,7 +177,7 @@ function locationFieldHtml(id, choices, selectedId, hint, { equipment = false, i
       <label for="${id}">Ubicación</label>
       <select id="${id}"${offerNew ? ` data-loc-new="${id}-new"` : ""}>
         ${offerNew ? `<option value="new"${startNew ? " selected" : ""}>Nueva, con el nombre del equipo</option>` : ""}
-        <option value="">Por ubicar</option>
+        <option value=""${!startNew && selectedId == null ? " selected" : ""}>Por ubicar</option>
         ${options(startNew ? null : selectedId)}
       </select>
       ${offerNew ? `
@@ -861,19 +861,22 @@ async function renderDevices() {
         <tbody>
           ${devices.map((d) => `
             <tr data-id="${d.id}">
-              <td>${esc(d.name)}${locationLineHtml(d.location)}</td>
+              <td>${esc(d.name)}${d.accessDeviceId ? `<div class="muted field-hint">Cámara de un terminal de acceso · incluida, no ocupa canal de video</div>` : ""}${locationLineHtml(d.location)}</td>
               <td>${esc(typeLabel(d.deviceType))}</td>
               <td class="muted">${esc(brandOf(d.driverKey))}</td>
-              <td class="muted">${d.isupDeviceId ? isupAddressHtml(d.isupDeviceId) : `${esc(d.host)}:${d.sdkPort}`}</td>
+              <td class="muted">${d.isupDeviceId ? isupAddressHtml(d.isupDeviceId)
+                : d.accessDeviceId ? `${esc(d.host)} · RTSP ${d.rtspPort}` : `${esc(d.host)}:${d.sdkPort}`}</td>
               <td>${esc(d.model ?? "—")}</td>
               <td class="muted">${esc(d.serialNumber ?? "—")}</td>
               <td class="muted">${esc(d.firmwareVersion ?? "—")}</td>
               <td>${channelCountCell(d)}</td>
-              <td>${anprCell(d, isAdmin)}</td>
+              <td>${d.accessDeviceId ? `<span class="muted">—</span>` : anprCell(d, isAdmin)}</td>
               <td>${statusTag(d.status)}</td>
               <td class="row-actions">
                 <button class="btn ghost btn-channels">Canales</button>
-                ${isAdmin ? `<button class="btn ghost btn-revalidate" title="Volver a sondear el equipo (modelo, firmware, canales, puerto RTSP)">Revalidar</button>
+                ${isAdmin && d.accessDeviceId ? `<a class="btn ghost" href="#/access/device?id=${d.accessDeviceId}"
+                  title="Su dirección y credenciales son las del terminal: se administra en Control de acceso">Ver terminal</a>` : ""}
+                ${isAdmin && !d.accessDeviceId ? `<button class="btn ghost btn-revalidate" title="Volver a sondear el equipo (modelo, firmware, canales, puerto RTSP)">Revalidar</button>
                 <button class="btn ghost btn-edit">Editar</button>
                 <button class="btn danger btn-delete">Eliminar</button>` : ""}
               </td>

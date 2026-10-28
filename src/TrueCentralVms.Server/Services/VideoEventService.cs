@@ -156,8 +156,9 @@ public sealed class VideoEventService(
             var ids = deviceIds.Union(fromChannels).ToHashSet();
             wanted = await db.Devices.AsNoTracking().Where(d => ids.Contains(d.Id)).ToListAsync(ct);
         }
-        // Solo los equipos cuyo driver sabe recibir eventos.
-        wanted = wanted.Where(d => drivers.Find(d.DriverKey)?.Capabilities.SupportsEvents == true).ToList();
+        // Solo los equipos cuyo driver sabe recibir eventos. La cámara de un terminal de acceso no se
+        // arma: el terminal admite pocas suscripciones y la que importa es la de sus eventos de acceso.
+        wanted = wanted.Where(d => d.AccessDeviceId is null && drivers.Find(d.DriverKey)?.Capabilities.SupportsEvents == true).ToList();
         var wantedIds = wanted.Select(d => d.Id).ToHashSet();
 
         foreach (var pair in _sources.ToArray())

@@ -65,6 +65,16 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<string>("AppliedHolidayHash")
                         .HasColumnType("text");
 
+                    b.Property<bool>("CameraChecked")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("CameraNote")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("CameraRtspPort")
+                        .HasColumnType("integer");
+
                     b.Property<string>("CapabilityProfileJson")
                         .HasColumnType("text");
 
@@ -177,6 +187,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("UseCamera")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("UseHttps")
                         .HasColumnType("boolean");
@@ -1802,6 +1815,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AccessDeviceId")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("AnprDisabledByLicense")
                         .HasColumnType("boolean");
 
@@ -1883,6 +1899,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasColumnType("character varying(64)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AccessDeviceId")
+                        .IsUnique();
 
                     b.HasIndex("IsupDeviceId")
                         .IsUnique()
@@ -5063,10 +5082,17 @@ namespace TrueCentralVms.Server.Migrations
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Device", b =>
                 {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessDevice", "AccessDevice")
+                        .WithOne()
+                        .HasForeignKey("TrueCentralVms.Server.Data.Entities.Device", "AccessDeviceId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("TrueCentralVms.Server.Data.Entities.Location", null)
                         .WithMany()
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AccessDevice");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.FleetEvent", b =>

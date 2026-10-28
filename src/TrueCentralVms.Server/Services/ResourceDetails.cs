@@ -98,6 +98,21 @@ public static class ResourceDetails
         if (c is null) return null;
         var d = c.Device;
         var facts = new List<ResourceFactDto>();
+        if (d.AccessDeviceId is { } terminalId &&
+            await db.AccessDevices.AsNoTracking().FirstOrDefaultAsync(a => a.Id == terminalId, ct) is { } terminal)
+        {
+            Add(facts, "Tipo de equipo", "Cámara de un terminal de acceso");
+            Add(facts, "Señal", c.IsOnline && d.Status == DeviceStatus.Online ? "Con señal" : "Sin señal");
+            Add(facts, "Visible para los operadores", c.Enabled ? (terminal.Enabled ? "Sí" : "No (el terminal está desactivado)") : "No");
+            Add(facts, "Licencia", "Incluida con el terminal: no ocupa canal de video");
+            Add(facts, "Puertas", "Es la cámara principal de las puertas del terminal");
+            return new Part(
+                new ResourceSourceDto("access", terminal.Id, terminal.Name, terminal.Model, terminal.SerialNumber,
+                    terminal.FirmwareVersion, Address(terminal.Host, terminal.Port, terminal.UseHttps),
+                    OnlineText(terminal.Status, terminal.Enabled), terminal.LastSeenAt),
+                facts, CanRename: true, RenameNote: null, FixedCameras: [],
+                SnapshotPath: $"/api/devices/{d.Id}/snapshot/{c.ChannelNumber}");
+        }
         Add(facts, "Tipo de equipo", d.DeviceType switch
         {
             DeviceType.Camera => "Cámara IP",
@@ -150,10 +165,14 @@ public static class ResourceDetails
         if (d.SupportsFace) credentials.Add("rostro");
         Add(facts, "Credenciales del equipo", credentials.Count > 0 ? string.Join(", ", credentials) : null);
         Add(facts, "Origen del nombre", door.NameFromDevice ? "Lo informa el equipo" : "Puesto en el VMS");
+        // La cámara del propio terminal es la principal de sus puertas (se quita desde el terminal).
+        var terminalCameras = await db.Channels.AsNoTracking().Include(c => c.Device)
+            .Where(c => c.Device.AccessDeviceId == d.Id && c.Enabled).OrderBy(c => c.ChannelNumber).ToListAsync(ct);
         return new Part(
             new ResourceSourceDto("access", d.Id, d.Name, d.Model, d.SerialNumber, d.FirmwareVersion,
                 Address(d.Host, d.Port, d.UseHttps), OnlineText(d.Status, d.Enabled), d.LastSeenAt),
-            facts, CanRename: true, RenameNote: null, FixedCameras: []);
+            facts, CanRename: true, RenameNote: null,
+            FixedCameras: terminalCameras.Select(c => CameraDto(c, isFixed: true)).ToList());
     }
 
     private static string ArmText(AlarmArmState state) => state switch

@@ -29,6 +29,13 @@ public sealed record AccessCapabilities(
     /// <summary>Cupo de tarjetas del equipo (null si no lo informa).</summary>
     int? CardCapacity);
 
+/// <summary>
+/// Cámara propia del equipo (la de un terminal facial). El VMS la muestra como
+/// una cámara más, incluida con el equipo: no ocupa canal de video de la licencia.
+/// </summary>
+/// <param name="RtspPort">Puerto RTSP del equipo (554 de fábrica).</param>
+public sealed record AccessCameraInfo(int RtspPort);
+
 /// <summary>Identificación del equipo obtenida al validar las credenciales.</summary>
 public sealed record AccessDeviceInfo(
     string? Model,
@@ -40,7 +47,9 @@ public sealed record AccessDeviceInfo(
     AccessCapabilities Capabilities,
     IReadOnlyList<AccessDoorInfo> Doors,
     /// <summary>Ficha de capacidades declaradas por el equipo; null si el driver no la sabe leer.</summary>
-    AccessCapabilityProfile? Profile = null);
+    AccessCapabilityProfile? Profile = null,
+    /// <summary>Su cámara propia; null si no tiene (o el driver no sabe verla).</summary>
+    AccessCameraInfo? Camera = null);
 
 /// <summary>Lo que el equipo informa de una puerta en el monitoreo en vivo.</summary>
 public sealed record AccessDoorStatus(
@@ -221,6 +230,14 @@ public interface IAccessControlDriver
     /// o rechaza las credenciales.
     /// </summary>
     Task PingAsync(AccessConnectionInfo info, CancellationToken ct = default);
+
+    /// <summary>
+    /// ¿Tiene el equipo una cámara propia? (la misma lectura que hace
+    /// <see cref="ProbeAsync"/>, para los equipos agregados antes de que el VMS
+    /// la supiera ver). Null = sin cámara. Por omisión, ninguna.
+    /// </summary>
+    Task<AccessCameraInfo?> ReadCameraAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+        Task.FromResult<AccessCameraInfo?>(null);
 
     /// <summary>
     /// Olvida lo que el driver tenga cacheado de ese equipo (credenciales

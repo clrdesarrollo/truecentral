@@ -73,7 +73,8 @@ public sealed class DeviceStatusMonitor(
         var results = await Task.WhenAll(devices.Select(async x =>
             (x.Device, x.ChannelCount, x.EnabledCount, Reachable: x.Device.IsupDeviceId is { } isupId
                 ? isup.IsOnline(isupId)
-                : await IsReachableAsync(x.Device.Host, x.Device.SdkPort, ct))));
+                // La cámara de un terminal de acceso: lo que importa es su RTSP (el SDK puede estar apagado en el terminal).
+                : await IsReachableAsync(x.Device.Host, x.Device.AccessDeviceId is null ? x.Device.SdkPort : x.Device.RtspPort, ct))));
 
         var changed = new List<(DeviceDto Dto, DeviceStatus Previous, bool Mobile)>();
         foreach (var (device, channelCount, enabledCount, reachable) in results)

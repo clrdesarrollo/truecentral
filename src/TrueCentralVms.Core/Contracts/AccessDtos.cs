@@ -81,7 +81,13 @@ public sealed record AccessDeviceDto(
     /// <summary>Por qué el equipo quedó sin feriados (controladoras con calendario propio), o null.</summary>
     string? HolidayNote = null,
     /// <summary>Se le mantiene una escucha de eventos en vivo; false = solo se lee su historial cada 15 s.</summary>
-    bool LiveEvents = true);
+    bool LiveEvents = true,
+    /// <summary>El equipo tiene cámara propia (terminal facial); false también si todavía no se le preguntó.</summary>
+    bool HasCamera = false,
+    /// <summary>Su cámara se muestra como una cámara más (incluida: no ocupa canal de video de la licencia).</summary>
+    bool UseCamera = true,
+    /// <summary>Por qué la cámara no está en uso aunque el equipo la tenga (ya agregada a mano, por ISUP…), o null.</summary>
+    string? CameraNote = null);
 
 public sealed record AccessDeviceWriteDto(
     string Name,
@@ -101,7 +107,9 @@ public sealed record AccessDeviceWriteDto(
     /// <summary>Clave ISUP; se guarda cifrada. En edición, vacía = mantener la guardada.</summary>
     string? IsupKey = null,
     /// <summary>Escucha de eventos en vivo: null = conservar (en el alta, sí). False cuando otro sistema necesita la escucha del equipo.</summary>
-    bool? LiveEvents = null);
+    bool? LiveEvents = null,
+    /// <summary>Mostrar su cámara propia como una cámara más: null = conservar (en el alta, sí).</summary>
+    bool? UseCamera = null);
 
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record AccessProbeResultDto(
@@ -120,7 +128,9 @@ public sealed record AccessProbeResultDto(
     bool SupportsFace,
     int? UserCapacity,
     int? CardCapacity,
-    IReadOnlyList<string> DoorNames);
+    IReadOnlyList<string> DoorNames,
+    /// <summary>El equipo tiene cámara propia (se agrega como cámara, sin ocupar canal de video).</summary>
+    bool HasCamera = false);
 
 /// <summary>Con qué se autentica el driver contra el equipo (cambia el formulario del mantenedor).</summary>
 public enum AccessAuthMode

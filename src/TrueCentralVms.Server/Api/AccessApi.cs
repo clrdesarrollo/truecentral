@@ -64,6 +64,12 @@ public static class AccessApi
 
     internal static void ApplyProbe(AccessDevice device, AccessDeviceInfo info)
     {
+        // Una lectura sin cámara no quita una ya conocida (un error pasajero del
+        // equipo se llevaría su grabación y sus tableros), salvo que sea otro equipo.
+        if (info.Camera is not null || !device.CameraChecked ||
+            !string.Equals(device.Model, info.Model, StringComparison.OrdinalIgnoreCase))
+            device.CameraRtspPort = info.Camera?.RtspPort;
+        device.CameraChecked = true;
         device.Kind = info.Kind;
         device.Model = info.Model;
         device.SerialNumber = info.SerialNumber;
@@ -121,6 +127,29 @@ public static class AccessApi
         if (renamed > 0) parts.Add($"{renamed} renombrada(s)");
         if (gone.Count > 0) parts.Add($"{gone.Count} eliminada(s)");
         return parts.Count > 0 ? string.Join(", ", parts) : "sin cambios en las puertas";
+    }
+
+    /// <summary>
+    /// Cámara propia del terminal recién guardado: la crea, la pone al día o la
+    /// quita (<see cref="AccessTerminalCameras"/>), guarda y, si cambió algo de
+    /// ella —o el terminal se encendió o apagó y tiene cámara—, rehace las rutas
+    /// de video y avisa a los puestos. Devuelve el alta o la baja para la bitácora.
+    /// </summary>
+    private static async Task<string?> SyncCameraAsync(HttpContext ctx, VmsDbContext db, AccessDevice device,
+        bool enabledChanged, CancellationToken ct)
+    {
+        string? change = await AccessTerminalCameras.SyncAsync(db, device, ct);
+        bool changed = db.ChangeTracker.HasChanges();
+        if (changed) await db.SaveChangesAsync(ct);
+        if (changed || (enabledChanged && await db.Devices.AnyAsync(d => d.AccessDeviceId == device.Id, ct)))
+        {
+            await ctx.RequestServices.GetRequiredService<MediaMtxManager>().RefreshPathsAsync(ct);
+            await ctx.RequestServices.GetRequiredService<IHubContext<VmsHub>>()
+                .Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", ct);
+        }
+        // Una cámara nueva (o que se fue) cambia lo que ve cada operador restringido.
+        if (change is not null) EquipmentLocation.Changed(ctx);
+        return change;
     }
 
     /// <summary>Puertas habilitadas de los demás equipos: lo que ya consume el cupo de la licencia.</summary>
@@ -259,6 +288,7 @@ public static class AccessApi
                 LocationId = locationId,
                 Enabled = request.Enabled,
                 LiveEvents = request.LiveEvents ?? true,
+                UseCamera = request.UseCamera ?? true,
             };
             if (info is not null)
             {
@@ -273,14 +303,16 @@ public static class AccessApi
             db.AccessDevices.Add(device);
             await db.SaveChangesAsync(ct);
             if (viaIsup) isup.InvalidateDirectory();
+            string? camera = await SyncCameraAsync(ctx, db, device, enabledChanged: false, ct);
 
             await audit.LogAsync(ctx, "access", "device-created",
                 targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
                 detail: $"Agregó el equipo de control de acceso '{device.Name}' ({device.DriverKey}, {WhereOf(device)}, " +
                         (info is null ? "a la espera de que se conecte por ISUP" : $"{device.Model ?? "modelo desconocido"}") +
                         (device.LocationId is null ? "" : $", en {EquipmentLocation.Describe(device.LocationId)}") +
-                        $", {device.Doors.Count} puerta(s)" + (device.LiveEvents ? "" : ", solo lectura del historial (sin escucha en vivo)") + ").",
-                data: new { device.Host, device.Port, device.UseHttps, device.DriverKey, device.IsupDeviceId, device.Model, device.SerialNumber, device.LocationId, device.LiveEvents });
+                        $", {device.Doors.Count} puerta(s)" + (device.LiveEvents ? "" : ", solo lectura del historial (sin escucha en vivo)") + ")" +
+                        (camera is null ? "." : $"; {camera}."),
+                data: new { device.Host, device.Port, device.UseHttps, device.DriverKey, device.IsupDeviceId, device.Model, device.SerialNumber, device.LocationId, device.LiveEvents, camera = device.CameraRtspPort is not null });
             EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
@@ -356,6 +388,10 @@ public static class AccessApi
             bool liveEvents = request.LiveEvents ?? device.LiveEvents;
             if (device.LiveEvents != liveEvents)
                 changes.Add(liveEvents ? "escucha de eventos en vivo activada" : "escucha de eventos en vivo apagada (solo lectura del historial)");
+            bool useCamera = request.UseCamera ?? device.UseCamera;
+            if (device.UseCamera != useCamera)
+                changes.Add(useCamera ? "su cámara se muestra como cámara" : "su cámara deja de mostrarse");
+            bool enabledChanged = device.Enabled != request.Enabled;
 
             // La sesión cacheada del driver queda con las credenciales viejas.
             if (reachChanged) service.ForgetSessionOf(device);
@@ -372,6 +408,7 @@ public static class AccessApi
             else if (isupKey is not null) device.IsupKeyCiphertext = protector.Protect(isupKey);
             device.Enabled = request.Enabled;
             device.LiveEvents = liveEvents;
+            device.UseCamera = useCamera;
             device.UpdatedAt = DateTime.UtcNow;
             // Las puertas que estaban con el equipo lo siguen; las ubicadas aparte se quedan.
             var followers = EquipmentLocation.Follow(device.Doors, previousLocation, locationId);
@@ -384,6 +421,7 @@ public static class AccessApi
             }
             await db.SaveChangesAsync(ct);
             if (isupChanged) isup.InvalidateDirectory();
+            if (await SyncCameraAsync(ctx, db, device, enabledChanged, ct) is { } camera) changes.Add(camera);
 
             await audit.LogAsync(ctx, "access", "device-updated",
                 targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
@@ -407,12 +445,19 @@ public static class AccessApi
             if (device is null) return Results.NotFound();
             service.ForgetSessionOf(device);
             int doors = device.Doors.Count;
-            db.AccessDevices.Remove(device);   // las puertas se van en cascada
+            bool hadCamera = await db.Devices.AnyAsync(d => d.AccessDeviceId == id, ct);
+            db.AccessDevices.Remove(device);   // las puertas y su cámara se van en cascada
             await db.SaveChangesAsync(ct);
+            if (hadCamera)
+            {
+                await ctx.RequestServices.GetRequiredService<MediaMtxManager>().RefreshPathsAsync(ct);
+                await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
+            }
             if (device.IsupDeviceId is not null) isup.InvalidateDirectory();
             await audit.LogAsync(ctx, "access", "device-deleted",
                 targetType: "access-device", targetId: id.ToString(), targetName: device.Name,
-                detail: $"Eliminó el equipo de control de acceso '{device.Name}' ({WhereOf(device)}) y sus {doors} puerta(s).");
+                detail: $"Eliminó el equipo de control de acceso '{device.Name}' ({WhereOf(device)}) y sus {doors} puerta(s)" +
+                        (hadCamera ? ", con su cámara." : "."));
             EquipmentLocation.Changed(ctx);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
             return Results.Ok();
@@ -447,6 +492,7 @@ public static class AccessApi
             ApplyProbe(device, info);
             string doorChanges = SyncDoors(device, info.Doors);
             await db.SaveChangesAsync(ct);
+            if (await SyncCameraAsync(ctx, db, device, enabledChanged: false, ct) is { } camera) doorChanges += $"; {camera}";
             // Pudieron aparecer puertas nuevas (ya ubicadas donde está el equipo).
             EquipmentLocation.Changed(ctx);
             await audit.LogAsync(ctx, "access", "device-revalidated",
@@ -511,7 +557,7 @@ public static class AccessApi
                 info.Capabilities.SupportsRemoteControl, info.Capabilities.SupportsEvents, info.Capabilities.SupportsCards,
                 info.Capabilities.SupportsFingerprint, info.Capabilities.SupportsFace,
                 info.Capabilities.UserCapacity, info.Capabilities.CardCapacity,
-                info.Doors.Select(d => d.Name).ToList()));
+                info.Doors.Select(d => d.Name).ToList(), HasCamera: info.Camera is not null));
         });
     }
 }

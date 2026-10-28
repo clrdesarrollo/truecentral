@@ -73,7 +73,7 @@ public sealed class AccessControlService(
         SupportsCardCapture(d.DriverKey),
         d.IsupDeviceId,
         d.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: d.DisabledByLicense, HolidayNote: d.HolidayNote,
-        LiveEvents: d.LiveEvents);
+        LiveEvents: d.LiveEvents, HasCamera: d.CameraRtspPort is not null, UseCamera: d.UseCamera, CameraNote: d.CameraNote);
 
     /// <summary>Puerta con su equipo, para el monitoreo en vivo y los niveles de acceso.</summary>
     public AccessDoorStateDto ToDoorDto(AccessDoor door)
@@ -273,6 +273,7 @@ public sealed class AccessControlService(
 
         using var writeScope = scopeFactory.CreateScope();
         var writeDb = writeScope.ServiceProvider.GetRequiredService<VmsDbContext>();
+        bool camerasChanged = false;
         foreach (var (snapshot, result) in results)
         {
             var device = await writeDb.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == snapshot.Id, ct);
@@ -282,6 +283,8 @@ public sealed class AccessControlService(
             device.LastError = result.Error;
             if (result.Status == AccessDeviceStatus.Online) device.LastSeenAt = DateTime.UtcNow;
             await ApplyDoorStatusAsync(writeDb, device, result.Doors, ct);
+            if (result.CameraRead && !device.CameraChecked)
+                camerasChanged |= await ApplyCameraAsync(writeDb, device, result.Camera, ct);
             if (previous == result.Status) continue;
             await writeDb.SaveChangesAsync(ct);
 
@@ -304,10 +307,38 @@ public sealed class AccessControlService(
                         result.Status.ToString(), result.Error));
         }
         await writeDb.SaveChangesAsync(ct);
+        if (camerasChanged)
+        {
+            writeScope.ServiceProvider.GetRequiredService<Auth.UserScopeService>().Invalidate();
+            await writeScope.ServiceProvider.GetRequiredService<MediaMtxManager>().RefreshPathsAsync(ct);
+            await writeScope.ServiceProvider.GetRequiredService<IHubContext<VmsHub>>()
+                .Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", ct);
+        }
     }
 
-    private async Task<(AccessDeviceStatus Status, string? Error, IReadOnlyList<AccessDoorStatus> Doors)> PollOneAsync(
-        AccessDevice device, CancellationToken ct)
+    /// <summary>
+    /// Primera lectura de la cámara de un terminal agregado antes de que el VMS
+    /// la supiera ver: si tiene, se agrega como una cámara más (lo mismo que al
+    /// darlo de alta hoy). Devuelve true si apareció una cámara.
+    /// </summary>
+    private async Task<bool> ApplyCameraAsync(VmsDbContext db, AccessDevice device, AccessCameraInfo? camera, CancellationToken ct)
+    {
+        device.CameraChecked = true;
+        device.CameraRtspPort = camera?.RtspPort;
+        string? change = await AccessTerminalCameras.SyncAsync(db, device, ct);
+        await db.SaveChangesAsync(ct);
+        if (change is null) return false;
+        logger.LogInformation("Terminal '{Device}' ({Host}): {Change}.", device.Name, device.Host, change);
+        await audit.LogSystemAsync("access", "device-camera-added",
+            targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
+            detail: $"El terminal de acceso '{device.Name}' tiene cámara propia: el servidor {change}.");
+        return true;
+    }
+
+    private sealed record PollResult(AccessDeviceStatus Status, string? Error, IReadOnlyList<AccessDoorStatus> Doors,
+        bool CameraRead = false, AccessCameraInfo? Camera = null);
+
+    private async Task<PollResult> PollOneAsync(AccessDevice device, CancellationToken ct)
     {
         try
         {
@@ -315,7 +346,7 @@ public sealed class AccessControlService(
             if (device.IsupDeviceId is { } isupId)
             {
                 if (!isup.IsOnline(isupId))
-                    return (AccessDeviceStatus.Offline, await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct), []);
+                    return new(AccessDeviceStatus.Offline, await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct), []);
             }
             var driver = DriverOf(device);
             var connection = ConnectionOf(device);
@@ -329,17 +360,24 @@ public sealed class AccessControlService(
                 try { doors = await driver.ReadDoorStatusAsync(connection, device.Doors.Count, ct); }
                 catch (DriverException ex) { logger.LogDebug(ex, "El equipo {Device} no entregó el estado de sus puertas.", device.Name); }
             }
-            return (AccessDeviceStatus.Online, null, doors);
+
+            // Los agregados antes de que el VMS supiera ver su cámara: se le pregunta una sola vez.
+            if (!device.CameraChecked && device.IsupDeviceId is null && AccessTerminalCameras.Supports(device.DriverKey))
+            {
+                try { return new(AccessDeviceStatus.Online, null, doors, true, await driver.ReadCameraAsync(connection, ct)); }
+                catch (DriverException ex) { logger.LogDebug(ex, "El equipo {Device} no dijo si tiene cámara.", device.Name); }
+            }
+            return new(AccessDeviceStatus.Online, null, doors);
         }
         catch (DriverException ex)
         {
             bool auth = ex.Message.Contains("credenciales", StringComparison.OrdinalIgnoreCase) ||
                         ex.Message.Contains("clave de comunicación", StringComparison.OrdinalIgnoreCase);
-            return (auth ? AccessDeviceStatus.AuthFailed : AccessDeviceStatus.Offline, ex.Message, []);
+            return new(auth ? AccessDeviceStatus.AuthFailed : AccessDeviceStatus.Offline, ex.Message, []);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return (AccessDeviceStatus.Offline, ex.Message, []);
+            return new(AccessDeviceStatus.Offline, ex.Message, []);
         }
     }
 

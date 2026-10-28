@@ -115,6 +115,29 @@ public class AccessDevice : IIsupEquipment
     /// </summary>
     public bool LiveEvents { get; set; } = true;
 
+    /// <summary>
+    /// Su cámara propia (terminal facial): puerto RTSP que declaró, o null si
+    /// no tiene. El VMS la muestra como una cámara más
+    /// (<see cref="Device.AccessDeviceId"/>), incluida con el equipo: no ocupa
+    /// canal de video de la licencia.
+    /// </summary>
+    public int? CameraRtspPort { get; set; }
+
+    /// <summary>
+    /// Ya se le preguntó si tiene cámara (al validarlo; a los agregados antes,
+    /// en su primer sondeo en línea).
+    /// </summary>
+    public bool CameraChecked { get; set; }
+
+    /// <summary>
+    /// Mostrar su cámara como una cámara más. Si el administrador la quita, no
+    /// vuelve sola al revalidar el equipo.
+    /// </summary>
+    public bool UseCamera { get; set; } = true;
+
+    /// <summary>Por qué la cámara no está en uso aunque el equipo la tenga, o null.</summary>
+    public string? CameraNote { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

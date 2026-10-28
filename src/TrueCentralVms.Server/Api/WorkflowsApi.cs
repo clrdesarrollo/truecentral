@@ -320,7 +320,8 @@ public static class WorkflowsApi
             var devices = await db.Devices.AsNoTracking().OrderBy(d => d.Name).ToListAsync(ct);
             return Results.Ok(devices.Where(d => scope.CanViewDevice(d.Id)).Select(d =>
             {
-                var caps = drivers.Find(d.DriverKey)?.Capabilities;
+                // La cámara de un terminal de acceso sirve para «Conexión de un equipo», no para analíticas ni patentes.
+                var caps = d.AccessDeviceId is null ? drivers.Find(d.DriverKey)?.Capabilities : null;
                 return new WorkflowDeviceDto(d.Id, d.Name, d.DriverKey, caps?.SupportsEvents ?? false,
                     caps?.SupportsAnpr ?? false, d.AnprEnabled);
             }));

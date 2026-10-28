@@ -61,6 +61,15 @@ public class Device : IIsupEquipment
     /// </summary>
     public bool IsMobile { get; set; }
 
+    /// <summary>
+    /// Cámara propia de un terminal de acceso (facial): el VMS la crea y la
+    /// mantiene a partir del terminal (dirección, credenciales, nombre y
+    /// ubicación son los suyos) y se borra con él. No se edita en Dispositivos
+    /// y sus canales no consumen el cupo de canales de video de la licencia.
+    /// </summary>
+    public int? AccessDeviceId { get; set; }
+    public AccessDevice? AccessDevice { get; set; }
+
     public DeviceStatus Status { get; set; } = DeviceStatus.Unknown;
     public DateTime? LastSeenAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

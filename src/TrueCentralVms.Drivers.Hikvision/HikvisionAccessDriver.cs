@@ -315,8 +315,46 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
         var kind = ClassifyModel(model) ?? KindOfDoorCount(doors.Count);
         return new AccessDeviceInfo(model, Value("serialNumber"), Value("firmwareVersion"), Value("deviceType"),
-            Value("macAddress"), kind, capabilities, doors, profile);
+            Value("macAddress"), kind, capabilities, doors, profile, await ReadCameraAsync(client, ct));
     }
+
+    public Task<AccessCameraInfo?> ReadCameraAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+        ReadCameraAsync(Client(info), ct);
+
+    /// <summary>
+    /// Cámara del terminal (los faciales tienen una): contesta su stream
+    /// principal, <c>/ISAPI/Streaming/channels/101</c>, igual que una cámara.
+    /// El puerto RTSP sale de <c>/ISAPI/Security/adminAccesses</c> (554 si no
+    /// lo dice). Por ISUP no se ofrece: el video no llega por RTSP directo.
+    /// </summary>
+    private static async Task<AccessCameraInfo?> ReadCameraAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        if (client.IsIsup) return null;
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get, "/ISAPI/Streaming/channels/101", ct: ct) is not { } stream ||
+                !stream.Contains("StreamingChannel", StringComparison.Ordinal))
+                return null;
+        }
+        catch (DriverException) { return null; }   // 403/400: controladora o terminal sin cámara
+
+        int port = 554;
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get, "/ISAPI/Security/adminAccesses", ct: ct) is { } xml)
+            {
+                var rtsp = XDocument.Parse(xml).Descendants().Where(e => e.Name.LocalName == "AdminAccessProtocol")
+                    .FirstOrDefault(p => string.Equals(ChildValue(p, "protocol"), "RTSP", StringComparison.OrdinalIgnoreCase));
+                if (ChildValue(rtsp, "portNo") is { } text && int.TryParse(text, out int value) && value is > 0 and < 65536)
+                    port = value;
+            }
+        }
+        catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { /* se queda el de fábrica */ }
+        return new AccessCameraInfo(port);
+    }
+
+    private static string? ChildValue(XElement? parent, string name) =>
+        parent?.Elements().FirstOrDefault(e => e.Name.LocalName == name)?.Value?.Trim();
 
     public async Task PingAsync(AccessConnectionInfo info, CancellationToken ct = default)
     {
