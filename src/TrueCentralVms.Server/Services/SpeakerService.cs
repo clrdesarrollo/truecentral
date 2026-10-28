@@ -725,6 +725,9 @@ public sealed class SpeakerService(
     /// ocupados o fallen quedan informados en <see cref="TalkSession.Rejected"/>;
     /// si ninguno abre, lanza <see cref="DriverException"/>.
     /// </summary>
+    /// <summary>Tope para que cada parlante acepte la voz en vivo.</summary>
+    private static readonly TimeSpan TalkOpenTimeout = TimeSpan.FromSeconds(6);
+
     public async Task<TalkSession> OpenTalkAsync(IReadOnlyList<int> ids, string actor, CancellationToken ct)
     {
         var speakers = await LoadAsync(ids, ct);
@@ -743,9 +746,17 @@ public sealed class SpeakerService(
             claimed.Add(speaker);
         }
 
+        // Cada parlante tiene un tope para aceptar: uno sin conexión no deja
+        // esperando a los demás (ni al operador, que espera el canal de voz).
         var opened = await Task.WhenAll(claimed.Select(async speaker =>
         {
-            try { return (speaker, (ISpeakerAudioSession?)await DriverOf(speaker).OpenLiveAudioAsync(ConnectionOf(speaker), ct), (string?)null); }
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TalkOpenTimeout);
+            try { return (speaker, (ISpeakerAudioSession?)await DriverOf(speaker).OpenLiveAudioAsync(ConnectionOf(speaker), timeout.Token), (string?)null); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return (speaker, null, $"No respondió en {TalkOpenTimeout.TotalSeconds:0} s (¿sin conexión?).");
+            }
             catch (DriverException ex) { return (speaker, null, ex.Message); }
             catch (Exception ex) when (ex is not OperationCanceledException) { return (speaker, null, ex.Message); }
         }));

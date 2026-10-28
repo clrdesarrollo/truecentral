@@ -400,8 +400,15 @@ public sealed partial class SpeakerGroupCellPanel : CellPanel
         speakers.Speakers.CollectionChanged += OnListChanged;
         speakers.Groups.CollectionChanged += OnListChanged;
         speakers.PropertyChanged += OnSpeakersChanged;
+        // Lo que puede operar llega después de entrar (y cambia con su alcance).
+        OperableScope.Current.Changed += OnOperableChanged;
         Resolve();
     }
+
+    private void OnOperableChanged() => Application.Current?.Dispatcher.InvokeAsync(Refresh);
+
+    /// <summary>Un integrante cambió (en línea, ocupado, operable): se rehace el resumen.</summary>
+    private void OnMemberChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) => Refresh();
 
     public SpeakersViewModel Speakers { get; }
 
@@ -439,13 +446,24 @@ public sealed partial class SpeakerGroupCellPanel : CellPanel
             return;
         }
         Title = group.Name;
-        foreach (var item in Speakers.Speakers.Where(s => group.SpeakerIds.Contains(s.Dto.Id))) Members.Add(item);
+        foreach (var old in Members) old.PropertyChanged -= OnMemberChanged;
+        Members.Clear();
+        foreach (var item in Speakers.Speakers.Where(s => group.SpeakerIds.Contains(s.Dto.Id)))
+        {
+            item.PropertyChanged += OnMemberChanged;
+            Members.Add(item);
+        }
+        SelectedSound ??= Speakers.SelectedSound ?? Speakers.ServerSounds.FirstOrDefault();
+        Status = Members.Count == 0 ? "El grupo no tiene parlantes activos." : "";
+        Refresh();
+    }
+
+    private void Refresh()
+    {
         int online = Members.Count(m => m.IsOnline), operable = Members.Count(m => m.CanOperate);
         Summary = $"{Members.Count} parlante(s) · {online} en línea" +
                   (operable < Members.Count ? $" · {Members.Count - operable} fuera de su alcance" : "");
         CanOperate = operable > 0;
-        SelectedSound ??= Speakers.SelectedSound ?? Speakers.ServerSounds.FirstOrDefault();
-        Status = Members.Count == 0 ? "El grupo no tiene parlantes activos." : "";
     }
 
     private List<int> OperableIds() => Members.Where(m => m.CanOperate).Select(m => m.Dto.Id).ToList();
@@ -460,12 +478,22 @@ public sealed partial class SpeakerGroupCellPanel : CellPanel
             IsTalking = false;
             return;
         }
-        var ids = OperableIds();
-        if (ids.Count == 0) { Status = "Ningún parlante del grupo está a su alcance."; return; }
+        // Solo los que están en línea: uno caído no tiene que frenar al resto.
+        var reachable = Members.Where(m => m.CanOperate && m.IsOnline).ToList();
+        var skipped = Members.Where(m => m.CanOperate && !m.IsOnline).Select(m => m.Name).ToList();
+        if (reachable.Count == 0)
+        {
+            Status = OperableIds().Count == 0 ? "Ningún parlante del grupo está a su alcance."
+                : "Ningún parlante del grupo está en línea.";
+            return;
+        }
+        var ids = reachable.Select(m => m.Dto.Id).ToList();
         foreach (var speaker in Speakers.Speakers) speaker.IsSelected = ids.Contains(speaker.Dto.Id);
+        Status = "Abriendo el canal de voz…";
         await Speakers.StartTalkAsync(Title);
         IsTalking = Speakers.IsTalking;
-        Status = IsTalking ? "" : Speakers.StatusMessage;
+        Status = !IsTalking ? Speakers.StatusMessage
+            : skipped.Count > 0 ? $"Hablando. Sin conexión, se omitió: {string.Join(", ", skipped)}." : "";
     }
 
     [RelayCommand]
@@ -499,6 +527,8 @@ public sealed partial class SpeakerGroupCellPanel : CellPanel
         Speakers.Speakers.CollectionChanged -= OnListChanged;
         Speakers.Groups.CollectionChanged -= OnListChanged;
         Speakers.PropertyChanged -= OnSpeakersChanged;
+        OperableScope.Current.Changed -= OnOperableChanged;
+        foreach (var member in Members) member.PropertyChanged -= OnMemberChanged;
     }
 }
 

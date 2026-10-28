@@ -287,8 +287,15 @@
                            Visibility="{Binding Speakers.HasSounds, Converter={x:Static vm:BoolToVisibility.Instance}}">
                     <Button DockPanel.Dock="Right" Content="Reproducir" Style="{StaticResource PanelButton}" Margin="6,0,0,0"
                             Command="{Binding PlaySoundCommand}" ToolTip="Hace sonar el sonido en todo el grupo, sincronizado"/>
+                    <!-- El estilo oscuro no usa DisplayMemberPath: el nombre va en la plantilla -->
                     <ComboBox ItemsSource="{Binding Speakers.ServerSounds}" SelectedItem="{Binding SelectedSound, Mode=TwoWay}"
-                              DisplayMemberPath="DisplayName" Style="{StaticResource DarkComboBox}" Height="28" FontSize="12"/>
+                              Style="{StaticResource DarkComboBox}" Height="28" FontSize="12">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
                 </DockPanel>
                 <TextBlock Text="Habla con el micrófono elegido en el panel de parlantes." Style="{StaticResource PanelHint}"/>
                 <TextBlock Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="0,6,0,0"/>

@@ -495,8 +495,15 @@ public sealed partial class SpeakersViewModel : ObservableObject
         {
             await _talk.StartAsync(ids, SelectedMicrophone, TalkPreTone, group: group);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ApiException or System.Net.WebSockets.WebSocketException or NAudio.MmException)
+        catch (OperationCanceledException)
         {
+            // El canal de voz no se abrió a tiempo: queda dicho, la aplicación sigue.
+            IsTalking = false;
+            StatusMessage = "El servidor no abrió la voz a tiempo (¿algún parlante sin conexión?). Intente de nuevo.";
+        }
+        catch (Exception ex)
+        {
+            // Micrófono, red o servidor: nunca debe cerrar el cliente (esto corre desde un botón).
             IsTalking = false;
             StatusMessage = ex.Message;
         }
