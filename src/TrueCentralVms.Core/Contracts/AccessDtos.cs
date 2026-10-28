@@ -79,7 +79,9 @@ public sealed record AccessDeviceDto(
     /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
     bool DisabledByLicense = false,
     /// <summary>Por qué el equipo quedó sin feriados (controladoras con calendario propio), o null.</summary>
-    string? HolidayNote = null);
+    string? HolidayNote = null,
+    /// <summary>Se le mantiene una escucha de eventos en vivo; false = solo se lee su historial cada 15 s.</summary>
+    bool LiveEvents = true);
 
 public sealed record AccessDeviceWriteDto(
     string Name,
@@ -97,7 +99,9 @@ public sealed record AccessDeviceWriteDto(
     /// <summary>ID ISUP (drivers con UsesIsup): el «ID del dispositivo» de su plataforma ISUP.</summary>
     string? IsupDeviceId = null,
     /// <summary>Clave ISUP; se guarda cifrada. En edición, vacía = mantener la guardada.</summary>
-    string? IsupKey = null);
+    string? IsupKey = null,
+    /// <summary>Escucha de eventos en vivo: null = conservar (en el alta, sí). False cuando otro sistema necesita la escucha del equipo.</summary>
+    bool? LiveEvents = null);
 
 /// <summary>Resultado del botón "Probar conexión" (no persiste nada).</summary>
 public sealed record AccessProbeResultDto(

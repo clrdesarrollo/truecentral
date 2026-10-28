@@ -12,8 +12,8 @@ public sealed class TrueCentralException(string message, HttpStatusCode? status 
     public HttpStatusCode? Status { get; } = status;
 }
 
-/// <summary>Lo mínimo del padrón existente para no duplicar: identificador, nombre y tarjetas.</summary>
-public sealed record ExistingPerson(int Id, string EmployeeNo, string FullName, IReadOnlyList<string> Cards);
+/// <summary>Lo mínimo del padrón existente para no duplicar: identificador, nombre, tarjetas y si ya tiene niveles.</summary>
+public sealed record ExistingPerson(int Id, string EmployeeNo, string FullName, IReadOnlyList<string> Cards, int LevelCount = 0);
 
 /// <summary>
 /// Cliente de la API del servidor TrueCentral para el alta del padrón. No
@@ -90,7 +90,7 @@ public sealed class TrueCentralClient : IDisposable
         {
             var pageDto = await SendAsync<PersonPage>(HttpMethod.Get, $"/api/access/persons?page={page}&pageSize=500", null, ct);
             foreach (var p in pageDto.Items)
-                result.Add(new ExistingPerson(p.Id, p.EmployeeNo, p.FullName, p.Cards.Select(c => c.Number).ToList()));
+                result.Add(new ExistingPerson(p.Id, p.EmployeeNo, p.FullName, p.Cards.Select(c => c.Number).ToList(), p.LevelIds.Count));
             if (pageDto.Items.Count < 500 || result.Count >= pageDto.Total) break;
             page++;
         }
@@ -100,6 +100,19 @@ public sealed class TrueCentralClient : IDisposable
     /// <summary>Niveles de acceso disponibles, para ofrecer asignar uno a las personas importadas.</summary>
     public Task<List<AccessLevelDto>> GetLevelsAsync(CancellationToken ct) =>
         SendAsync<List<AccessLevelDto>>(HttpMethod.Get, "/api/access/levels", null, ct);
+
+    /// <summary>Equipos de control de acceso con sus puertas: con su IP se ubica cada terminal de HikCentral.</summary>
+    public Task<List<AccessDeviceDto>> GetDevicesAsync(CancellationToken ct) =>
+        SendAsync<List<AccessDeviceDto>>(HttpMethod.Get, "/api/access/devices", null, ct);
+
+    public Task<List<AccessScheduleDto>> GetSchedulesAsync(CancellationToken ct) =>
+        SendAsync<List<AccessScheduleDto>>(HttpMethod.Get, "/api/access/schedules", null, ct);
+
+    public Task<AccessScheduleDto> CreateScheduleAsync(AccessScheduleWriteDto schedule, CancellationToken ct) =>
+        SendAsync<AccessScheduleDto>(HttpMethod.Post, "/api/access/schedules", schedule, ct);
+
+    public Task<AccessLevelDto> CreateLevelAsync(AccessLevelWriteDto level, CancellationToken ct) =>
+        SendAsync<AccessLevelDto>(HttpMethod.Post, "/api/access/levels", level, ct);
 
     public Task<AccessPersonDto> CreatePersonAsync(AccessPersonWriteDto person, CancellationToken ct) =>
         SendAsync<AccessPersonDto>(HttpMethod.Post, "/api/access/persons", person, ct);

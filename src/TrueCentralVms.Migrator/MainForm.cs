@@ -32,7 +32,8 @@ public sealed class MainForm : Form
     private string _hcpVersion = "";
 
     // --- Paso 2: terminales
-    private readonly CheckBox _readTerminals = new() { Text = "Leer desde los terminales las plantillas de huella y el legajo con el que conocen a cada persona", AutoSize = true, Checked = true };
+    private readonly CheckBox _readTerminals = new() { Text = "Leer desde los terminales las huellas, las claves, las puertas y horarios de cada persona y el legajo con que la conocen", AutoSize = true, Checked = true };
+    private readonly CheckBox _terminalFaces = new() { Text = "Traer también la foto de rostro que guarda cada terminal y usarla si es más grande que la de HikCentral", AutoSize = true, Checked = true };
     private readonly TextBox _termUser = new() { Width = 140 };
     private readonly TextBox _termPass = new() { Width = 160, UseSystemPasswordChar = true };
     private readonly DataGridView _terminals = new();
@@ -48,8 +49,12 @@ public sealed class MainForm : Form
     private readonly RadioButton _idTerminal = new() { Text = "El legajo que usan los terminales (recomendado si los equipos Hikvision siguen en uso: evita duplicarlas)", AutoSize = true, Checked = true };
     private readonly RadioButton _idPersonCode = new() { Text = "El código de persona de HikCentral", AutoSize = true };
     private readonly RadioButton _idAssigned = new() { Text = "Dejar que TrueCentral asigne uno nuevo", AutoSize = true };
-    private readonly ComboBox _level = new() { DropDownStyle = ComboBoxStyle.DropDownList };
-    private readonly CheckBox _updateExisting = new() { Text = "Completar a las personas que ya existen: agregarles las huellas, tarjetas y foto que les falten (no cambia nombre, vigencia, clave ni niveles)", AutoSize = true, Checked = true };
+    private readonly RadioButton _levelsPerDoor = new() { Text = "Uno por puerta, reconstruido de los terminales: cada persona recibe las puertas y el horario que tenía (recomendado)", AutoSize = true, Checked = true };
+    private readonly RadioButton _levelsSingle = new() { Text = "El mismo nivel para todas:", AutoSize = true };
+    private readonly RadioButton _levelsNone = new() { Text = "Ninguno: solo cargar el padrón, sin bajar nada a los equipos (modo sombra)", AutoSize = true };
+    private readonly ComboBox _level = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
+    private readonly CheckBox _onlyFound = new() { Text = "Importar solo a las personas encontradas en los terminales leídos (piloto en una sola puerta)", AutoSize = true };
+    private readonly CheckBox _updateExisting = new() { Text = "Completar a las personas que ya existen: agregarles las huellas, tarjetas, foto, clave y puertas que les falten (no cambia nombre ni vigencia ni quita nada)", AutoSize = true, Checked = true };
     private readonly CheckBox _import = new() { Text = "Importar a TrueCentral al terminar de exportar (si se desmarca, solo se guarda el paquete)", AutoSize = true, Checked = true };
     private int _tcExisting = -1;
 
@@ -133,7 +138,7 @@ public sealed class MainForm : Form
         };
         var subtitle = new Label
         {
-            Text = "Trae al padrón de TrueCentral las personas, fotos, tarjetas y huellas de HikCentral Professional, sin volver a enrolar a nadie.",
+            Text = "Trae al padrón de TrueCentral las personas, fotos, tarjetas, huellas, claves y puertas de HikCentral Professional, sin volver a enrolar a nadie.",
             ForeColor = Color.FromArgb(200, 210, 225),
             AutoSize = true,
             Margin = new Padding(1, 0, 0, 0),
@@ -293,18 +298,21 @@ public sealed class MainForm : Form
 
     private TabPage BuildTerminalsTab()
     {
-        var page = new TabPage("  2 · Terminales (huellas)  ");
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12) };
+        var page = new TabPage("  2 · Terminales  ");
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(12) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));   // sin esto la columna se ensancha al ancho preferido de la grilla
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        layout.Controls.Add(Hint("HikCentral no entrega las plantillas de huella por su OpenAPI, pero los terminales sí las devuelven por ISAPI. La lista se completa sola con los equipos registrados en HikCentral al conectar en el paso 1; el puerto es el HTTP del equipo (80 por defecto). Hace falta estar en la misma red que los terminales."), 0, 0);
+        layout.Controls.Add(Hint("HikCentral no entrega por su OpenAPI las plantillas de huella ni las claves, pero los terminales sí las devuelven por ISAPI, junto con las puertas y horarios de cada persona. Lea TODOS los terminales: una persona recibe en TrueCentral solo las puertas de los terminales leídos. La lista se completa sola con los equipos registrados en HikCentral al conectar en el paso 1; el puerto es el HTTP del equipo (80 por defecto). Hace falta estar en la misma red que los terminales."), 0, 0);
         layout.Controls.Add(_readTerminals, 0, 1);
-        _readTerminals.Margin = new Padding(0, 0, 0, 8);
+        _readTerminals.Margin = new Padding(0, 0, 0, 2);
+        layout.Controls.Add(_terminalFaces, 0, 2);
+        _terminalFaces.Margin = new Padding(0, 0, 0, 8);
 
         var creds = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 0, 0, 6) };
         var apply = new Button { Text = "Aplicar a todos", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10, 3, 10, 3) };
@@ -317,7 +325,7 @@ public sealed class MainForm : Form
             apply, probe, add, remove, _termStatus,
         ]);
         _termStatus.Margin = new Padding(12, 6, 0, 0);
-        layout.Controls.Add(creds, 0, 2);
+        layout.Controls.Add(creds, 0, 3);
         AddRevealButton(_termPass, "las contraseñas de los terminales", show =>
         {
             _showTerminalPasswords = show;
@@ -352,7 +360,7 @@ public sealed class MainForm : Form
             if (e.Control is TextBox tb)
                 tb.UseSystemPasswordChar = !_showTerminalPasswords && _terminals.CurrentCell?.OwningColumn?.Name == "pass";
         };
-        layout.Controls.Add(_terminals, 0, 3);
+        layout.Controls.Add(_terminals, 0, 4);
 
         apply.Click += (_, _) =>
         {
@@ -374,10 +382,10 @@ public sealed class MainForm : Form
     {
         var page = new TabPage("  3 · TrueCentral  ");
         var grid = Grid(10);
-        grid.Controls.Add(Hint("Servidor TrueCentral donde se va a cargar el padrón. Hace falta un usuario administrador; cada alta queda en la bitácora del sistema."), 0, 0);
+        grid.Controls.Add(Hint("Servidor TrueCentral donde se va a cargar el padrón. Hace falta un usuario administrador; cada alta queda en la bitácora del sistema. Con niveles por puerta, los terminales tienen que estar dados de alta antes en TrueCentral (se los reconoce por su IP)."), 0, 0);
         grid.SetColumnSpan(grid.GetControlFromPosition(0, 0)!, 2);
         AddRow(grid, 1, "Dirección del servidor", _tcUrl);
-        _tcUrl.PlaceholderText = "http://192.168.10.232:5080";
+        _tcUrl.PlaceholderText = "https://192.168.1.78";
         AddRow(grid, 2, "Usuario", _tcUser);
         AddRow(grid, 3, "Contraseña", _tcPass);
         AddRevealButton(_tcPass);
@@ -385,9 +393,29 @@ public sealed class MainForm : Form
         buttons.Controls.AddRange([_tcConnect, _tcStatus]);
         _tcStatus.Margin = new Padding(12, 8, 0, 0);
         grid.Controls.Add(buttons, 1, 4);
-        AddRow(grid, 5, "Nivel de acceso a asignar", _level);
-        _level.Items.Add(new LevelItem(null, "(ninguno: asignar después en TrueCentral)"));
+
+        var levelBox = new GroupBox { Text = "Niveles de acceso (qué puertas abre cada persona)", AutoSize = true, Padding = new Padding(10), Margin = new Padding(0, 10, 0, 0), Dock = DockStyle.Fill };
+        var levelLayout = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Dock = DockStyle.Fill };
+        var singleRow = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+        singleRow.Controls.AddRange([_levelsSingle, _level]);
+        _level.Margin = new Padding(6, 0, 0, 0);
+        levelLayout.Controls.AddRange([_levelsPerDoor, singleRow, _levelsNone, _onlyFound]);
+        _onlyFound.Margin = new Padding(0, 8, 0, 0);
+        levelBox.Controls.Add(levelLayout);
+        grid.Controls.Add(levelBox, 0, 5);
+        grid.SetColumnSpan(levelBox, 2);
+        _level.Items.Add(new LevelItem(null, "(conecte para ver los niveles)"));
         _level.SelectedIndex = 0;
+        // «Uno para todos» vive en otra fila (con su lista al lado): los tres se
+        // excluyen a mano, porque WinForms agrupa los botones por contenedor.
+        RadioButton[] modes = [_levelsPerDoor, _levelsSingle, _levelsNone];
+        foreach (var r in modes)
+            r.CheckedChanged += (s, _) =>
+            {
+                if (s is RadioButton { Checked: true } on)
+                    foreach (var other in modes) if (other != on) other.Checked = false;
+                UpdateSummary();
+            };
 
         var idBox = new GroupBox { Text = "Identificador de empleado (es el que los equipos usan para reconocer a la persona)", AutoSize = true, Padding = new Padding(10), Margin = new Padding(0, 10, 0, 0) };
         var idLayout = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
@@ -401,7 +429,7 @@ public sealed class MainForm : Form
         grid.Controls.Add(_import, 0, 8);
         grid.SetColumnSpan(_import, 2);
         _import.Margin = new Padding(0, 6, 0, 0);
-        grid.Controls.Add(Hint("Con un nivel de acceso asignado, el sincronizador baja a las personas a los equipos de ese nivel apenas se crean. Si no se marca «completar», las personas que ya existan con el mismo identificador se omiten. Una tarjeta que ya sea de otra persona se deja fuera y se avisa en el registro. Las claves de teclado no se pueden recuperar de HikCentral."), 0, 9);
+        grid.Controls.Add(Hint("Con niveles, el sincronizador baja a las personas a sus equipos apenas se crean. Por puerta se crea un nivel «Acceso · terminal» por cada puerta y horario (el de fábrica «todo el día» si el terminal no tenía otro), y la importación no arranca si falta un terminal en TrueCentral o un horario sin leer. Si no se marca «completar», las personas que ya existan con el mismo identificador se omiten. Una tarjeta que ya sea de otra persona se deja fuera y se avisa en el registro. Las claves se leen de los terminales; TrueCentral acepta de 4 a 8 dígitos."), 0, 9);
         grid.SetColumnSpan(grid.GetControlFromPosition(0, 9)!, 2);
         grid.GetControlFromPosition(0, 9)!.Margin = new Padding(0, 10, 0, 0);
 
@@ -465,6 +493,11 @@ public sealed class MainForm : Form
         _hcpKey.Text = s.HcpAppKey;
         _hcpSecret.Text = MigratorSettings.Unprotect(s.HcpAppSecretProtected);
         _readTerminals.Checked = s.ReadTerminals;
+        _terminalFaces.Checked = s.FacesFromTerminals;
+        _levelsPerDoor.Checked = s.LevelMode == (int)LevelMode.PerDoor;
+        _levelsSingle.Checked = s.LevelMode == (int)LevelMode.Single;
+        _levelsNone.Checked = s.LevelMode == (int)LevelMode.None;
+        _onlyFound.Checked = s.OnlyFoundOnTerminals;
         _termUser.Text = s.TerminalUsername;
         _termPass.Text = MigratorSettings.Unprotect(s.TerminalPasswordProtected);
         foreach (var t in s.Terminals)
@@ -494,6 +527,9 @@ public sealed class MainForm : Form
         s.HcpAppKey = _hcpKey.Text.Trim();
         s.HcpAppSecretProtected = remember ? MigratorSettings.Protect(_hcpSecret.Text) : "";
         s.ReadTerminals = _readTerminals.Checked;
+        s.FacesFromTerminals = _terminalFaces.Checked;
+        s.LevelMode = (int)CurrentLevelMode();
+        s.OnlyFoundOnTerminals = _onlyFound.Checked;
         s.TerminalUsername = _termUser.Text;
         s.TerminalPasswordProtected = remember ? MigratorSettings.Protect(_termPass.Text) : "";
         s.Terminals = TerminalRows().Select(r => new TerminalSetting
@@ -676,7 +712,7 @@ public sealed class MainForm : Form
             var levels = await tc.GetLevelsAsync(_cts.Token);
             int? wanted = SelectedLevelId() ?? _settings.TrueCentralLevelId;
             _level.Items.Clear();
-            _level.Items.Add(new LevelItem(null, "(ninguno: asignar después en TrueCentral)"));
+            _level.Items.Add(new LevelItem(null, "(elija un nivel)"));
             foreach (var l in levels.Where(l => l.Enabled).OrderBy(l => l.Name))
                 _level.Items.Add(new LevelItem(l.Id, $"{l.Name} · {l.DoorNames.Count} puerta(s) · {l.ScheduleName}"));
             _level.SelectedIndex = Math.Max(0, _level.Items.Cast<LevelItem>().ToList().FindIndex(i => i.Id == wanted));
@@ -709,6 +745,7 @@ public sealed class MainForm : Form
         if (terminals.Any(t => t.Password.Length == 0) &&
             MessageBox.Show(this, "Hay terminales sin contraseña. ¿Continuar igual?", Text,
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        if (_import.Checked && !ValidateLevelMode(terminals.Count > 0)) return;
         string folder = _folder.Text.Trim();
         if (folder.Length == 0) { _folder.Text = folder = DefaultFolder(); }
 
@@ -728,6 +765,7 @@ public sealed class MainForm : Form
                 Organizations = SelectedOrganizations(),
                 DownloadPhotos = _photos.Checked,
                 Terminals = terminals,
+                FacesFromTerminals = _terminalFaces.Checked,
                 PackageFolder = folder,
             }, ct), ct);
 
@@ -735,15 +773,7 @@ public sealed class MainForm : Form
             {
                 using var tc = new TrueCentralClient();
                 await tc.LoginAsync(_tcUrl.Text, _tcUser.Text, _tcPass.Text, ct);
-                await Task.Run(() => engine.ImportAsync(package, new ImportOptions
-                {
-                    TrueCentral = tc,
-                    PackageFolder = folder,
-                    EmployeeNoSource = CurrentEmployeeNoSource(),
-                    LevelId = SelectedLevelId(),
-                    LevelName = SelectedLevelName(),
-                    UpdateExisting = _updateExisting.Checked,
-                }, ct), ct);
+                await Task.Run(() => engine.ImportAsync(package, CurrentImportOptions(tc, folder), ct), ct);
             }
             else Log(LogLevel.Info, "No se importó a TrueCentral (opción desmarcada en el paso 3). El paquete queda listo para «Importar un paquete guardado».");
 
@@ -767,6 +797,7 @@ public sealed class MainForm : Form
     private async Task ImportSavedPackageAsync()
     {
         if (!ValidateTrueCentralFields()) { _tabs.SelectedIndex = 2; return; }
+        if (!ValidateLevelMode(true)) return;
         using var dialog = new FolderBrowserDialog { Description = "Carpeta del paquete guardado (la que contiene paquete.json)", UseDescriptionForTitle = true, SelectedPath = _folder.Text };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         string folder = dialog.SelectedPath;
@@ -778,18 +809,19 @@ public sealed class MainForm : Form
         {
             var package = await MigrationPackage.LoadAsync(folder, ct);
             Log(LogLevel.Info, $"Paquete de {package.Source} ({package.SourceVersion}) exportado el {package.ExportedAt.ToLocalTime():g} por {package.ExportedBy}: {package.Persons.Count} personas, " +
-                               $"{package.Persons.Count(p => p.PhotoFile is not null)} fotos, {package.Persons.Sum(p => p.Fingerprints.Count)} huellas.");
-            if (MessageBox.Show(this, $"Se van a dar de alta {package.Persons.Count} personas en {TrueCentralClient.NormalizeUrl(_tcUrl.Text)}. ¿Continuar?", Text,
+                               $"{package.Persons.Count(p => p.PhotoFile is not null)} fotos, {package.Persons.Sum(p => p.Fingerprints.Count)} huellas, " +
+                               $"{package.Persons.Count(p => p.Pin is not null)} claves, {package.Terminals.Count} terminal(es) leído(s).");
+            if (CurrentLevelMode() == LevelMode.PerDoor && package.Terminals.Count == 0 &&
+                MessageBox.Show(this, "Este paquete no trae las puertas de cada persona (se exportó sin leer terminales o con una versión anterior del migrador): con «uno por puerta» nadie recibirá niveles. ¿Continuar igual?", Text,
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            int count = _onlyFound.Checked ? package.Persons.Count(p => p.FoundOnTerminals.Count > 0) : package.Persons.Count;
+            if (MessageBox.Show(this, $"Se van a dar de alta {count} personas en {TrueCentralClient.NormalizeUrl(_tcUrl.Text)}. ¿Continuar?", Text,
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
 
             var engine = new MigrationEngine(entry => BeginInvoke(() => Log(entry)), new Progress<ProgressState>(UpdateProgress));
             using var tc = new TrueCentralClient();
             await tc.LoginAsync(_tcUrl.Text, _tcUser.Text, _tcPass.Text, ct);
-            await Task.Run(() => engine.ImportAsync(package, new ImportOptions
-            {
-                TrueCentral = tc, PackageFolder = folder, EmployeeNoSource = CurrentEmployeeNoSource(),
-                LevelId = SelectedLevelId(), LevelName = SelectedLevelName(), UpdateExisting = _updateExisting.Checked,
-            }, ct), ct);
+            await Task.Run(() => engine.ImportAsync(package, CurrentImportOptions(tc, folder), ct), ct);
             WriteLogFile(Path.Combine(folder, "registro-importacion.txt"));
         }
         catch (OperationCanceledException) { Log(LogLevel.Warning, "Importación cancelada."); }
@@ -811,6 +843,32 @@ public sealed class MainForm : Form
 
     private EmployeeNoSource CurrentEmployeeNoSource() =>
         _idPersonCode.Checked ? EmployeeNoSource.PersonCode : _idAssigned.Checked ? EmployeeNoSource.Assigned : EmployeeNoSource.Terminal;
+
+    private LevelMode CurrentLevelMode() =>
+        _levelsSingle.Checked ? LevelMode.Single : _levelsNone.Checked ? LevelMode.None : LevelMode.PerDoor;
+
+    private ImportOptions CurrentImportOptions(TrueCentralClient tc, string folder) => new()
+    {
+        TrueCentral = tc,
+        PackageFolder = folder,
+        EmployeeNoSource = CurrentEmployeeNoSource(),
+        LevelMode = CurrentLevelMode(),
+        LevelId = SelectedLevelId(),
+        LevelName = SelectedLevelName(),
+        OnlyFoundOnTerminals = _onlyFound.Checked,
+        UpdateExisting = _updateExisting.Checked,
+    };
+
+    private bool ValidateLevelMode(bool readsTerminals)
+    {
+        if (_levelsSingle.Checked && SelectedLevelId() is null)
+            return Complain("Eligió «el mismo nivel para todas» pero no eligió el nivel (conecte con TrueCentral en el paso 3 para ver la lista).", _level, 2);
+        if (_levelsPerDoor.Checked && !readsTerminals)
+            return Complain("«Uno por puerta» necesita leer los terminales (paso 2): de ahí sale qué puertas abría cada persona.", _readTerminals, 1);
+        if (_levelsPerDoor.Checked && _idAssigned.Checked)
+            return Complain("Con niveles por puerta el identificador tiene que ser el legajo de los terminales: si TrueCentral asigna uno nuevo, los equipos tendrían a cada persona dos veces.", _idTerminal, 2);
+        return true;
+    }
 
     // ==================================================================
     // Validaciones y estado
@@ -853,8 +911,9 @@ public sealed class MainForm : Form
             _cts = null;
         }
         _cancel.Enabled = busy && allowCancel;
-        foreach (var c in new Control[] { _hcpUrl, _hcpKey, _hcpSecret, _hcpConnect, _orgs, _readTerminals, _termUser, _termPass, _terminals,
-                     _tcUrl, _tcUser, _tcPass, _tcConnect, _level, _updateExisting, _idTerminal, _idPersonCode, _idAssigned, _import, _folder, _photos, _start, _importPackage })
+        foreach (var c in new Control[] { _hcpUrl, _hcpKey, _hcpSecret, _hcpConnect, _orgs, _readTerminals, _terminalFaces, _termUser, _termPass, _terminals,
+                     _tcUrl, _tcUser, _tcPass, _tcConnect, _level, _levelsPerDoor, _levelsSingle, _levelsNone, _onlyFound, _updateExisting,
+                     _idTerminal, _idPersonCode, _idAssigned, _import, _folder, _photos, _start, _importPackage })
             c.Enabled = !busy;
         UseWaitCursor = busy;
         if (!busy) _progress.Value = _progress.Value; // fuerza repintado tras el cursor
@@ -876,13 +935,18 @@ public sealed class MainForm : Form
               (SelectedOrganizations() is { } sel ? $", {_hcpPersons.Count(p => sel.Contains(p.OrgIndexCode))} en los departamentos elegidos" : ", todos los departamentos") + ".");
         var terminals = SelectedTerminals();
         sb.AppendLine(_readTerminals.Checked
-            ? $"Terminales: se leerán huellas y legajos de {terminals.Count} equipo(s)."
-            : "Terminales: no se leen (las huellas no se recuperan).");
+            ? $"Terminales: se leerán huellas, claves, puertas y legajos de {terminals.Count} equipo(s)" + (_terminalFaces.Checked ? ", y sus fotos de rostro." : ".")
+            : "Terminales: no se leen (las huellas, las claves y las puertas no se recuperan).");
         sb.AppendLine(_import.Checked
             ? $"Destino: {(_tcUrl.Text.Trim().Length > 0 ? TrueCentralClient.NormalizeUrl(_tcUrl.Text) : "(sin definir)")} como {_tcUser.Text}" +
               (_tcExisting >= 0 ? $" · ya hay {_tcExisting} persona(s)" : "") + "."
             : "Destino: solo se guarda el paquete, sin importar.");
-        sb.AppendLine("Nivel de acceso: " + (SelectedLevelName() ?? "ninguno (asignar después)."));
+        sb.AppendLine("Niveles de acceso: " + CurrentLevelMode() switch
+        {
+            LevelMode.PerDoor => "uno por puerta, con el horario de cada terminal.",
+            LevelMode.Single => SelectedLevelName() ?? "(elija el nivel en el paso 3).",
+            _ => "ninguno (modo sombra: no baja nada a los equipos).",
+        } + (_onlyFound.Checked ? " Solo las personas encontradas en los terminales." : ""));
         sb.Append("Identificador: " + (_idPersonCode.Checked ? "código de persona de HikCentral." : _idAssigned.Checked ? "lo asigna TrueCentral." : "el legajo de los terminales."));
         _summary.Text = sb.ToString();
     }

@@ -26,7 +26,15 @@ public sealed record HcpPerson(
     DateTimeOffset? EndTime,
     string PicUri,
     IReadOnlyList<string> Cards,
-    IReadOnlyList<HcpFingerprint> Fingerprints);
+    IReadOnlyList<HcpFingerprint> Fingerprints)
+{
+    /// <summary>
+    /// Campos personalizados de la persona (nombre → valor), como «Colacion»
+    /// que usa el casino. Se migran todos: HikCentral no dice para qué los usa
+    /// cada integración.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> CustomFields { get; init; } = new Dictionary<string, string>();
+}
 
 /// <summary>Terminal de control de acceso registrado en HikCentral.</summary>
 public sealed record HcpAccessDevice(string IndexCode, string Name, string Ip, int SdkPort, string Code, int Status);
@@ -300,6 +308,15 @@ public sealed class HikCentralClient : IDisposable
         if (p.TryGetProperty("personPhoto", out var photo) && photo.ValueKind == JsonValueKind.Object)
             picUri = Str(photo, "picUri") ?? "";
 
+        // HCP 3.1 escribe "customFiledName" (con la errata); otras versiones, "customFieldName".
+        var custom = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (p.TryGetProperty("customFieldList", out var fields) && fields.ValueKind == JsonValueKind.Array)
+            foreach (var f in fields.EnumerateArray())
+            {
+                string? name = Str(f, "customFieldName") ?? Str(f, "customFiledName");
+                if (!string.IsNullOrWhiteSpace(name)) custom[name.Trim()] = (Str(f, "customFieldValue") ?? "").Trim();
+            }
+
         return new HcpPerson(
             Str(p, "personId") ?? "",
             Str(p, "personCode") ?? "",
@@ -315,7 +332,7 @@ public sealed class HikCentralClient : IDisposable
             Date(p, "endTime"),
             picUri,
             cards,
-            fingers);
+            fingers) { CustomFields = custom };
     }
 
     private static string? Str(JsonElement obj, string name)

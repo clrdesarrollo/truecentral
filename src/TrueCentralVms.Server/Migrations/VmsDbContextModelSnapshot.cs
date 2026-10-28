@@ -125,6 +125,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<DateTime?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("LiveEvents")
+                        .HasColumnType("boolean");
+
                     b.Property<int?>("LocationId")
                         .HasColumnType("integer");
 

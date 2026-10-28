@@ -35,7 +35,23 @@ public sealed class ExportOptions
     public HashSet<string>? Organizations { get; init; }
     public bool DownloadPhotos { get; init; } = true;
     public IReadOnlyList<TerminalTarget> Terminals { get; init; } = [];
+    /// <summary>Traer la foto de rostro que guarda cada terminal y quedarse con la más grande.</summary>
+    public bool FacesFromTerminals { get; init; } = true;
     public required string PackageFolder { get; init; }
+}
+
+/// <summary>Qué niveles de acceso reciben las personas al importarlas.</summary>
+public enum LevelMode
+{
+    /// <summary>Ninguno: quedan en el padrón pero no bajan a los equipos (modo sombra).</summary>
+    None = 0,
+    /// <summary>El mismo nivel para todas (<see cref="ImportOptions.LevelId"/>).</summary>
+    Single = 1,
+    /// <summary>
+    /// Uno por puerta, reconstruido de los terminales: cada persona recibe los
+    /// de las puertas donde HikCentral la tenía, con el horario que tenía ahí.
+    /// </summary>
+    PerDoor = 2,
 }
 
 public sealed class ImportOptions
@@ -43,13 +59,17 @@ public sealed class ImportOptions
     public required TrueCentralClient TrueCentral { get; init; }
     public required string PackageFolder { get; init; }
     public EmployeeNoSource EmployeeNoSource { get; init; }
-    /// <summary>Nivel de acceso que reciben las personas al crearse (null = ninguno; se asignan después).</summary>
+    public LevelMode LevelMode { get; init; }
+    /// <summary>Con <see cref="LevelMode.Single"/>: nivel de acceso que reciben las personas al crearse.</summary>
     public int? LevelId { get; init; }
     public string? LevelName { get; init; }
+    /// <summary>Importar solo a quienes se encontraron en algún terminal leído (piloto de una puerta).</summary>
+    public bool OnlyFoundOnTerminals { get; init; }
     /// <summary>
     /// Si la persona ya existe (mismo identificador), completarla con lo que
-    /// le falte —huellas, tarjetas, foto— en vez de omitirla. No pisa nombre,
-    /// vigencia, clave ni niveles: eso ya lo administra TrueCentral.
+    /// le falte —huellas, tarjetas, foto, clave y, con niveles por puerta, los
+    /// niveles de las puertas que le falten— en vez de omitirla. No pisa
+    /// nombre, vigencia ni lo que ya tenga: eso ya lo administra TrueCentral.
     /// </summary>
     public bool UpdateExisting { get; init; } = true;
 }
@@ -63,6 +83,8 @@ public sealed class ImportResult
     public int Photos { get; set; }
     public int Cards { get; set; }
     public int Fingerprints { get; set; }
+    public int Pins { get; set; }
+    public int Levels { get; set; }
 }
 
 /// <summary>
@@ -125,7 +147,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
 
         if (options.Terminals.Count > 0)
         {
-            await ReadTerminalsAsync(options.Terminals, package, ct);
+            await ReadTerminalsAsync(options, package, ct);
             NextPhase();
         }
 
@@ -144,6 +166,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
 
         var orgs = await hcp.GetOrganizationsAsync(ct);
         var orgNames = OrganizationPaths(orgs);
+        var orgLeaf = orgs.GroupBy(o => o.IndexCode).ToDictionary(g => g.Key, g => g.First().Name);
         Info($"Departamentos: {orgs.Count}.");
         Report(0.1, "leyendo personas…");
 
@@ -181,6 +204,8 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 FirstName = first,
                 LastName = last,
                 Department = orgNames.GetValueOrDefault(p.OrgIndexCode),
+                DepartmentName = orgLeaf.GetValueOrDefault(p.OrgIndexCode),
+                CustomFields = new Dictionary<string, string>(p.CustomFields, StringComparer.OrdinalIgnoreCase),
                 Phone = Blank(p.Phone),
                 Email = Blank(p.Email),
                 Notes = Blank(p.Remark),
@@ -205,12 +230,21 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             _photoUris[p.PersonId] = p.PicUri;
         }
         Info($"Con tarjeta: {withCards} · con huellas registradas: {withFingers} · con foto: {withPhoto}.");
+        // Los campos personalizados no tienen todavía dónde ir en TrueCentral: quedan
+        // en el paquete para no perderlos (el casino usa «Colacion»).
+        var fieldNames = package.Persons.SelectMany(p => p.CustomFields.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (fieldNames.Count > 0)
+            Info("Campos personalizados de HikCentral (se guardan en el paquete): " + string.Join(", ", fieldNames.Select(n =>
+                $"«{n}» ({package.Persons.Count(p => p.CustomFields.TryGetValue(n, out string? v) && v.Length > 0)} con valor)")) + ".");
         if (withFingers > 0 && package.Persons.Sum(p => p.Fingerprints.Count) == 0)
             Info("HikCentral no entrega las plantillas de huella por OpenAPI: se van a leer desde los terminales.");
         return package;
     }
 
     private readonly Dictionary<string, string> _photoUris = new();
+
+    /// <summary>Personas cuya foto ya se comparó con la de algún terminal.</summary>
+    private readonly HashSet<PackagePerson> _faceChecked = [];
 
     private async Task DownloadPhotosAsync(ExportOptions options, MigrationPackage package, CancellationToken ct)
     {
@@ -235,6 +269,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                     await File.WriteAllBytesAsync(Path.Combine(options.PackageFolder, file), photo.Value.Bytes, ct);
                     person.PhotoFile = file;
                     person.PhotoContentType = photo.Value.ContentType;
+                    person.PhotoSource = "HikCentral";
                     ok++;
                 }
             }
@@ -248,8 +283,9 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
     // Terminales
     // ------------------------------------------------------------------
 
-    private async Task ReadTerminalsAsync(IReadOnlyList<TerminalTarget> terminals, MigrationPackage package, CancellationToken ct)
+    private async Task ReadTerminalsAsync(ExportOptions options, MigrationPackage package, CancellationToken ct)
     {
+        var terminals = options.Terminals;
         int index = 0;
         var byCode = package.Persons.Where(p => p.PersonCode.Length > 0).GroupBy(p => p.PersonCode)
             .ToDictionary(g => g.Key, g => g.First());
@@ -277,9 +313,21 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 var cardsByEmployee = cards.GroupBy(c => c.EmployeeNo).ToDictionary(g => g.Key, g => g.Select(c => c.CardNo).ToList());
                 bool reportsFingerCount = users.Any(u => u.Fingerprints is not null);
                 Info($"[{target.Name}] personas en el equipo: {users.Count} · tarjetas: {cards.Count} · con huella: " +
-                     (reportsFingerCount ? $"{users.Count(u => u.Fingerprints > 0)}." : "el firmware no lo informa; se consultan los diez dedos de cada persona."));
+                     (reportsFingerCount ? $"{users.Count(u => u.Fingerprints > 0)}" : "el firmware no lo informa (se consultan los diez dedos de cada persona)") +
+                     $" · con clave: {users.Count(u => u.Pin is not null)} · con rostro: {users.Count(u => u.Faces > 0)}.");
+                if (users.Count > 0 && users.All(u => u.Pin is null))
+                    Info($"[{target.Name}] el equipo no informó ninguna clave: o nadie usa clave en él, o su firmware no la entrega.");
 
-                int matched = 0, fingers = 0, unmatched = 0, virtualCards = 0;
+                var terminal = new PackageTerminal
+                {
+                    Name = target.Name, Host = target.Host, Model = Blank(info.Model), SerialNumber = Blank(info.SerialNumber),
+                    Firmware = Blank(info.Firmware), Users = users.Count, Cards = cards.Count,
+                };
+                package.Terminals.RemoveAll(t => t.Host.Equals(target.Host, StringComparison.OrdinalIgnoreCase));
+                package.Terminals.Add(terminal);
+                await ReadSchedulesAsync(reader, target, terminal, users, ct);
+
+                int matched = 0, fingers = 0, unmatched = 0, virtualCards = 0, pins = 0, faces = 0, noRights = 0;
                 var unmatchedNames = new List<string>();
                 for (int i = 0; i < users.Count; i++)
                 {
@@ -303,6 +351,31 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                         Warn($"{person.FullName}: {target.Name} la conoce como '{user.EmployeeNo}' pero otro terminal como '{person.TerminalEmployeeNo}'. Se conserva el primero.");
                     if (!person.FoundOnTerminals.Contains(target.Name)) person.FoundOnTerminals.Add(target.Name);
                     if (how != "legajo") Info($"{person.FullName}: identificada en {target.Name} por {how} (legajo {user.EmployeeNo}).");
+
+                    // Clave: HikCentral escribe la misma en todos sus equipos; si dos
+                    // terminales discrepan, vale la primera y se avisa.
+                    if (user.Pin is { } pin)
+                    {
+                        if (person.Pin is null) { person.Pin = pin; pins++; }
+                        else if (person.Pin != pin)
+                            Warn($"{person.FullName}: {target.Name} tiene otra clave que el terminal anterior. Se conserva la primera; revise cuál usa.");
+                    }
+
+                    // Puertas y horario: de acá salen sus niveles de acceso en TrueCentral.
+                    if (user.Rights.Count == 0) noRights++;
+                    foreach (var right in user.Rights)
+                        if (!person.Access.Any(a => a.Host.Equals(target.Host, StringComparison.OrdinalIgnoreCase) && a.DoorNo == right.DoorNo && a.TemplateNo == right.PlanTemplateNo))
+                            person.Access.Add(new PackageAccess { Terminal = target.Name, Host = target.Host, DoorNo = right.DoorNo, TemplateNo = right.PlanTemplateNo });
+
+                    // Lo que TrueCentral no conserva al reescribir a la persona: se informa
+                    // para volver a aplicarlo (el kiosco del casino lo hace en sus equipos).
+                    if (!user.Enabled && !person.DisabledOn.Contains(target.Name)) person.DisabledOn.Add(target.Name);
+                    if (user.VerifyMode is { } mode && mode.Equals("card", StringComparison.OrdinalIgnoreCase) && !person.CardOnlyOn.Contains(target.Name))
+                        person.CardOnlyOn.Add(target.Name);
+                    if (user.LocalAdmin && !person.LocalAdminOn.Contains(target.Name)) person.LocalAdminOn.Add(target.Name);
+
+                    if (options.FacesFromTerminals && user.Faces > 0 && await TakeTerminalFaceAsync(reader, target, options.PackageFolder, user, person, ct))
+                        faces++;
 
                     foreach (string card in terminalCards)
                     {
@@ -339,7 +412,10 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                             Warn($"{person.FullName}: {target.Name} dice que tiene {user.Fingerprints} huella(s) pero no entregó ninguna.");
                     }
                 }
-                Ok($"[{target.Name}] personas cruzadas: {matched} de {users.Count} · huellas recuperadas: {fingers}.");
+                Ok($"[{target.Name}] personas cruzadas: {matched} de {users.Count} · huellas recuperadas: {fingers} · claves: {pins}" +
+                   (options.FacesFromTerminals ? $" · rostros tomados del equipo: {faces}" : "") + ".");
+                if (noRights > 0)
+                    Info($"[{target.Name}] {noRights} persona(s) están en el equipo sin ninguna puerta habilitada: en TrueCentral no recibirán el nivel de esta puerta.");
                 if (virtualCards > 0)
                     Info($"[{target.Name}] se ignoraron {virtualCards} tarjeta(s) virtuales: HikCentral las inventa (números cercanos a 18446744073709551615) para vincular huellas de personas sin tarjeta; no abren ninguna puerta.");
                 if (unmatched > 0)
@@ -358,6 +434,129 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
         Ok($"Huellas en el paquete: {total}. Personas con huella en HikCentral que quedaron sin plantilla: {missing}.");
         int noId = package.Persons.Count(p => p.TerminalEmployeeNo is null);
         if (noId > 0) Info($"{noId} persona(s) no se encontraron en ningún terminal: usarán su código de persona como identificador.");
+        Ok($"Claves en el paquete: {package.Persons.Count(p => p.Pin is not null)} · personas con puertas: {package.Persons.Count(p => p.Access.Count > 0)} · " +
+           $"puertas distintas: {package.Persons.SelectMany(p => p.Access).Select(a => (a.Host, a.DoorNo)).Distinct().Count()}.");
+        await WriteFollowUpAsync(options.PackageFolder, package, ct);
+    }
+
+    /// <summary>
+    /// Lo que TrueCentral NO conserva al escribir a la persona en sus equipos
+    /// (siempre la deja habilitada, con verificación según el lector y sin
+    /// acceso al menú): se avisa en el registro y se deja la lista en
+    /// <c>pendientes-despues-del-corte.csv</c> para volver a aplicarlo.
+    /// </summary>
+    private async Task WriteFollowUpAsync(string folder, MigrationPackage package, CancellationToken ct)
+    {
+        var rows = new List<string>();
+        foreach (var p in package.Persons)
+        {
+            string id = p.TerminalEmployeeNo ?? p.PersonCode;
+            rows.AddRange(p.DisabledOn.Select(t => $"{id};{p.FullName};{t};deshabilitada en el equipo"));
+            rows.AddRange(p.CardOnlyOn.Select(t => $"{id};{p.FullName};{t};solo tarjeta"));
+            rows.AddRange(p.LocalAdminOn.Select(t => $"{id};{p.FullName};{t};administrador del menú del equipo"));
+        }
+        int disabled = package.Persons.Count(p => p.DisabledOn.Count > 0);
+        int cardOnly = package.Persons.Count(p => p.CardOnlyOn.Count > 0);
+        int admins = package.Persons.Count(p => p.LocalAdminOn.Count > 0);
+        string file = Path.Combine(folder, "pendientes-despues-del-corte.csv");
+        if (rows.Count == 0)
+        {
+            if (File.Exists(file)) File.Delete(file);
+            return;
+        }
+        await File.WriteAllTextAsync(file, "legajo;nombre;terminal;estado" + Environment.NewLine + string.Join(Environment.NewLine, rows) + Environment.NewLine,
+            new UTF8Encoding(true), ct);
+        if (disabled > 0)
+            Warn($"{disabled} persona(s) están DESHABILITADAS en algún terminal (lo hace el kiosco del casino). TrueCentral las va a dejar habilitadas al escribirlas: vuelva a deshabilitarlas desde el kiosco después del corte.");
+        if (cardOnly > 0)
+            Warn($"{cardOnly} persona(s) tienen «solo tarjeta» en algún terminal (visitas del casino): vuelva a aplicarlo desde el kiosco después del corte.");
+        if (admins > 0)
+            Warn($"{admins} persona(s) pueden entrar al menú de algún terminal: TrueCentral les quita ese permiso.");
+        Info($"La lista quedó en {file}.");
+    }
+
+    /// <summary>
+    /// Lee las plantillas de horario que usan las personas del terminal. Una
+    /// plantilla que no se pudo leer queda fuera del paquete: al importar con
+    /// niveles por puerta eso detiene la importación, porque reemplazarla por
+    /// «todo el día» daría más acceso del que había.
+    /// </summary>
+    private async Task ReadSchedulesAsync(TerminalReader reader, TerminalTarget target, PackageTerminal terminal,
+        List<TerminalUser> users, CancellationToken ct)
+    {
+        foreach (int number in users.SelectMany(u => u.Rights).Select(r => r.PlanTemplateNo).Distinct().Order())
+        {
+            TerminalSchedule? schedule;
+            try { schedule = await reader.ReadScheduleAsync(number, ct); }
+            catch (DriverException ex) { Warn($"[{target.Name}] no se pudo leer la plantilla de horario {number}: {ex.Message}"); continue; }
+            catch (System.Text.Json.JsonException) { Warn($"[{target.Name}] la plantilla de horario {number} vino en un formato inesperado."); continue; }
+            if (schedule is null) { Warn($"[{target.Name}] el equipo no entregó la plantilla de horario {number}."); continue; }
+            terminal.Schedules.Add(new PackageSchedule
+            {
+                Number = schedule.Number,
+                Name = schedule.Name,
+                HolidayGroup = schedule.HolidayGroup,
+                Segments = schedule.Segments.Select(s => new PackageSegment { Day = s.Day, StartMinutes = s.StartMinutes, EndMinutes = s.EndMinutes }).ToList(),
+            });
+            int people = users.Count(u => u.Rights.Any(r => r.PlanTemplateNo == number));
+            Info($"[{target.Name}] horario {number} «{schedule.Name}»: {DescribeSegments(schedule.Segments.Select(s => (s.Day, s.StartMinutes, s.EndMinutes)))} ({people} persona(s)).");
+            if (schedule.HolidayGroup is not null)
+                Warn($"[{target.Name}] el horario «{schedule.Name}» tiene feriados en HikCentral (grupo {schedule.HolidayGroup}): cargue los feriados en TrueCentral y revise el horario después de importar.");
+        }
+    }
+
+    /// <summary>
+    /// Toma la foto del rostro que guarda el terminal si es más grande que la
+    /// que ya hay en el paquete (la de HikCentral es una miniatura). Devuelve
+    /// true si la reemplazó.
+    /// </summary>
+    private async Task<bool> TakeTerminalFaceAsync(TerminalReader reader, TerminalTarget target, string folder,
+        TerminalUser user, PackagePerson person, CancellationToken ct)
+    {
+        int? current = person.PhotoFile is { } existing && File.Exists(Path.Combine(folder, existing))
+            ? ShortSide(await File.ReadAllBytesAsync(Path.Combine(folder, existing), ct))
+            : null;
+        // Ya se comparó con otro terminal y la foto alcanza para modelar: no se
+        // le pregunta a cada equipo (son 12 consultas por persona).
+        if (!_faceChecked.Add(person) && current >= MinAcceptedSide) return false;
+
+        var face = await reader.ReadFaceAsync(user.EmployeeNo, ct);
+        if (face is null || ShortSide(face.Value.Bytes) is not { } side || side <= (current ?? 0)) return false;
+        if (face.Value.Bytes.Length > AccessFacePhoto.MaxBytes) return false;
+
+        Directory.CreateDirectory(Path.Combine(folder, MigrationPackage.PhotosFolder));
+        string ext = face.Value.ContentType == "image/png" ? ".png" : ".jpg";
+        string file = Path.Combine(MigrationPackage.PhotosFolder, SafeFileName(person.HcpPersonId) + "-terminal" + ext);
+        await File.WriteAllBytesAsync(Path.Combine(folder, file), face.Value.Bytes, ct);
+        person.PhotoFile = file;
+        person.PhotoContentType = face.Value.ContentType;
+        person.PhotoSource = $"terminal {target.Name}";
+        return true;
+    }
+
+    /// <summary>Lado corto de la imagen en píxeles, o null si no se puede leer.</summary>
+    private static int? ShortSide(byte[] bytes)
+    {
+        try
+        {
+            using var input = new MemoryStream(bytes);
+            using var image = System.Drawing.Image.FromStream(input, useEmbeddedColorManagement: false, validateImageData: false);
+            return Math.Min(image.Width, image.Height);
+        }
+        catch (Exception) { return null; }
+    }
+
+    private static readonly string[] DayNames = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+
+    /// <summary>"todos los días 00:00-23:59" o "lun 08:00-18:00; mar 08:00-18:00…", para el registro.</summary>
+    private static string DescribeSegments(IEnumerable<(int Day, int Start, int End)> segments)
+    {
+        var list = segments.ToList();
+        if (list.Count == 0) return "sin tramos (no deja pasar)";
+        string Hhmm(int m) => $"{m / 60:00}:{m % 60:00}";
+        var byDay = list.GroupBy(s => s.Day).ToDictionary(g => g.Key, g => string.Join(", ", g.OrderBy(s => s.Start).Select(s => $"{Hhmm(s.Start)}-{Hhmm(s.End)}")));
+        if (byDay.Count == 7 && byDay.Values.Distinct().Count() == 1) return $"todos los días {byDay[0]}";
+        return string.Join("; ", byDay.OrderBy(d => d.Key).Select(d => $"{DayNames[d.Key]} {d.Value}"));
     }
 
     private static (PackagePerson? Person, string How) Match(TerminalUser user, List<string> terminalCards,
@@ -393,16 +592,40 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             EmployeeNoSource.PersonCode => "el código de persona de HikCentral.",
             _ => "lo asigna TrueCentral.",
         });
-        Info(options.LevelId is null
-            ? "Nivel de acceso: ninguno (las personas no bajan a los equipos hasta que se les asigne uno)."
-            : $"Nivel de acceso asignado al crear: {options.LevelName ?? options.LevelId.ToString()} (el sincronizador las baja a sus equipos).");
+        var mode = options.LevelMode == LevelMode.Single && options.LevelId is null ? LevelMode.None : options.LevelMode;
+        Info(mode switch
+        {
+            LevelMode.PerDoor => "Niveles de acceso: uno por puerta, con el horario que cada persona tenía en cada terminal.",
+            LevelMode.Single => $"Nivel de acceso asignado al crear: {options.LevelName ?? options.LevelId.ToString()} (el sincronizador las baja a sus equipos).",
+            _ => "Nivel de acceso: ninguno (las personas quedan en el padrón y NO bajan a los equipos hasta que se les asigne uno).",
+        });
+
+        var persons = options.OnlyFoundOnTerminals ? package.Persons.Where(p => p.FoundOnTerminals.Count > 0).ToList() : package.Persons;
+        if (persons.Count < package.Persons.Count)
+            Info($"Solo las personas encontradas en los terminales leídos: {persons.Count} de {package.Persons.Count}.");
+
+        Dictionary<(string Host, int Door, int Template), int> doorLevels = [];
+        if (mode == LevelMode.PerDoor)
+        {
+            Report(0, "preparando horarios y niveles…");
+            doorLevels = await PrepareDoorLevelsAsync(tc, package, persons, result, ct);
+        }
+        List<int> LevelsOf(PackagePerson p) => mode switch
+        {
+            // PrepareDoorLevelsAsync deja resuelta cada puerta del paquete (o se detiene antes).
+            LevelMode.PerDoor => p.Access.Select(a => doorLevels[AccessKey(a)]).Distinct().ToList(),
+            LevelMode.Single => [options.LevelId!.Value],
+            _ => [],
+        };
 
         int upscaled = 0;
-        for (int i = 0; i < package.Persons.Count; i++)
+        for (int i = 0; i < persons.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            var person = package.Persons[i];
-            Report((double)i / package.Persons.Count, $"{person.FullName} ({i + 1}/{package.Persons.Count})");
+            var person = persons[i];
+            Report((double)i / persons.Count, $"{person.FullName} ({i + 1}/{persons.Count})");
+            var levelIds = LevelsOf(person);
+            string? pinCode = ValidPin(person);
 
             string? employeeNo = options.EmployeeNoSource switch
             {
@@ -422,7 +645,8 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 {
                     try
                     {
-                        if (await CompleteExistingAsync(tc, who, person, options, usedCards, result, ct)) result.Updated++;
+                        if (await CompleteExistingAsync(tc, who, person, options, usedCards, result,
+                                mode == LevelMode.PerDoor ? levelIds : [], pinCode, ct)) result.Updated++;
                         else result.Skipped++;
                     }
                     catch (TrueCentralException ex)
@@ -462,7 +686,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                     if (UpscaleIfSmall(bytes) is { } bigger) { bytes = bigger; contentType = "image/jpeg"; upscaled++; }
                     if (bytes.Length > AccessFacePhoto.MaxBytes)
                         Warn($"{person.FullName}: la foto pesa {bytes.Length / 1024} KB (máximo {AccessFacePhoto.MaxBytes / 1024} KB); se omite.");
-                    else face = new AccessFaceWriteDto(Convert.ToBase64String(bytes), contentType, "HikCentral");
+                    else face = new AccessFaceWriteDto(Convert.ToBase64String(bytes), contentType, person.PhotoSource ?? "HikCentral");
                 }
             }
 
@@ -483,10 +707,10 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 ValidFrom: person.ValidFrom,
                 ValidTo: person.ValidTo > person.ValidFrom ? person.ValidTo : person.ValidFrom.AddYears(10),
                 Enabled: true,
-                PinCode: null,
+                PinCode: pinCode,
                 ClearPin: false,
                 Cards: cards,
-                LevelIds: options.LevelId is { } level ? [level] : [],
+                LevelIds: levelIds,
                 EmployeeNo: employeeNo,
                 Fingerprints: fingers.Count > 0 ? fingers : null,
                 Face: face);
@@ -500,7 +724,10 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 result.Cards += cards.Count;
                 result.Fingerprints += fingers.Count;
                 if (face is not null) result.Photos++;
-                Ok($"{created.FullName} → identificador {created.EmployeeNo}: {cards.Count} tarjeta(s), {fingers.Count} huella(s), {(face is null ? "sin foto" : "con foto")}.");
+                if (pinCode is not null) result.Pins++;
+                Ok($"{created.FullName} → identificador {created.EmployeeNo}: {cards.Count} tarjeta(s), {fingers.Count} huella(s), " +
+                   $"{(face is null ? "sin foto" : "con foto")}, {(pinCode is null ? "sin clave" : "con clave")}" +
+                   (mode == LevelMode.PerDoor ? $", {levelIds.Count} puerta(s)" : "") + ".");
             }
             catch (TrueCentralException ex)
             {
@@ -513,23 +740,172 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
         if (upscaled > 0)
             Info($"{upscaled} foto(s) venían chicas (HikCentral entrega miniaturas de ~135 px) y se ampliaron a {UpscaleShortSide} px de lado corto: es lo mínimo que piden los terminales para modelar el rostro.");
         Ok($"Importación terminada: {result.Created} creada(s), {result.Updated} completada(s), {result.Skipped} omitida(s) o sin cambios, {result.Failed} con error. " +
-           $"Fotos: {result.Photos} · tarjetas: {result.Cards} · huellas: {result.Fingerprints}.");
-        if (result.Created > 0 && options.LevelId is null)
+           $"Fotos: {result.Photos} · tarjetas: {result.Cards} · huellas: {result.Fingerprints} · claves: {result.Pins}" +
+           (mode == LevelMode.PerDoor ? $" · niveles creados: {result.Levels}" : "") + ".");
+        if (result.Created > 0 && mode == LevelMode.None)
             Info("Las personas entraron sin nivel de acceso: asígnelos en TrueCentral (Control de acceso → Niveles) para que el sincronizador las baje a los equipos.");
-        if (result.Created > 0)
-            Info("Las claves de teclado no se migran: hay que volver a definirlas. El estado de la bajada a cada equipo se ve en TrueCentral → Control de acceso → Personas.");
+        int withoutPin = persons.Count(p => !string.IsNullOrWhiteSpace(p.Pin) && !IsValidPin(p.Pin));
+        if (withoutPin > 0)
+            Warn($"{withoutPin} clave(s) no se migraron porque TrueCentral acepta claves de 4 a 8 dígitos: hay que definírselas a mano (están en el registro de arriba).");
+        if (result.Created + result.Updated > 0)
+            Info("El estado de la bajada a cada equipo se ve en TrueCentral → Control de acceso → Personas.");
         return result;
+    }
+
+    /// <summary>La clave del paquete si TrueCentral la acepta (4 a 8 dígitos); si no, null y se avisa.</summary>
+    private string? ValidPin(PackagePerson person)
+    {
+        string? pin = person.Pin?.Trim();
+        if (string.IsNullOrEmpty(pin)) return null;
+        if (IsValidPin(pin)) return pin;
+        Warn($"{person.FullName}: su clave en los terminales tiene {pin.Length} caracteres y TrueCentral acepta de 4 a 8 dígitos; no se migró " +
+             "y, al escribirla, TrueCentral le BORRA la clave en sus equipos: defínale una nueva antes del corte.");
+        return null;
+    }
+
+    private static bool IsValidPin(string pin) => pin.Trim() is { Length: >= 4 and <= 8 } p && p.All(char.IsAsciiDigit);
+
+    private static (string Host, int Door, int Template) AccessKey(PackageAccess a) =>
+        (a.Host.Trim().ToLowerInvariant(), a.DoorNo, a.TemplateNo);
+
+    /// <summary>
+    /// Arma en TrueCentral lo necesario para replicar quién entraba por dónde:
+    /// por cada plantilla de horario distinta, un horario (el 24/7 de fábrica
+    /// si es «todo el día», o uno igual que ya exista); y por cada puerta y
+    /// horario, un nivel «Acceso · puerta». Antes de crear nada verifica que
+    /// todos los terminales estén dados de alta en TrueCentral y que todas las
+    /// plantillas se hayan leído: con una puerta o un horario de menos alguien
+    /// perdería acceso, y reemplazar un horario por «todo el día» le daría más.
+    /// Es idempotente: una segunda pasada reutiliza lo que creó la primera.
+    /// </summary>
+    private async Task<Dictionary<(string Host, int Door, int Template), int>> PrepareDoorLevelsAsync(
+        TrueCentralClient tc, MigrationPackage package, IReadOnlyList<PackagePerson> persons, ImportResult result, CancellationToken ct)
+    {
+        var needed = persons.SelectMany(p => p.Access).GroupBy(AccessKey).Select(g => g.First()).ToList();
+        if (needed.Count == 0)
+        {
+            Warn("El paquete no trae puertas por persona (¿se exportó sin leer los terminales, o con una versión anterior del migrador?): nadie recibirá niveles.");
+            return [];
+        }
+
+        // 1. Terminales y puertas en TrueCentral, por IP.
+        var devices = await tc.GetDevicesAsync(ct);
+        var byHost = devices.Where(d => d.Host.Length > 0).GroupBy(d => d.Host.Trim().ToLowerInvariant()).ToDictionary(g => g.Key, g => g.First());
+        var problems = new List<string>();
+        foreach (var terminal in needed.GroupBy(a => a.Host.Trim().ToLowerInvariant()))
+        {
+            string name = terminal.First().Terminal;
+            if (!byHost.TryGetValue(terminal.Key, out var device))
+            {
+                problems.Add($"el terminal «{name}» ({terminal.First().Host}) no está dado de alta en TrueCentral");
+                continue;
+            }
+            foreach (int door in terminal.Select(a => a.DoorNo).Distinct())
+                if (device.Doors.All(d => d.Number != door))
+                    problems.Add($"«{device.Name}» no tiene la puerta {door} en TrueCentral");
+        }
+
+        // 2. Plantillas de horario leídas de cada terminal.
+        var templates = new Dictionary<(string Host, int Number), PackageSchedule>();
+        foreach (var t in package.Terminals)
+            foreach (var s in t.Schedules)
+                templates[(t.Host.Trim().ToLowerInvariant(), s.Number)] = s;
+        foreach (var missing in needed.Where(a => !templates.ContainsKey((a.Host.Trim().ToLowerInvariant(), a.TemplateNo)))
+                     .GroupBy(a => (a.Host, a.TemplateNo)))
+        {
+            // Sin la plantilla 1 leída, se sabe igual qué es: la de fábrica.
+            if (missing.Key.TemplateNo == 1) continue;
+            problems.Add($"no se leyó el horario {missing.Key.TemplateNo} de «{missing.First().Terminal}»");
+        }
+        if (problems.Count > 0)
+            throw new TrueCentralException("No se importó nada para no dejar a nadie con más o menos acceso del que tenía: " +
+                                           string.Join("; ", problems) + ". Corríjalo y vuelva a importar el paquete.");
+
+        // 3. Horarios: el de fábrica para «todo el día», uno igual que ya exista, o uno nuevo.
+        var schedules = await tc.GetSchedulesAsync(ct);
+        var scheduleOf = new Dictionary<(string Host, int Number), AccessScheduleDto>();
+        foreach (var key in needed.Select(a => (Host: a.Host.Trim().ToLowerInvariant(), a.TemplateNo)).Distinct())
+        {
+            var segments = templates.TryGetValue(key, out var template)
+                ? Normalize(template.Segments.Select(s => (s.Day, s.StartMinutes, s.EndMinutes)))
+                : Normalize(Enumerable.Range(0, 7).Select(d => (d, 0, 24 * 60 - 1)));
+            var match = schedules
+                .Where(s => s.HolidayMode == AccessHolidayMode.Normal || s.IsBuiltIn)
+                .OrderByDescending(s => s.IsBuiltIn)
+                .FirstOrDefault(s => Normalize(s.Segments.Select(x => (x.Day, x.StartMinutes, x.EndMinutes))) == segments);
+            if (match is null)
+            {
+                if (template is null)
+                    throw new TrueCentralException("TrueCentral no tiene su horario de fábrica «Todo el día, todos los días»: abra Control de acceso → Horarios una vez y vuelva a importar.");
+                if (segments.Length == 0)
+                    throw new TrueCentralException($"El horario «{template.Name}» de un terminal no tiene ningún tramo (no deja pasar a nadie): revíselo en HikCentral antes de migrar.");
+                string baseName = Clip($"Migrado · {template.Name}", 120), name = baseName;
+                for (int n = 2; schedules.Any(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)); n++) name = $"{baseName} ({n})";
+                match = await tc.CreateScheduleAsync(new AccessScheduleWriteDto(name,
+                    $"Creado por el migrador desde la plantilla {template.Number} de HikCentral el {DateTime.Now:dd-MM-yyyy}.",
+                    template.Segments.Select(s => new AccessScheduleSegmentDto(s.Day, s.StartMinutes, s.EndMinutes)).ToList()), ct);
+                schedules.Add(match);
+                Ok($"Horario creado: «{match.Name}» ({DescribeSegments(template.Segments.Select(s => (s.Day, s.StartMinutes, s.EndMinutes)))}).");
+            }
+            scheduleOf[key] = match;
+        }
+
+        // 4. Un nivel por puerta y horario.
+        var levels = await tc.GetLevelsAsync(ct);
+        var map = new Dictionary<(string Host, int Door, int Template), int>();
+        foreach (var access in needed)
+        {
+            var device = byHost[access.Host.Trim().ToLowerInvariant()];
+            var door = device.Doors.First(d => d.Number == access.DoorNo);
+            var schedule = scheduleOf[(access.Host.Trim().ToLowerInvariant(), access.TemplateNo)];
+            string place = device.Doors.Count > 1 ? $"{device.Name} · {door.Name}" : device.Name;
+            string name = Clip(schedule.IsBuiltIn ? $"Puerta · {place}" : $"Puerta · {place} ({schedule.Name})", 120);
+
+            var level = levels.FirstOrDefault(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (level is not null && !(level.ScheduleId == schedule.Id && level.DoorIds.Count == 1 && level.DoorIds[0] == door.Id))
+                throw new TrueCentralException($"Ya existe un nivel «{level.Name}» con otras puertas u otro horario: renómbrelo antes de importar (el migrador usa ese nombre).");
+            if (level is null)
+            {
+                level = await tc.CreateLevelAsync(new AccessLevelWriteDto(name,
+                    $"Creado por el migrador el {DateTime.Now:dd-MM-yyyy}: quienes entraban por esta puerta en HikCentral.",
+                    schedule.Id, [door.Id]), ct);
+                levels.Add(level);
+                result.Levels++;
+                Ok($"Nivel creado: «{level.Name}» ({schedule.Name}).");
+            }
+            map[AccessKey(access)] = level.Id;
+        }
+        int people = persons.Count(p => p.Access.Count > 0);
+        Info($"Niveles por puerta listos: {map.Values.Distinct().Count()} nivel(es) para {people} persona(s) con puertas.");
+        int none = persons.Count(p => p.Access.Count == 0);
+        if (none > 0)
+            Warn($"{none} persona(s) no estaban en ningún terminal leído (o sin puertas): entran sin niveles y no bajan a los equipos.");
+        return map;
+    }
+
+    /// <summary>Tramos ordenados en texto, para comparar horarios sin importar el orden.</summary>
+    private static string Normalize(IEnumerable<(int Day, int Start, int End)> segments)
+    {
+        // El VMS escribe el fin de día como 23:59 y algunos equipos lo leen como 24:00.
+        var list = segments.Select(s => (s.Day, s.Start, End: Math.Min(s.End, 24 * 60 - 1)))
+            .OrderBy(s => s.Day).ThenBy(s => s.Start).Select(s => $"{s.Day}:{s.Start}-{s.End}");
+        return string.Join(",", list);
     }
 
     /// <summary>
     /// Completa una persona que ya está en TrueCentral con las credenciales
-    /// que trae el paquete y ella no tiene: dedos nuevos, tarjetas nuevas y
-    /// la foto si no tenía rostro. Devuelve false si no había nada que agregar.
+    /// que trae el paquete y ella no tiene: dedos nuevos, tarjetas nuevas, la
+    /// foto si no tenía rostro, la clave si no tenía y los niveles por puerta
+    /// que le falten (<paramref name="doorLevels"/>; nunca le quita uno).
+    /// Devuelve false si no había nada que agregar.
     /// </summary>
     private async Task<bool> CompleteExistingAsync(TrueCentralClient tc, ExistingPerson who, PackagePerson person,
-        ImportOptions options, Dictionary<string, string> usedCards, ImportResult result, CancellationToken ct)
+        ImportOptions options, Dictionary<string, string> usedCards, ImportResult result,
+        IReadOnlyList<int> doorLevels, string? pinCode, CancellationToken ct)
     {
         var current = await tc.GetPersonAsync(who.Id, ct);
+        var newLevels = doorLevels.Where(l => !current.LevelIds.Contains(l)).Distinct().ToList();
+        string? newPin = current.HasPin ? null : pinCode;
 
         var newCards = new List<string>();
         foreach (string card in person.Cards.Distinct())
@@ -557,11 +933,11 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 byte[] bytes = await File.ReadAllBytesAsync(path, ct);
                 string contentType = person.PhotoContentType ?? "image/jpeg";
                 if (UpscaleIfSmall(bytes) is { } bigger) { bytes = bigger; contentType = "image/jpeg"; }
-                if (bytes.Length <= AccessFacePhoto.MaxBytes) face = new AccessFaceWriteDto(Convert.ToBase64String(bytes), contentType, "HikCentral");
+                if (bytes.Length <= AccessFacePhoto.MaxBytes) face = new AccessFaceWriteDto(Convert.ToBase64String(bytes), contentType, person.PhotoSource ?? "HikCentral");
             }
         }
 
-        if (newCards.Count == 0 && newFingers.Count == 0 && face is null)
+        if (newCards.Count == 0 && newFingers.Count == 0 && face is null && newPin is null && newLevels.Count == 0)
         {
             Info($"{current.FullName} ({current.EmployeeNo}): ya tenía todo; sin cambios.");
             return false;
@@ -584,10 +960,10 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             ValidFrom: current.ValidFrom,
             ValidTo: current.ValidTo,
             Enabled: current.Enabled,
-            PinCode: null,
+            PinCode: newPin,
             ClearPin: false,
             Cards: current.Cards.Select(c => c.Number).Concat(newCards).ToList(),
-            LevelIds: current.LevelIds,
+            LevelIds: current.LevelIds.Concat(newLevels).ToList(),
             EmployeeNo: null,
             Fingerprints: fingers,
             Face: face);
@@ -597,8 +973,11 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
         result.Cards += newCards.Count;
         result.Fingerprints += newFingers.Count;
         if (face is not null) result.Photos++;
+        if (newPin is not null) result.Pins++;
         Ok($"{updated.FullName} ({updated.EmployeeNo}) completada: +{newFingers.Count} huella(s), +{newCards.Count} tarjeta(s)" +
-           (face is null ? "" : ", foto agregada") + $"; ahora tiene {updated.Fingerprints.Count} huella(s) y {updated.Cards.Count} tarjeta(s).");
+           (face is null ? "" : ", foto agregada") + (newPin is null ? "" : ", clave agregada") +
+           (newLevels.Count == 0 ? "" : $", +{newLevels.Count} puerta(s)") +
+           $"; ahora tiene {updated.Fingerprints.Count} huella(s), {updated.Cards.Count} tarjeta(s) y {updated.LevelIds.Count} nivel(es).");
         return true;
     }
 

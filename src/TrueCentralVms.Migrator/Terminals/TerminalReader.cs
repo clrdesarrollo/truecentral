@@ -17,7 +17,41 @@ public sealed record TerminalUser(
     int Cards,
     /// <summary>Cuántas huellas declara la ficha; null si el firmware no informa el campo (DS-K1T804AMF V1.4): hay que preguntar igual.</summary>
     int? Fingerprints,
-    int Faces);
+    int Faces)
+{
+    /// <summary>
+    /// Clave de teclado (<c>password</c> de la ficha). La OpenAPI de HikCentral
+    /// no la entrega, pero <c>UserInfo/Search</c> la devuelve en claro: es la
+    /// única forma de migrarla sin volver a pedírsela a cada persona. Null si
+    /// no tiene o el firmware no la informa.
+    /// </summary>
+    public string? Pin { get; init; }
+
+    /// <summary>Puertas que abre y con qué plantilla de horario (<c>RightPlan</c>).</summary>
+    public IReadOnlyList<TerminalRight> Rights { get; init; } = [];
+
+    /// <summary><c>Valid.enable</c>: false = deshabilitada en el equipo (el kiosco del casino lo hace).</summary>
+    public bool Enabled { get; init; } = true;
+
+    /// <summary><c>userVerifyMode</c> propio de la persona ("card" = solo tarjeta), o null si sigue al lector.</summary>
+    public string? VerifyMode { get; init; }
+
+    /// <summary><c>localUIRight</c>: puede entrar al menú del terminal (administrador local).</summary>
+    public bool LocalAdmin { get; init; }
+}
+
+/// <summary>Permiso de una persona en el terminal: puerta y plantilla de horario (1 = 24 h de fábrica).</summary>
+public sealed record TerminalRight(int DoorNo, int PlanTemplateNo);
+
+/// <summary>Tramo de un horario leído del terminal: día 0 (domingo) a 6 y minutos desde medianoche.</summary>
+public sealed record TerminalSegment(int Day, int StartMinutes, int EndMinutes);
+
+/// <summary>
+/// Plantilla de horario del terminal (<c>UserRightPlanTemplate</c>) con su
+/// semana (<c>UserRightWeekPlanCfg</c>). <see cref="HolidayGroup"/> no vacío =
+/// HikCentral le asoció feriados.
+/// </summary>
+public sealed record TerminalSchedule(int Number, string Name, IReadOnlyList<TerminalSegment> Segments, string? HolidayGroup);
 
 /// <summary>Huella leída del terminal: el dedo (1..10) y la plantilla en base64 tal como la entrega ISAPI.</summary>
 public sealed record TerminalFingerprint(int Finger, string Template);
@@ -86,6 +120,8 @@ public sealed class TerminalReader
                         from = LocalDate(Str(valid, "beginTime"));
                         to = LocalDate(Str(valid, "endTime"));
                     }
+                    bool enabled = !(u.TryGetProperty("Valid", out var v) && v.ValueKind == JsonValueKind.Object &&
+                                     v.TryGetProperty("enable", out var en) && en.ValueKind == JsonValueKind.False);
                     users.Add(new TerminalUser(
                         Str(u, "employeeNo") ?? "",
                         Str(u, "name") ?? "",
@@ -93,7 +129,14 @@ public sealed class TerminalReader
                         from, to,
                         Int(u, "numOfCard") ?? 0,
                         Int(u, "numOfFP"),
-                        Int(u, "numOfFace") ?? 0));
+                        Int(u, "numOfFace") ?? 0)
+                    {
+                        Pin = Blank(Str(u, "password")),
+                        Rights = ReadRights(u),
+                        Enabled = enabled,
+                        VerifyMode = Blank(Str(u, "userVerifyMode")),
+                        LocalAdmin = u.TryGetProperty("localUIRight", out var ui) && ui.ValueKind == JsonValueKind.True,
+                    });
                 }
             progress?.Report(users.Count);
             // "MORE" = quedan más; "OK" = esta fue la última tanda; "NO MATCH" = nada.
@@ -188,7 +231,147 @@ public sealed class TerminalReader
         return result;
     }
 
+    private static readonly string[] IsapiWeekDays =
+        ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+    /// <summary>Fin de día en la convención del VMS (su horario 24/7 termina en 23:59).</summary>
+    private const int EndOfDay = 24 * 60 - 1;
+
+    /// <summary>
+    /// Plantilla de horario <paramref name="number"/> con los tramos de su
+    /// semana: es lo que referencia cada persona por puerta en <c>RightPlan</c>.
+    /// Son dos objetos encadenados (<c>UserRightPlanTemplate</c> →
+    /// <c>UserRightWeekPlanCfg</c>), igual que cuando el VMS los escribe. Si el
+    /// equipo no tiene la ruta, la 1 es la de fábrica (todo el día, todos los
+    /// días) y cualquier otra se devuelve null.
+    /// </summary>
+    public async Task<TerminalSchedule?> ReadScheduleAsync(int number, CancellationToken ct)
+    {
+        string? json = await _client.RequestAsync(HttpMethod.Get, $"/ISAPI/AccessControl/UserRightPlanTemplate/{number}?format=json", ct: ct);
+        if (json is null) return number == 1 ? AllDay(number, "Todo el día") : null;
+        string name = $"Plantilla {number}";
+        int weekPlan = number;
+        string? holidays = null;
+        using (var doc = JsonDocument.Parse(json))
+        {
+            var template = Find(doc.RootElement, "UserRightPlanTemplate") ?? doc.RootElement;
+            name = Blank(Str(template, "templateName")) ?? name;
+            weekPlan = Int(template, "weekPlanNo") ?? number;
+            holidays = Blank(Str(template, "holidayGroupNo"));
+            if (holidays is "0") holidays = null;
+        }
+
+        string? weekJson = await _client.RequestAsync(HttpMethod.Get, $"/ISAPI/AccessControl/UserRightWeekPlanCfg/{weekPlan}?format=json", ct: ct);
+        if (weekJson is null) return number == 1 ? AllDay(number, name) : null;
+        var segments = new List<TerminalSegment>();
+        using (var doc = JsonDocument.Parse(weekJson))
+        {
+            var week = Find(doc.RootElement, "UserRightWeekPlanCfg") ?? doc.RootElement;
+            if (week.TryGetProperty("WeekPlanCfg", out var list) && list.ValueKind == JsonValueKind.Array)
+                foreach (var s in list.EnumerateArray())
+                {
+                    if (s.TryGetProperty("enable", out var en) && en.ValueKind == JsonValueKind.False) continue;
+                    int day = Array.FindIndex(IsapiWeekDays, d => d.Equals(Str(s, "week"), StringComparison.OrdinalIgnoreCase));
+                    if (day < 0 || !s.TryGetProperty("TimeSegment", out var seg)) continue;
+                    int? start = Minutes(Str(seg, "beginTime")), end = Minutes(Str(seg, "endTime"));
+                    if (start is null || end is null || end <= start) continue;
+                    segments.Add(new TerminalSegment(day, start.Value, Math.Min(end.Value, EndOfDay)));
+                }
+        }
+        return new TerminalSchedule(number, name, segments.OrderBy(s => s.Day).ThenBy(s => s.StartMinutes).ToList(), holidays);
+    }
+
+    private static TerminalSchedule AllDay(int number, string name) =>
+        new(number, name, Enumerable.Range(0, 7).Select(d => new TerminalSegment(d, 0, EndOfDay)).ToList(), null);
+
+    /// <summary>"08:30:00" → 510; el fin de día ("23:59:59" o "24:00:00") → 1439.</summary>
+    private static int? Minutes(string? hhmmss)
+    {
+        if (string.IsNullOrWhiteSpace(hhmmss)) return null;
+        var parts = hhmmss.Trim().Split(':');
+        if (parts.Length < 2 || !int.TryParse(parts[0], out int h) || !int.TryParse(parts[1], out int m)) return null;
+        int s = parts.Length > 2 && int.TryParse(parts[2], out int sec) ? sec : 0;
+        int total = Math.Clamp(h * 60 + m + (s >= 59 ? 1 : 0), 0, 24 * 60);
+        return total >= EndOfDay ? EndOfDay : total;
+    }
+
+    /// <summary>
+    /// <c>RightPlan</c> de la ficha: por cada puerta, sus plantillas (pueden
+    /// venir varias separadas por coma). Los firmware viejos que solo traen
+    /// <c>doorRight</c> ("1,2") no dicen el horario: se asume la plantilla 1,
+    /// que es la de fábrica.
+    /// </summary>
+    private static List<TerminalRight> ReadRights(JsonElement user)
+    {
+        var rights = new List<TerminalRight>();
+        if (user.TryGetProperty("RightPlan", out var plans) && plans.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var p in plans.EnumerateArray())
+            {
+                if (Int(p, "doorNo") is not { } door) continue;
+                foreach (string t in (Str(p, "planTemplateNo") ?? "1").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    if (int.TryParse(t, out int template) && template > 0) rights.Add(new TerminalRight(door, template));
+            }
+            return rights.Distinct().ToList();
+        }
+        foreach (string d in (Str(user, "doorRight") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (int.TryParse(d, out int door) && door > 0) rights.Add(new TerminalRight(door, 1));
+        return rights;
+    }
+
+    /// <summary>
+    /// La foto con la que el terminal modeló el rostro de la persona
+    /// (<c>FDLib/FDSearch</c> → <c>faceURL</c>). Suele ser la original que se
+    /// enroló, más grande que la miniatura de 135×189 que entrega la OpenAPI de
+    /// HikCentral; con la miniatura ampliada el equipo vuelve a modelar el
+    /// rostro con menos detalle. Null si no tiene o el equipo no la entrega.
+    /// </summary>
+    public async Task<(byte[] Bytes, string ContentType)?> ReadFaceAsync(string employeeNo, CancellationToken ct)
+    {
+        string body = JsonSerializer.Serialize(new
+        {
+            searchResultPosition = 0,
+            maxResults = 1,
+            faceLibType = "blackFD",
+            FDID = "1",
+            FPID = employeeNo,
+            searchID = SearchId(),
+        });
+        string? json;
+        try { json = await _client.RequestAsync(HttpMethod.Post, "/ISAPI/Intelligent/FDLib/FDSearch?format=json", body, ct: ct); }
+        catch (DriverException) { return null; }
+        if (json is null) return null;
+
+        string? url = null;
+        using (var doc = JsonDocument.Parse(json))
+            if (doc.RootElement.TryGetProperty("MatchList", out var list) && list.ValueKind == JsonValueKind.Array)
+                foreach (var m in list.EnumerateArray())
+                {
+                    url = Blank(Str(m, "faceURL"));
+                    if (url is not null) break;
+                }
+        // La dirección la arma el equipo con su propio host: se usa solo la ruta,
+        // por la misma conexión (puerto y Digest que ya funcionan).
+        if (url is null || !Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
+
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            using var response = await _client.OpenStreamAsync(uri.PathAndQuery, limit.Token);
+            byte[] bytes = await response.Content.ReadAsByteArrayAsync(limit.Token);
+            if (bytes.Length > 3 && bytes[0] == 0xFF && bytes[1] == 0xD8) return (bytes, "image/jpeg");
+            if (bytes.Length > 4 && bytes[0] == 0x89 && bytes[1] == 0x50) return (bytes, "image/png");
+            return null;   // el equipo contestó otra cosa (una página de error, p. ej.)
+        }
+        catch (DriverException) { return null; }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; }
+        catch (HttpRequestException) { return null; }
+    }
+
     // ------------------------------------------------------------------
+
+    private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
     /// <summary>16 caracteres hexadecimales: lo que aceptan los firmware probados (hay tope de largo).</summary>
     private static string SearchId() => Guid.NewGuid().ToString("N")[..16];

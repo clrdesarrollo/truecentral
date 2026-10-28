@@ -340,6 +340,7 @@ async function accessDeviceModal(device, prefill) {
       </div>
       <div id="ac-isup-wrap">${isupFieldsHtml("ac", device, isNew, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${device ? (device.enabled ? "checked" : "") : "checked"}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
+      <label class="checkbox-row" title="Apáguela si otro sistema (por ejemplo el kiosco del casino) necesita la escucha del equipo: hay terminales que admiten una sola."><input type="checkbox" id="ac-live" ${device ? (device.liveEvents === false ? "" : "checked") : "checked"}> Escuchar sus eventos en vivo (apagado: se lee su historial cada 15 s, sin ocupar la escucha del equipo)</label>
       <div class="info-box" style="margin-top:10px">Al guardar se leen del equipo el modelo, el firmware, las capacidades y las puertas que administra.</div>
       <div id="ac-probe-result"></div>
       ${isNew ? "" : maintDeviceSectionHtml()}
@@ -425,6 +426,7 @@ function accessReadConnectionForm() {
       driverKey: $("#ac-driver").value,
       host: "", port: 0, useHttps: false, username: "", password: null,
       enabled: $("#ac-enabled").checked,
+      liveEvents: $("#ac-live")?.checked ?? true,
       locationId: locationFieldValue("ac-location"),
       ...readIsupFields("ac"),
     };
@@ -439,6 +441,7 @@ function accessReadConnectionForm() {
     username: $("#ac-username")?.value.trim() ?? "",
     password: $("#ac-password").value || null,
     enabled: $("#ac-enabled").checked,
+    liveEvents: $("#ac-live")?.checked ?? true,
     locationId: locationFieldValue("ac-location"),
   };
 }
@@ -701,6 +704,7 @@ async function acdDrawConnection(body) {
       </div>
       <div id="ac-isup-wrap">${isupFieldsHtml("ac", d, false, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${d.enabled ? "checked" : ""}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
+      <label class="checkbox-row" title="Apáguela si otro sistema (por ejemplo el kiosco del casino) necesita la escucha del equipo: hay terminales que admiten una sola."><input type="checkbox" id="ac-live" ${d.liveEvents === false ? "" : "checked"}> Escuchar sus eventos en vivo (apagado: se lee su historial cada 15 s, sin ocupar la escucha del equipo)</label>
       <div class="info-box">Si cambia la dirección, el puerto, el usuario o la contraseña, al guardar se vuelve a validar contra
         el equipo y se releen su modelo, firmware, capacidades y puertas.</div>
       <div id="ac-probe-result"></div>

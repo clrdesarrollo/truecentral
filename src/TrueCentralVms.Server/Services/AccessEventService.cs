@@ -144,8 +144,12 @@ public sealed class AccessEventService(
 
     private DateTime _lastPurge = DateTime.MinValue;
 
-    /// <summary>Escuchas abiertas, por equipo: para no abrir dos al mismo.</summary>
-    private readonly Dictionary<int, Task> _listeners = [];
+    /// <summary>
+    /// Escuchas abiertas, por equipo: para no abrir dos al mismo, y con su
+    /// propio corte para soltar al instante la de un equipo al que se le apaga
+    /// la escucha en vivo (una escucha sana no se cierra nunca sola).
+    /// </summary>
+    private readonly Dictionary<int, (Task Task, CancellationTokenSource Stop)> _listeners = [];
 
     private int RetentionDays => Math.Clamp(config.GetValue("Access:EventRetentionDays", 365), 7, 3650);
 
@@ -181,7 +185,9 @@ public sealed class AccessEventService(
     /// Abre una escucha por cada equipo que sepa empujar eventos y todavía no
     /// tenga una. Se llama en cada vuelta del sondeo, así que un equipo que se
     /// da de alta —o que vuelve después de una caída— queda escuchado sin
-    /// ceremonia.
+    /// ceremonia. A los que tienen la escucha en vivo apagada se les corta la
+    /// que tuvieran: el equipo queda libre para otro sistema y sigue entrando
+    /// por el sondeo de cada 15 s.
     /// </summary>
     private void EnsureListeners(CancellationToken ct)
     {
@@ -189,19 +195,35 @@ public sealed class AccessEventService(
         var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
         var devices = db.AccessDevices.AsNoTracking()
             .Where(d => d.Enabled && d.SupportsEvents)
+            .Select(d => new { d.Id, d.Name, d.DriverKey, d.LiveEvents })
             .ToList();
 
         foreach (var device in devices)
         {
-            if (_listeners.TryGetValue(device.Id, out var running) && !running.IsCompleted) continue;
-            if (!access.SupportsEventStream(device.DriverKey)) continue;
-            _listeners[device.Id] = Task.Run(() => ListenAsync(device.Id, ct), ct);
+            bool running = _listeners.TryGetValue(device.Id, out var listener) && !listener.Task.IsCompleted;
+            if (!device.LiveEvents)
+            {
+                if (running)
+                {
+                    listener.Stop.Cancel();
+                    logger.LogInformation("Se suelta la escucha en vivo de '{Device}': queda solo con la lectura del historial.", device.Name);
+                }
+                continue;
+            }
+            if (running || !access.SupportsEventStream(device.DriverKey)) continue;
+            listener.Stop?.Dispose();
+            var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _listeners[device.Id] = (Task.Run(() => ListenAsync(device.Id, stop.Token), stop.Token), stop);
         }
 
         // Los equipos que se dieron de baja o se pausaron dejan de escucharse
         // solos: su tarea termina al fallar la conexión y no se vuelve a crear.
-        foreach (int id in _listeners.Where(p => p.Value.IsCompleted).Select(p => p.Key).ToList())
-            if (devices.All(d => d.Id != id)) _listeners.Remove(id);
+        foreach (var (id, listener) in _listeners.Where(p => p.Value.Task.IsCompleted).ToList())
+            if (devices.All(d => d.Id != id || !d.LiveEvents))
+            {
+                listener.Stop.Dispose();
+                _listeners.Remove(id);
+            }
     }
 
     /// <summary>
@@ -222,7 +244,7 @@ public sealed class AccessEventService(
                 device = await db.AccessDevices.AsNoTracking().Include(d => d.Doors)
                     .FirstOrDefaultAsync(d => d.Id == deviceId, ct);
             }
-            if (device is null || !device.Enabled || !device.SupportsEvents) return;
+            if (device is null || !device.Enabled || !device.SupportsEvents || !device.LiveEvents) return;
 
             try
             {
