@@ -45,6 +45,41 @@ public sealed class PackageSchedule
     public string? HolidayGroup { get; set; }
 }
 
+/// <summary>Puerta de un nivel de HikCentral, ubicada en su terminal.</summary>
+public sealed class PackageLevelDoor
+{
+    /// <summary>Nombre de la puerta en HikCentral (puede no coincidir con el del terminal).</summary>
+    public string Name { get; set; } = "";
+    public string HcpIndexCode { get; set; } = "";
+    /// <summary>IP del terminal (de acsDeviceList); null si HikCentral no la dio.</summary>
+    public string? DeviceHost { get; set; }
+    public string? DeviceName { get; set; }
+    /// <summary>
+    /// Número de la puerta EN EL EQUIPO. HikCentral numera las puertas a su
+    /// manera: se deduce del orden de las puertas del equipo (1 si tiene una sola).
+    /// </summary>
+    public int DoorNo { get; set; } = 1;
+}
+
+/// <summary>Nivel de acceso de HikCentral, para replicarlo en TrueCentral.</summary>
+public sealed class PackageLevel
+{
+    public string HcpId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string ScheduleName { get; set; } = "";
+    public string ScheduleHcpId { get; set; } = "";
+    /// <summary>
+    /// Tramos del horario. La OpenAPI no los entrega: salen de la plantilla que
+    /// tienen en los terminales las personas del nivel. Null = no se pudo saber.
+    /// </summary>
+    public List<PackageSegment>? Segments { get; set; }
+    /// <summary>De dónde salieron los tramos ("terminal Sala Técnica, plantilla 3"), para el registro.</summary>
+    public string? SegmentsSource { get; set; }
+    public List<PackageLevelDoor> Doors { get; set; } = [];
+    /// <summary>Elementos que no son puertas (pisos de ascensor…): no se migran.</summary>
+    public int OtherElements { get; set; }
+}
+
 /// <summary>Un terminal leído: identificación y sus plantillas de horario en uso.</summary>
 public sealed class PackageTerminal
 {
@@ -78,8 +113,10 @@ public sealed class PackagePerson
     /// sensible y se guarda cifrado.
     /// </summary>
     public string? Pin { get; set; }
-    /// <summary>Puertas y horarios que tenía en los terminales: de acá salen sus niveles de acceso.</summary>
+    /// <summary>Puertas y horarios que tenía en los terminales (modo «uno por puerta» y para verificar).</summary>
     public List<PackageAccess> Access { get; set; } = [];
+    /// <summary>Niveles de HikCentral asignados a la persona (<see cref="PackageLevel.HcpId"/>).</summary>
+    public List<string> HcpLevelIds { get; set; } = [];
     /// <summary>De dónde salió la foto ("HikCentral" o el terminal).</summary>
     public string? PhotoSource { get; set; }
     /// <summary>Terminales donde estaba deshabilitada (<c>Valid.enable=false</c>: lo hace el kiosco del casino).</summary>
@@ -120,6 +157,8 @@ public sealed class MigrationPackage
     public List<PackagePerson> Persons { get; set; } = [];
     /// <summary>Terminales leídos (vacío en paquetes de versiones anteriores del migrador).</summary>
     public List<PackageTerminal> Terminals { get; set; } = [];
+    /// <summary>Niveles de acceso de HikCentral (vacío si la versión de HCP no los entrega por OpenAPI).</summary>
+    public List<PackageLevel> Levels { get; set; } = [];
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 

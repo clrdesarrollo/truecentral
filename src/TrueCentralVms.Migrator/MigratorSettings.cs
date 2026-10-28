@@ -37,8 +37,8 @@ public sealed class MigratorSettings
     public int EmployeeNoSource { get; set; }
     /// <summary>Nivel de acceso a asignar al importar con «uno para todos» (null = ninguno).</summary>
     public int? TrueCentralLevelId { get; set; }
-    /// <summary>0 = ninguno, 1 = uno para todos, 2 = uno por puerta (ver <c>LevelMode</c>).</summary>
-    public int LevelMode { get; set; } = 2;
+    /// <summary>0 = ninguno, 1 = uno para todos, 2 = uno por puerta, 3 = copiar los de HikCentral (ver <c>LevelMode</c>).</summary>
+    public int LevelMode { get; set; } = 3;
     public bool OnlyFoundOnTerminals { get; set; }
     public bool FacesFromTerminals { get; set; } = true;
     public bool UpdateExisting { get; set; } = true;
