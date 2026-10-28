@@ -140,6 +140,8 @@ function lvLayoutLabel(layout) { return layout.key.startsWith("m") ? `a medida $
 // caracteres por cada cuadro de más de una celda (columna, fila, ancho-1 y
 // alto-1 en 3 bits cada uno); las celdas libres son cuadros simples.
 // ---------------------------------------------------------------------------
+/** Tiempo que el puntero tiene que quedarse en el borde para que aparezca la franja. */
+const LV_GROW_DWELL_MS = 1200;
 const LV_GROW_MAX_COLUMNS = 8, LV_GROW_MAX_ROWS = 8, LV_GROW_MAX_CELLS = 64;
 const LV_CUSTOM_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const LV_MAX_BIG_CELLS = 14;
@@ -412,7 +414,7 @@ const lv = {
   selChannelId: null,
   dropCell: null,
   grow: null,              // franja nueva a la vista al arrastrar al borde: { edge, slot, el, slots }
-  growBlockedShown: null,  // borde cuyo aviso de tope ya se mostró
+  growPending: null,       // borde donde espera el puntero antes de abrir la franja: { edge, since, told }
   growWired: false,
   bulk: null,             // texto de la apertura masiva en curso
   views: [],
@@ -1932,15 +1934,25 @@ function lvGrowEdgeAt(e) {
 /** Arrastre sobre la grilla: true si quedó (o sigue) la franja a la vista; el arrastre es de ella. */
 function lvGrowTrack(e) {
   if (!lvIsChannelDrag(e) || !lv.layout) return false;
-  let edge = lvGrowEdgeAt(e);
-  const blocked = edge && lvGrowBlocked(lv.layout, edge, lvGrowLimit());
-  if (blocked) {
-    if (lv.growBlockedShown !== edge) lvStatus(blocked, true);
-    lv.growBlockedShown = edge;
-    edge = null;
-  } else if (!edge) lv.growBlockedShown = null;
-  if (!edge) { lvGrowEnd(); return false; }
-  if (lv.grow?.edge !== edge) lvGrowShow(edge);
+  const edge = lvGrowEdgeAt(e);
+  if (!edge) { lv.growPending = null; lvGrowEnd(); return false; }
+  if (!lv.grow) {
+    // Pasar por el borde camino a un cuadro no abre nada: la franja aparece
+    // recién si el puntero se queda en el borde un momento (el navegador
+    // repite dragover mientras el puntero sigue encima).
+    if (lv.growPending?.edge !== edge) lv.growPending = { edge, since: performance.now(), told: false };
+    if (performance.now() - lv.growPending.since < LV_GROW_DWELL_MS) return false;
+  }
+  if (lv.grow?.edge !== edge) {
+    const blocked = lvGrowBlocked(lv.layout, edge, lvGrowLimit());
+    if (blocked) {
+      // El aviso de tope, una sola vez por espera en el borde.
+      if (lv.growPending && !lv.growPending.told) { lvStatus(blocked, true); lv.growPending.told = true; }
+      lvGrowEnd();
+      return false;
+    }
+    lvGrowShow(edge);
+  }
   const strip = lv.grow.el.getBoundingClientRect();
   const count = lv.grow.slots.length;
   const along = lvSideways(edge) ? (e.clientY - strip.top) / strip.height : (e.clientX - strip.left) / strip.width;
@@ -1993,6 +2005,7 @@ function lvGrowEnd() {
 
 /** Soltar con la franja abierta: se agrega la franja y la cámara abre en el cuadro marcado. */
 function lvGrowDrop(e) {
+  lv.growPending = null;
   if (!lv.grow) return false;
   e.preventDefault();
   const { edge } = lv.grow, slot = Math.max(lv.grow.slot, 0);
@@ -2215,9 +2228,9 @@ function lvWireGrid() {
   const wrap = $("#lv-gridwrap");
   wrap.addEventListener("dragover", (e) => { if (lvGrowTrack(e)) e.stopPropagation(); }, true);
   wrap.addEventListener("drop", (e) => { if (lvGrowDrop(e)) e.stopPropagation(); }, true);
-  wrap.addEventListener("dragleave", (e) => { if (!wrap.contains(e.relatedTarget)) lvGrowEnd(); });
+  wrap.addEventListener("dragleave", (e) => { if (!wrap.contains(e.relatedTarget)) { lv.growPending = null; lvGrowEnd(); } });
   // Arrastre terminado en cualquier lado (soltado fuera, Esc): la franja se recoge.
-  if (!lv.growWired) { document.addEventListener("dragend", () => lvGrowEnd()); lv.growWired = true; }
+  if (!lv.growWired) { document.addEventListener("dragend", () => { lv.growPending = null; lvGrowEnd(); }); lv.growWired = true; }
 
   // Arrastre de un cuadro sobre otro.
   grid.addEventListener("dragstart", (e) => {
