@@ -125,6 +125,12 @@ public sealed class PackagePerson
     public List<string> CardOnlyOn { get; set; } = [];
     /// <summary>Terminales donde podía entrar al menú (administrador local).</summary>
     public List<string> LocalAdminOn { get; set; } = [];
+    /// <summary>
+    /// Terminal → tipo de usuario cuando no es «normal» («visitor», «blackList»…).
+    /// TrueCentral escribe a todos como «normal», y hay sistemas que leen el tipo
+    /// del terminal (el kiosco del casino distingue así a las visitas).
+    /// </summary>
+    public Dictionary<string, string> UserTypeOn { get; set; } = [];
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? Notes { get; set; }

@@ -334,7 +334,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                     if (deviceByCode.TryGetValue(found.Door.DeviceIndexCode, out var device))
                     {
                         door.DeviceHost = device.Ip.Trim();
-                        door.DeviceName = device.Name;
+                        door.DeviceName = device.Name.Trim();
                     }
                 }
                 packaged.Doors.Add(door);
@@ -592,6 +592,8 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                     if (user.VerifyMode is { } mode && mode.Equals("card", StringComparison.OrdinalIgnoreCase) && !person.CardOnlyOn.Contains(target.Name))
                         person.CardOnlyOn.Add(target.Name);
                     if (user.LocalAdmin && !person.LocalAdminOn.Contains(target.Name)) person.LocalAdminOn.Add(target.Name);
+                    if (user.UserType.Length > 0 && !user.UserType.Equals("normal", StringComparison.OrdinalIgnoreCase))
+                        person.UserTypeOn[target.Name] = user.UserType;
 
                     if (options.FacesFromTerminals && user.Faces > 0 && await TakeTerminalFaceAsync(reader, target, options.PackageFolder, user, person, ct))
                         faces++;
@@ -673,10 +675,12 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             rows.AddRange(p.DisabledOn.Select(t => $"{id};{p.FullName};{t};deshabilitada en el equipo"));
             rows.AddRange(p.CardOnlyOn.Select(t => $"{id};{p.FullName};{t};solo tarjeta"));
             rows.AddRange(p.LocalAdminOn.Select(t => $"{id};{p.FullName};{t};administrador del menú del equipo"));
+            rows.AddRange(p.UserTypeOn.Select(t => $"{id};{p.FullName};{t.Key};tipo de usuario «{t.Value}»"));
         }
         int disabled = package.Persons.Count(p => p.DisabledOn.Count > 0);
         int cardOnly = package.Persons.Count(p => p.CardOnlyOn.Count > 0);
         int admins = package.Persons.Count(p => p.LocalAdminOn.Count > 0);
+        int typed = package.Persons.Count(p => p.UserTypeOn.Count > 0);
         string file = Path.Combine(folder, "pendientes-despues-del-corte.csv");
         if (rows.Count == 0)
         {
@@ -691,6 +695,9 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             Warn($"{cardOnly} persona(s) tienen «solo tarjeta» en algún terminal (visitas del casino): vuelva a aplicarlo desde el kiosco después del corte.");
         if (admins > 0)
             Warn($"{admins} persona(s) pueden entrar al menú de algún terminal: TrueCentral les quita ese permiso.");
+        if (typed > 0)
+            Warn($"{typed} persona(s) tienen en algún terminal un tipo de usuario distinto de «normal» (visita, lista negra…): TrueCentral las escribe como «normal». " +
+                 "Si otro sistema usa ese tipo (el kiosco del casino distingue así a las visitas), vuelva a aplicarlo después del corte.");
         Info($"La lista quedó en {file}.");
     }
 
