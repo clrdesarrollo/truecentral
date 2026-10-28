@@ -9,7 +9,7 @@
   <script>if (document.documentMode) { document.write('<p style="font-family:Segoe UI,Arial,sans-serif;margin:40px">Internet Explorer no es compatible con este panel. Ábralo con Microsoft Edge u otro navegador actual.</p>'); document.execCommand('Stop'); }</script>
   <link rel="icon" href="favicon.ico">
   <link rel="stylesheet" href="vendor/mdi/css/materialdesignicons.min.css?v=1">
-  <link rel="stylesheet" href="styles.css?v=91">
+  <link rel="stylesheet" href="styles.css?v=92">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -40,6 +40,8 @@
         <button type="button" class="topbar-icon" id="btn-menu" title="Mostrar u ocultar el menú" aria-label="Menú" aria-expanded="false"><i class="mdi mdi-menu" aria-hidden="true"></i></button>
       </div>
       <div class="topbar-user">
+        <!-- Manual de usuario: abre el capítulo de la página actual (app.js). -->
+        <a class="topbar-icon" id="btn-manual" href="manual/" target="_blank" rel="noopener" title="Manual de usuario" aria-label="Manual de usuario"><i class="mdi mdi-help-circle-outline" aria-hidden="true"></i></a>
         <button type="button" class="user-menu-toggle" id="btn-user-menu" aria-haspopup="menu" aria-expanded="false">
           <i class="mdi mdi-account-circle user-menu-icon" aria-hidden="true"></i><span id="current-user"></span><span class="caret" aria-hidden="true"></span>
         </button>
@@ -256,6 +258,6 @@
   <script src="playback.js?v=6"></script>
   <script src="roles.js?v=3"></script>
   <script src="dashboard.js?v=9"></script>
-  <script src="app.js?v=87"></script>
+  <script src="app.js?v=88"></script>
 </body>
 </html>
