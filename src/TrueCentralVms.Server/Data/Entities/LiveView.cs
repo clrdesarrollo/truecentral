@@ -61,6 +61,8 @@ public class LiveViewItem
     public string? Ref { get; set; }
     /// <summary>Rótulo del cuadro (el de una página web).</summary>
     public string? Title { get; set; }
+    /// <summary>Zoom de una página web en porcentaje (null = 100 %).</summary>
+    public int? Zoom { get; set; }
 }
 
 /// <summary>

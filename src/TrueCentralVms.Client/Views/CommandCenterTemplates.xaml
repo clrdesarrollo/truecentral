@@ -519,7 +519,7 @@
             </ItemsControl>
         </ScrollViewer>
     </DataTemplate>
-    <!-- Página web: el navegador del cuadro y, abajo, dónde está y Recargar -->
+    <!-- Página web: el navegador del cuadro y, abajo, dónde está, el zoom y Recargar -->
     <DataTemplate DataType="{x:Type vm:WebCellPanel}">
         <DockPanel Background="{StaticResource CellBgBrush}">
             <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}" Padding="8,2">
@@ -531,6 +531,20 @@
                             <TextBlock Text="Recargar" Margin="5,0,0,0" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
+                    <!-- Zoom de la página (también Ctrl + rueda); se guarda con el cuadro -->
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,8,0">
+                        <Button Style="{StaticResource GhostButton}" Padding="7,1" FontSize="11"
+                                Command="{Binding ZoomOutCommand}" ToolTip="Alejar (también Ctrl + rueda en la página)">
+                            <TextBlock Text="&#xE738;" FontFamily="Segoe MDL2 Assets" FontSize="10" VerticalAlignment="Center"/>
+                        </Button>
+                        <Button Style="{StaticResource GhostButton}" Padding="6,1" FontSize="11" MinWidth="48"
+                                Content="{Binding ZoomLabel}" Command="{Binding ZoomResetCommand}"
+                                ToolTip="Zoom de la página: clic para volver a 100 %"/>
+                        <Button Style="{StaticResource GhostButton}" Padding="7,1" FontSize="11"
+                                Command="{Binding ZoomInCommand}" ToolTip="Acercar (también Ctrl + rueda en la página)">
+                            <TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" FontSize="10" VerticalAlignment="Center"/>
+                        </Button>
+                    </StackPanel>
                     <TextBlock Text="{Binding CurrentUrl}" FontSize="10.5" Foreground="{StaticResource MutedBrush}"
                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding CurrentUrl}"/>
                 </DockPanel>

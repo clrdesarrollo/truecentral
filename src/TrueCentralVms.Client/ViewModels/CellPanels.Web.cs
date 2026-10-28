@@ -11,22 +11,24 @@ namespace TrueCentralVms.Client.ViewModels;
 /// una dirección escrita a mano. La dibuja <c>Views.WebCellView</c>, con un
 /// navegador incrustado de perfil propio: no comparte cookies ni sesión con el
 /// mapa de Flota ni con el panel web del servidor. Abrirla y cerrarla queda en
-/// la bitácora del servidor (como comenzar y dejar de ver una cámara).
+/// la bitácora del servidor (como comenzar y dejar de ver una cámara). Su zoom
+/// se guarda con el cuadro (última sesión y tableros).
 /// </summary>
 public sealed partial class WebCellPanel : CellPanel
 {
     private readonly ApiClient? _api;
     private DateTime? _openedAt;
 
-    public WebCellPanel(string url, string title, int? linkId, ApiClient? api = null)
+    public WebCellPanel(string url, string title, int? linkId, ApiClient? api = null, int? zoom = null)
     {
         _api = api;
         Url = url;
         Title = title;
         LinkId = linkId;
+        _zoom = DashboardItemKinds.CleanZoom(zoom) ?? 100;
         Content = linkId is { } id
-            ? new CellContentRef(DashboardItemKinds.Web, id, null, title)
-            : new CellContentRef(DashboardItemKinds.Web, null, url, title);
+            ? new CellContentRef(DashboardItemKinds.Web, id, null, title, DashboardItemKinds.CleanZoom(_zoom))
+            : new CellContentRef(DashboardItemKinds.Web, null, url, title, DashboardItemKinds.CleanZoom(_zoom));
         Status = "Cargando…";
     }
 
@@ -50,6 +52,35 @@ public sealed partial class WebCellPanel : CellPanel
 
     [RelayCommand]
     private void Reload() => ReloadRequested?.Invoke();
+
+    /// <summary>Pasos del zoom (los de un navegador).</summary>
+    private static readonly int[] ZoomSteps = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500];
+
+    /// <summary>Zoom de la página en porcentaje (también cambia con Ctrl + rueda dentro de ella).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ZoomLabel))]
+    private int _zoom;
+
+    public string ZoomLabel => $"{Zoom} %";
+
+    /// <summary>El zoom va en lo que se guarda del cuadro: el cuadro avisa y se guarda la sesión.</summary>
+    partial void OnZoomChanged(int value)
+    {
+        if (Content is { } content)
+        {
+            Content = content with { Zoom = DashboardItemKinds.CleanZoom(value) };
+            OnPropertyChanged(nameof(Content));
+        }
+    }
+
+    [RelayCommand]
+    private void ZoomIn() => Zoom = ZoomSteps.FirstOrDefault(s => s > Zoom, ZoomSteps[^1]);
+
+    [RelayCommand]
+    private void ZoomOut() => Zoom = ZoomSteps.LastOrDefault(s => s < Zoom, ZoomSteps[0]);
+
+    [RelayCommand]
+    private void ZoomReset() => Zoom = 100;
 
     /// <summary>El cuadro la recibió: queda en la bitácora (sin esperar al servidor).</summary>
     public override Task LoadAsync()

@@ -846,7 +846,18 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     }
 
     partial void OnAssignedChannelChanged(ChannelNode? value) => AssignedChannelChanged?.Invoke();
-    partial void OnPanelChanged(CellPanel? value) => AssignedChannelChanged?.Invoke();
+    partial void OnPanelChanged(CellPanel? oldValue, CellPanel? newValue)
+    {
+        if (oldValue is not null) oldValue.PropertyChanged -= OnPanelPropertyChanged;
+        if (newValue is not null) newValue.PropertyChanged += OnPanelPropertyChanged;
+        AssignedChannelChanged?.Invoke();
+    }
+
+    /// <summary>Cambió lo que se guarda del panel (el zoom de una página): se guarda la sesión.</summary>
+    private void OnPanelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(CellPanel.Content)) AssignedChannelChanged?.Invoke();
+    }
 
     [RelayCommand]
     private void ToggleAudio() => IsAudioOn = !IsAudioOn;

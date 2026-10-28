@@ -125,11 +125,19 @@ public partial class WebCellView : UserControl
         if (_web is not null || DataContext is not WebCellPanel panel) return;
         _panel = panel;
         panel.ReloadRequested += OnReload;
+        panel.PropertyChanged += OnPanelPropertyChanged;
         var web = _web = new WebView2
         {
             DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x15, 0x18, 0x1D),
             AllowExternalDrop = false,
             Visibility = PageHidden ? Visibility.Hidden : Visibility.Visible,
+            ZoomFactor = panel.Zoom / 100.0,
+        };
+        // Ctrl + rueda dentro de la página: el porcentaje de la barra (y lo guardado) lo sigue.
+        web.ZoomFactorChanged += (_, _) =>
+        {
+            int zoom = (int)Math.Round(web.ZoomFactor * 100);
+            if (_panel == panel && zoom != panel.Zoom) panel.Zoom = zoom;
         };
         Host.Child = web;
         try
@@ -171,6 +179,7 @@ public partial class WebCellView : UserControl
         {
             panel.CurrentUrl = core.Source;
             panel.Status = e.IsSuccess ? "" : "No cargó";
+            ApplyZoom(); // otro sitio puede volver al 100 %
         };
         core.DownloadStarting += (_, e) => e.Cancel = true;
         core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
@@ -195,9 +204,26 @@ public partial class WebCellView : UserControl
         else core.Reload();
     }
 
+    private void OnPanelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(WebCellPanel.Zoom)) ApplyZoom();
+    }
+
+    /// <summary>El zoom del cuadro (botones −/+ de la barra o lo guardado) en el navegador.</summary>
+    private void ApplyZoom()
+    {
+        if (_web is not { } web || _panel is not { } panel) return;
+        double factor = panel.Zoom / 100.0;
+        if (Math.Abs(web.ZoomFactor - factor) > 0.001) web.ZoomFactor = factor;
+    }
+
     private void Stop()
     {
-        if (_panel is not null) _panel.ReloadRequested -= OnReload;
+        if (_panel is not null)
+        {
+            _panel.ReloadRequested -= OnReload;
+            _panel.PropertyChanged -= OnPanelPropertyChanged;
+        }
         _panel = null;
         if (_web is null) return;
         var web = _web;

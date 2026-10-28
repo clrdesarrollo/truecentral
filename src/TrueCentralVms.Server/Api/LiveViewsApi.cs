@@ -76,10 +76,10 @@ public static class LiveViewsApi
                     break;
                 case DashboardItemKinds.Web when item.RefId is { } linkId:
                     if (lookup.Links.TryGetValue(linkId, out var link))
-                        items.Add(new(item.CellIndex, 0, 0, item.Kind, linkId, link.Url, link.Name));
+                        items.Add(new(item.CellIndex, 0, 0, item.Kind, linkId, link.Url, link.Name, item.Zoom));
                     break;
                 case DashboardItemKinds.Web:
-                    items.Add(new(item.CellIndex, 0, 0, item.Kind, null, item.Ref, item.Title));
+                    items.Add(new(item.CellIndex, 0, 0, item.Kind, null, item.Ref, item.Title, item.Zoom));
                     break;
                 default:
                     if (item.ChannelId is { } channelId && scope.CanViewChannel(channelId))
@@ -175,6 +175,7 @@ public static class LiveViewsApi
                         items.Add(new LiveViewItem
                         {
                             CellIndex = i.CellIndex, Kind = DashboardItemKinds.Web, RefId = linkId, Title = linkName,
+                            Zoom = DashboardItemKinds.CleanZoom(i.Zoom),
                         });
                     break;
                 case DashboardItemKinds.Web:
@@ -186,6 +187,7 @@ public static class LiveViewsApi
                     {
                         CellIndex = i.CellIndex, Kind = DashboardItemKinds.Web, Ref = url,
                         Title = Clip(i.Title, 128) ?? new Uri(url).Host,
+                        Zoom = DashboardItemKinds.CleanZoom(i.Zoom),
                     });
                     break;
             }

@@ -26,6 +26,9 @@ public static class DashboardItemKinds
         ["card-equipment", "card-server", "card-alerts", "card-plates", "card-access"];
 
     public static bool IsCamera(string? kind) => string.IsNullOrEmpty(kind) || kind == Camera;
+
+    /// <summary>Zoom de una página entre 25 % y 500 %; 100 % (o nada) = null.</summary>
+    public static int? CleanZoom(int? zoom) => zoom is { } z && z != 100 ? Math.Clamp(z, 25, 500) : null;
 }
 
 /// <summary>Un cuadro del tablero.</summary>
@@ -37,8 +40,9 @@ public static class DashboardItemKinds
 /// <param name="RefId">Id del recurso o de la página web de la lista.</param>
 /// <param name="Ref">Tipo del recurso, clave de la tarjeta o dirección web libre.</param>
 /// <param name="Title">Rótulo del cuadro (el de la página web, por ejemplo).</param>
+/// <param name="Zoom">Zoom de una página web en porcentaje (null = 100 %).</param>
 public sealed record LiveViewItemDto(int CellIndex, int ChannelId, int StreamType,
-    string? Kind = null, int? RefId = null, string? Ref = null, string? Title = null);
+    string? Kind = null, int? RefId = null, string? Ref = null, string? Title = null, int? Zoom = null);
 
 /// <summary>Tablero tal como lo ve el puesto que lo pide.</summary>
 /// <param name="LayoutName">Clave de la división estándar ("16", "13"), uniforme

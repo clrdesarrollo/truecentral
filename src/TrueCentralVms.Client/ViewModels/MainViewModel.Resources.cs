@@ -119,7 +119,7 @@ public partial class MainViewModel
     /// que no es cámara. Null si ya no existe o esta sesión no lo puede ver
     /// (sus permisos o su alcance): el cuadro queda libre.
     /// </summary>
-    public CellPanel? PanelFor(string? kind, int? refId, string? reference, string? title)
+    public CellPanel? PanelFor(string? kind, int? refId, string? reference, string? title, int? zoom = null)
     {
         switch (kind)
         {
@@ -135,11 +135,11 @@ public partial class MainViewModel
                 if (refId is { } linkId)
                     return ResourceGroups.SelectMany(g => g.Children)
                         .FirstOrDefault(n => n.CardKind == CardKinds.Web && n.Id == linkId) is { Url: { } url } link
-                        ? new WebCellPanel(url, link.Name, linkId, _api)
+                        ? new WebCellPanel(url, link.Name, linkId, _api, zoom)
                         : null;
                 return Uri.TryCreate(reference, UriKind.Absolute, out var uri) &&
                        (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
-                    ? new WebCellPanel(uri.ToString(), string.IsNullOrWhiteSpace(title) ? uri.Host : title, null, _api)
+                    ? new WebCellPanel(uri.ToString(), string.IsNullOrWhiteSpace(title) ? uri.Host : title, null, _api, zoom)
                     : null;
             default:
                 return null;
@@ -151,7 +151,7 @@ public partial class MainViewModel
         cell.AssignedChannel is { } channel
             ? new LiveViewItemDto(index, channel.Channel.Id, (int)cell.Profile, DashboardItemKinds.Camera)
             : cell.Panel?.Content is { } content
-                ? new LiveViewItemDto(index, 0, 0, content.Kind, content.RefId, content.Ref, content.Title)
+                ? new LiveViewItemDto(index, 0, 0, content.Kind, content.RefId, content.Ref, content.Title, content.Zoom)
                 : null;
 
     private CellPanel? CreateResourcePanel(ResourceNode node) => node.Kind switch

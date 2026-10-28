@@ -68,6 +68,8 @@ public sealed class LiveSessionCell
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? RefId { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Ref { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Title { get; set; }
+    /// <summary>Zoom de una página web en porcentaje (null = 100 %).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? Zoom { get; set; }
 }
 
 /// <summary>Una pantalla auxiliar: su grilla y dónde estaba su ventana.</summary>

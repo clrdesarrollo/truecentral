@@ -278,7 +278,7 @@ public partial class MainViewModel
             int panels = 0;
             foreach (var item in others)
             {
-                if (PanelFor(item.Kind, item.RefId, item.Ref, item.Title) is { } panel)
+                if (PanelFor(item.Kind, item.RefId, item.Ref, item.Title, item.Zoom) is { } panel)
                 {
                     await Cells[item.CellIndex].ShowPanelAsync(panel);
                     panels++;

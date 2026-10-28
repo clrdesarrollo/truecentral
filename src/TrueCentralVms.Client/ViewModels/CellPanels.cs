@@ -47,4 +47,6 @@ public abstract partial class CellPanel : ObservableObject, IDisposable
 /// una tarjeta (clave en Ref) o una página web (de la lista: RefId; libre: la
 /// dirección en Ref). Mismo formato que <c>LiveViewItemDto</c>.
 /// </summary>
-public sealed record CellContentRef(string Kind, int? RefId = null, string? Ref = null, string? Title = null);
+/// <param name="Zoom">Zoom de una página web en porcentaje (null = 100 %).</param>
+public sealed record CellContentRef(string Kind, int? RefId = null, string? Ref = null, string? Title = null,
+    int? Zoom = null);

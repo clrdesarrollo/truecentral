@@ -114,6 +114,7 @@ public partial class MainViewModel
                     : new LiveSessionCell
                     {
                         Index = item.CellIndex, Kind = item.Kind, RefId = item.RefId, Ref = item.Ref, Title = item.Title,
+                        Zoom = item.Zoom,
                     })
                 .ToList();
         }
@@ -233,7 +234,7 @@ public partial class MainViewModel
         int panels = 0;
         foreach (var item in inGrid.Where(c => c.Kind is not null))
         {
-            if (PanelFor(item.Kind, item.RefId, item.Ref, item.Title) is { } panel)
+            if (PanelFor(item.Kind, item.RefId, item.Ref, item.Title, item.Zoom) is { } panel)
             {
                 await cells[item.Index].ShowPanelAsync(panel);
                 panels++;
