@@ -11,13 +11,13 @@
                    HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
                    Foreground="{StaticResource MutedBrush}"
                    Visibility="{Binding Error, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
-        <!-- Durante un arrastre la página se esconde (si no, se tragaría el soltar) -->
+        <!-- Durante un arrastre o en modo Unir la página se esconde (si no, se tragaría el mouse) -->
         <StackPanel x:Name="DragHint" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
             <TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="26" HorizontalAlignment="Center"
                        Foreground="{StaticResource MutedBrush}"/>
             <TextBlock Text="{Binding Title}" FontSize="12.5" FontWeight="SemiBold" Margin="0,8,0,0"
                        HorizontalAlignment="Center" Foreground="{StaticResource TextBrush}"/>
-            <TextBlock Text="Suelte aquí para reemplazar la página" FontSize="11.5" Margin="0,4,0,0"
+            <TextBlock x:Name="HintText" FontSize="11.5" Margin="0,4,0,0"
                        HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}"/>
         </StackPanel>
     </Grid>

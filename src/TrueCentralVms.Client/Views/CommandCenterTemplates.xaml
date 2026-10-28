@@ -535,7 +535,9 @@
                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding CurrentUrl}"/>
                 </DockPanel>
             </Border>
-            <views:WebCellView/>
+            <!-- Modo Unir de la grilla (Vista en vivo o pantalla auxiliar): la página se esconde -->
+            <views:WebCellView MergeMode="{Binding DataContext.IsMergeMode,
+                                           RelativeSource={RelativeSource AncestorType=ItemsControl}}"/>
         </DockPanel>
     </DataTemplate>
 

@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using TrueCentralVms.Client.Services;
 using TrueCentralVms.Core.Contracts;
 
 namespace TrueCentralVms.Client.ViewModels;
@@ -9,12 +10,17 @@ namespace TrueCentralVms.Client.ViewModels;
 /// externo…): de la lista del servidor o, con "Abrir cualquier página web",
 /// una dirección escrita a mano. La dibuja <c>Views.WebCellView</c>, con un
 /// navegador incrustado de perfil propio: no comparte cookies ni sesión con el
-/// mapa de Flota ni con el panel web del servidor.
+/// mapa de Flota ni con el panel web del servidor. Abrirla y cerrarla queda en
+/// la bitácora del servidor (como comenzar y dejar de ver una cámara).
 /// </summary>
 public sealed partial class WebCellPanel : CellPanel
 {
-    public WebCellPanel(string url, string title, int? linkId)
+    private readonly ApiClient? _api;
+    private DateTime? _openedAt;
+
+    public WebCellPanel(string url, string title, int? linkId, ApiClient? api = null)
     {
+        _api = api;
         Url = url;
         Title = title;
         LinkId = linkId;
@@ -44,4 +50,24 @@ public sealed partial class WebCellPanel : CellPanel
 
     [RelayCommand]
     private void Reload() => ReloadRequested?.Invoke();
+
+    /// <summary>El cuadro la recibió: queda en la bitácora (sin esperar al servidor).</summary>
+    public override Task LoadAsync()
+    {
+        _openedAt = DateTime.UtcNow;
+        Report("live-web-opened", Url + (LinkId is null ? ", dirección escrita a mano" : ", de la lista del servidor"));
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Se cerró (cuadro liberado, reemplazado, otro tablero o el cliente se cierra).</summary>
+    public override void Dispose()
+    {
+        if (_openedAt is not { } openedAt) return;
+        _openedAt = null;
+        var open = DateTime.UtcNow - openedAt;
+        Report("live-web-closed", $"{Url}; abierta {(int)open.TotalMinutes} min {open.Seconds} s");
+    }
+
+    private void Report(string action, string detail) =>
+        _ = _api?.ReportAuditEventAsync(new ClientAuditEventDto(action, null, Title, null, null, null, detail));
 }

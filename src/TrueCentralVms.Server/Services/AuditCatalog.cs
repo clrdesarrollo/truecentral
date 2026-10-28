@@ -90,6 +90,8 @@ public static class AuditCatalog
             new("web-link-created", "Página web agregada a la lista"),
             new("web-link-updated", "Página web de la lista modificada"),
             new("web-link-deleted", "Página web quitada de la lista"),
+            new("web-page-opened", "Página web abierta en un cuadro (cliente)"),
+            new("web-page-closed", "Página web cerrada en un cuadro (cliente)"),
         ]),
         new("ptz", "Control PTZ",
         [
@@ -503,6 +505,8 @@ public static class AuditCatalog
             ["live-snapshot"] = ("live", "snapshot-client", "Guardó una captura de video en vivo"),
             ["live-clip-start"] = ("live", "clip-started", "Inició una grabación local de video en vivo"),
             ["live-clip-saved"] = ("live", "clip-saved", "Guardó una grabación local de video en vivo"),
+            ["live-web-opened"] = ("live", "web-page-opened", "Abrió en un cuadro la página web"),
+            ["live-web-closed"] = ("live", "web-page-closed", "Cerró la página web"),
             ["playback-snapshot"] = ("playback", "snapshot-saved", "Guardó una captura durante la reproducción"),
             ["playback-clip-saved"] = ("playback", "clip-saved", "Guardó una cápsula durante la reproducción"),
             ["playback-export-saved"] = ("playback", "export-saved", "Guardó una exportación de grabación"),

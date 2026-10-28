@@ -18,8 +18,9 @@ namespace TrueCentralVms.Client.Views;
 /// El navegador se crea al cargarse el cuadro y se suelta al descargarse. Es el
 /// WebView2 de ventana propia (como el video): WebView2CompositionControl pide
 /// las proyecciones WinRT de un TFM con versión de Windows, que el cliente no
-/// usa. Como esa ventana se tragaría un arrastre, durante uno se esconde
-/// (<see cref="DragActive"/>).
+/// usa. Como esa ventana se tragaría el mouse, la página se esconde durante
+/// un arrastre (<see cref="DragActive"/>) y con el modo Unir de su grilla
+/// (<see cref="MergeMode"/>).
 /// </summary>
 public partial class WebCellView : UserControl
 {
@@ -84,10 +85,30 @@ public partial class WebCellView : UserControl
         }
     }
 
+    /// <summary>
+    /// La grilla del cuadro está en modo Unir: la selección se arrastra de
+    /// cuadro en cuadro, también por encima de una página (la plantilla lo ata
+    /// al IsMergeMode de la Vista en vivo o de la pantalla auxiliar).
+    /// </summary>
+    public bool MergeMode
+    {
+        get => (bool)GetValue(MergeModeProperty);
+        set => SetValue(MergeModeProperty, value);
+    }
+
+    public static readonly DependencyProperty MergeModeProperty = DependencyProperty.Register(
+        nameof(MergeMode), typeof(bool), typeof(WebCellView),
+        new PropertyMetadata(false, (d, _) => ((WebCellView)d).OnDragActiveChanged()));
+
+    /// <summary>La página se esconde (arrastre o modo Unir) y en su lugar va un aviso.</summary>
+    private bool PageHidden => _dragActive || MergeMode;
+
     private void OnDragActiveChanged()
     {
-        if (_web is not null) _web.Visibility = _dragActive ? Visibility.Hidden : Visibility.Visible;
-        DragHint.Visibility = _dragActive && DataContext is WebCellPanel ? Visibility.Visible : Visibility.Collapsed;
+        if (_web is not null) _web.Visibility = PageHidden ? Visibility.Hidden : Visibility.Visible;
+        DragHint.Visibility = PageHidden && DataContext is WebCellPanel ? Visibility.Visible : Visibility.Collapsed;
+        HintText.Text = _dragActive ? "Suelte aquí para reemplazar la página"
+            : "Modo Unir: arrastre de un cuadro a otro (la página vuelve al salir)";
     }
 
     private static Task<CoreWebView2Environment> EnvironmentAsync() =>
@@ -108,7 +129,7 @@ public partial class WebCellView : UserControl
         {
             DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x15, 0x18, 0x1D),
             AllowExternalDrop = false,
-            Visibility = _dragActive ? Visibility.Hidden : Visibility.Visible,
+            Visibility = PageHidden ? Visibility.Hidden : Visibility.Visible,
         };
         Host.Child = web;
         try

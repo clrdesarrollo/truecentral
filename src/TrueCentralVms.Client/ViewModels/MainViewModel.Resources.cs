@@ -93,7 +93,7 @@ public partial class MainViewModel
             CardKinds.Alerts => new AlertsCardPanel(_api, _hub, OpenAlert),
             CardKinds.Plates => new PlatesCardPanel(_api, _hub),
             CardKinds.Access => new AccessCardPanel(_api, _hub),
-            CardKinds.Web when node.Url is { } url => new WebCellPanel(url, node.Name, node.Id),
+            CardKinds.Web when node.Url is { } url => new WebCellPanel(url, node.Name, node.Id, _api),
             CardKinds.WebCustom => AskWebPage(),
             _ => CreateResourcePanel(node),
         };
@@ -111,7 +111,7 @@ public partial class MainViewModel
         if (!CanOpenAnyUrl) return null;
         var owner = System.Windows.Application.Current.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive)
                     ?? System.Windows.Application.Current.MainWindow;
-        return Views.WebUrlWindow.Ask(owner) is { } page ? new WebCellPanel(page.Url, page.Title, null) : null;
+        return Views.WebUrlWindow.Ask(owner) is { } page ? new WebCellPanel(page.Url, page.Title, null, _api) : null;
     }
 
     /// <summary>
@@ -135,11 +135,11 @@ public partial class MainViewModel
                 if (refId is { } linkId)
                     return ResourceGroups.SelectMany(g => g.Children)
                         .FirstOrDefault(n => n.CardKind == CardKinds.Web && n.Id == linkId) is { Url: { } url } link
-                        ? new WebCellPanel(url, link.Name, linkId)
+                        ? new WebCellPanel(url, link.Name, linkId, _api)
                         : null;
                 return Uri.TryCreate(reference, UriKind.Absolute, out var uri) &&
                        (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
-                    ? new WebCellPanel(uri.ToString(), string.IsNullOrWhiteSpace(title) ? uri.Host : title, null)
+                    ? new WebCellPanel(uri.ToString(), string.IsNullOrWhiteSpace(title) ? uri.Host : title, null, _api)
                     : null;
             default:
                 return null;
