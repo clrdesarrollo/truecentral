@@ -379,6 +379,129 @@ public sealed partial class SpeakerCellPanel : CellPanel
     }
 }
 
+/// <summary>
+/// Grupo de parlantes: hablarle a todos de una vez (micrófono del panel de
+/// parlantes), hacerlos sonar con un sonido del servidor o detener lo que
+/// suena. Solo cuentan los parlantes que esta sesión puede operar; el resto
+/// se ve con su aviso. Los integrantes se releen cuando el administrador
+/// cambia el grupo.
+/// </summary>
+public sealed partial class SpeakerGroupCellPanel : CellPanel
+{
+    private readonly ApiClient _api;
+    private readonly int _groupId;
+
+    public SpeakerGroupCellPanel(ApiClient api, SpeakersViewModel speakers, int groupId, string name)
+    {
+        _api = api;
+        Speakers = speakers;
+        _groupId = groupId;
+        Title = name;
+        speakers.Speakers.CollectionChanged += OnListChanged;
+        speakers.Groups.CollectionChanged += OnListChanged;
+        speakers.PropertyChanged += OnSpeakersChanged;
+        Resolve();
+    }
+
+    public SpeakersViewModel Speakers { get; }
+
+    public override string Glyph => ResourceNode.GlyphOf(ResourceKind.Speaker);
+    public override string Kind => "speaker-group";
+    public override int ResourceId => _groupId;
+
+    /// <summary>Integrantes del grupo que este puesto conoce (habilitados).</summary>
+    public ObservableCollection<SpeakerItem> Members { get; } = [];
+
+    [ObservableProperty] private string _summary = "";
+    [ObservableProperty] private bool _isTalking;
+    [ObservableProperty] private bool _canOperate;
+    [ObservableProperty] private WorkflowAudioDto? _selectedSound;
+
+    public string TalkLabel => IsTalking ? "Dejar de hablar" : "Hablar al grupo";
+    partial void OnIsTalkingChanged(bool value) => OnPropertyChanged(nameof(TalkLabel));
+
+    private void OnListChanged(object? sender, NotifyCollectionChangedEventArgs e) => Resolve();
+
+    private void OnSpeakersChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SpeakersViewModel.IsTalking) && !Speakers.IsTalking) IsTalking = false;
+    }
+
+    private void Resolve()
+    {
+        var group = Speakers.Groups.FirstOrDefault(g => g.Id == _groupId);
+        Members.Clear();
+        if (group is null)
+        {
+            Summary = "";
+            CanOperate = false;
+            Status = Speakers.Groups.Count == 0 ? "Cargando el grupo…" : "El grupo ya no existe.";
+            return;
+        }
+        Title = group.Name;
+        foreach (var item in Speakers.Speakers.Where(s => group.SpeakerIds.Contains(s.Dto.Id))) Members.Add(item);
+        int online = Members.Count(m => m.IsOnline), operable = Members.Count(m => m.CanOperate);
+        Summary = $"{Members.Count} parlante(s) · {online} en línea" +
+                  (operable < Members.Count ? $" · {Members.Count - operable} fuera de su alcance" : "");
+        CanOperate = operable > 0;
+        SelectedSound ??= Speakers.SelectedSound ?? Speakers.ServerSounds.FirstOrDefault();
+        Status = Members.Count == 0 ? "El grupo no tiene parlantes activos." : "";
+    }
+
+    private List<int> OperableIds() => Members.Where(m => m.CanOperate).Select(m => m.Dto.Id).ToList();
+
+    /// <summary>Hablar marca solo los parlantes del grupo (los que puede operar) y abre el micrófono; otro clic lo corta.</summary>
+    [RelayCommand]
+    private async Task ToggleTalk()
+    {
+        if (IsTalking)
+        {
+            await Speakers.StopTalkAsync();
+            IsTalking = false;
+            return;
+        }
+        var ids = OperableIds();
+        if (ids.Count == 0) { Status = "Ningún parlante del grupo está a su alcance."; return; }
+        foreach (var speaker in Speakers.Speakers) speaker.IsSelected = ids.Contains(speaker.Dto.Id);
+        await Speakers.StartTalkAsync(Title);
+        IsTalking = Speakers.IsTalking;
+        Status = IsTalking ? "" : Speakers.StatusMessage;
+    }
+
+    [RelayCommand]
+    private async Task PlaySound()
+    {
+        var ids = OperableIds();
+        if (ids.Count == 0) { Status = "Ningún parlante del grupo está a su alcance."; return; }
+        if (SelectedSound is null) { Status = "Elija un sonido."; return; }
+        Status = "Reproduciendo…";
+        try
+        {
+            var result = await _api.PlaySpeakersAsync(new SpeakerPlayRequestDto(ids, SpeakerPlaySources.Server, Sound: SelectedSound.DisplayName));
+            Status = result.Message;
+        }
+        catch (ApiException ex) { Status = ex.Message; }
+    }
+
+    [RelayCommand]
+    private async Task Stop()
+    {
+        var ids = OperableIds();
+        if (ids.Count == 0) return;
+        if (IsTalking) await ToggleTalk();
+        try { Status = (await _api.StopSpeakersAsync(ids)).Message; }
+        catch (ApiException ex) { Status = ex.Message; }
+    }
+
+    public override void Dispose()
+    {
+        if (IsTalking) _ = Speakers.StopTalkAsync();
+        Speakers.Speakers.CollectionChanged -= OnListChanged;
+        Speakers.Groups.CollectionChanged -= OnListChanged;
+        Speakers.PropertyChanged -= OnSpeakersChanged;
+    }
+}
+
 /// <summary>Módulo de E/S: entradas y salidas, con encender/apagar/pulsar cada relé.</summary>
 public sealed partial class IoCellPanel : CellPanel
 {

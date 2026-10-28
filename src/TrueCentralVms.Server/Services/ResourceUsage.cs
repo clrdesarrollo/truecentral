@@ -20,7 +20,7 @@ public static class ResourceUsage
         int OwnerId,          // equipo de video, equipo de acceso o panel (0 si el recurso es el equipo)
         int Number,           // canal, puerta, área o zona dentro del equipo
         int? AreaNumber,      // zonas: su área
-        string? GroupName);   // parlantes: su grupo
+        IReadOnlyList<string>? Groups);   // parlantes: sus grupos
 
     private static async Task<Target?> TargetAsync(VmsDbContext db, ResourceKind kind, int id, CancellationToken ct) => kind switch
     {
@@ -35,7 +35,8 @@ public static class ResourceUsage
         ResourceKind.Fence => await db.CercoPanels.Where(p => p.Id == id)
             .Select(p => new Target(kind, id, 0, 0, null, null)).FirstOrDefaultAsync(ct),
         ResourceKind.Speaker => await db.Speakers.Where(s => s.Id == id)
-            .Select(s => new Target(kind, id, 0, 0, null, s.GroupName)).FirstOrDefaultAsync(ct),
+            .Select(s => new Target(kind, id, 0, 0, null, s.GroupMemberships.Select(m => m.Group!.Name).ToList()))
+            .FirstOrDefaultAsync(ct),
         ResourceKind.Intercom => await db.Intercoms.Where(i => i.Id == id)
             .Select(i => new Target(kind, id, 0, 0, null, null)).FirstOrDefaultAsync(ct),
         ResourceKind.IoModule => await db.IoModules.Where(m => m.Id == id)
@@ -307,8 +308,8 @@ public static class ResourceUsage
                     bool stop = string.Equals(Text(config, "command"), "stop", StringComparison.OrdinalIgnoreCase);
                     if (Ints(config, "speakerIds").Contains(t.Id))
                         return stop ? "Detiene el parlante" : "Hace sonar el parlante";
-                    if (t.GroupName is { Length: > 0 } group &&
-                        string.Equals(Text(config, "group")?.Trim(), group, StringComparison.OrdinalIgnoreCase))
+                    if (t.Groups?.FirstOrDefault(g =>
+                            string.Equals(Text(config, "group")?.Trim(), g, StringComparison.OrdinalIgnoreCase)) is { } group)
                         return stop ? $"Detiene el grupo «{group}»" : $"Hace sonar el grupo «{group}»";
                 }
                 break;

@@ -34,6 +34,12 @@ public sealed partial class ResourceNode : ObservableObject
         new(ResourceKind.Camera, link.Id, link.Name, link.Description ?? link.Url, null)
         { CardKind = CardKinds.Web, CustomGlyph = "\uE774", Url = link.Url };
 
+    /// <summary>Grupo de parlantes: hablarle (o hacer sonar) a todos de una vez.</summary>
+    public static ResourceNode SpeakerGroup(SpeakerGroupDto group) =>
+        new(ResourceKind.Speaker, group.Id, group.Name,
+            group.Description ?? $"{group.SpeakerIds.Count} parlante(s)", null)
+        { CardKind = CardKinds.SpeakerGroup };
+
     /// <summary>«Otra dirección…»: la página se escribe al abrirla.</summary>
     public static ResourceNode WebCustom() =>
         new(ResourceKind.Camera, 0, "Otra dirección…", "Escribir la dirección de una página web", null)

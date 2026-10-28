@@ -268,6 +268,9 @@ public static class AuditCatalog
             new("agent-enroll-failed", "Enrolamiento o conexión de TrueCentral Speaker rechazado"),
             new("agent-revoked", "TrueCentral Speaker revocado"),
             new("test-tone", "Tono de prueba en parlante"),
+            new("group-created", "Grupo de parlantes creado"),
+            new("group-updated", "Grupo de parlantes modificado"),
+            new("group-deleted", "Grupo de parlantes eliminado"),
         ]),
         new("fleet", "Flota (DVR móviles)",
         [

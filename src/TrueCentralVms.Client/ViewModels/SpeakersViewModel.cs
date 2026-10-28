@@ -48,7 +48,7 @@ public sealed partial class SpeakersViewModel : ObservableObject
 
         hub.ConfigChanged += entity =>
         {
-            if (entity is "speakers" or "locations")
+            if (entity is "speakers" or "locations" or "speaker-groups")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadAsync());
         };
         // Cambió lo que esta sesión puede operar: los parlantes ajenos no se eligen.
@@ -63,6 +63,8 @@ public sealed partial class SpeakersViewModel : ObservableObject
     }
 
     public ObservableCollection<SpeakerItem> Speakers { get; } = [];
+    /// <summary>Grupos de parlantes (los arma el administrador en el panel web).</summary>
+    public ObservableCollection<SpeakerGroupDto> Groups { get; } = [];
     public ObservableCollection<WorkflowAudioDto> ServerSounds { get; } = [];
     public ObservableCollection<SpeakerAudioItemDto> Library { get; } = [];
     public ObservableCollection<string> Microphones { get; } = [];
@@ -209,6 +211,12 @@ public sealed partial class SpeakersViewModel : ObservableObject
             // Con un solo parlante no hay nada que elegir: queda marcado (si lo puede operar).
             if (Speakers.Count == 1 && selected.Count == 0 && Speakers[0].CanOperate) Speakers[0].IsSelected = true;
             HasSpeakers = Speakers.Count > 0;
+
+            List<SpeakerGroupDto> groups;
+            try { groups = await _api.GetSpeakerGroupsAsync(); }
+            catch (ApiException) { groups = []; } // servidor anterior: sin grupos
+            Groups.Clear();
+            foreach (var group in groups) Groups.Add(group);
 
             var sounds = await _api.GetSpeakerSoundsAsync();
             string? current = SelectedSound?.DisplayName;
@@ -474,7 +482,8 @@ public sealed partial class SpeakersViewModel : ObservableObject
     // Voz en vivo (mantener presionado)
     // ------------------------------------------------------------------
 
-    public async Task StartTalkAsync()
+    /// <param name="group">Grupo al que se habla (para la bitácora); null = parlantes marcados sueltos.</param>
+    public async Task StartTalkAsync(string? group = null)
     {
         if (IsTalking) return;
         var ids = SelectedIds;
@@ -484,7 +493,7 @@ public sealed partial class SpeakersViewModel : ObservableObject
         StatusMessage = "Abriendo el canal de voz…";
         try
         {
-            await _talk.StartAsync(ids, SelectedMicrophone, TalkPreTone);
+            await _talk.StartAsync(ids, SelectedMicrophone, TalkPreTone, group: group);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ApiException or System.Net.WebSockets.WebSocketException or NAudio.MmException)
         {

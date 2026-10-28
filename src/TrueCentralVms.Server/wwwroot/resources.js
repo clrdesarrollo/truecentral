@@ -65,7 +65,9 @@ const resState = {
   locations: [],
   byId: new Map(),
   children: new Map(),      // id del padre ("root" = raíz) → ubicaciones hijas ordenadas
-  resources: [],
+  resources: [],             // los que se muestran (sin los deshabilitados, salvo que se pida verlos)
+  allResources: [],          // todos, tal como llegan del servidor
+  showDisabled: false,       // interruptor «Mostrar deshabilitados» (recordado en este navegador)
   selected: "all",          // "all" | "pending" | id de ubicación
   kind: "",                 // filtro por tipo de recurso ("" = todos)
   source: "",               // filtro por equipo "módulo:id" ("" = todos)
@@ -83,7 +85,14 @@ const resState = {
 
 try {
   for (const id of JSON.parse(localStorage.getItem("tcvms.res.collapsed") || "[]")) resState.collapsed.add(id);
+  resState.showDisabled = localStorage.getItem("tcvms.res.showDisabled") === "1";
 } catch { /* preferencia corrupta: se ignora */ }
+
+/** Lo que se muestra: los deshabilitados (canales fuera de la licencia, puertas apagadas…) solo con el interruptor. */
+function resApplyDisabled() {
+  resState.resources = resState.showDisabled
+    ? resState.allResources : resState.allResources.filter((r) => r.enabled !== false);
+}
 
 /** Suelta hub y sondeo al salir de la página (lo llama navigate() de app.js). */
 function resourcesDetachHub() {
@@ -202,7 +211,8 @@ async function resLoad({ quiet = false } = {}) {
   if (quiet && signature === resState.signature) return;
   resState.signature = signature;
   resState.locations = locations;
-  resState.resources = resources;
+  resState.allResources = resources;
+  resApplyDisabled();
   resIndex();
   resDraw();
 }
@@ -231,6 +241,11 @@ async function renderResources() {
         <div class="res-filters">
           <input type="search" id="res-text" placeholder="Buscar por nombre, equipo o estado…" value="${esc(resState.text)}">
           <select id="res-source" title="Solo los recursos de un equipo"></select>
+          <label class="ui-switch" title="Canales fuera de la licencia, puertas o áreas apagadas…: ocultos salvo que se pidan">
+            <input type="checkbox" id="res-show-disabled"${resState.showDisabled ? " checked" : ""}>
+            <span class="ui-switch-track" aria-hidden="true"></span>
+            <span>Mostrar deshabilitados <span class="muted" id="res-disabled-count"></span></span>
+          </label>
         </div>
         <div id="res-bulk"></div>
         <div id="res-table"></div>`}
@@ -240,6 +255,13 @@ async function renderResources() {
   if (!resState.sheet) {
     $("#res-text").addEventListener("input", (e) => { resState.text = e.target.value; resDrawList(); });
     $("#res-source").addEventListener("change", (e) => { resState.source = e.target.value; resDrawList(); });
+    $("#res-show-disabled").addEventListener("change", (e) => {
+      resState.showDisabled = e.target.checked;
+      try { localStorage.setItem("tcvms.res.showDisabled", resState.showDisabled ? "1" : "0"); } catch { /* modo privado */ }
+      resApplyDisabled();
+      resIndex();
+      resDraw();
+    });
     resBindList(isAdmin);
   }
   resBindTree(isAdmin);
@@ -258,6 +280,8 @@ async function renderResources() {
 }
 
 function resDraw() {
+  const hidden = resState.allResources.filter((r) => r.enabled === false).length;
+  if ($("#res-disabled-count")) $("#res-disabled-count").textContent = hidden ? `(${hidden})` : "";
   resDrawTree();
   if (resState.sheet) { resSheetRefreshState(); return; } // con la ficha abierta, la lista no está en pantalla
   resDrawHead();
@@ -350,7 +374,7 @@ function resDrawHead() {
       <button class="btn ghost small" type="button" data-op="location:${sel}" data-cmd="disarm">Desarmar</button>
     </div>` : ""}`;
   $("#res-pending-by-equipment")?.addEventListener("click", () =>
-    resByEquipmentModal(resState.resources.filter((r) => r.locationId == null)));
+    resByEquipmentModal(resState.allResources.filter((r) => r.locationId == null)));
   if (typeof sel === "number") {
     $("#res-loc-child")?.addEventListener("click", () => resLocationModal(null, sel));
     $("#res-loc-edit")?.addEventListener("click", () => resLocationModal(resState.byId.get(sel), null));
@@ -982,7 +1006,7 @@ async function resOpenSheet() {
 function resSheetRefreshState() {
   const sheet = resState.sheet;
   if (!sheet?.detail || !$("#rs-state")) return;
-  const fresh = resState.resources.find((r) => r.kind === sheet.kind && r.id === sheet.id);
+  const fresh = resState.allResources.find((r) => r.kind === sheet.kind && r.id === sheet.id);
   if (!fresh) return;
   sheet.detail.resource = { ...sheet.detail.resource, health: fresh.health, state: fresh.state };
   $("#rs-state").innerHTML = resStateTag(sheet.detail.resource);

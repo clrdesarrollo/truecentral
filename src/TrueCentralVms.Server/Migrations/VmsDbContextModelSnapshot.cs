@@ -3771,10 +3771,6 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<string>("GroupName")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
                     b.Property<string>("Host")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -3868,6 +3864,52 @@ namespace TrueCentralVms.Server.Migrations
                         .HasFilter("\"IsupDeviceId\" IS NULL AND \"DriverKey\" <> 'truecentral-agent'");
 
                     b.ToTable("Speakers");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.SpeakerGroup", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("SpeakerGroups");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.SpeakerGroupMember", b =>
+                {
+                    b.Property<int>("SpeakerGroupId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SpeakerId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("SpeakerGroupId", "SpeakerId");
+
+                    b.HasIndex("SpeakerId");
+
+                    b.ToTable("SpeakerGroupMembers");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.StreamSession", b =>
@@ -5486,6 +5528,25 @@ namespace TrueCentralVms.Server.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.SpeakerGroupMember", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.SpeakerGroup", "Group")
+                        .WithMany("Members")
+                        .HasForeignKey("SpeakerGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Speaker", "Speaker")
+                        .WithMany("GroupMemberships")
+                        .HasForeignKey("SpeakerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Group");
+
+                    b.Navigation("Speaker");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.UserLocation", b =>
                 {
                     b.HasOne("TrueCentralVms.Server.Data.Entities.Location", null)
@@ -5728,6 +5789,16 @@ namespace TrueCentralVms.Server.Migrations
                     b.Navigation("Permissions");
 
                     b.Navigation("Resources");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Speaker", b =>
+                {
+                    b.Navigation("GroupMemberships");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.SpeakerGroup", b =>
+                {
+                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.User", b =>

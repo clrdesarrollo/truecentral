@@ -22,7 +22,7 @@ const BD_RESOURCE_KINDS = ["Camera", "Door", "Partition", "Fence", "Intercom", "
 const BD_PICK_LIMIT = 40;
 
 /** Estado de la página (lo que se cargó del servidor y el tablero que se está editando). */
-const bdState = { views: [], links: [], roles: [], resources: [], byKey: new Map(), hubBound: [], editing: null };
+const bdState = { views: [], links: [], roles: [], resources: [], speakerGroups: [], byKey: new Map(), hubBound: [], editing: null };
 
 function boardsDetachHub() {
   for (const { ev, fn } of bdState.hubBound) VmsHub.off(ev, fn);
@@ -54,7 +54,7 @@ async function renderBoards() {
     <div id="bd-links"></div>`;
   $("#bd-new").addEventListener("click", () => bdEditor(null));
   $("#bd-link-new").addEventListener("click", () => bdLinkModal(null));
-  const onConfig = (topic) => { if (topic === "live-views" || topic === "web-links") bdLoad(true); };
+  const onConfig = (topic) => { if (topic === "live-views" || topic === "web-links" || topic === "speaker-groups") bdLoad(true); };
   VmsHub.on("ConfigChanged", onConfig);
   bdState.hubBound.push({ ev: "ConfigChanged", fn: onConfig });
   await bdLoad(false);
@@ -62,10 +62,11 @@ async function renderBoards() {
 
 async function bdLoad(quiet) {
   try {
-    const [views, links, roles, resources] = await Promise.all([
+    const [views, links, roles, resources, speakerGroups] = await Promise.all([
       Api.get("/api/live-views"), Api.get("/api/web-links"), Api.get("/api/live-views/roles"), Api.get("/api/resources"),
+      Api.get("/api/speakers/groups").catch(() => []),
     ]);
-    Object.assign(bdState, { views: views.filter((v) => v.shared), links, roles, resources });
+    Object.assign(bdState, { views: views.filter((v) => v.shared), links, roles, resources, speakerGroups });
     bdState.byKey = new Map(resources.map((r) => [`${r.kind}:${r.id}`, r]));
   } catch (err) {
     if (!quiet && $("#bd-views")) $("#bd-views").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
@@ -83,7 +84,8 @@ function bdContents(items) {
   const n = {};
   for (const i of items) n[i.kind || "camera"] = (n[i.kind || "camera"] || 0) + 1;
   return [n.camera && `${n.camera} cámara(s)`, n.resource && `${n.resource} recurso(s)`,
-    n.card && `${n.card} tarjeta(s)`, n.web && `${n.web} página(s) web`].filter(Boolean).join(" · ") || "vacío";
+    n.card && `${n.card} tarjeta(s)`, n.web && `${n.web} página(s) web`,
+    n["speaker-group"] && `${n["speaker-group"]} grupo(s) de parlantes`].filter(Boolean).join(" · ") || "vacío";
 }
 
 function bdAudience(v) {
@@ -295,6 +297,11 @@ function bdItemInfo(it) {
       const kind = RES_KINDS[it.ref];
       return { icon: resIcon(kind?.icon || "point", 14), name: r?.name ?? it.title ?? "(ya no existe)", sub: [kind?.label, r?.source].filter(Boolean).join(" · ") };
     }
+    case "speaker-group": {
+      const group = bdState.speakerGroups.find((g) => g.id === it.refId);
+      return { icon: resIcon("speaker", 14), name: group?.name ?? it.title ?? "(grupo borrado)",
+        sub: group ? `Grupo de parlantes · ${group.speakerIds.length}` : "Grupo de parlantes" };
+    }
     case "card": {
       const card = BD_CARDS.find((c) => c.key === it.ref);
       return { icon: `<i class="mdi mdi-chart-bar" aria-hidden="true"></i>`, name: card?.label ?? it.ref, sub: "Tarjeta" };
@@ -349,6 +356,11 @@ function bdPickGroups(text) {
       .map((r) => ({ key: `${kind}:${r.id}`, icon: resIcon(RES_KINDS[kind].icon, 14), name: r.name, sub: r.source })),
   }));
   groups.push({
+    title: "Grupos de parlantes",
+    options: bdState.speakerGroups.filter((g) => hit(g.name, g.description, "parlantes"))
+      .map((g) => ({ key: `speaker-group:${g.id}`, icon: resIcon("speaker", 14), name: g.name, sub: `${g.speakerIds.length} parlante(s)` })),
+  });
+  groups.push({
     title: "Tarjetas",
     options: BD_CARDS.filter((c) => hit(c.label, c.detail, "tarjeta"))
       .map((c) => ({ key: `card:${c.key}`, icon: `<i class="mdi mdi-chart-bar" aria-hidden="true"></i>`, name: c.label, sub: c.detail })),
@@ -367,7 +379,7 @@ function bdDrawPicker() {
   if (ed.locked) { box.innerHTML = ""; return; }
   if (ed.selected == null) {
     box.innerHTML = `<div class="muted bd-pick-hint">Elija un cuadro de la grilla para decidir qué muestra: una cámara,
-      un recurso (puerta, alarma, cerco…), una tarjeta de reporte o una página web.</div>`;
+      un recurso (puerta, alarma, cerco…), un grupo de parlantes, una tarjeta de reporte o una página web.</div>`;
     return;
   }
   const canUrl = Perms.can("dashboards.weburl");
@@ -416,6 +428,9 @@ function bdAssign(key) {
     bdPut({ kind: "camera", channelId: Number(id), streamType: ed.layout.cells.length <= 4 ? 0 : 1 });
   } else if (type === "card") {
     bdPut({ kind: "card", ref: id });
+  } else if (type === "speaker-group") {
+    const group = bdState.speakerGroups.find((g) => g.id === Number(id));
+    bdPut({ kind: "speaker-group", refId: Number(id), title: group?.name });
   } else if (type === "web") {
     const link = bdState.links.find((l) => l.id === Number(id));
     bdPut({ kind: "web", refId: Number(id), title: link?.name });

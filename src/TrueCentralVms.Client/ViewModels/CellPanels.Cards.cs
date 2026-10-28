@@ -26,6 +26,8 @@ public static class CardKinds
     public const string Web = "web";
     /// <summary>«Otra dirección…»: se escribe al abrirla.</summary>
     public const string WebCustom = "web-custom";
+    /// <summary>Grupo de parlantes (Id = el del grupo).</summary>
+    public const string SpeakerGroup = "speaker-group";
 }
 
 /// <summary>Base de las tarjetas que se releen solas cada cierto tiempo.</summary>

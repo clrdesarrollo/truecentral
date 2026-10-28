@@ -20,6 +20,8 @@ public static class DashboardItemKinds
     public const string Card = "card";
     /// <summary>Una página web: de la lista del servidor (RefId) o una dirección libre (Ref).</summary>
     public const string Web = "web";
+    /// <summary>Un grupo de parlantes (RefId): hablarle a todos de una vez.</summary>
+    public const string SpeakerGroup = "speaker-group";
 
     /// <summary>Tarjetas de reporte que puede llevar un cuadro.</summary>
     public static readonly IReadOnlyList<string> Cards =

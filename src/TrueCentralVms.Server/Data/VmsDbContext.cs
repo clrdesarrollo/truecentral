@@ -51,6 +51,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
 
     // Parlantes IP
     public DbSet<Speaker> Speakers => Set<Speaker>();
+    public DbSet<SpeakerGroup> SpeakerGroups => Set<SpeakerGroup>();
+    public DbSet<SpeakerGroupMember> SpeakerGroupMembers => Set<SpeakerGroupMember>();
 
     // Módulos de entradas y salidas (relés de barreras, portones, balizas)
     public DbSet<IoModule> IoModules => Set<IoModule>();
@@ -385,7 +387,6 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(s => s.DriverKey).HasMaxLength(32);
             e.Property(s => s.Host).HasMaxLength(255);
             e.Property(s => s.Username).HasMaxLength(64);
-            e.Property(s => s.GroupName).HasMaxLength(64);
             e.Property(s => s.Model).HasMaxLength(64);
             e.Property(s => s.SerialNumber).HasMaxLength(64);
             e.Property(s => s.FirmwareVersion).HasMaxLength(64);
@@ -403,6 +404,21 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.HasIndex(s => s.AgentId).IsUnique().HasFilter("\"AgentId\" IS NOT NULL");
             e.HasIndex(s => s.AgentTokenHash).HasFilter("\"AgentTokenHash\" IS NOT NULL");
             e.HasIndex(s => s.EnrollmentCodeHash).HasFilter("\"EnrollmentCodeHash\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<SpeakerGroup>(e =>
+        {
+            e.Property(g => g.Name).HasMaxLength(64);
+            e.Property(g => g.Description).HasMaxLength(255);
+            e.HasIndex(g => g.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<SpeakerGroupMember>(e =>
+        {
+            e.HasKey(m => new { m.SpeakerGroupId, m.SpeakerId });
+            e.HasOne(m => m.Group).WithMany(g => g.Members).HasForeignKey(m => m.SpeakerGroupId).OnDelete(DeleteBehavior.Cascade);
+            // Borrar un parlante lo saca de sus grupos.
+            e.HasOne(m => m.Speaker).WithMany(s => s.GroupMemberships).HasForeignKey(m => m.SpeakerId).OnDelete(DeleteBehavior.Cascade);
         });
 
         // Módulos de entradas y salidas: una fila por módulo y una por cada

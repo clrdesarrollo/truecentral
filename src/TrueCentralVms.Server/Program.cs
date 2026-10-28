@@ -593,6 +593,7 @@ app.MapAlarmsApi();
 app.MapIsupApi();
 app.MapCercoApi();
 app.MapSpeakersApi();
+app.MapSpeakerGroupsApi();
 app.MapSpeakerAgentsApi();
 app.MapIoModulesApi();
 app.MapFleetApi();

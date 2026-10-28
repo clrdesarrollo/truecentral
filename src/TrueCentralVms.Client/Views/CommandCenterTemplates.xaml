@@ -256,6 +256,67 @@
         </ScrollViewer>
     </DataTemplate>
 
+    <!-- Grupo de parlantes: hablar a todos, hacerlos sonar o detener; integrantes con su estado -->
+    <DataTemplate DataType="{x:Type vm:SpeakerGroupCellPanel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
+            <StackPanel Margin="14,12">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="26" Margin="0,0,12,0" VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CanOperate}" Value="True"><Setter Property="Foreground" Value="{StaticResource OkBrush}"/></DataTrigger>
+                                    <DataTrigger Binding="{Binding IsTalking}" Value="True"><Setter Property="Foreground" Value="{StaticResource WarnBrush}"/></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                        <TextBlock Text="{Binding Summary}" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+                <WrapPanel Margin="0,12,0,0">
+                    <Button Content="{Binding TalkLabel}" Style="{StaticResource PanelButton}" Command="{Binding ToggleTalkCommand}"
+                            IsEnabled="{Binding CanOperate}"/>
+                    <Button Content="Detener" Style="{StaticResource PanelButton}" Command="{Binding StopCommand}"
+                            IsEnabled="{Binding CanOperate}" ToolTip="Detiene lo que esté sonando en los parlantes del grupo"/>
+                </WrapPanel>
+                <DockPanel Margin="0,2,0,0" IsEnabled="{Binding CanOperate}"
+                           Visibility="{Binding Speakers.HasSounds, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                    <Button DockPanel.Dock="Right" Content="Reproducir" Style="{StaticResource PanelButton}" Margin="6,0,0,0"
+                            Command="{Binding PlaySoundCommand}" ToolTip="Hace sonar el sonido en todo el grupo, sincronizado"/>
+                    <ComboBox ItemsSource="{Binding Speakers.ServerSounds}" SelectedItem="{Binding SelectedSound, Mode=TwoWay}"
+                              DisplayMemberPath="DisplayName" Style="{StaticResource DarkComboBox}" Height="28" FontSize="12"/>
+                </DockPanel>
+                <TextBlock Text="Habla con el micrófono elegido en el panel de parlantes." Style="{StaticResource PanelHint}"/>
+                <TextBlock Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="0,6,0,0"/>
+                <TextBlock Text="PARLANTES" Style="{StaticResource PanelSection}"/>
+                <ItemsControl ItemsSource="{Binding Members}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="0,2">
+                                <Ellipse Width="7" Height="7" Margin="0,0,8,0" VerticalAlignment="Center">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse">
+                                            <Setter Property="Fill" Value="{StaticResource MutedBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsOnline}" Value="True"><Setter Property="Fill" Value="{StaticResource OkBrush}"/></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock Text="{Binding BusyWith}" DockPanel.Dock="Right" FontSize="11" Foreground="{StaticResource WarnBrush}"/>
+                                <TextBlock Text="{Binding Name}" FontSize="12" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+
     <!-- Módulo de E/S: salidas (relés) con encender/apagar/pulso y entradas -->
     <DataTemplate DataType="{x:Type vm:IoCellPanel}">
         <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">

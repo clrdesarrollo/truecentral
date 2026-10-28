@@ -902,7 +902,7 @@ public partial class MainViewModel : ObservableObject
             if (entity is "permissions")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadPermissionsAsync());
             // La lista de páginas web va en el árbol; los tableros compartidos, en su desplegable.
-            if (entity is "web-links")
+            if (entity is "web-links" or "speaker-groups")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadTreeAsync());
             if (entity is "live-views")
                 Application.Current.Dispatcher.InvokeAsync(() => { if (IsViewsPopupOpen) _ = LoadSavedViewsAsync(); });

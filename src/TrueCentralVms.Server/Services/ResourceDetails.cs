@@ -253,12 +253,14 @@ public static class ResourceDetails
     {
         var s = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (s is null) return null;
+        var groups = await db.SpeakerGroupMembers.AsNoTracking().Where(m => m.SpeakerId == id)
+            .Select(m => m.Group!.Name).OrderBy(n => n).ToListAsync(ct);
         var facts = new List<ResourceFactDto>();
         Add(facts, "Volumen", s.Volume?.ToString() ?? "Sin información todavía");
         Add(facts, "Voz en vivo", YesNo(s.SupportsLiveAudio));
         Add(facts, "Biblioteca de audios propia", YesNo(s.SupportsLibrary));
         Add(facts, "Texto a voz", YesNo(s.SupportsTts));
-        Add(facts, "Grupo", s.GroupName);
+        Add(facts, "Grupos", groups.Count > 0 ? string.Join(", ", groups) : null);
         return new Part(
             new ResourceSourceDto("speakers", s.Id, s.Name, s.Model, s.SerialNumber, s.FirmwareVersion,
                 Address(s.Host, s.Port, s.UseHttps), OnlineText(s.Status, s.Enabled), s.LastSeenAt),

@@ -107,8 +107,8 @@ async function refreshSpeakersInPlace() {
 async function renderSpeakers() {
   closeSpeakerVolumePopover();
   $("#page-title").textContent = "Parlantes IP";
-  let speakers;
-  try { speakers = await Api.get("/api/speakers"); }
+  let speakers, groups;
+  try { [speakers, groups] = await Promise.all([Api.get("/api/speakers"), Api.get("/api/speakers/groups").catch(() => [])]); }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
 
   const isAdmin = Perms.can("speakers.configure");
@@ -127,7 +127,7 @@ async function renderSpeakers() {
       </div>` : `
       <div class="table-scroll"><table class="grid">
         <thead><tr>
-          <th>Nombre</th><th>Grupo</th><th>Dirección</th><th>Modelo</th><th>Firmware</th>
+          <th>Nombre</th><th>Grupos</th><th>Dirección</th><th>Modelo</th><th>Firmware</th>
           <th>Funciones</th><th>Volumen</th><th>Conexión</th><th>En uso</th><th></th>
         </tr></thead>
         <tbody>
@@ -155,11 +155,13 @@ async function renderSpeakers() {
             </tr>
             <tr class="hidden" data-detail="${s.id}"><td colspan="10"></td></tr>`).join("")}
         </tbody>
-      </table></div>`}`;
+      </table></div>`}
+    ${speakers.length || groups.length ? speakerGroupsSectionHtml(groups, speakers, isAdmin) : ""}`;
+  speakerGroupsBind(groups, speakers);
 
   const byRow = (e) => speakers.find((s) => s.id === Number(e.target.closest("tr").dataset.id));
   $("#btn-speaker-new")?.addEventListener("click", () => speakerModal(null));
-  $("#btn-speaker-play-all")?.addEventListener("click", () => speakerPlayModal(speakers, null));
+  $("#btn-speaker-play-all")?.addEventListener("click", () => speakerPlayModal(speakers, null, groups));
   $$("#view .btn-edit").forEach((b) => b.addEventListener("click", (e) => speakerModal(byRow(e))));
   $$("#view .btn-play").forEach((b) => b.addEventListener("click", (e) => speakerPlayModal(speakers, byRow(e))));
   $$("#view .btn-stop").forEach((b) => b.addEventListener("click", async (e) => {
@@ -216,6 +218,102 @@ async function renderSpeakers() {
       if (!await refreshSpeakersInPlace()) renderSpeakers();
     } catch { /* se reintenta en el próximo ciclo */ }
   }, 15000);
+}
+
+// ---------------------------------------------------------------------------
+// Grupos de parlantes: para hablar o hacer sonar varios de una vez desde el
+// Centro de mando (lista y tableros) y desde las automatizaciones. Un
+// parlante puede estar en varios grupos.
+// ---------------------------------------------------------------------------
+
+function speakerGroupsSectionHtml(groups, speakers, isAdmin) {
+  const byId = new Map(speakers.map((s) => [s.id, s]));
+  return `
+    <div class="sp-groups-head">
+      <h3>Grupos de parlantes</h3>
+      ${isAdmin ? `<button class="btn ghost small" id="btn-speaker-group-new">Nuevo grupo</button>` : ""}
+    </div>
+    <p class="muted sp-groups-intro">En el Centro de mando del cliente se le habla a todo el grupo de una vez (desde la
+      lista o un cuadro de un tablero), y las automatizaciones pueden hacerlo sonar.</p>
+    ${groups.length ? `
+    <div class="table-scroll"><table class="grid">
+      <thead><tr><th>Grupo</th><th>Parlantes</th><th>Descripción</th><th></th></tr></thead>
+      <tbody>${groups.map((g) => `
+        <tr data-group="${g.id}">
+          <td><b>${esc(g.name)}</b></td>
+          <td>${g.speakerIds.length ? g.speakerIds.map((id) => esc(byId.get(id)?.name ?? `#${id}`)).join(", ") : `<span class="muted">vacío</span>`}</td>
+          <td class="muted">${esc(g.description ?? "")}</td>
+          <td><div class="row-actions">
+            <button class="btn ghost btn-group-play" title="Reproducir en los parlantes del grupo">Reproducir</button>
+            ${isAdmin ? `<button class="btn ghost btn-group-edit">Editar</button>
+            <button class="btn danger btn-group-delete">Eliminar</button>` : ""}
+          </div></td>
+        </tr>`).join("")}</tbody>
+    </table></div>` : `<div class="info-box">Todavía no hay grupos.${isAdmin ? " Use <b>Nuevo grupo</b>." : ""}</div>`}`;
+}
+
+function speakerGroupsBind(groups, speakers) {
+  const groupOf = (e) => groups.find((g) => g.id === Number(e.target.closest("tr").dataset.group));
+  $("#btn-speaker-group-new")?.addEventListener("click", () => speakerGroupModal(null, speakers));
+  $$("#view .btn-group-edit").forEach((b) => b.addEventListener("click", (e) => speakerGroupModal(groupOf(e), speakers)));
+  $$("#view .btn-group-play").forEach((b) => b.addEventListener("click", (e) => {
+    const group = groupOf(e);
+    speakerPlayModal(speakers.filter((s) => group.speakerIds.includes(s.id)), null, [group]);
+  }));
+  $$("#view .btn-group-delete").forEach((b) => b.addEventListener("click", async (e) => {
+    const group = groupOf(e);
+    let used = 0;
+    try { used = (await Api.delete(`/api/speakers/groups/${group.id}?dryRun=true`)).workflowActions; } catch { /* sin datos */ }
+    if (!confirm(`¿Eliminar el grupo "${group.name}"? Los parlantes no se tocan.` +
+      (used ? `\n\n${used} acción(es) de automatizaciones lo nombran y ya no harán sonar nada por él.` : ""))) return;
+    try {
+      await Api.delete(`/api/speakers/groups/${group.id}`);
+      toast(`Grupo "${group.name}" eliminado.`);
+      renderSpeakers();
+    } catch (err) { toast(err.error, true); }
+  }));
+}
+
+function speakerGroupModal(group, speakers) {
+  const members = new Set(group?.speakerIds ?? []);
+  openModal(`
+    <h3>${group ? "Editar grupo de parlantes" : "Nuevo grupo de parlantes"}</h3>
+    <div id="sp-group-error"></div>
+    <div class="form-grid">
+      <div class="field"><label for="sp-group-name">Nombre</label>
+        <input id="sp-group-name" maxlength="64" value="${esc(group?.name ?? "")}" placeholder="Perímetro, Bodega, Todos…"></div>
+      <div class="field"><label for="sp-group-desc">Descripción (opcional)</label>
+        <input id="sp-group-desc" maxlength="255" value="${esc(group?.description ?? "")}"></div>
+    </div>
+    <div class="field">
+      <label>Parlantes del grupo</label>
+      <div class="wf-check-grid" id="sp-group-members">
+        ${speakers.map((s) => `<label class="checkbox-row"><input type="checkbox" value="${s.id}"${members.has(s.id) ? " checked" : ""}>
+          ${esc(s.name)}${s.enabled ? "" : ` <span class="muted">(pausado)</span>`}</label>`).join("") || `<span class="muted">No hay parlantes.</span>`}
+      </div>
+      ${group ? `<div class="muted field-hint">Si cambia el nombre, las automatizaciones que usan este grupo pasan solas al nombre nuevo.</div>` : ""}
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" id="sp-group-cancel">Cancelar</button>
+      <button class="btn" type="button" id="sp-group-save">Guardar</button>
+    </div>`, true);
+  $("#sp-group-cancel").addEventListener("click", closeModal);
+  $("#sp-group-save").addEventListener("click", async () => {
+    const body = {
+      name: $("#sp-group-name").value.trim(),
+      description: $("#sp-group-desc").value.trim() || null,
+      speakerIds: [...$$("#sp-group-members input:checked")].map((cb) => Number(cb.value)),
+    };
+    try {
+      if (group) await Api.put(`/api/speakers/groups/${group.id}`, body);
+      else await Api.post("/api/speakers/groups", body);
+      closeModal();
+      toast(`Grupo "${body.name}" guardado.`);
+      renderSpeakers();
+    } catch (err) {
+      $("#sp-group-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    }
+  });
 }
 
 /**
@@ -477,7 +575,7 @@ async function speakerTtsModal(speaker) {
 }
 
 /** Reproducir en uno (fijo) o varios parlantes (elegibles). */
-async function speakerPlayModal(speakers, fixed) {
+async function speakerPlayModal(speakers, fixed, groups = []) {
   let sounds = [];
   try { sounds = await Api.get("/api/speakers/sounds"); } catch { /* sin sonidos del servidor */ }
   const targets = fixed ? [fixed] : speakers.filter((s) => s.enabled);
@@ -488,6 +586,8 @@ async function speakerPlayModal(speakers, fixed) {
       ${fixed ? "" : `
       <div class="field">
         <label>Parlantes (los sonidos del servidor suenan sincronizados)</label>
+        ${groups.length ? `<div class="sp-group-chips">Marcar solo el grupo:
+          ${groups.map((g) => `<button type="button" class="res-chip" data-group-ids="${g.speakerIds.join(",")}">${esc(g.name)}</button>`).join("")}</div>` : ""}
         <div class="wf-check-grid" id="sp-play-targets">
           ${targets.map((s) => `<label class="checkbox-row"><input type="checkbox" data-speaker="${s.id}" data-op="speaker:${s.id}" ${Operable.can("speaker", s.id) ? "checked" : ""}> ${esc(s.name)}${s.groupName ? ` <span class="muted">· ${esc(s.groupName)}</span>` : ""}</label>`).join("")}
         </div>
@@ -542,6 +642,12 @@ async function speakerPlayModal(speakers, fixed) {
   };
   $("#sp-play-source").addEventListener("change", syncSource);
   syncSource();
+  $$("#sp-play-form [data-group-ids]").forEach((chip) => chip.addEventListener("click", () => {
+    const ids = new Set(chip.dataset.groupIds.split(",").filter(Boolean).map(Number));
+    $$("#sp-play-targets input[data-speaker]").forEach((cb) => {
+      cb.checked = ids.has(Number(cb.dataset.speaker)) && Operable.can("speaker", Number(cb.dataset.speaker));
+    });
+  }));
   // Escucha local (navegador del que configura): mismo reproductor que Automatizaciones → Sonidos.
   $("#sp-play-sound-listen")?.addEventListener("click", (e) => wfTogglePreview($("#sp-play-sound").value, e.currentTarget));
   if (fixed) {
@@ -612,8 +718,9 @@ async function speakerModal(speaker) {
           <input id="sp-name" required maxlength="128" value="${esc(speaker?.name ?? "")}" placeholder="Acceso proveedores, Patio bodega...">
         </div>
         <div class="field">
-          <label>Grupo (opcional)</label>
-          <input id="sp-group" maxlength="64" value="${esc(speaker?.groupName ?? "")}" placeholder="Perímetro, Bodega…">
+          <label>Grupos</label>
+          <div class="muted sp-groups-note">${speaker?.groupName ? esc(speaker.groupName) : "Ninguno"} · se arman en
+            <b>Grupos de parlantes</b>, al final de esta página.</div>
         </div>
       </div>
       ${locationFieldHtml("sp-location", places, speaker?.locationId ?? null, null, { equipment: true, isNew })}
@@ -692,7 +799,6 @@ async function speakerModal(speaker) {
       name: $("#sp-name").value.trim() || "(sin nombre)",
       driverKey: $("#sp-driver").value,
       enabled: $("#sp-enabled").checked,
-      groupName: $("#sp-group").value.trim() || null,
       locationId: locationFieldValue("sp-location"),
     };
     if (!$("#sp-agent-box").hidden)

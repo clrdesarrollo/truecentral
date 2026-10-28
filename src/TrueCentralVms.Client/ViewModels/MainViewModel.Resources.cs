@@ -57,6 +57,20 @@ public partial class MainViewModel
                 "Pasos por todas las puertas en vivo"));
         ResourceGroups.Add(cards);
 
+        // Grupos de parlantes (los arma el administrador en el panel web).
+        if (SpeakersViewModel.CanUse)
+        {
+            List<SpeakerGroupDto> speakerGroups;
+            try { speakerGroups = await _api.GetSpeakerGroupsAsync(); }
+            catch (ApiException) { speakerGroups = []; } // servidor anterior: sin grupos
+            if (speakerGroups.Count > 0)
+            {
+                var groups = new ResourceGroupNode("Grupos de parlantes", ResourceNode.GlyphOf(ResourceKind.Speaker));
+                foreach (var group in speakerGroups) groups.Children.Add(ResourceNode.SpeakerGroup(group));
+                ResourceGroups.Add(groups);
+            }
+        }
+
         // Páginas web: las de la lista del servidor y, con permiso, «Otra dirección…».
         List<WebLinkDto> links;
         try { links = await _api.GetWebLinksAsync(); }
@@ -95,6 +109,10 @@ public partial class MainViewModel
             CardKinds.Access => new AccessCardPanel(_api, _hub),
             CardKinds.Web when node.Url is { } url => new WebCellPanel(url, node.Name, node.Id, _api),
             CardKinds.WebCustom => AskWebPage(),
+            CardKinds.SpeakerGroup => new SpeakerGroupCellPanel(_api, Speakers, node.Id, node.Name)
+            {
+                Content = new CellContentRef(DashboardItemKinds.SpeakerGroup, node.Id, null, node.Name),
+            },
             _ => CreateResourcePanel(node),
         };
         // Lo que se guarda en los tableros y en la última sesión.
@@ -130,6 +148,10 @@ public partial class MainViewModel
             case DashboardItemKinds.Card:
                 var card = ResourceGroups.SelectMany(g => g.Children).FirstOrDefault(n => n.CardKind == reference);
                 return card is null ? null : CreatePanel(card);
+            case DashboardItemKinds.SpeakerGroup:
+                var speakerGroup = ResourceGroups.SelectMany(g => g.Children)
+                    .FirstOrDefault(n => n.CardKind == CardKinds.SpeakerGroup && n.Id == refId);
+                return speakerGroup is null ? null : CreatePanel(speakerGroup);
             case DashboardItemKinds.Web:
                 // Una de la lista se busca al día (pudieron cambiarle la dirección).
                 if (refId is { } linkId)

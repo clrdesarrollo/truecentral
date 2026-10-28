@@ -83,8 +83,40 @@ public sealed class SpeakerService(
         drivers.Find(speaker.DriverKey)?.Create()
         ?? throw new DriverException($"El parlante '{speaker.Name}' usa un driver desconocido ('{speaker.DriverKey}').");
 
+    // ------------------------------------------------------------------
+    // Grupos de parlantes: en memoria (parlante → sus grupos) para que cada
+    // DTO diga a qué grupos pertenece sin consultar la base. Se relee al
+    // arrancar y cada vez que se crea, cambia o borra un grupo.
+    // ------------------------------------------------------------------
+
+    private volatile IReadOnlyList<SpeakerGroupDto> _groups = [];
+    private volatile IReadOnlyDictionary<int, string> _groupNames = new Dictionary<int, string>();
+
+    /// <summary>Los grupos con sus integrantes (copia en memoria).</summary>
+    public IReadOnlyList<SpeakerGroupDto> Groups => _groups;
+
+    /// <summary>Grupos del parlante unidos por coma; null si no está en ninguno.</summary>
+    public string? GroupsOf(int speakerId) => _groupNames.GetValueOrDefault(speakerId);
+
+    /// <summary>Integrantes del grupo con ese nombre (sin distinguir mayúsculas); vacío si no existe.</summary>
+    public IReadOnlyList<int> MembersOf(string groupName) =>
+        _groups.FirstOrDefault(g => string.Equals(g.Name, groupName.Trim(), StringComparison.OrdinalIgnoreCase))?.SpeakerIds ?? [];
+
+    public async Task ReloadGroupsAsync(CancellationToken ct = default)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+        var groups = await db.SpeakerGroups.AsNoTracking().Include(g => g.Members)
+            .OrderBy(g => g.Name).ToListAsync(ct);
+        _groups = groups.Select(g => new SpeakerGroupDto(g.Id, g.Name, g.Description,
+            g.Members.Select(m => m.SpeakerId).Order().ToList())).ToList();
+        _groupNames = groups.SelectMany(g => g.Members.Select(m => (m.SpeakerId, g.Name)))
+            .GroupBy(x => x.SpeakerId)
+            .ToDictionary(x => x.Key, x => string.Join(", ", x.Select(y => y.Name)));
+    }
+
     public SpeakerDto ToDto(Speaker s) => new(s.Id, s.Name, s.DriverKey, s.Host, s.Port, s.UseHttps, s.Username,
-        s.Model, s.SerialNumber, s.FirmwareVersion, s.GroupName, s.Enabled, s.Status, s.LastError, s.LastSeenAt, s.Volume,
+        s.Model, s.SerialNumber, s.FirmwareVersion, GroupsOf(s.Id), s.Enabled, s.Status, s.LastError, s.LastSeenAt, s.Volume,
         s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio, BusyOf(s.Id), s.CreatedAt, s.UpdatedAt,
         s.LocationId, Auth.LocationPaths.Of(s.LocationId), s.IsupDeviceId, s.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: s.DisabledByLicense,
         AgentId: s.AgentId,
@@ -98,6 +130,8 @@ public sealed class SpeakerService(
     protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         _stopping = stoppingToken;
+        try { await ReloadGroupsAsync(stoppingToken); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "No se pudieron leer los grupos de parlantes."); }
         // Un parlante ISUP que se conecta: si se agregó antes de conectarse, se completa (modelo y capacidades) y se sondea ya.
         isup.DeviceOnlineChanged += (isupId, online) =>
         {

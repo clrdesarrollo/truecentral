@@ -36,8 +36,8 @@ public class Speaker : ILocatable, IIsupEquipment
     /// <summary>SHA-256 del código de enrolamiento vigente (de un solo uso).</summary>
     public string? EnrollmentCodeHash { get; set; }
     public DateTime? EnrollmentExpiresAt { get; set; }
-    /// <summary>Grupo lógico (sector) para elegir varios parlantes de una vez; libre.</summary>
-    public string? GroupName { get; set; }
+    /// <summary>Grupos de parlantes a los que pertenece (puede estar en varios).</summary>
+    public List<SpeakerGroupMember> GroupMemberships { get; set; } = [];
 
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
@@ -67,4 +67,28 @@ public class Speaker : ILocatable, IIsupEquipment
     public int? Volume { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Grupo de parlantes ("Perímetro", "Bodega", "Todos"): para hablar o hacer
+/// sonar varios de una vez desde el Centro de mando, un tablero o una
+/// automatización. Un parlante puede estar en varios grupos.
+/// </summary>
+public class SpeakerGroup
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public string? Description { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public List<SpeakerGroupMember> Members { get; set; } = [];
+}
+
+/// <summary>Parlante de un grupo.</summary>
+public class SpeakerGroupMember
+{
+    public int SpeakerGroupId { get; set; }
+    public SpeakerGroup? Group { get; set; }
+    public int SpeakerId { get; set; }
+    public Speaker? Speaker { get; set; }
 }

@@ -516,6 +516,10 @@ public sealed class ApiClient
     public Task<List<SpeakerDto>> GetSpeakersAsync(CancellationToken ct = default) =>
         SendAsync<List<SpeakerDto>>(HttpMethod.Get, "/api/speakers", null, ct);
 
+    /// <summary>Grupos de parlantes con sus integrantes.</summary>
+    public Task<List<SpeakerGroupDto>> GetSpeakerGroupsAsync(CancellationToken ct = default) =>
+        SendAsync<List<SpeakerGroupDto>>(HttpMethod.Get, "/api/speakers/groups", null, ct);
+
     /// <summary>Biblioteca de audios guardada en el propio parlante.</summary>
     public Task<List<SpeakerAudioItemDto>> GetSpeakerLibraryAsync(int speakerId, CancellationToken ct = default) =>
         SendAsync<List<SpeakerAudioItemDto>>(HttpMethod.Get, $"/api/speakers/{speakerId}/library", null, ct);

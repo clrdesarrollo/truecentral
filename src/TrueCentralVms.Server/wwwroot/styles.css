@@ -1790,6 +1790,15 @@ label.with-ico .ico { width: 14px; height: 14px; color: var(--muted); }
 .res-filters input:focus, .res-filters select:focus { border-color: var(--accent); }
 .res-filters input { flex: 1; min-width: 220px; }
 .res-filters select { max-width: 260px; }
+.res-filters .ui-switch { align-self: center; }
+/* Interruptor (checkbox con forma de switch): <label class="ui-switch"><input type="checkbox"><span class="ui-switch-track"></span>texto</label> */
+.ui-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text); user-select: none; }
+.ui-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.ui-switch-track { position: relative; flex: none; width: 34px; height: 18px; border-radius: 999px; background: var(--border); transition: background .15s; }
+.ui-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
+.ui-switch input:checked + .ui-switch-track { background: var(--accent); }
+.ui-switch input:checked + .ui-switch-track::after { transform: translateX(16px); }
+.ui-switch input:focus-visible + .ui-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .res-bulk {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 10px;
   background: rgba(var(--accent-rgb), .08); border: 1px solid rgba(var(--accent-rgb), .35); border-radius: 8px; font-size: 13px;
@@ -1816,6 +1825,12 @@ a.res-source .res-ico { color: var(--muted); }
 .res-eq-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; font-size: 13.5px; }
 .res-eq-row b { font-weight: 600; }
 .res-eq-row .muted { flex: 1; }
+/* Parlantes IP: grupos de parlantes. */
+.sp-groups-head { display: flex; align-items: center; justify-content: space-between; margin: 22px 0 4px; }
+.sp-groups-head h3 { margin: 0; font-size: 15px; }
+.sp-groups-intro { margin: 0 0 10px; }
+.sp-groups-note { font-size: 12.5px; padding-top: 9px; }
+.sp-group-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
 /* Configuración → Tableros: listas y editor (grilla a la izquierda, buscador a la derecha). */
 .bd-intro { margin-bottom: 14px; }
 .bd-h { margin: 18px 0 8px; font-size: 15px; }

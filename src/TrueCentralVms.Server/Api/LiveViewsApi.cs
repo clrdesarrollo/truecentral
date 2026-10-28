@@ -28,11 +28,13 @@ public static class LiveViewsApi
         Results.Json(new { error = message }, statusCode: statusCode);
 
     /// <summary>Lo que necesita armar la respuesta: roles por id y páginas de la lista.</summary>
-    private sealed record Lookup(IReadOnlyDictionary<int, string> Roles, IReadOnlyDictionary<int, WebLink> Links);
+    private sealed record Lookup(IReadOnlyDictionary<int, string> Roles, IReadOnlyDictionary<int, WebLink> Links,
+        IReadOnlyDictionary<int, string> SpeakerGroups);
 
     private static async Task<Lookup> LookupAsync(VmsDbContext db, CancellationToken ct) => new(
         await db.Roles.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Name, ct),
-        await db.WebLinks.AsNoTracking().ToDictionaryAsync(l => l.Id, ct));
+        await db.WebLinks.AsNoTracking().ToDictionaryAsync(l => l.Id, ct),
+        await db.SpeakerGroups.AsNoTracking().ToDictionaryAsync(g => g.Id, g => g.Name, ct));
 
     private static Task<List<int>> MyRolesAsync(VmsDbContext db, SessionInfo session, CancellationToken ct) =>
         db.UserRoles.Where(r => r.UserId == session.UserId).Select(r => r.RoleId).ToListAsync(ct);
@@ -73,6 +75,10 @@ public static class LiveViewsApi
                     break;
                 case DashboardItemKinds.Card:
                     items.Add(new(item.CellIndex, 0, 0, item.Kind, null, item.Ref, item.Title));
+                    break;
+                case DashboardItemKinds.SpeakerGroup when item.RefId is { } groupId:
+                    if (lookup.SpeakerGroups.TryGetValue(groupId, out var groupName))
+                        items.Add(new(item.CellIndex, 0, 0, item.Kind, groupId, null, groupName));
                     break;
                 case DashboardItemKinds.Web when item.RefId is { } linkId:
                     if (lookup.Links.TryGetValue(linkId, out var link))
@@ -170,6 +176,13 @@ public static class LiveViewsApi
                     if (DashboardItemKinds.Cards.Contains(i.Ref ?? ""))
                         items.Add(new LiveViewItem { CellIndex = i.CellIndex, Kind = DashboardItemKinds.Card, Ref = i.Ref });
                     break;
+                case DashboardItemKinds.SpeakerGroup when i.RefId is { } groupId:
+                    if (await db.SpeakerGroups.Where(g => g.Id == groupId).Select(g => g.Name).FirstOrDefaultAsync(ct) is { } groupName)
+                        items.Add(new LiveViewItem
+                        {
+                            CellIndex = i.CellIndex, Kind = DashboardItemKinds.SpeakerGroup, RefId = groupId, Title = groupName,
+                        });
+                    break;
                 case DashboardItemKinds.Web when i.RefId is { } linkId:
                     if (knownLinks.TryGetValue(linkId, out var linkName))
                         items.Add(new LiveViewItem
@@ -229,6 +242,7 @@ public static class LiveViewsApi
             DashboardItemKinds.Resource => $"{g.Count()} recurso(s)",
             DashboardItemKinds.Card => $"{g.Count()} tarjeta(s)",
             DashboardItemKinds.Web => $"{g.Count()} página(s) web",
+            DashboardItemKinds.SpeakerGroup => $"{g.Count()} grupo(s) de parlantes",
             _ => $"{g.Count()} cámara(s)",
         });
         return string.Join(", ", parts.DefaultIfEmpty("sin cuadros"));
