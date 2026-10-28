@@ -72,7 +72,8 @@ public sealed class AccessControlService(
         d.LocationId,
         SupportsCardCapture(d.DriverKey),
         d.IsupDeviceId,
-        d.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: d.DisabledByLicense, HolidayNote: d.HolidayNote);
+        d.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: d.DisabledByLicense, HolidayNote: d.HolidayNote,
+        LiveEvents: d.LiveEvents);
 
     /// <summary>Puerta con su equipo, para el monitoreo en vivo y los niveles de acceso.</summary>
     public AccessDoorStateDto ToDoorDto(AccessDoor door)

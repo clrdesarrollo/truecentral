@@ -106,6 +106,15 @@ public class AccessDevice : IIsupEquipment
     /// </summary>
     public bool ClockAutoCorrect { get; set; } = true;
 
+    /// <summary>
+    /// Mantener una escucha de eventos en vivo con el equipo. Se apaga cuando
+    /// otro sistema necesita la suya y el equipo admite pocas (los faciales con
+    /// llamada de Hikvision, una sola: <c>deployExceedMax</c>), como el kiosco
+    /// del casino. Apagada, el historial se sigue leyendo cada 15 s: no se
+    /// pierde nada, solo llega con unos segundos de atraso.
+    /// </summary>
+    public bool LiveEvents { get; set; } = true;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

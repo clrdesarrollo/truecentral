@@ -258,6 +258,7 @@ public static class AccessApi
                 IsupKeyCiphertext = isupKey is null ? null : protector.Protect(isupKey),
                 LocationId = locationId,
                 Enabled = request.Enabled,
+                LiveEvents = request.LiveEvents ?? true,
             };
             if (info is not null)
             {
@@ -278,8 +279,8 @@ public static class AccessApi
                 detail: $"Agregó el equipo de control de acceso '{device.Name}' ({device.DriverKey}, {WhereOf(device)}, " +
                         (info is null ? "a la espera de que se conecte por ISUP" : $"{device.Model ?? "modelo desconocido"}") +
                         (device.LocationId is null ? "" : $", en {EquipmentLocation.Describe(device.LocationId)}") +
-                        $", {device.Doors.Count} puerta(s)).",
-                data: new { device.Host, device.Port, device.UseHttps, device.DriverKey, device.IsupDeviceId, device.Model, device.SerialNumber, device.LocationId });
+                        $", {device.Doors.Count} puerta(s)" + (device.LiveEvents ? "" : ", solo lectura del historial (sin escucha en vivo)") + ").",
+                data: new { device.Host, device.Port, device.UseHttps, device.DriverKey, device.IsupDeviceId, device.Model, device.SerialNumber, device.LocationId, device.LiveEvents });
             EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
@@ -352,6 +353,9 @@ public static class AccessApi
             if (locationId != previousLocation)
                 changes.Add(EquipmentLocation.Change(previousLocation, locationId));
             if (device.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
+            bool liveEvents = request.LiveEvents ?? device.LiveEvents;
+            if (device.LiveEvents != liveEvents)
+                changes.Add(liveEvents ? "escucha de eventos en vivo activada" : "escucha de eventos en vivo apagada (solo lectura del historial)");
 
             // La sesión cacheada del driver queda con las credenciales viejas.
             if (reachChanged) service.ForgetSessionOf(device);
@@ -367,6 +371,7 @@ public static class AccessApi
             if (!viaIsup) device.IsupKeyCiphertext = null;
             else if (isupKey is not null) device.IsupKeyCiphertext = protector.Protect(isupKey);
             device.Enabled = request.Enabled;
+            device.LiveEvents = liveEvents;
             device.UpdatedAt = DateTime.UtcNow;
             // Las puertas que estaban con el equipo lo siguen; las ubicadas aparte se quedan.
             var followers = EquipmentLocation.Follow(device.Doors, previousLocation, locationId);
