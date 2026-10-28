@@ -1811,6 +1811,14 @@ a.res-source .res-ico { color: var(--muted); }
 .res-loc-pick { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
 .res-loc-pick label { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13.5px; }
 .res-loc-pick label:hover { background: var(--panel-2); }
+/* «Una ubicación por equipo»: lo que haría, antes de hacerlo. */
+.res-eq-plan { margin-top: 8px; max-height: 40vh; }
+.res-eq-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; font-size: 13.5px; }
+.res-eq-row b { font-weight: 600; }
+.res-eq-row .muted { flex: 1; }
+/* Campo Ubicación: dónde crear la «Nueva, con el nombre del equipo». */
+.loc-new { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border); }
+.loc-new label { font-size: 12.5px; }
 @media (max-width: 900px) {
   .res-layout { grid-template-columns: 1fr; }
   .res-tree { position: static; max-height: none; }

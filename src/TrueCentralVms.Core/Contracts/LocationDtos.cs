@@ -78,6 +78,31 @@ public sealed record ResourceLocationRequest(int? LocationId, List<ResourceRef> 
 /// <summary>Resultado de ubicar recursos en bloque.</summary>
 public sealed record ResourceLocationResult(int Updated, string Message);
 
+/// <summary>
+/// La ubicación con ese nombre dentro de <paramref name="ParentId"/> (null = la
+/// raíz): la que ya existe o una nueva. Es lo que usa el alta de un equipo con
+/// «Nueva ubicación con el nombre del equipo».
+/// </summary>
+public sealed record LocationEnsureRequest(string Name, int? ParentId);
+
+/// <summary>La ubicación encontrada o creada.</summary>
+public sealed record LocationEnsureResult(int Id, bool Created, string Path);
+
+/// <summary>
+/// Ubica cada recurso en una ubicación con el nombre de su equipo (el grabador
+/// de un canal, la controladora de una puerta, el panel de un área; el equipo
+/// mismo si es un parlante, citófono, cerco o módulo de E/S), dentro de
+/// <paramref name="ParentId"/>. Con <paramref name="DryRun"/> solo dice qué haría.
+/// </summary>
+public sealed record ResourceEquipmentLocateRequest(int? ParentId, List<ResourceRef> Resources, bool DryRun = false);
+
+/// <summary>Una ubicación de <see cref="ResourceEquipmentLocateResult"/>: su
+/// nombre, si hay que crearla y cuántos recursos recibe.</summary>
+public sealed record EquipmentLocationPlan(string Name, bool Created, int Resources);
+
+/// <summary>Resultado (o vista previa) de ubicar por equipo.</summary>
+public sealed record ResourceEquipmentLocateResult(int Updated, string Message, List<EquipmentLocationPlan> Locations);
+
 // ---------------------------------------------------------------------------
 // Ficha del recurso: lo que el VMS sabe de un recurso más allá de lo que
 // informa su equipo. Pestañas General, Equipo, Cámaras asociadas,

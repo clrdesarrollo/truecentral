@@ -616,7 +616,7 @@ async function speakerModal(speaker) {
           <input id="sp-group" maxlength="64" value="${esc(speaker?.groupName ?? "")}" placeholder="Perímetro, Bodega…">
         </div>
       </div>
-      ${locationFieldHtml("sp-location", places, speaker?.locationId ?? null)}
+      ${locationFieldHtml("sp-location", places, speaker?.locationId ?? null, null, { equipment: true, isNew })}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="sp-driver">
@@ -754,6 +754,7 @@ async function speakerModal(speaker) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
+      await locationFieldCommit("sp-location", body);
       const saved = isNew ? await Api.post("/api/speakers", body) : await Api.put(`/api/speakers/${speaker.id}`, body);
       closeModal();
       // Un TrueCentral Speaker nuevo queda esperando su equipo: se muestra al tiro el código para enrolarlo.

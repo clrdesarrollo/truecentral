@@ -153,8 +153,14 @@ async function loadLocationChoices() {
   return out;
 }
 
-/** Campo "Ubicación" con el árbol indentado; "" = por ubicar. */
-function locationFieldHtml(id, choices, selectedId, hint) {
+/**
+ * Campo "Ubicación" con el árbol indentado; "" = por ubicar. En el alta y la
+ * edición de un equipo (equipment) ofrece además «Nueva, con el nombre del
+ * equipo» dentro de la ubicación que se elija (solo a quien administra
+ * Recursos); en el alta es la opción por omisión, así lo nuevo no se acumula
+ * en "Por ubicar". La crea locationFieldCommit al guardar.
+ */
+function locationFieldHtml(id, choices, selectedId, hint, { equipment = false, isNew = false } = {}) {
   if (!choices) {
     return `
       <div class="field">
@@ -162,22 +168,59 @@ function locationFieldHtml(id, choices, selectedId, hint) {
         <select id="${id}" data-keep="1" disabled><option>No se pudo leer el árbol: se conserva la actual</option></select>
       </div>`;
   }
+  const offerNew = equipment && Perms.can("resources.manage");
+  const startNew = offerNew && isNew;
+  const options = (selected) => choices.map((c) =>
+    `<option value="${c.id}" ${c.id === selected ? "selected" : ""}>${"   ".repeat(c.depth)}${esc(c.name)}</option>`).join("");
   return `
     <div class="field">
       <label for="${id}">Ubicación</label>
-      <select id="${id}">
+      <select id="${id}"${offerNew ? ` data-loc-new="${id}-new"` : ""}>
+        ${offerNew ? `<option value="new"${startNew ? " selected" : ""}>Nueva, con el nombre del equipo</option>` : ""}
         <option value="">Por ubicar</option>
-        ${choices.map((c) => `<option value="${c.id}" ${c.id === selectedId ? "selected" : ""}>${"\u00a0\u00a0\u00a0".repeat(c.depth)}${esc(c.name)}</option>`).join("")}
+        ${options(startNew ? null : selectedId)}
       </select>
+      ${offerNew ? `
+      <div class="loc-new" id="${id}-new"${startNew ? "" : " hidden"}>
+        <label for="${id}-parent">Dentro de</label>
+        <select id="${id}-parent">
+          <option value="">La raíz del árbol</option>
+          ${options(null)}
+        </select>
+        <div class="muted field-hint">Si ahí ya hay una ubicación con ese nombre, se usa esa.</div>
+      </div>` : ""}
       ${hint ? `<div class="muted field-hint">${esc(hint)}</div>` : ""}
     </div>`;
 }
 
-/** Lo que va al servidor: el id elegido, 0 = por ubicar, null = conservar la actual. */
+// «Nueva, con el nombre del equipo» muestra dónde crearla.
+document.addEventListener("change", (e) => {
+  const target = e.target.dataset?.locNew;
+  if (target) $("#" + target).hidden = e.target.value !== "new";
+});
+
+/**
+ * Lo que va al servidor: el id elegido, 0 = por ubicar, null = conservar la
+ * actual (también con «Nueva, con el nombre del equipo», hasta que
+ * locationFieldCommit la cree al guardar: probar la conexión no crea nada).
+ */
 function locationFieldValue(id) {
   const select = $("#" + id);
-  if (!select || select.dataset.keep) return null;
+  if (!select || select.dataset.keep || select.value === "new") return null;
   return select.value ? Number(select.value) : 0;
+}
+
+/**
+ * Justo antes de guardar el equipo: con «Nueva, con el nombre del equipo»,
+ * crea la ubicación con body.name (o toma la que ya se llama así en ese
+ * lugar) y deja su id en body.locationId.
+ */
+async function locationFieldCommit(id, body) {
+  const select = $("#" + id);
+  if (!select || select.value !== "new") return;
+  const parent = $(`#${id}-parent`)?.value;
+  const result = await Api.post("/api/locations/ensure", { name: body.name, parentId: parent ? Number(parent) : null });
+  body.locationId = result.id;
 }
 
 /**
@@ -1396,7 +1439,7 @@ async function deviceModal(device, prefill) {
         <input id="df-name" required maxlength="128" value="${esc(device?.name ?? seed.name ?? "")}" placeholder="NVR Bodega, Cámara acceso...">
       </div>
       ${locationFieldHtml("df-location", places, device?.locationId ?? null,
-        "Sus canales la heredan; los que ubique aparte en Recursos se quedan donde están.")}
+        "Sus canales la heredan; los que ubique aparte en Recursos se quedan donde están.", { equipment: true, isNew })}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="df-driver">
@@ -1591,6 +1634,7 @@ async function deviceModal(device, prefill) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
+      await locationFieldCommit("df-location", body);
       const result = isNew
         ? await Api.post("/api/devices", body)
         : await Api.put(`/api/devices/${device.id}`, body);

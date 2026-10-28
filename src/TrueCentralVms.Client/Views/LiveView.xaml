@@ -198,19 +198,8 @@
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
                 Visibility="{Binding IsTreeCollapsed, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
             <DockPanel>
-                <!-- Encabezado: el árbol agrupa por equipo o por ubicación (Recursos) -->
-                <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8">
-                    <Border DockPanel.Dock="Right" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                            CornerRadius="6" Padding="2">
-                        <StackPanel Orientation="Horizontal">
-                            <Button Style="{StaticResource SegmentButton}" Content="Equipo"
-                                    Tag="{Binding IsTreeByDevice}" Command="{Binding ShowTreeByDeviceCommand}"
-                                    ToolTip="Cámaras agrupadas por equipo (DVR, NVR, cámara)"/>
-                            <Button Style="{StaticResource SegmentButton}" Content="Ubicación"
-                                    Tag="{Binding IsTreeByLocation}" Command="{Binding ShowTreeByLocationCommand}"
-                                    ToolTip="Cámaras agrupadas por ubicación (sitio, edificio, sector…), como en Recursos del panel web"/>
-                        </StackPanel>
-                    </Border>
+                <!-- Encabezado: la lista va por ubicación, como Recursos del panel web -->
+                <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8" MinHeight="24">
                     <TextBlock Text="RECURSOS" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
                                Foreground="{StaticResource MutedBrush}"/>
                 </DockPanel>
@@ -606,22 +595,23 @@
                                 <StackPanel.ContextMenu>
                                     <ContextMenu Style="{StaticResource DarkContextMenu}">
                                         <MenuItem Header="Abrir sus cámaras" Click="OnLocationOpenCameras"/>
-                                        <Separator/>
+                                        <!-- "Sin ubicación" y sus equipos no son ubicaciones: sin órdenes -->
+                                        <Separator Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                         <MenuItem Header="Armar total sus áreas de alarma…" Click="OnLocationArmAway"
                                                   IsEnabled="{Binding CanCommand}" ToolTip="{Binding CommandHint}"
-                                                  ToolTipService.ShowOnDisabled="True"/>
+                                                  ToolTipService.ShowOnDisabled="True" Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                         <MenuItem Header="Armar parcial sus áreas de alarma…" Click="OnLocationArmStay"
                                                   IsEnabled="{Binding CanCommand}" ToolTip="{Binding CommandHint}"
-                                                  ToolTipService.ShowOnDisabled="True"/>
+                                                  ToolTipService.ShowOnDisabled="True" Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                         <MenuItem Header="Desarmar sus áreas de alarma…" Click="OnLocationDisarm"
                                                   IsEnabled="{Binding CanCommand}" ToolTip="{Binding CommandHint}"
-                                                  ToolTipService.ShowOnDisabled="True"/>
+                                                  ToolTipService.ShowOnDisabled="True" Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                     </ContextMenu>
                                 </StackPanel.ContextMenu>
                                 <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="12"
                                            Foreground="{StaticResource MutedBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
                                 <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
-                                <TextBlock Text="{Binding ChannelCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                <TextBlock Text="{Binding ItemCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
                                            Margin="7,0,0,0" VerticalAlignment="Center"/>
                             </StackPanel>
                         </HierarchicalDataTemplate>

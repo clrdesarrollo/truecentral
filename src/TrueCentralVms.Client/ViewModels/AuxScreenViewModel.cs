@@ -34,8 +34,6 @@ public partial class AuxScreenViewModel : ObservableObject
     public string WindowTitle => IsFleet ? "Flota en vivo" : $"Pantalla auxiliar {SlotNumber}";
     public string TreeCaption => IsFleet ? "VEHÍCULOS" : "RECURSOS";
     public string SearchHint => IsFleet ? "Buscar vehículo o cámara…" : "Buscar…";
-    /// <summary>El selector Equipo/Ubicación es del árbol del shell; en Flota no se ofrece.</summary>
-    public bool ShowTreeModeToggle => !IsFleet;
 
     private readonly ObservableCollection<DeviceNode> _fleetDevices = [];
     private string _fleetSearch = "";
@@ -61,12 +59,6 @@ public partial class AuxScreenViewModel : ObservableObject
             ApplyFleetFilter();
         }
     }
-
-    public bool IsTreeByDevice => IsFleet || _shell.IsTreeByDevice;
-    public bool IsTreeByLocation => !IsFleet && _shell.IsTreeByLocation;
-
-    [RelayCommand] private void ShowTreeByDevice() { if (!IsFleet) _shell.IsTreeByLocation = false; }
-    [RelayCommand] private void ShowTreeByLocation() { if (!IsFleet) _shell.IsTreeByLocation = true; }
 
     public ObservableCollection<VideoCellViewModel> Cells { get; } = [];
 
@@ -259,10 +251,7 @@ public partial class AuxScreenViewModel : ObservableObject
         if (IsFleet) return;   // Flota tiene su propio árbol y su propio buscador
         switch (e.PropertyName)
         {
-            case nameof(MainViewModel.TreeItems): OnPropertyChanged(nameof(TreeItems)); break;
             case nameof(MainViewModel.SearchText): OnPropertyChanged(nameof(SearchText)); break;
-            case nameof(MainViewModel.IsTreeByDevice): OnPropertyChanged(nameof(IsTreeByDevice)); break;
-            case nameof(MainViewModel.IsTreeByLocation): OnPropertyChanged(nameof(IsTreeByLocation)); break;
         }
     }
 

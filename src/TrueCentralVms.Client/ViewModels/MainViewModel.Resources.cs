@@ -7,19 +7,16 @@ namespace TrueCentralVms.Client.ViewModels;
 
 /// <summary>
 /// Centro de mando: la lista ya no es solo de cámaras. Los recursos de todo
-/// tipo que ve esta sesión (/api/resources, ya filtrado por alcance) se agrupan
-/// por tipo en el árbol por equipo y cuelgan de su ubicación en el árbol por
-/// ubicación. Cada uno se abre en un cuadro como su <see cref="CellPanel"/>.
+/// tipo que ve esta sesión (/api/resources, ya filtrado por alcance) cuelgan de
+/// su ubicación junto a las cámaras, y al final van las tarjetas de reporte.
+/// Cada uno se abre en un cuadro como su <see cref="CellPanel"/>.
 /// </summary>
 public partial class MainViewModel
 {
-    /// <summary>Grupos por tipo del árbol por equipo («Puertas», «Paneles de alarma»…).</summary>
+    /// <summary>Grupos que van al final de la lista, fuera de las ubicaciones (las «Tarjetas»).</summary>
     public ObservableCollection<ResourceGroupNode> ResourceGroups { get; } = [];
 
-    /// <summary>Lo que muestra el árbol por equipo: los equipos de video y, debajo, los grupos de recursos.</summary>
-    public ObservableCollection<object> DeviceTreeItems { get; } = [];
-
-    /// <summary>Recursos sueltos para el árbol por ubicación (sin cámaras ni zonas).</summary>
+    /// <summary>Recursos para el árbol por ubicación (sin cámaras ni zonas).</summary>
     private List<ResourceNode> _locatedResources = [];
 
     /// <summary>Tipos que se muestran y si los permisos de la sesión dejan verlos.</summary>
@@ -40,30 +37,10 @@ public partial class MainViewModel
         try { all = await _api.GetResourcesAsync(); }
         catch (ApiException) { all = []; } // servidor anterior o sin acceso: solo cámaras
 
-        var visible = all.Where(r => r.Enabled && ShowsKind(r.Kind)).ToList();
-        _locatedResources = visible.Select(ResourceNode.From).ToList();
-
-        ResourceGroups.Clear();
-        void Group(string title, ResourceKind kind, IEnumerable<ResourceNode> nodes)
-        {
-            var list = nodes.OrderBy(n => n.Name, NaturalOrder).ToList();
-            if (list.Count == 0) return;
-            var group = new ResourceGroupNode(title, ResourceNode.GlyphOf(kind));
-            foreach (var node in list) group.Children.Add(node);
-            ResourceGroups.Add(group);
-        }
-        Group("Puertas", ResourceKind.Door, visible.Where(r => r.Kind == ResourceKind.Door).Select(ResourceNode.From));
-        // Las áreas se agrupan en su panel: el cuadro muestra el panel entero.
-        Group("Paneles de alarma", ResourceKind.Partition, visible.Where(r => r.Kind == ResourceKind.Partition)
-            .GroupBy(r => r.SourceId)
-            .Select(g => new ResourceNode(ResourceKind.Partition, g.Key, g.First().Source,
-                $"{g.Count()} área(s)", null) { IsWholePanel = true }));
-        Group("Cercos eléctricos", ResourceKind.Fence, visible.Where(r => r.Kind == ResourceKind.Fence).Select(ResourceNode.From));
-        Group("Citófonos", ResourceKind.Intercom, visible.Where(r => r.Kind == ResourceKind.Intercom).Select(ResourceNode.From));
-        Group("Parlantes", ResourceKind.Speaker, visible.Where(r => r.Kind == ResourceKind.Speaker).Select(ResourceNode.From));
-        Group("Módulos de E/S", ResourceKind.IoModule, visible.Where(r => r.Kind == ResourceKind.IoModule).Select(ResourceNode.From));
+        _locatedResources = all.Where(r => r.Enabled && ShowsKind(r.Kind)).Select(ResourceNode.From).ToList();
 
         // Tarjetas de reporte: no son equipos, van siempre al final y en su orden.
+        ResourceGroups.Clear();
         var cards = new ResourceGroupNode("Tarjetas", "\uE9D2");
         cards.Children.Add(ResourceNode.Card(CardKinds.Equipment, "Estado de los equipos", "\uE9D9",
             "En línea por tipo de equipo y los que están sin conexión"));
@@ -79,10 +56,6 @@ public partial class MainViewModel
             cards.Children.Add(ResourceNode.Card(CardKinds.Access, "Últimos accesos", "\uE8D7",
                 "Pasos por todas las puertas en vivo"));
         ResourceGroups.Add(cards);
-
-        DeviceTreeItems.Clear();
-        foreach (var device in Devices) DeviceTreeItems.Add(device);
-        foreach (var group in ResourceGroups) DeviceTreeItems.Add(group);
     }
 
     /// <summary>Buscador en los grupos de recursos (nombre, detalle o grupo).</summary>
@@ -115,7 +88,7 @@ public partial class MainViewModel
     private CellPanel? CreateResourcePanel(ResourceNode node) => node.Kind switch
     {
         ResourceKind.Door => new DoorCellPanel(_api, _hub, node),
-        ResourceKind.Partition => new AlarmCellPanel(_api, Alarms, node.AlarmPanelId, node.IsWholePanel ? node.Name : node.Detail ?? node.Name),
+        ResourceKind.Partition => new AlarmCellPanel(_api, Alarms, node.AlarmPanelId, node.IsWholePanel ? node.Name : node.Equipment ?? node.Detail ?? node.Name),
         ResourceKind.Fence => new CercoCellPanel(Cerco, node.Id, node.Name),
         ResourceKind.Intercom => new IntercomCellPanel(_api, Intercom, OpenIntercomWindow, node.Id, node.Name),
         ResourceKind.Speaker => new SpeakerCellPanel(Speakers, node.Id, node.Name),

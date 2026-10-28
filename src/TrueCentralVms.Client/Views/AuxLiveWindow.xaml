@@ -158,20 +158,8 @@
                         BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
                         Visibility="{Binding IsTreeCollapsed, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
                     <DockPanel>
-                        <!-- Modo del árbol y buscador: estado compartido con la ventana principal -->
-                        <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8">
-                            <Border DockPanel.Dock="Right" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                                    CornerRadius="6" Padding="2"
-                                    Visibility="{Binding ShowTreeModeToggle, Converter={x:Static vm:BoolToVisibility.Instance}}">
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Style="{StaticResource SegmentButton}" Content="Equipo"
-                                            Tag="{Binding IsTreeByDevice}" Command="{Binding ShowTreeByDeviceCommand}"
-                                            ToolTip="Cámaras agrupadas por equipo (DVR, NVR, cámara)"/>
-                                    <Button Style="{StaticResource SegmentButton}" Content="Ubicación"
-                                            Tag="{Binding IsTreeByLocation}" Command="{Binding ShowTreeByLocationCommand}"
-                                            ToolTip="Cámaras agrupadas por ubicación (sitio, edificio, sector…)"/>
-                                </StackPanel>
-                            </Border>
+                        <!-- Encabezado y buscador: estado compartido con la ventana principal -->
+                        <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8" MinHeight="24">
                             <TextBlock Text="{Binding TreeCaption}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
                                        Foreground="{StaticResource MutedBrush}"/>
                         </DockPanel>
@@ -232,7 +220,7 @@
                                         <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="12"
                                                    Foreground="{StaticResource MutedBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
                                         <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{Binding ChannelCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                        <TextBlock Text="{Binding ItemCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
                                                    Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </HierarchicalDataTemplate>

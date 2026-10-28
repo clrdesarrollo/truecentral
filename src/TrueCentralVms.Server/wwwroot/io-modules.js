@@ -258,7 +258,7 @@ async function ioModuleModal(module) {
         <label>Nombre</label>
         <input id="io-name" required maxlength="128" value="${esc(module?.name ?? "")}" placeholder="Gabinete acceso vehicular">
       </div>
-      ${locationFieldHtml("io-location", places, module?.locationId ?? null)}
+      ${locationFieldHtml("io-location", places, module?.locationId ?? null, null, { equipment: true, isNew })}
       <div class="form-grid">
         <div class="field">
           <label>Marca / protocolo</label>
@@ -416,6 +416,7 @@ async function ioModuleModal(module) {
     button.textContent = "Validando…";
     try {
       const body = readForm();
+      await locationFieldCommit("io-location", body);
       const r = isNew ? await Api.post("/api/io/modules", body) : await Api.put(`/api/io/modules/${module.id}`, body);
       closeModal();
       toast(r.warning ?? (isNew ? "Módulo agregado y validado." : "Módulo actualizado."), false);

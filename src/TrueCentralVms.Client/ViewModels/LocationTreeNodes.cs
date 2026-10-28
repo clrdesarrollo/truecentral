@@ -5,17 +5,25 @@ using TrueCentralVms.Core.Contracts;
 namespace TrueCentralVms.Client.ViewModels;
 
 /// <summary>
-/// Nodo del árbol "por ubicación" (página Recursos del servidor): sus hijos son
-/// sububicaciones y cámaras. Las cámaras son los MISMOS <see cref="ChannelNode"/>
-/// del árbol por equipo, así que el estado en línea, la marca ▶ de "en vivo" y
-/// la selección se comparten entre los dos árboles.
+/// Nodo del árbol por ubicación (página Recursos del servidor): sus hijos son
+/// sububicaciones, cámaras y los demás recursos. Las cámaras son los MISMOS
+/// <see cref="ChannelNode"/> de <see cref="MainViewModel.Devices"/>, así que el
+/// estado en línea, la marca ▶ de "en vivo" y la selección se comparten entre
+/// el árbol de Vista en vivo y el de Reproducción.
 /// </summary>
-public sealed partial class LocationNode(LocationDto? location) : ObservableObject
+/// <param name="location">null = nodo "Sin ubicación" o, con
+/// <paramref name="equipment"/>, un equipo dentro de él.</param>
+/// <param name="equipment">Nombre del equipo cuyos recursos sin ubicar agrupa
+/// (dentro de "Sin ubicación", para que no sea una lista plana).</param>
+public sealed partial class LocationNode(LocationDto? location, string? equipment = null) : ObservableObject
 {
-    /// <summary>null = nodo "Sin ubicación" (las cámaras que nadie ubicó todavía).</summary>
+    /// <summary>null = nodo "Sin ubicación" (lo que nadie ubicó todavía) o un equipo dentro de él.</summary>
     public LocationDto? Location { get; } = location;
 
-    public string Header => Location?.Name ?? "Sin ubicación";
+    /// <summary>Agrupa lo sin ubicar de un equipo (no es una ubicación).</summary>
+    public bool IsEquipment => equipment is not null;
+
+    public string Header => Location?.Name ?? equipment ?? "Sin ubicación";
 
     /// <summary>Es una ubicación de verdad (no el nodo "Sin ubicación"): admite órdenes.</summary>
     public bool IsRealLocation => Location is not null;
@@ -40,7 +48,7 @@ public sealed partial class LocationNode(LocationDto? location) : ObservableObje
     }
 
     /// <summary>Glifo Segoe MDL2 del tipo de ubicación.</summary>
-    public string Glyph => Location?.Kind switch
+    public string Glyph => IsEquipment ? "\uE7F4" : Location?.Kind switch
     {
         LocationKind.Site => "\uE707",
         LocationKind.Building => "\uEC06",
@@ -75,7 +83,14 @@ public sealed partial class LocationNode(LocationDto? location) : ObservableObje
     /// <summary>Cámaras contando las sububicaciones (lo fija quien arma el árbol).</summary>
     public int ChannelCount { get; internal set; }
 
-    public string ToolTipText => ChannelCount == 1
-        ? "Doble clic para abrir su cámara"
-        : $"Doble clic para abrir sus {ChannelCount} cámaras";
+    /// <summary>Recursos de todo tipo contando las sububicaciones (el número
+    /// junto al nombre, como en Recursos del panel web).</summary>
+    public int ItemCount => Children.Sum(c => c is LocationNode location ? location.ItemCount : 1);
+
+    public string ToolTipText => ChannelCount switch
+    {
+        0 => "Sin cámaras: arrastre sus recursos a un cuadro",
+        1 => "Doble clic para abrir su cámara",
+        _ => $"Doble clic para abrir sus {ChannelCount} cámaras",
+    };
 }

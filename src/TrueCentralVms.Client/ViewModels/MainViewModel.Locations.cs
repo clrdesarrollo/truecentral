@@ -1,5 +1,4 @@
 using TrueCentralVms.Client.Views;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -12,14 +11,13 @@ using TrueCentralVms.Core.Contracts;
 namespace TrueCentralVms.Client.ViewModels;
 
 /// <summary>
-/// Árbol de cámaras "por ubicación": el mismo inventario, ordenado según la
-/// página Recursos del servidor (sitio → edificio → piso → sector → punto) en
-/// vez de por equipo. Lo comparten Vista en vivo, Reproducción y las pantallas
-/// auxiliares; el modo elegido se recuerda en client.json.
+/// La lista de recursos ordenada según la página Recursos del servidor (sitio →
+/// edificio → piso → sector → punto). La comparten Vista en vivo, Reproducción
+/// (solo cámaras) y las pantallas auxiliares.
 /// </summary>
 public partial class MainViewModel
 {
-    /// <summary>Raíces del árbol por ubicación ("Sin ubicación" al final, si hace falta).</summary>
+    /// <summary>Raíces del árbol de la Vista en vivo ("Sin ubicación" al final, si hace falta).</summary>
     public ObservableCollection<LocationNode> LocationRoots { get; } = [];
 
     /// <summary>Alcance por ubicación de esta sesión, para el menú del usuario (null = sin restricción).</summary>
@@ -61,48 +59,50 @@ public partial class MainViewModel
     private void OnOperableChanged()
     {
         UpdatePtzPanel();
-        foreach (var root in LocationRoots) root.RefreshOperable();
+        foreach (var root in LocationRoots.Concat(PlaybackTreeItems)) root.RefreshOperable();
     }
 
-    /// <summary>true = los árboles de cámaras agrupan por ubicación; false = por equipo.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsTreeByDevice), nameof(TreeItems))]
-    private bool _isTreeByLocation;
+    /// <summary>
+    /// La lista de la Vista en vivo y de las pantallas auxiliares: las
+    /// ubicaciones con sus cámaras y demás recursos, "Sin ubicación" (agrupado
+    /// por equipo) y, al final, las tarjetas de reporte. Ya no hay árbol "por
+    /// equipo": cada equipo se ubica al darlo de alta (o queda en una ubicación
+    /// con su nombre desde Recursos).
+    /// </summary>
+    public ObservableCollection<object> TreeItems { get; } = [];
 
-    public bool IsTreeByDevice => !IsTreeByLocation;
-
-    /// <summary>Lo que muestran los árboles de cámaras según el modo elegido.</summary>
-    public IEnumerable TreeItems => IsTreeByLocation ? LocationRoots : DeviceTreeItems;
-
-    [RelayCommand]
-    private void ShowTreeByDevice() => IsTreeByLocation = false;
-
-    [RelayCommand]
-    private void ShowTreeByLocation() => IsTreeByLocation = true;
-
-    partial void OnIsTreeByLocationChanged(bool value)
-    {
-        _settings.TreeByLocation = value;
-        _settings.Save();
-        ApplySearchFilter(); // el texto del buscador se vuelve a aplicar con el criterio del otro árbol
-    }
+    /// <summary>Árbol de Reproducción: las mismas ubicaciones, solo con cámaras.</summary>
+    public ObservableCollection<LocationNode> PlaybackTreeItems { get; } = [];
 
     /// <summary>Orden en que lo lee una persona: "Cámara 2" antes que "Cámara 10".</summary>
     private static readonly StringComparer NaturalOrder =
         StringComparer.Create(CultureInfo.CurrentCulture, CompareOptions.IgnoreCase | CompareOptions.NumericOrdering);
 
-    /// <summary>
-    /// Rehace el árbol por ubicación con los canales YA cargados en
-    /// <see cref="Devices"/>: los nodos de cámara son los mismos objetos. Las
-    /// ubicaciones sin ninguna cámara en su subárbol no se muestran (este árbol
-    /// es para ver video); las cámaras sin ubicación van a "Sin ubicación".
-    /// </summary>
+    /// <summary>Rehace los árboles con los canales YA cargados en <see cref="Devices"/>
+    /// y los recursos de <see cref="LoadResourcesAsync"/>.</summary>
     private async Task LoadLocationTreeAsync()
     {
         List<LocationDto> locations;
         try { locations = await _api.GetLocationsAsync(); }
         catch (ApiException) { locations = []; } // sin ubicaciones (o servidor anterior): todo queda "Sin ubicación"
 
+        Fill(LocationRoots, locations, _locatedResources);
+        Fill(PlaybackTreeItems, locations, []);
+        TreeItems.Clear();
+        foreach (var root in LocationRoots) TreeItems.Add(root);
+        foreach (var group in ResourceGroups) TreeItems.Add(group);
+        ApplySearchFilter(); // el texto del buscador vale también para lo recién cargado
+    }
+
+    /// <summary>
+    /// Arma un árbol: los nodos de cámara son los mismos objetos de
+    /// <see cref="Devices"/>. Las ubicaciones sin nada en su subárbol no se
+    /// muestran; lo que nadie ubicó va a "Sin ubicación", agrupado por su
+    /// equipo (un parlante, citófono o cerco es el equipo mismo y va suelto).
+    /// </summary>
+    private void Fill(ObservableCollection<LocationNode> target, List<LocationDto> locations,
+        IReadOnlyList<ResourceNode> resources)
+    {
         var nodes = locations.ToDictionary(l => l.Id, l => new LocationNode(l));
         var roots = new List<LocationNode>();
         foreach (var location in locations.OrderBy(l => l.Name, NaturalOrder))
@@ -114,30 +114,47 @@ public partial class MainViewModel
                 roots.Add(node);
         }
 
-        var unassigned = new LocationNode(null);
+        var equipment = new Dictionary<string, LocationNode>(StringComparer.OrdinalIgnoreCase);
+        LocationNode EquipmentNode(string name)
+        {
+            if (!equipment.TryGetValue(name, out var node)) equipment[name] = node = new LocationNode(null, name);
+            return node;
+        }
+        var loose = new List<ResourceNode>();
+
         foreach (var channel in Devices.SelectMany(d => d.Channels).OrderBy(c => c.Header, NaturalOrder))
         {
             if (channel.Channel.LocationId is { } id && nodes.TryGetValue(id, out var owner))
                 owner.Children.Add(channel);
             else
-                unassigned.Children.Add(channel);
+                EquipmentNode(channel.Device.Name).Children.Add(channel);
         }
         // Centro de mando: puertas, áreas, cercos… junto a las cámaras de su ubicación.
-        foreach (var resource in _locatedResources.OrderBy(r => r.Kind).ThenBy(r => r.Name, NaturalOrder))
+        foreach (var resource in resources.OrderBy(r => r.Kind).ThenBy(r => r.Name, NaturalOrder))
         {
             if (resource.LocationId is { } id && nodes.TryGetValue(id, out var owner))
                 owner.Children.Add(resource);
+            else if (resource.Equipment is { } name)
+                EquipmentNode(name).Children.Add(resource);
             else
-                unassigned.Children.Add(resource);
+                loose.Add(resource);
         }
 
-        LocationRoots.Clear();
+        target.Clear();
         foreach (var root in roots)
-            if (Prune(root)) LocationRoots.Add(root);
-        unassigned.ChannelCount = unassigned.Children.OfType<ChannelNode>().Count();
-        if (unassigned.Children.Count > 0) LocationRoots.Add(unassigned);
+            if (Prune(root)) target.Add(root);
 
-        // Cuenta las cámaras de cada subárbol y quita las ramas sin ninguna.
+        var unassigned = new LocationNode(null);
+        foreach (var node in equipment.Values.OrderBy(n => n.Header, NaturalOrder))
+        {
+            node.ChannelCount = node.AllChannels().Count();
+            unassigned.Children.Add(node);
+        }
+        foreach (var resource in loose) unassigned.Children.Add(resource);
+        unassigned.ChannelCount = unassigned.AllChannels().Count();
+        if (unassigned.Children.Count > 0) target.Add(unassigned);
+
+        // Cuenta las cámaras de cada subárbol y quita las ramas sin nada.
         static bool Prune(LocationNode node)
         {
             foreach (var child in node.Children.OfType<LocationNode>().ToList())
@@ -150,11 +167,11 @@ public partial class MainViewModel
             node.Children.OfType<ResourceNode>().Any() || node.Children.OfType<LocationNode>().Any(HasResources);
     }
 
-    /// <summary>Buscador en el árbol por ubicación: una cámara se ve si calza su
-    /// nombre, el de su equipo o el de alguna ubicación que la contiene.</summary>
+    /// <summary>Buscador en los árboles por ubicación: una cámara se ve si calza
+    /// su nombre, el de su equipo o el de alguna ubicación que la contiene.</summary>
     private void ApplyLocationSearchFilter(string text)
     {
-        foreach (var root in LocationRoots) Filter(root, ancestorMatch: false);
+        foreach (var root in LocationRoots.Concat(PlaybackTreeItems)) Filter(root, ancestorMatch: false);
 
         bool Filter(LocationNode node, bool ancestorMatch)
         {

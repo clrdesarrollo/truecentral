@@ -182,6 +182,27 @@ public static class LocationsApi
             return Results.Ok(ToDto(location, 0));
         });
 
+        // La ubicación con ese nombre en esa rama: la que hay o una nueva. El
+        // alta de un equipo con «Nueva ubicación con el nombre del equipo» pasa
+        // por aquí antes de guardarlo (repetir el alta no la duplica).
+        app.MapPost("/api/locations/ensure", async (HttpContext ctx, LocationEnsureRequest request, VmsDbContext db,
+            IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
+            if (Validate(new LocationSaveRequest(request.Name ?? "", LocationKind.Sector, request.ParentId)) is { } invalid)
+                return Error(invalid);
+
+            var all = await db.Locations.AsNoTracking().ToListAsync(ct);
+            var byId = all.ToDictionary(l => l.Id);
+            if (request.ParentId is { } parentId && !byId.ContainsKey(parentId))
+                return Error("La ubicación superior ya no existe.", StatusCodes.Status404NotFound);
+            var (location, created) = await EnsureLocationAsync(ctx, db, audit, all, byId,
+                request.Name!.Trim(), request.ParentId, ct);
+            if (location is null) return Error($"El árbol admite hasta {MaxDepth} niveles.");
+            if (created) await AnnounceAsync(ctx, hub, ct);
+            return Results.Ok(new LocationEnsureResult(location.Id, created, PathOf(location.Id, byId)));
+        });
+
         // Modifica sus datos y, si cambia ParentId, la mueve con todo su contenido.
         app.MapPut("/api/locations/{id:int}", async (HttpContext ctx, int id, LocationSaveRequest request,
             VmsDbContext db, IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
@@ -453,5 +474,140 @@ public static class LocationsApi
                 ? $"{changed.Count} recurso(s) ubicado(s) en {path}."
                 : $"{changed.Count} recurso(s) quedaron por ubicar."));
         });
+
+        // Una ubicación por equipo: cada recurso va a la ubicación con el nombre
+        // de su equipo dentro de ParentId (la que hay o una nueva), y el equipo
+        // sin ubicación queda ahí también, para que lo que descubra después la herede.
+        app.MapPost("/api/resources/locate-by-equipment", async (HttpContext ctx, ResourceEquipmentLocateRequest request,
+            VmsDbContext db, IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
+            if (request.Resources is not { Count: > 0 }) return Error("No se indicó ningún recurso.");
+            if (request.Resources.Count > MaxBatch)
+                return Error($"Demasiados recursos en una sola operación (máximo {MaxBatch}).");
+
+            var all = await db.Locations.AsNoTracking().ToListAsync(ct);
+            var byId = all.ToDictionary(l => l.Id);
+            if (request.ParentId is { } parentId && !byId.ContainsKey(parentId))
+                return Error("La ubicación superior ya no existe.", StatusCodes.Status404NotFound);
+            if (DepthOf(request.ParentId, byId) + 1 > MaxDepth)
+                return Error($"El árbol admite hasta {MaxDepth} niveles.");
+
+            var wanted = request.Resources.Select(r => ResourceCatalog.Key(r.Kind, r.Id)).ToHashSet();
+            var resources = (await ResourceCatalog.ListAsync(db, new ResourceCatalog.Filter(), ct))
+                .Where(r => wanted.Contains(ResourceCatalog.Key(r.Kind, r.Id)))
+                .ToList();
+            if (resources.Count == 0) return Error("Los recursos marcados ya no existen: recargue la página.");
+
+            // Dos equipos que se llaman igual comparten la ubicación.
+            var groups = resources
+                .GroupBy(EquipmentNameOf, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var plan = groups.Select(g => new EquipmentLocationPlan(g.Key,
+                !NameTaken(all, request.ParentId, g.Key, null), g.Count())).ToList();
+            string parentPath = PathOf(request.ParentId, byId);
+            int toCreate = plan.Count(p => p.Created);
+            if (request.DryRun)
+                return Results.Ok(new ResourceEquipmentLocateResult(0,
+                    $"{resources.Count} recurso(s) de {groups.Count} equipo(s) irían a una ubicación con el nombre " +
+                    $"de su equipo en {parentPath}" + (toCreate > 0 ? $" ({toCreate} nueva(s))." : "."), plan));
+
+            int updated = 0;
+            foreach (var group in groups)
+            {
+                var (location, _) = await EnsureLocationAsync(ctx, db, audit, all, byId, group.Key, request.ParentId, ct);
+                if (location is null) continue; // solo pasa si el árbol cambió entretanto
+                var changed = await ResourceCatalog.SetLocationAsync(db, location.Id,
+                    group.Select(r => new ResourceRef(r.Kind, r.Id)), ct);
+                await LocateEquipmentAsync(db, group, location.Id, ct);
+                await db.SaveChangesAsync(ct);
+                if (changed.Count == 0) continue;
+                updated += changed.Count;
+
+                string path = PathOf(location.Id, byId);
+                string names = string.Join(", ", changed.Take(10).Select(c => $"\"{c.Name}\"")) +
+                               (changed.Count > 10 ? $" y {changed.Count - 10} más" : "");
+                await audit.LogAsync(ctx, "locations", "resources-located",
+                    targetType: "location", targetId: location.Id.ToString(), targetName: path,
+                    detail: $"Ubicó {ResourceCatalog.Summarize(changed.Select(c => c.Kind))} del equipo " +
+                            $"'{group.Key}' en {path}: {names}.",
+                    data: new { resources = changed.Select(c => ResourceCatalog.Key(c.Kind, c.Id)).ToList() });
+            }
+            await AnnounceAsync(ctx, hub, ct);
+            return Results.Ok(new ResourceEquipmentLocateResult(updated,
+                $"{updated} recurso(s) ubicado(s) en {groups.Count} ubicación(es) con el nombre de su equipo" +
+                (toCreate > 0 ? $" ({toCreate} nueva(s))." : "."), plan));
+        });
+    }
+
+    /// <summary>
+    /// El equipo de un recurso, para «una ubicación por equipo»: el grabador de
+    /// un canal, la controladora de una puerta, el panel de un área o zona; el
+    /// recurso mismo si es el equipo (parlante, citófono, cerco, módulo de E/S).
+    /// </summary>
+    private static string EquipmentNameOf(ResourceDto resource)
+    {
+        string name = resource.Kind is ResourceKind.Camera or ResourceKind.Door
+            or ResourceKind.Partition or ResourceKind.Zone ? resource.Source : resource.Name;
+        name = name.Trim();
+        return name.Length == 0 ? "(sin nombre)" : name.Length > 128 ? name[..128] : name;
+    }
+
+    /// <summary>
+    /// La ubicación <paramref name="name"/> dentro de <paramref name="parentId"/>:
+    /// la que ya existe (sin distinguir mayúsculas) o una nueva de tipo sector,
+    /// que se guarda y queda en la bitácora. Mantiene al día
+    /// <paramref name="all"/> y <paramref name="byId"/>. Null si el árbol ya
+    /// no admite otro nivel ahí.
+    /// </summary>
+    private static async Task<(Location? Location, bool Created)> EnsureLocationAsync(HttpContext ctx,
+        VmsDbContext db, AuditService audit, List<Location> all, Dictionary<int, Location> byId,
+        string name, int? parentId, CancellationToken ct)
+    {
+        var existing = all.FirstOrDefault(l => l.ParentId == parentId &&
+                                              string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null) return (existing, false);
+        if (DepthOf(parentId, byId) + 1 > MaxDepth) return (null, false);
+
+        var location = new Location { ParentId = parentId, Name = name, Kind = LocationKind.Sector };
+        db.Locations.Add(location);
+        await db.SaveChangesAsync(ct);
+        all.Add(location);
+        byId[location.Id] = location;
+        await audit.LogAsync(ctx, "locations", "location-created",
+            targetType: "location", targetId: location.Id.ToString(), targetName: location.Name,
+            detail: $"Creó la ubicación \"{location.Name}\" ({KindLabel(location.Kind)}) en {PathOf(parentId, byId)} " +
+                    "con el nombre del equipo.");
+        return (location, true);
+    }
+
+    /// <summary>
+    /// El grabador, la controladora o el panel de estos recursos queda en la
+    /// ubicación si no tenía: así heredan esa ubicación los canales, puertas o
+    /// áreas que descubra después. No guarda.
+    /// </summary>
+    private static async Task LocateEquipmentAsync(VmsDbContext db, IEnumerable<ResourceDto> resources,
+        int locationId, CancellationToken ct)
+    {
+        foreach (var module in resources.GroupBy(r => r.SourceModule))
+        {
+            var ids = module.Select(r => r.SourceId).Distinct().ToList();
+            switch (module.Key)
+            {
+                case "devices":
+                    foreach (var d in await db.Devices.Where(d => ids.Contains(d.Id) && d.LocationId == null).ToListAsync(ct))
+                        d.LocationId = locationId;
+                    break;
+                case "access":
+                    foreach (var d in await db.AccessDevices.Where(d => ids.Contains(d.Id) && d.LocationId == null).ToListAsync(ct))
+                        d.LocationId = locationId;
+                    break;
+                case "alarm-panels":
+                    foreach (var p in await db.AlarmPanels.Where(p => ids.Contains(p.Id) && p.LocationId == null).ToListAsync(ct))
+                        p.LocationId = locationId;
+                    break;
+            }
+        }
     }
 }

@@ -141,9 +141,6 @@ public sealed class ClientSettings
     public string? MicrophoneDevice { get; set; }
     /// <summary>Tono de apertura (dos pitidos cortos) antes de la voz al hablar por los parlantes IP.</summary>
     public bool TalkPreTone { get; set; } = true;
-    /// <summary>Árbol de cámaras de Vista en vivo y Reproducción: true = por
-    /// ubicación (Recursos del servidor), false = por equipo.</summary>
-    public bool TreeByLocation { get; set; }
     /// <summary>
     /// Al iniciar sesión, volver a abrir las cámaras de la última sesión (grilla
     /// principal y pantallas auxiliares). Sirve para que un cierre inesperado —o

@@ -32,7 +32,12 @@ public sealed partial class ResourceNode : ObservableObject
     /// <summary>Las puertas suelen llamarse igual en cada equipo («Puerta 1»): su detalle es el equipo.</summary>
     public static ResourceNode From(ResourceDto dto) =>
         new(dto.Kind, dto.Id, dto.Name, dto.Kind == ResourceKind.Door ? dto.Source : dto.Detail,
-            dto.LocationId, dto.SourceId, dto.Health, dto.State);
+            dto.LocationId, dto.SourceId, dto.Health, dto.State)
+        {
+            // Puertas y áreas son parte de un equipo; un parlante, citófono,
+            // cerco o módulo de E/S es el equipo mismo.
+            Equipment = dto.Kind is ResourceKind.Door or ResourceKind.Partition or ResourceKind.Zone ? dto.Source : null,
+        };
 
     public ResourceKind Kind { get; }
 
@@ -46,6 +51,10 @@ public sealed partial class ResourceNode : ObservableObject
     public string Name { get; }
     public string? Detail { get; }
     public int? LocationId { get; }
+
+    /// <summary>Equipo del que es parte (controladora de una puerta, panel de
+    /// un área); null si el recurso es el equipo mismo.</summary>
+    public string? Equipment { get; init; }
 
     /// <summary>Clave de la tarjeta (<see cref="CardKinds"/>); null = es un equipo.</summary>
     public string? CardKind { get; init; }

@@ -318,7 +318,7 @@ async function accessDeviceModal(device, prefill) {
         <input id="ac-name" required maxlength="128" value="${esc(device?.name ?? seed.name ?? "")}" placeholder="Portería principal, Torniquete casino…">
       </div>
       ${locationFieldHtml("ac-location", places, device?.locationId ?? null,
-        "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.")}
+        "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.", { equipment: true, isNew })}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="ac-driver">
@@ -398,6 +398,7 @@ async function accessDeviceModal(device, prefill) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
+      await locationFieldCommit("ac-location", body);
       const saved = isNew ? await Api.post("/api/access/devices", body) : await Api.put(`/api/access/devices/${device.id}`, body);
       closeModal();
       // Por ISUP el equipo puede no haberse conectado todavía: se guarda igual y se completa en su primer contacto.
@@ -679,7 +680,7 @@ async function acdDrawConnection(body) {
           <input id="ac-name" required maxlength="128" value="${esc(d.name)}" placeholder="Portería principal, Torniquete casino…">
         </div>
         ${locationFieldHtml("ac-location", places, d.locationId ?? null,
-          "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.")}
+          "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.", { equipment: true })}
       </div>
       <div class="form-grid">
         <div class="field">
@@ -754,7 +755,9 @@ async function acdDrawConnection(body) {
     saveButton.disabled = true;
     saveButton.textContent = "Validando…";
     try {
-      acdState.device = await Api.put(`/api/access/devices/${d.id}`, accessReadConnectionForm());
+      const body = accessReadConnectionForm();
+      await locationFieldCommit("ac-location", body);
+      acdState.device = await Api.put(`/api/access/devices/${d.id}`, body);
       acdState.settings = null;
       toast("Equipo actualizado.");
       acdDrawPage();

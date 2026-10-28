@@ -702,29 +702,14 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnSearchTextChanged(string value) => ApplySearchFilter();
 
-    /// <summary>Filtra el árbol: un canal se muestra si su nombre (o el de su
-    /// equipo) contiene el texto; un equipo, si él o alguno de sus canales
-    /// calza. Ignora mayúsculas y tildes.</summary>
+    /// <summary>Filtra la lista: un recurso se muestra si su nombre, el de su
+    /// equipo o el de alguna ubicación que lo contiene calza con el texto.
+    /// Ignora mayúsculas y tildes.</summary>
     private void ApplySearchFilter()
     {
         string text = SearchText.Trim();
-        if (IsTreeByLocation)
-        {
-            ApplyLocationSearchFilter(text);
-            return;
-        }
+        ApplyLocationSearchFilter(text);
         ApplyResourceSearchFilter(text);
-        foreach (var device in Devices)
-        {
-            bool deviceMatch = Matches(device.Header, text);
-            bool anyChannelVisible = false;
-            foreach (var channel in device.Channels)
-            {
-                channel.IsVisible = text.Length == 0 || deviceMatch || Matches(channel.Header, text);
-                anyChannelVisible |= channel.IsVisible;
-            }
-            device.IsVisible = text.Length == 0 || deviceMatch || anyChannelVisible;
-        }
     }
 
     private static bool Matches(string haystack, string needle) =>
@@ -892,9 +877,6 @@ public partial class MainViewModel : ObservableObject
         _api = api;
         _hub = hub;
         _alertSound = new AlertSoundPlayer(api);
-
-        // Árbol por equipo o por ubicación: preferencia de este puesto.
-        _isTreeByLocation = _settings.TreeByLocation;
 
         _hub.ConfigChanged += entity =>
         {

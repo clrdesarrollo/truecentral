@@ -316,6 +316,8 @@ function resDrawHead() {
   } else if (sel === "pending") {
     title = "Por ubicar";
     note = "Recursos sin ubicación. Aquí llega lo que descubre un equipo nuevo: márquelos y use «Mover a…», o arrástrelos al árbol.";
+    if (isAdmin && resInSelection().length)
+      actions = `<button class="btn small" id="res-pending-by-equipment" title="Cada recurso a una ubicación con el nombre de su equipo">Una ubicación por equipo…</button>`;
   } else {
     const loc = resState.byId.get(sel);
     const path = resPath(sel);
@@ -347,6 +349,8 @@ function resDrawHead() {
       <button class="btn ghost small" type="button" data-op="location:${sel}" data-cmd="arm-stay">Armar parcial</button>
       <button class="btn ghost small" type="button" data-op="location:${sel}" data-cmd="disarm">Desarmar</button>
     </div>` : ""}`;
+  $("#res-pending-by-equipment")?.addEventListener("click", () =>
+    resByEquipmentModal(resState.resources.filter((r) => r.locationId == null)));
   if (typeof sel === "number") {
     $("#res-loc-child")?.addEventListener("click", () => resLocationModal(null, sel));
     $("#res-loc-edit")?.addEventListener("click", () => resLocationModal(resState.byId.get(sel), null));
@@ -478,10 +482,12 @@ function resDrawBulk(list) {
     <div class="res-bulk">
       <span class="grow"><b>${checked.length}</b> marcado(s)${hidden > 0 ? ` <span class="muted">(${hidden} fuera de la vista actual)</span>` : ""}</span>
       <button class="btn small" id="res-move">Mover a…</button>
+      <button class="btn ghost small" id="res-by-equipment" title="Cada recurso a una ubicación con el nombre de su equipo">Una por equipo…</button>
       ${checked.some((r) => r.locationId != null) ? `<button class="btn ghost small" id="res-unlocate">Quitar ubicación</button>` : ""}
       <button class="btn ghost small" id="res-clear">Desmarcar</button>
     </div>`;
   $("#res-move").addEventListener("click", () => resMoveModal(checked));
+  $("#res-by-equipment").addEventListener("click", () => resByEquipmentModal(checked));
   $("#res-unlocate")?.addEventListener("click", () => resAssign(null, checked));
   $("#res-clear").addEventListener("click", () => { resState.checked.clear(); resDrawList(); });
 }
@@ -789,6 +795,65 @@ function resMoveModal(resources) {
     closeModal();
     await resAssign(Number(picked.value), resources);
   });
+}
+
+/**
+ * «Una ubicación por equipo»: cada recurso va a una ubicación con el nombre de
+ * su equipo (el grabador de un canal, la controladora de una puerta, el panel
+ * de un área; el equipo mismo si es un parlante o un citófono) dentro de la
+ * que se elija; si ahí ya hay una con ese nombre, se usa esa. Antes de
+ * hacerlo se muestra qué ubicaciones usaría y cuáles crearía.
+ */
+function resByEquipmentModal(resources) {
+  if (!resources.length) return;
+  const refs = resources.map((r) => ({ kind: r.kind, id: r.id }));
+  const start = typeof resState.selected === "number" ? resState.selected : null;
+  openModal(`
+    <h3>Una ubicación por equipo</h3>
+    <p class="muted" style="margin-top:-8px">${resources.length} recurso(s): cada uno va a una ubicación con el nombre de su equipo. El equipo queda ahí también, así lo que descubra después llega a la misma ubicación.</p>
+    <div class="field"><label for="res-eq-parent">Dentro de</label>
+      <select id="res-eq-parent"><option value="">La raíz del árbol</option>${resLocationOptions(start)}</select></div>
+    <div id="res-eq-plan"><div class="muted">Calculando…</div></div>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" id="res-eq-cancel">Cancelar</button>
+      <button class="btn" type="button" id="res-eq-ok" disabled>Ubicar</button>
+    </div>`, true);
+  const request = (dryRun) => Api.post("/api/resources/locate-by-equipment", {
+    parentId: $("#res-eq-parent").value ? Number($("#res-eq-parent").value) : null, resources: refs, dryRun,
+  });
+  const preview = async () => {
+    $("#res-eq-ok").disabled = true;
+    $("#res-eq-plan").innerHTML = `<div class="muted">Calculando…</div>`;
+    try {
+      const plan = await request(true);
+      $("#res-eq-plan").innerHTML = `
+        <div class="info-box">${esc(plan.message)}</div>
+        <div class="res-loc-pick res-eq-plan">${plan.locations.map((l) => `
+          <div class="res-eq-row">${resIcon(LOC_KINDS.Sector.icon)} <b>${esc(l.name)}</b>
+            <span class="muted">${l.resources} recurso(s)</span>
+            <span class="tag ${l.created ? "on" : "operator"}">${l.created ? "nueva" : "ya existe"}</span></div>`).join("")}
+        </div>`;
+      $("#res-eq-ok").disabled = false;
+    } catch (err) {
+      $("#res-eq-plan").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    }
+  };
+  $("#res-eq-parent").addEventListener("change", preview);
+  $("#res-eq-cancel").addEventListener("click", closeModal);
+  $("#res-eq-ok").addEventListener("click", async () => {
+    $("#res-eq-ok").disabled = true;
+    try {
+      const result = await request(false);
+      closeModal();
+      toast(result.message);
+      for (const r of resources) resState.checked.delete(resKey(r));
+      await resLoad();
+    } catch (err) {
+      $("#res-eq-ok").disabled = false;
+      toast(err.error, true);
+    }
+  });
+  preview();
 }
 
 // ---------------------------------------------------------------------------
