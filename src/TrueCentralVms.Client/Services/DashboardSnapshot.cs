@@ -18,7 +18,7 @@ public sealed class DashboardSnapshot
 public sealed class DashboardServer
 {
     public string? Version { get; set; }
-    public long UptimeSeconds { get; set; }
+    public double UptimeSeconds { get; set; }
     public double? Cpu { get; set; }
     public double? Ram { get; set; }
     public double? RamUsedGb { get; set; }

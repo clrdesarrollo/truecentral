@@ -415,27 +415,81 @@
         </ScrollViewer>
     </DataTemplate>
 
-    <!-- Últimas patentes -->
+    <!-- Últimas patentes: escena y recorte de la lectura elegida a la izquierda, la lista a la derecha -->
     <DataTemplate DataType="{x:Type vm:PlatesCardPanel}">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
-            <ItemsControl ItemsSource="{Binding Items}" Margin="14,10">
-                <ItemsControl.ItemTemplate>
+        <Grid Background="{StaticResource CellBgBrush}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto" MinWidth="250"/>
+            </Grid.ColumnDefinitions>
+            <Grid Margin="10,10,6,10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Border Background="#000000" CornerRadius="3">
+                    <Grid>
+                        <Image Source="{Binding SceneImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <TextBlock Text="Sin imagen de la escena" Style="{StaticResource PanelHint}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock.Visibility>
+                                <Binding Path="SceneImage" Converter="{x:Static vm:NullToVisibility.Instance}"/>
+                            </TextBlock.Visibility>
+                        </TextBlock>
+                    </Grid>
+                </Border>
+                <Image Grid.Row="1" Source="{Binding PlateImage}" Height="64" Stretch="Uniform" HorizontalAlignment="Left"
+                       Margin="0,8,0,0" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <TextBlock Grid.Row="2" Text="{Binding SelectedText}" Style="{StaticResource PanelHint}" Margin="0,6,0,0"
+                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+            </Grid>
+            <ListBox Grid.Column="1" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected, Mode=TwoWay}"
+                     Background="Transparent" BorderThickness="1,0,0,0" BorderBrush="{StaticResource BorderBrush}"
+                     Padding="6,8" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Padding" Value="4,3"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Row" Background="Transparent" CornerRadius="3" Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Row" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Row" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                                            <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            <Setter TargetName="Row" Property="BorderThickness" Value="1"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <DockPanel Margin="0,3">
-                            <TextBlock DockPanel.Dock="Left" Text="{Binding Time}" Width="64" VerticalAlignment="Center"
-                                       Foreground="{StaticResource MutedBrush}" FontFamily="{StaticResource MonoFont}"/>
-                            <Border DockPanel.Dock="Left" Background="#F2F2F2" CornerRadius="3" Padding="8,1" Margin="0,0,10,0"
-                                    VerticalAlignment="Center">
-                                <TextBlock Text="{Binding Plate}" Foreground="#111111" FontWeight="Bold" FontSize="14"
-                                           FontFamily="{StaticResource MonoFont}"/>
-                            </Border>
-                            <TextBlock Text="{Binding Where}" VerticalAlignment="Center" Foreground="{StaticResource TextBrush}"
-                                       TextTrimming="CharacterEllipsis"/>
-                        </DockPanel>
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Time}" Width="64" VerticalAlignment="Center"
+                                           Foreground="{StaticResource MutedBrush}" FontFamily="{StaticResource MonoFont}"/>
+                                <Border Background="#F2F2F2" CornerRadius="3" Padding="8,1" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Plate}" Foreground="#111111" FontWeight="Bold" FontSize="14"
+                                               FontFamily="{StaticResource MonoFont}"/>
+                                </Border>
+                            </StackPanel>
+                            <TextBlock Text="{Binding Where}" Style="{StaticResource PanelHint}" Margin="64,1,0,0"
+                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                        </StackPanel>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
     </DataTemplate>
 
     <!-- Últimos accesos -->

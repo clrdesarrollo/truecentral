@@ -224,17 +224,23 @@ public sealed partial class AlertsCardPanel : CellPanel
 /// <summary>Una lectura de patente en la tarjeta.</summary>
 public sealed class PlateLine(PlateEventDto e)
 {
+    public PlateEventDto Event { get; } = e;
     public string Time { get; } = e.CapturedAt.ToLocalTime().ToString("HH:mm:ss");
     public string Plate { get; } = e.PlateNumber;
     public string Where { get; } = string.Join(" · ", new[] { e.ChannelName, e.Direction }.Where(s => !string.IsNullOrWhiteSpace(s)));
 }
 
-/// <summary>Últimos reconocimientos de patente, en vivo.</summary>
+/// <summary>
+/// Últimos reconocimientos de patente, en vivo: a un lado la escena y el
+/// recorte de la patente de la lectura elegida (la más nueva, salvo que el
+/// operador elija otra) y al otro la lista.
+/// </summary>
 public sealed partial class PlatesCardPanel : CellPanel
 {
     private const int Size = 12;
     private readonly ApiClient _api;
     private readonly VmsHubClient _hub;
+    private long _imagesFor;
 
     public PlatesCardPanel(ApiClient api, VmsHubClient hub)
     {
@@ -249,18 +255,66 @@ public sealed partial class PlatesCardPanel : CellPanel
 
     public ObservableCollection<PlateLine> Items { get; } = [];
 
+    [ObservableProperty] private PlateLine? _selected;
+    [ObservableProperty] private System.Windows.Media.ImageSource? _sceneImage;
+    [ObservableProperty] private System.Windows.Media.ImageSource? _plateImage;
+    [ObservableProperty] private string _selectedText = "";
+
     public override async Task LoadAsync()
     {
         var events = await _api.GetPlateEventsAsync(take: Size);
         Items.Clear();
         foreach (var e in events) Items.Add(new PlateLine(e));
+        Selected = Items.FirstOrDefault();
     }
 
     private void OnPlate(PlateEventDto e) => Ui.Run(() =>
     {
-        Items.Insert(0, new PlateLine(e));
+        // Si el operador estaba mirando la más nueva, sigue a la que llega.
+        bool followNewest = Selected is null || Selected == Items.FirstOrDefault();
+        var line = new PlateLine(e);
+        Items.Insert(0, line);
         while (Items.Count > Size) Items.RemoveAt(Items.Count - 1);
+        if (followNewest) Selected = line;
     });
+
+    partial void OnSelectedChanged(PlateLine? value) => _ = LoadImagesAsync(value);
+
+    private async Task LoadImagesAsync(PlateLine? line)
+    {
+        if (line is null)
+        {
+            SceneImage = PlateImage = null;
+            SelectedText = "";
+            return;
+        }
+        var e = line.Event;
+        _imagesFor = e.Id;
+        SelectedText = $"{e.PlateNumber} · {e.CapturedAt.ToLocalTime():dd-MM-yyyy HH:mm:ss} · {line.Where}";
+        var scene = e.HasSceneImage ? await _api.GetPlateImageAsync(e.Id, "scene") : null;
+        var plate = e.HasPlateImage ? await _api.GetPlateImageAsync(e.Id, "plate") : null;
+        if (_imagesFor != e.Id) return; // ya eligió otra mientras descargaba
+        SceneImage = Decode(scene, 1280);
+        PlateImage = Decode(plate);
+    }
+
+    /// <summary>JPEG → imagen congelada (como en el módulo de patentes).</summary>
+    private static System.Windows.Media.ImageSource? Decode(byte[]? bytes, int maxWidth = 0)
+    {
+        if (bytes is null || bytes.Length == 0) return null;
+        try
+        {
+            var image = new System.Windows.Media.Imaging.BitmapImage();
+            image.BeginInit();
+            image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            if (maxWidth > 0) image.DecodePixelWidth = maxWidth;
+            image.StreamSource = new System.IO.MemoryStream(bytes);
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+        catch { return null; }
+    }
 
     public override void Dispose() => _hub.PlateRecognized -= OnPlate;
 }
