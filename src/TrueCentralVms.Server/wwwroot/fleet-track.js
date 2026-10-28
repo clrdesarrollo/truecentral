@@ -111,7 +111,7 @@ async function renderFleetTrack() {
     const settings = await Api.get("/api/fleet/map/settings");
     if (!ft.active) return;
     ft.map = new lib.Map({ container: "ft-map", style: await fmStyle(settings), center: [settings.centerLongitude, settings.centerLatitude],
-      zoom: settings.zoom, attributionControl: { compact: true } });
+      zoom: settings.zoom, attributionControl: { compact: true }, transformRequest: fmTransformRequest });
     ft.map.addControl(new lib.NavigationControl({ showCompass: false }), "top-left");
     ft.map.addControl(new lib.ScaleControl({ unit: "metric" }), "bottom-right");
     ft.map.on("load", () => { if (params.get("v")) ftLoad(); });

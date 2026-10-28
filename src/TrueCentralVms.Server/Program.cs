@@ -303,6 +303,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Ser
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Fleet.FleetPositionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Fleet.FleetPositionService>());
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Fleet.FleetEventService>();
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Fleet.FleetTileProxy>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.Fleet.FleetEventService>());
 builder.Services.AddSingleton<SessionAccounting>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionAccounting>());
