@@ -52,6 +52,12 @@ public enum LevelMode
     /// de las puertas donde HikCentral la tenía, con el horario que tenía ahí.
     /// </summary>
     PerDoor = 2,
+    /// <summary>
+    /// Copia los niveles de HikCentral tal cual: mismo nombre, horario, puertas
+    /// y personas (OpenAPI <c>privilege/group</c>; los tramos del horario salen
+    /// de los terminales). Es lo más fiel y lo más fácil de administrar después.
+    /// </summary>
+    CopyHcp = 3,
 }
 
 public sealed class ImportOptions
@@ -151,6 +157,12 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             NextPhase();
         }
 
+        if (package.Levels.Count > 0)
+        {
+            ResolveLevelSchedules(package);
+            CheckLevelsAgainstTerminals(package);
+        }
+
         await package.SaveAsync(options.PackageFolder, ct);
         Ok($"Paquete guardado en {options.PackageFolder} ({package.Persons.Count} personas).");
         progress.Report(new ProgressState(1, "Exportación terminada."));
@@ -230,6 +242,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             _photoUris[p.PersonId] = p.PicUri;
         }
         Info($"Con tarjeta: {withCards} · con huellas registradas: {withFingers} · con foto: {withPhoto}.");
+        await ReadLevelsAsync(hcp, package, ct);
         // Los campos personalizados no tienen todavía dónde ir en TrueCentral: quedan
         // en el paquete para no perderlos (el casino usa «Colacion»).
         var fieldNames = package.Persons.SelectMany(p => p.CustomFields.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -239,6 +252,212 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
         if (withFingers > 0 && package.Persons.Sum(p => p.Fingerprints.Count) == 0)
             Info("HikCentral no entrega las plantillas de huella por OpenAPI: se van a leer desde los terminales.");
         return package;
+    }
+
+    // ------------------------------------------------------------------
+    // Niveles de acceso de HikCentral
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Plantillas de fábrica de HikCentral (las trae toda instalación, con el
+    /// mismo código): no hace falta leerlas de un terminal. Verificado en HCP 3.1.
+    /// </summary>
+    private static readonly Dictionary<string, (string Name, int[] Days)> FactorySchedules = new()
+    {
+        ["1"] = ("Todo el día, todos los días", [0, 1, 2, 3, 4, 5, 6]),
+        ["2"] = ("Días hábiles, todo el día", [1, 2, 3, 4, 5]),
+        ["3"] = ("Fin de semana, todo el día", [0, 6]),
+    };
+
+    /// <summary>
+    /// Niveles de acceso con sus puertas y sus personas, por la OpenAPI. Una
+    /// versión de HikCentral que no tenga las rutas no frena la exportación: se
+    /// avisa y queda el modo «uno por puerta», que no las necesita.
+    /// </summary>
+    private async Task ReadLevelsAsync(HikCentralClient hcp, MigrationPackage package, CancellationToken ct)
+    {
+        List<HcpAccessLevel> levels;
+        List<HcpDoor> doors;
+        List<HcpAccessDevice> devices;
+        try
+        {
+            levels = await hcp.GetAccessLevelsAsync(ct);
+            doors = await hcp.GetDoorsAsync(ct);
+            devices = await hcp.GetAccessDevicesAsync(ct);
+        }
+        catch (HikCentralException ex)
+        {
+            Warn($"No se pudieron leer los niveles de acceso de HikCentral ({ex.Message}). Se podrá importar con «uno por puerta», que los reconstruye desde los terminales.");
+            return;
+        }
+        if (levels.Count == 0) { Info("HikCentral no tiene niveles de acceso."); return; }
+
+        // Número de cada puerta EN SU EQUIPO: HikCentral numera las puertas a su
+        // manera (doorNo correlativo de toda la instalación), así que se cuenta su
+        // posición entre las puertas del mismo equipo. La verificación contra los
+        // terminales, al final, delata un orden equivocado.
+        var deviceByCode = devices.GroupBy(d => d.IndexCode).ToDictionary(g => g.Key, g => g.First());
+        var doorByCode = new Dictionary<string, (HcpDoor Door, int Position, int Siblings)>();
+        foreach (var group in doors.GroupBy(d => d.DeviceIndexCode))
+        {
+            var ordered = group.OrderBy(d => d.DoorNo).ThenBy(d => long.TryParse(d.IndexCode, out long n) ? n : long.MaxValue).ToList();
+            for (int i = 0; i < ordered.Count; i++) doorByCode[ordered[i].IndexCode] = (ordered[i], i + 1, ordered.Count);
+        }
+        int multiDoorDevices = doors.GroupBy(d => d.DeviceIndexCode).Count(g => g.Count() > 1);
+        if (multiDoorDevices > 0)
+            Warn($"{multiDoorDevices} equipo(s) tienen varias puertas: su número en el equipo se deduce del orden de HikCentral. Revise la verificación contra los terminales al final de la exportación.");
+
+        var byId = package.Persons.GroupBy(p => p.HcpPersonId).ToDictionary(g => g.Key, g => g.First());
+        int outside = 0;
+        foreach (var level in levels)
+        {
+            ct.ThrowIfCancellationRequested();
+            var packaged = new PackageLevel
+            {
+                HcpId = level.Id,
+                Name = level.Name.Trim(),
+                ScheduleName = level.ScheduleName.Trim(),
+                ScheduleHcpId = level.ScheduleId,
+                OtherElements = level.OtherElements,
+            };
+            if (FactorySchedules.TryGetValue(level.ScheduleId, out var factory))
+            {
+                packaged.Segments = factory.Days.Select(d => new PackageSegment { Day = d, StartMinutes = 0, EndMinutes = 24 * 60 - 1 }).ToList();
+                packaged.SegmentsSource = $"plantilla de fábrica de HikCentral ({factory.Name})";
+            }
+            foreach (var d in level.Doors)
+            {
+                var door = new PackageLevelDoor { Name = d.Name, HcpIndexCode = d.IndexCode };
+                if (doorByCode.TryGetValue(d.IndexCode, out var found))
+                {
+                    door.DoorNo = found.Position;
+                    if (deviceByCode.TryGetValue(found.Door.DeviceIndexCode, out var device))
+                    {
+                        door.DeviceHost = device.Ip.Trim();
+                        door.DeviceName = device.Name.Trim();
+                    }
+                }
+                packaged.Doors.Add(door);
+            }
+            if (packaged.Doors.Any(d => d.DeviceHost is null))
+                Warn($"Nivel «{packaged.Name}»: HikCentral no dijo en qué equipo está la puerta {string.Join(", ", packaged.Doors.Where(d => d.DeviceHost is null).Select(d => $"«{d.Name}»"))}.");
+            if (level.OtherElements > 0)
+                Warn($"Nivel «{packaged.Name}»: tiene {level.OtherElements} elemento(s) que no son puertas (pisos de ascensor u otros): TrueCentral no los migra.");
+
+            List<string> personIds;
+            try { personIds = await hcp.GetAccessLevelPersonIdsAsync(level.Id, ct); }
+            catch (HikCentralException ex)
+            {
+                Warn($"No se pudieron leer las personas de los niveles de acceso ({ex.Message}). Se podrá importar con «uno por puerta».");
+                package.Levels.Clear();
+                foreach (var p in package.Persons) p.HcpLevelIds.Clear();
+                return;
+            }
+            foreach (string id in personIds.Distinct())
+            {
+                if (!byId.TryGetValue(id, out var person)) { outside++; continue; }
+                if (!person.HcpLevelIds.Contains(level.Id)) person.HcpLevelIds.Add(level.Id);
+            }
+            package.Levels.Add(packaged);
+        }
+
+        int withLevels = package.Persons.Count(p => p.HcpLevelIds.Count > 0);
+        Ok($"Niveles de acceso en HikCentral: {package.Levels.Count} · personas con nivel: {withLevels} de {package.Persons.Count}" +
+           $" · con dos o más: {package.Persons.Count(p => p.HcpLevelIds.Count > 1)}.");
+        foreach (var l in package.Levels)
+            Info($"Nivel «{l.Name}» · horario «{l.ScheduleName}» · {l.Doors.Count} puerta(s) · {package.Persons.Count(p => p.HcpLevelIds.Contains(l.HcpId))} persona(s).");
+        if (outside > 0) Info($"{outside} asignación(es) de nivel son de personas que quedaron fuera (departamentos no elegidos): se ignoran.");
+        if (withLevels < package.Persons.Count)
+            Warn($"{package.Persons.Count - withLevels} persona(s) no tienen ningún nivel en HikCentral: entrarán a TrueCentral sin puertas.");
+    }
+
+    /// <summary>
+    /// Tramos de cada horario. La OpenAPI no los entrega, pero los terminales
+    /// sí: para cada nivel se mira qué plantilla tienen sus personas en las
+    /// puertas del nivel y se toma la más repetida. Se prefieren las personas
+    /// que tienen solo ese nivel, porque con dos niveles en la misma puerta
+    /// HikCentral puede haberles escrito una combinación de horarios.
+    /// </summary>
+    private void ResolveLevelSchedules(MigrationPackage package)
+    {
+        var templates = new Dictionary<(string Host, int Number), PackageSchedule>();
+        foreach (var t in package.Terminals)
+            foreach (var s in t.Schedules)
+                templates[(t.Host.Trim().ToLowerInvariant(), s.Number)] = s;
+
+        foreach (var level in package.Levels.Where(l => l.Segments is null))
+        {
+            var members = package.Persons.Where(p => p.HcpLevelIds.Contains(level.HcpId)).ToList();
+            var votes = new Dictionary<string, (List<PackageSegment> Segments, string Source, int Count)>();
+            foreach (var pass in new[] { members.Where(p => p.HcpLevelIds.Count == 1).ToList(), members })
+            {
+                foreach (var person in pass)
+                    foreach (var door in level.Doors.Where(d => d.DeviceHost is not null))
+                        foreach (var access in person.Access.Where(a => a.Host.Equals(door.DeviceHost, StringComparison.OrdinalIgnoreCase) && a.DoorNo == door.DoorNo))
+                        {
+                            if (!templates.TryGetValue((access.Host.Trim().ToLowerInvariant(), access.TemplateNo), out var schedule)) continue;
+                            string key = Normalize(schedule.Segments.Select(s => (s.Day, s.StartMinutes, s.EndMinutes)));
+                            var current = votes.TryGetValue(key, out var seen)
+                                ? seen
+                                : (Segments: schedule.Segments, Source: $"terminal {access.Terminal}, plantilla {schedule.Number} «{schedule.Name}»", Count: 0);
+                            votes[key] = (current.Segments, current.Source, current.Count + 1);
+                        }
+                if (votes.Count > 0) break;   // con las de un solo nivel alcanzó
+            }
+            if (votes.Count == 0)
+            {
+                Warn($"Nivel «{level.Name}»: no se pudo saber el horario «{level.ScheduleName}» (ninguna de sus personas apareció en sus puertas de los terminales leídos). " +
+                     "Para copiar los niveles de HikCentral hay que leer los terminales de sus puertas.");
+                continue;
+            }
+            var best = votes.Values.OrderByDescending(v => v.Count).First();
+            level.Segments = best.Segments.Select(s => new PackageSegment { Day = s.Day, StartMinutes = s.StartMinutes, EndMinutes = s.EndMinutes }).ToList();
+            level.SegmentsSource = best.Source;
+            Info($"Nivel «{level.Name}»: horario «{level.ScheduleName}» = {DescribeSegments(level.Segments.Select(s => (s.Day, s.StartMinutes, s.EndMinutes)))} (de {best.Source}).");
+            if (votes.Count > 1)
+                Warn($"Nivel «{level.Name}»: no todas sus personas tienen el mismo horario en los terminales ({votes.Count} distintos); se usó el más repetido ({best.Count} coincidencia(s)).");
+        }
+    }
+
+    /// <summary>
+    /// Compara, por persona, las puertas que le dan sus niveles de HikCentral
+    /// con las que tiene en los terminales leídos. Diferencias esperables: un
+    /// cambio que HikCentral no alcanzó a aplicar, o un número de puerta mal
+    /// deducido en una controladora de varias puertas. Solo informa.
+    /// </summary>
+    private void CheckLevelsAgainstTerminals(MigrationPackage package)
+    {
+        var read = package.Terminals.Select(t => t.Host.Trim().ToLowerInvariant()).ToHashSet();
+        if (read.Count == 0) return;
+        var levels = package.Levels.ToDictionary(l => l.HcpId);
+        int checkedPeople = 0;
+        var missing = new List<string>();
+        var extra = new List<string>();
+        foreach (var person in package.Persons)
+        {
+            var expected = person.HcpLevelIds.Where(levels.ContainsKey).SelectMany(id => levels[id].Doors)
+                .Where(d => d.DeviceHost is not null && read.Contains(d.DeviceHost.ToLowerInvariant()))
+                .Select(d => (Host: d.DeviceHost!.ToLowerInvariant(), d.DoorNo, Name: d.Name)).Distinct().ToList();
+            var actual = person.Access.Where(a => read.Contains(a.Host.Trim().ToLowerInvariant()))
+                .Select(a => (Host: a.Host.Trim().ToLowerInvariant(), a.DoorNo, Name: a.Terminal)).Distinct().ToList();
+            if (expected.Count == 0 && actual.Count == 0) continue;
+            checkedPeople++;
+            foreach (var e in expected.Where(e => !actual.Any(a => a.Host == e.Host && a.DoorNo == e.DoorNo)))
+                missing.Add($"{person.FullName} → «{e.Name}»");
+            foreach (var a in actual.Where(a => !expected.Any(e => e.Host == a.Host && e.DoorNo == a.DoorNo)))
+                extra.Add($"{person.FullName} → {a.Name} (puerta {a.DoorNo})");
+        }
+        if (missing.Count == 0 && extra.Count == 0)
+        {
+            Ok($"Verificación: los niveles de HikCentral coinciden con lo que tienen los terminales ({checkedPeople} persona(s) revisadas).");
+            return;
+        }
+        if (missing.Count > 0)
+            Warn($"{missing.Count} puerta(s) que HikCentral da por nivel NO están en el terminal (¿cambio sin aplicar?): " +
+                 string.Join("; ", missing.Take(10)) + (missing.Count > 10 ? "; …" : "") + ". Con «copiar los niveles» esas personas pasarán a tenerlas.");
+        if (extra.Count > 0)
+            Warn($"{extra.Count} puerta(s) que el terminal da y ningún nivel de HikCentral: " +
+                 string.Join("; ", extra.Take(10)) + (extra.Count > 10 ? "; …" : "") + ". Con «copiar los niveles» esas personas las perderán.");
     }
 
     private readonly Dictionary<string, string> _photoUris = new();
@@ -373,6 +592,8 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                     if (user.VerifyMode is { } mode && mode.Equals("card", StringComparison.OrdinalIgnoreCase) && !person.CardOnlyOn.Contains(target.Name))
                         person.CardOnlyOn.Add(target.Name);
                     if (user.LocalAdmin && !person.LocalAdminOn.Contains(target.Name)) person.LocalAdminOn.Add(target.Name);
+                    if (user.UserType.Length > 0 && !user.UserType.Equals("normal", StringComparison.OrdinalIgnoreCase))
+                        person.UserTypeOn[target.Name] = user.UserType;
 
                     if (options.FacesFromTerminals && user.Faces > 0 && await TakeTerminalFaceAsync(reader, target, options.PackageFolder, user, person, ct))
                         faces++;
@@ -454,10 +675,12 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             rows.AddRange(p.DisabledOn.Select(t => $"{id};{p.FullName};{t};deshabilitada en el equipo"));
             rows.AddRange(p.CardOnlyOn.Select(t => $"{id};{p.FullName};{t};solo tarjeta"));
             rows.AddRange(p.LocalAdminOn.Select(t => $"{id};{p.FullName};{t};administrador del menú del equipo"));
+            rows.AddRange(p.UserTypeOn.Select(t => $"{id};{p.FullName};{t.Key};tipo de usuario «{t.Value}»"));
         }
         int disabled = package.Persons.Count(p => p.DisabledOn.Count > 0);
         int cardOnly = package.Persons.Count(p => p.CardOnlyOn.Count > 0);
         int admins = package.Persons.Count(p => p.LocalAdminOn.Count > 0);
+        int typed = package.Persons.Count(p => p.UserTypeOn.Count > 0);
         string file = Path.Combine(folder, "pendientes-despues-del-corte.csv");
         if (rows.Count == 0)
         {
@@ -472,6 +695,9 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             Warn($"{cardOnly} persona(s) tienen «solo tarjeta» en algún terminal (visitas del casino): vuelva a aplicarlo desde el kiosco después del corte.");
         if (admins > 0)
             Warn($"{admins} persona(s) pueden entrar al menú de algún terminal: TrueCentral les quita ese permiso.");
+        if (typed > 0)
+            Warn($"{typed} persona(s) tienen en algún terminal un tipo de usuario distinto de «normal» (visita, lista negra…): TrueCentral las escribe como «normal». " +
+                 "Si otro sistema usa ese tipo (el kiosco del casino distingue así a las visitas), vuelva a aplicarlo después del corte.");
         Info($"La lista quedó en {file}.");
     }
 
@@ -596,6 +822,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
         Info(mode switch
         {
             LevelMode.PerDoor => "Niveles de acceso: uno por puerta, con el horario que cada persona tenía en cada terminal.",
+            LevelMode.CopyHcp => "Niveles de acceso: los mismos de HikCentral (nombre, horario, puertas y personas).",
             LevelMode.Single => $"Nivel de acceso asignado al crear: {options.LevelName ?? options.LevelId.ToString()} (el sincronizador las baja a sus equipos).",
             _ => "Nivel de acceso: ninguno (las personas quedan en el padrón y NO bajan a los equipos hasta que se les asigne uno).",
         });
@@ -605,15 +832,22 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             Info($"Solo las personas encontradas en los terminales leídos: {persons.Count} de {package.Persons.Count}.");
 
         Dictionary<(string Host, int Door, int Template), int> doorLevels = [];
+        Dictionary<string, int> hcpLevels = [];
         if (mode == LevelMode.PerDoor)
         {
             Report(0, "preparando horarios y niveles…");
             doorLevels = await PrepareDoorLevelsAsync(tc, package, persons, result, ct);
         }
+        else if (mode == LevelMode.CopyHcp)
+        {
+            Report(0, "copiando los niveles de HikCentral…");
+            hcpLevels = await PrepareHcpLevelsAsync(tc, package, persons, result, ct);
+        }
         List<int> LevelsOf(PackagePerson p) => mode switch
         {
             // PrepareDoorLevelsAsync deja resuelta cada puerta del paquete (o se detiene antes).
             LevelMode.PerDoor => p.Access.Select(a => doorLevels[AccessKey(a)]).Distinct().ToList(),
+            LevelMode.CopyHcp => p.HcpLevelIds.Where(hcpLevels.ContainsKey).Select(id => hcpLevels[id]).Distinct().ToList(),
             LevelMode.Single => [options.LevelId!.Value],
             _ => [],
         };
@@ -646,7 +880,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                     try
                     {
                         if (await CompleteExistingAsync(tc, who, person, options, usedCards, result,
-                                mode == LevelMode.PerDoor ? levelIds : [], pinCode, ct)) result.Updated++;
+                                mode is LevelMode.PerDoor or LevelMode.CopyHcp ? levelIds : [], pinCode, ct)) result.Updated++;
                         else result.Skipped++;
                     }
                     catch (TrueCentralException ex)
@@ -727,7 +961,8 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 if (pinCode is not null) result.Pins++;
                 Ok($"{created.FullName} → identificador {created.EmployeeNo}: {cards.Count} tarjeta(s), {fingers.Count} huella(s), " +
                    $"{(face is null ? "sin foto" : "con foto")}, {(pinCode is null ? "sin clave" : "con clave")}" +
-                   (mode == LevelMode.PerDoor ? $", {levelIds.Count} puerta(s)" : "") + ".");
+                   (mode == LevelMode.PerDoor ? $", {levelIds.Count} puerta(s)" : "") +
+                   (mode == LevelMode.CopyHcp ? $", {levelIds.Count} nivel(es)" : "") + ".");
             }
             catch (TrueCentralException ex)
             {
@@ -741,7 +976,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             Info($"{upscaled} foto(s) venían chicas (HikCentral entrega miniaturas de ~135 px) y se ampliaron a {UpscaleShortSide} px de lado corto: es lo mínimo que piden los terminales para modelar el rostro.");
         Ok($"Importación terminada: {result.Created} creada(s), {result.Updated} completada(s), {result.Skipped} omitida(s) o sin cambios, {result.Failed} con error. " +
            $"Fotos: {result.Photos} · tarjetas: {result.Cards} · huellas: {result.Fingerprints} · claves: {result.Pins}" +
-           (mode == LevelMode.PerDoor ? $" · niveles creados: {result.Levels}" : "") + ".");
+           (mode is LevelMode.PerDoor or LevelMode.CopyHcp ? $" · niveles creados: {result.Levels}" : "") + ".");
         if (result.Created > 0 && mode == LevelMode.None)
             Info("Las personas entraron sin nivel de acceso: asígnelos en TrueCentral (Control de acceso → Niveles) para que el sincronizador las baje a los equipos.");
         int withoutPin = persons.Count(p => !string.IsNullOrWhiteSpace(p.Pin) && !IsValidPin(p.Pin));
@@ -880,6 +1115,110 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
         int none = persons.Count(p => p.Access.Count == 0);
         if (none > 0)
             Warn($"{none} persona(s) no estaban en ningún terminal leído (o sin puertas): entran sin niveles y no bajan a los equipos.");
+        return map;
+    }
+
+    /// <summary>
+    /// Crea en TrueCentral los niveles de HikCentral que usan las personas que
+    /// se importan: mismo nombre, mismas puertas (ubicadas por la IP de su
+    /// terminal) y un horario con el mismo nombre y tramos (el 24/7 de fábrica
+    /// si es «todo el día»). Antes de crear nada verifica que estén todos los
+    /// terminales, sus puertas y los tramos de cada horario: con una puerta o
+    /// un horario de menos alguien perdería acceso. Una segunda pasada
+    /// reutiliza lo que creó la primera. Devuelve id de HCP → id en TrueCentral.
+    /// </summary>
+    private async Task<Dictionary<string, int>> PrepareHcpLevelsAsync(
+        TrueCentralClient tc, MigrationPackage package, IReadOnlyList<PackagePerson> persons, ImportResult result, CancellationToken ct)
+    {
+        if (package.Levels.Count == 0)
+            throw new TrueCentralException("El paquete no trae los niveles de HikCentral (la versión de HCP no los entregó, o se exportó con un migrador anterior). " +
+                                           "Importe con «uno por puerta».");
+        var used = persons.SelectMany(p => p.HcpLevelIds).ToHashSet();
+        var levels = package.Levels.Where(l => used.Contains(l.HcpId)).ToList();
+        foreach (var skipped in package.Levels.Where(l => !used.Contains(l.HcpId)))
+            Info($"Nivel «{skipped.Name}»: ninguna de las personas que se importan lo tiene; no se crea.");
+
+        // 1. Terminales, puertas y horarios: todo o nada.
+        var devices = await tc.GetDevicesAsync(ct);
+        var byHost = devices.Where(d => d.Host.Length > 0).GroupBy(d => d.Host.Trim().ToLowerInvariant()).ToDictionary(g => g.Key, g => g.First());
+        var problems = new List<string>();
+        foreach (var level in levels)
+        {
+            if (level.Segments is null)
+                problems.Add($"no se sabe el horario «{level.ScheduleName}» del nivel «{level.Name}» (lea los terminales de sus puertas)");
+            else if (level.Segments.Count == 0)
+                problems.Add($"el horario «{level.ScheduleName}» del nivel «{level.Name}» no tiene ningún tramo");
+            if (level.Doors.Count == 0)
+                problems.Add($"el nivel «{level.Name}» no tiene puertas");
+            foreach (var door in level.Doors)
+            {
+                if (door.DeviceHost is null) { problems.Add($"no se sabe en qué terminal está la puerta «{door.Name}» del nivel «{level.Name}»"); continue; }
+                if (!byHost.TryGetValue(door.DeviceHost.ToLowerInvariant(), out var device))
+                    problems.Add($"el terminal «{door.DeviceName ?? door.Name}» ({door.DeviceHost}) no está dado de alta en TrueCentral");
+                else if (device.Doors.All(d => d.Number != door.DoorNo))
+                    problems.Add($"«{device.Name}» no tiene la puerta {door.DoorNo} en TrueCentral");
+            }
+        }
+        if (problems.Count > 0)
+            throw new TrueCentralException("No se importó nada para no dejar a nadie con más o menos acceso del que tenía: " +
+                                           string.Join("; ", problems.Distinct()) + ". Corríjalo y vuelva a importar el paquete.");
+
+        // 2. Horarios: el de fábrica si es «todo el día»; si no, uno con el nombre de HikCentral.
+        var schedules = await tc.GetSchedulesAsync(ct);
+        var scheduleOf = new Dictionary<string, AccessScheduleDto>();
+        foreach (var level in levels)
+        {
+            var segments = level.Segments!;
+            string key = Normalize(segments.Select(s => (s.Day, s.StartMinutes, s.EndMinutes)));
+            string cacheKey = $"{level.ScheduleHcpId}|{key}";
+            if (scheduleOf.ContainsKey(cacheKey)) continue;
+
+            var builtIn = schedules.FirstOrDefault(s => s.IsBuiltIn && Normalize(s.Segments.Select(x => (x.Day, x.StartMinutes, x.EndMinutes))) == key);
+            var match = builtIn ?? schedules.FirstOrDefault(s => s.Name.Equals(level.ScheduleName, StringComparison.OrdinalIgnoreCase) &&
+                                                                 s.HolidayMode == AccessHolidayMode.Normal &&
+                                                                 Normalize(s.Segments.Select(x => (x.Day, x.StartMinutes, x.EndMinutes))) == key);
+            if (match is null)
+            {
+                string baseName = Clip(level.ScheduleName.Length > 0 ? level.ScheduleName : $"Horario de {level.Name}", 120), name = baseName;
+                // Mismo nombre con otros tramos = otro horario: se le pone un sufijo en vez de pisarlo.
+                for (int n = 2; schedules.Any(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)); n++) name = $"{baseName} ({n})";
+                match = await tc.CreateScheduleAsync(new AccessScheduleWriteDto(name,
+                    $"Copiado del horario «{level.ScheduleName}» de HikCentral por el migrador el {DateTime.Now:dd-MM-yyyy} (tramos tomados de {level.SegmentsSource}).",
+                    segments.Select(s => new AccessScheduleSegmentDto(s.Day, s.StartMinutes, s.EndMinutes)).ToList()), ct);
+                schedules.Add(match);
+                Ok($"Horario creado: «{match.Name}» ({DescribeSegments(segments.Select(s => (s.Day, s.StartMinutes, s.EndMinutes)))}).");
+            }
+            scheduleOf[cacheKey] = match;
+        }
+
+        // 3. Niveles con el nombre de HikCentral.
+        var existing = await tc.GetLevelsAsync(ct);
+        var map = new Dictionary<string, int>();
+        foreach (var level in levels)
+        {
+            var schedule = scheduleOf[$"{level.ScheduleHcpId}|{Normalize(level.Segments!.Select(s => (s.Day, s.StartMinutes, s.EndMinutes)))}"];
+            var doorIds = level.Doors.Select(d => byHost[d.DeviceHost!.ToLowerInvariant()].Doors.First(x => x.Number == d.DoorNo).Id)
+                .Distinct().OrderBy(id => id).ToList();
+            string name = Clip(level.Name.Length > 0 ? level.Name : $"Nivel {level.HcpId} de HikCentral", 120);
+            var same = existing.FirstOrDefault(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (same is not null)
+            {
+                if (same.ScheduleId != schedule.Id || !same.DoorIds.OrderBy(id => id).SequenceEqual(doorIds))
+                    throw new TrueCentralException($"Ya existe en TrueCentral un nivel «{same.Name}» con otras puertas u otro horario: renómbrelo antes de importar " +
+                                                   "(el migrador copia los niveles de HikCentral con su mismo nombre).");
+                map[level.HcpId] = same.Id;
+                continue;
+            }
+            var created = await tc.CreateLevelAsync(new AccessLevelWriteDto(name,
+                $"Copiado del nivel «{level.Name}» de HikCentral por el migrador el {DateTime.Now:dd-MM-yyyy}.", schedule.Id, doorIds), ct);
+            existing.Add(created);
+            map[level.HcpId] = created.Id;
+            result.Levels++;
+            Ok($"Nivel creado: «{created.Name}» · horario «{schedule.Name}» · {doorIds.Count} puerta(s).");
+        }
+        int none = persons.Count(p => !p.HcpLevelIds.Any(map.ContainsKey));
+        if (none > 0)
+            Warn($"{none} persona(s) no tienen niveles en HikCentral: entran a TrueCentral sin puertas y no bajan a los equipos.");
         return map;
     }
 

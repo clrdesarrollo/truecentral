@@ -49,7 +49,8 @@ public sealed class MainForm : Form
     private readonly RadioButton _idTerminal = new() { Text = "El legajo que usan los terminales (recomendado si los equipos Hikvision siguen en uso: evita duplicarlas)", AutoSize = true, Checked = true };
     private readonly RadioButton _idPersonCode = new() { Text = "El código de persona de HikCentral", AutoSize = true };
     private readonly RadioButton _idAssigned = new() { Text = "Dejar que TrueCentral asigne uno nuevo", AutoSize = true };
-    private readonly RadioButton _levelsPerDoor = new() { Text = "Uno por puerta, reconstruido de los terminales: cada persona recibe las puertas y el horario que tenía (recomendado)", AutoSize = true, Checked = true };
+    private readonly RadioButton _levelsCopyHcp = new() { Text = "Copiar los de HikCentral: mismos nombres, horarios, puertas y personas (recomendado)", AutoSize = true, Checked = true };
+    private readonly RadioButton _levelsPerDoor = new() { Text = "Uno por puerta, reconstruido de los terminales (si HikCentral no entrega sus niveles, o para un piloto en una sola puerta)", AutoSize = true };
     private readonly RadioButton _levelsSingle = new() { Text = "El mismo nivel para todas:", AutoSize = true };
     private readonly RadioButton _levelsNone = new() { Text = "Ninguno: solo cargar el padrón, sin bajar nada a los equipos (modo sombra)", AutoSize = true };
     private readonly ComboBox _level = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
@@ -382,7 +383,7 @@ public sealed class MainForm : Form
     {
         var page = new TabPage("  3 · TrueCentral  ");
         var grid = Grid(10);
-        grid.Controls.Add(Hint("Servidor TrueCentral donde se va a cargar el padrón. Hace falta un usuario administrador; cada alta queda en la bitácora del sistema. Con niveles por puerta, los terminales tienen que estar dados de alta antes en TrueCentral (se los reconoce por su IP)."), 0, 0);
+        grid.Controls.Add(Hint("Servidor TrueCentral donde se va a cargar el padrón. Hace falta un usuario administrador; cada alta queda en la bitácora del sistema. Para crear niveles (copiados de HikCentral o por puerta), los terminales tienen que estar dados de alta antes en TrueCentral (se los reconoce por su IP)."), 0, 0);
         grid.SetColumnSpan(grid.GetControlFromPosition(0, 0)!, 2);
         AddRow(grid, 1, "Dirección del servidor", _tcUrl);
         _tcUrl.PlaceholderText = "https://192.168.1.78";
@@ -399,7 +400,7 @@ public sealed class MainForm : Form
         var singleRow = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
         singleRow.Controls.AddRange([_levelsSingle, _level]);
         _level.Margin = new Padding(6, 0, 0, 0);
-        levelLayout.Controls.AddRange([_levelsPerDoor, singleRow, _levelsNone, _onlyFound]);
+        levelLayout.Controls.AddRange([_levelsCopyHcp, _levelsPerDoor, singleRow, _levelsNone, _onlyFound]);
         _onlyFound.Margin = new Padding(0, 8, 0, 0);
         levelBox.Controls.Add(levelLayout);
         grid.Controls.Add(levelBox, 0, 5);
@@ -408,7 +409,7 @@ public sealed class MainForm : Form
         _level.SelectedIndex = 0;
         // «Uno para todos» vive en otra fila (con su lista al lado): los tres se
         // excluyen a mano, porque WinForms agrupa los botones por contenedor.
-        RadioButton[] modes = [_levelsPerDoor, _levelsSingle, _levelsNone];
+        RadioButton[] modes = [_levelsCopyHcp, _levelsPerDoor, _levelsSingle, _levelsNone];
         foreach (var r in modes)
             r.CheckedChanged += (s, _) =>
             {
@@ -429,7 +430,7 @@ public sealed class MainForm : Form
         grid.Controls.Add(_import, 0, 8);
         grid.SetColumnSpan(_import, 2);
         _import.Margin = new Padding(0, 6, 0, 0);
-        grid.Controls.Add(Hint("Con niveles, el sincronizador baja a las personas a sus equipos apenas se crean. Por puerta se crea un nivel «Acceso · terminal» por cada puerta y horario (el de fábrica «todo el día» si el terminal no tenía otro), y la importación no arranca si falta un terminal en TrueCentral o un horario sin leer. Si no se marca «completar», las personas que ya existan con el mismo identificador se omiten. Una tarjeta que ya sea de otra persona se deja fuera y se avisa en el registro. Las claves se leen de los terminales; TrueCentral acepta de 4 a 8 dígitos."), 0, 9);
+        grid.Controls.Add(Hint("Con niveles, el sincronizador baja a las personas a sus equipos apenas se crean. «Copiar los de HikCentral» crea los mismos niveles con su nombre, horario y puertas (los tramos de cada horario se toman de los terminales) y les asigna las mismas personas. «Por puerta» crea un nivel «Puerta · terminal» por cada puerta y horario. En los dos la importación no arranca si falta un terminal en TrueCentral o un horario sin conocer. Si no se marca «completar», las personas que ya existan con el mismo identificador se omiten. Una tarjeta que ya sea de otra persona se deja fuera y se avisa en el registro. Las claves se leen de los terminales; TrueCentral acepta de 4 a 8 dígitos."), 0, 9);
         grid.SetColumnSpan(grid.GetControlFromPosition(0, 9)!, 2);
         grid.GetControlFromPosition(0, 9)!.Margin = new Padding(0, 10, 0, 0);
 
@@ -494,6 +495,7 @@ public sealed class MainForm : Form
         _hcpSecret.Text = MigratorSettings.Unprotect(s.HcpAppSecretProtected);
         _readTerminals.Checked = s.ReadTerminals;
         _terminalFaces.Checked = s.FacesFromTerminals;
+        _levelsCopyHcp.Checked = s.LevelMode == (int)LevelMode.CopyHcp;
         _levelsPerDoor.Checked = s.LevelMode == (int)LevelMode.PerDoor;
         _levelsSingle.Checked = s.LevelMode == (int)LevelMode.Single;
         _levelsNone.Checked = s.LevelMode == (int)LevelMode.None;
@@ -811,6 +813,12 @@ public sealed class MainForm : Form
             Log(LogLevel.Info, $"Paquete de {package.Source} ({package.SourceVersion}) exportado el {package.ExportedAt.ToLocalTime():g} por {package.ExportedBy}: {package.Persons.Count} personas, " +
                                $"{package.Persons.Count(p => p.PhotoFile is not null)} fotos, {package.Persons.Sum(p => p.Fingerprints.Count)} huellas, " +
                                $"{package.Persons.Count(p => p.Pin is not null)} claves, {package.Terminals.Count} terminal(es) leído(s).");
+            if (CurrentLevelMode() == LevelMode.CopyHcp && package.Levels.Count == 0)
+            {
+                MessageBox.Show(this, "Este paquete no trae los niveles de HikCentral (su versión no los entregó, o se exportó con un migrador anterior). Elija «uno por puerta» en el paso 3.", Text,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             if (CurrentLevelMode() == LevelMode.PerDoor && package.Terminals.Count == 0 &&
                 MessageBox.Show(this, "Este paquete no trae las puertas de cada persona (se exportó sin leer terminales o con una versión anterior del migrador): con «uno por puerta» nadie recibirá niveles. ¿Continuar igual?", Text,
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
@@ -845,7 +853,8 @@ public sealed class MainForm : Form
         _idPersonCode.Checked ? EmployeeNoSource.PersonCode : _idAssigned.Checked ? EmployeeNoSource.Assigned : EmployeeNoSource.Terminal;
 
     private LevelMode CurrentLevelMode() =>
-        _levelsSingle.Checked ? LevelMode.Single : _levelsNone.Checked ? LevelMode.None : LevelMode.PerDoor;
+        _levelsSingle.Checked ? LevelMode.Single : _levelsNone.Checked ? LevelMode.None
+        : _levelsPerDoor.Checked ? LevelMode.PerDoor : LevelMode.CopyHcp;
 
     private ImportOptions CurrentImportOptions(TrueCentralClient tc, string folder) => new()
     {
@@ -865,8 +874,11 @@ public sealed class MainForm : Form
             return Complain("Eligió «el mismo nivel para todas» pero no eligió el nivel (conecte con TrueCentral en el paso 3 para ver la lista).", _level, 2);
         if (_levelsPerDoor.Checked && !readsTerminals)
             return Complain("«Uno por puerta» necesita leer los terminales (paso 2): de ahí sale qué puertas abría cada persona.", _readTerminals, 1);
-        if (_levelsPerDoor.Checked && _idAssigned.Checked)
-            return Complain("Con niveles por puerta el identificador tiene que ser el legajo de los terminales: si TrueCentral asigna uno nuevo, los equipos tendrían a cada persona dos veces.", _idTerminal, 2);
+        if ((_levelsPerDoor.Checked || _levelsCopyHcp.Checked) && _idAssigned.Checked)
+            return Complain("Con niveles copiados o por puerta el identificador tiene que ser el legajo de los terminales: si TrueCentral asigna uno nuevo, los equipos tendrían a cada persona dos veces.", _idTerminal, 2);
+        if (_levelsCopyHcp.Checked && !readsTerminals &&
+            MessageBox.Show(this, "Sin leer los terminales solo se conocen los horarios de fábrica de HikCentral (todo el día, días hábiles, fin de semana): si algún nivel usa otro horario, la importación se va a detener. ¿Continuar igual?", Text,
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
         return true;
     }
 
@@ -912,7 +924,7 @@ public sealed class MainForm : Form
         }
         _cancel.Enabled = busy && allowCancel;
         foreach (var c in new Control[] { _hcpUrl, _hcpKey, _hcpSecret, _hcpConnect, _orgs, _readTerminals, _terminalFaces, _termUser, _termPass, _terminals,
-                     _tcUrl, _tcUser, _tcPass, _tcConnect, _level, _levelsPerDoor, _levelsSingle, _levelsNone, _onlyFound, _updateExisting,
+                     _tcUrl, _tcUser, _tcPass, _tcConnect, _level, _levelsCopyHcp, _levelsPerDoor, _levelsSingle, _levelsNone, _onlyFound, _updateExisting,
                      _idTerminal, _idPersonCode, _idAssigned, _import, _folder, _photos, _start, _importPackage })
             c.Enabled = !busy;
         UseWaitCursor = busy;
@@ -943,6 +955,7 @@ public sealed class MainForm : Form
             : "Destino: solo se guarda el paquete, sin importar.");
         sb.AppendLine("Niveles de acceso: " + CurrentLevelMode() switch
         {
+            LevelMode.CopyHcp => "los mismos de HikCentral (nombre, horario, puertas y personas).",
             LevelMode.PerDoor => "uno por puerta, con el horario de cada terminal.",
             LevelMode.Single => SelectedLevelName() ?? "(elija el nivel en el paso 3).",
             _ => "ninguno (modo sombra: no baja nada a los equipos).",

@@ -39,6 +39,21 @@ public sealed record HcpPerson(
 /// <summary>Terminal de control de acceso registrado en HikCentral.</summary>
 public sealed record HcpAccessDevice(string IndexCode, string Name, string Ip, int SdkPort, string Code, int Status);
 
+/// <summary>Puerta de HikCentral con el equipo al que pertenece. <c>DoorNo</c> es la numeración de HCP, no la del equipo.</summary>
+public sealed record HcpDoor(string IndexCode, string Name, string DeviceIndexCode, int DoorNo);
+
+/// <summary>Puerta incluida en un nivel de acceso de HikCentral.</summary>
+public sealed record HcpLevelDoor(string IndexCode, string Name);
+
+/// <summary>
+/// Nivel de acceso de HikCentral («privilege group»): su horario —solo el
+/// nombre y el código: la OpenAPI 3.1 no entrega los tramos— y sus puertas.
+/// <c>OtherElements</c> cuenta lo que no es una puerta (pisos de ascensor,
+/// etc.), que TrueCentral no migra.
+/// </summary>
+public sealed record HcpAccessLevel(string Id, string Name, string ScheduleId, string ScheduleName,
+    IReadOnlyList<HcpLevelDoor> Doors, int OtherElements);
+
 public sealed class HikCentralException(string message, string? code = null) : Exception(message)
 {
     public string? Code { get; } = code;
@@ -48,8 +63,10 @@ public sealed class HikCentralException(string message, string? code = null) : E
 /// Cliente de la OpenAPI de HikCentral Professional (pasarela "Artemis").
 /// Cada petición va firmada con HMAC-SHA256 sobre método, Accept,
 /// Content-Type, las cabeceras x-ca-* y la ruta; el secreto nunca viaja.
-/// Verificado contra HCP 3.1.0: las rutas que no existen en la versión
-/// contestan código 8 "This product version is not supported".
+/// Hay pasarelas que solo aceptan la firma antigua (sin cabeceras x-ca-*
+/// firmadas): si rechazan la firma se reintenta con el otro esquema y se
+/// recuerda el que funcionó. Verificado contra HCP 3.1.0: las rutas que no
+/// existen en la versión contestan código 8 "This product version is not supported".
 /// </summary>
 public sealed class HikCentralClient : IDisposable
 {
@@ -98,8 +115,35 @@ public sealed class HikCentralClient : IDisposable
         return ParseEnvelope(text, contentType, status, path);
     }
 
+    /// <summary>Firma antigua (sin x-ca-* firmadas): la usan algunas pasarelas. Se recuerda la que aceptó el servidor.</summary>
+    private bool _legacySignature;
+
     /// <summary>Envía la petición firmada y devuelve el cuerpo tal cual, con su tipo.</summary>
     private async Task<(string Text, string ContentType, System.Net.HttpStatusCode Status)> SendAsync(string path, object? body, CancellationToken ct)
+    {
+        var first = await SendOnceAsync(path, body, _legacySignature, ct);
+        if (!IsSignatureRejected(first.Status, first.Text)) return first;
+        var other = await SendOnceAsync(path, body, !_legacySignature, ct);
+        if (IsSignatureRejected(other.Status, other.Text)) return first;
+        _legacySignature = !_legacySignature;
+        return other;
+    }
+
+    /// <summary>401, o los códigos 64/68 de la pasarela: la firma no sirvió (o la clave/secreto están mal).</summary>
+    private static bool IsSignatureRejected(System.Net.HttpStatusCode status, string text)
+    {
+        if (status == System.Net.HttpStatusCode.Unauthorized) return true;
+        if (!text.TrimStart().StartsWith('{')) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            return doc.RootElement.TryGetProperty("code", out var code) && code.ToString() is "64" or "68";
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private async Task<(string Text, string ContentType, System.Net.HttpStatusCode Status)> SendOnceAsync(string path, object? body,
+        bool legacy, CancellationToken ct)
     {
         string payload = JsonSerializer.Serialize(body ?? new { }, Json);
         string timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
@@ -107,16 +151,21 @@ public sealed class HikCentralClient : IDisposable
         const string accept = "*/*";
         const string contentType = "application/json";
 
-        string toSign = string.Join("\n", "POST", accept, contentType,
-            $"x-ca-key:{_appKey}", $"x-ca-nonce:{nonce}", $"x-ca-timestamp:{timestamp}", path);
+        string toSign = legacy
+            ? string.Join("\n", "POST", accept, contentType, path)
+            : string.Join("\n", "POST", accept, contentType,
+                $"x-ca-key:{_appKey}", $"x-ca-nonce:{nonce}", $"x-ca-timestamp:{timestamp}", path);
         string signature = Convert.ToBase64String(HMACSHA256.HashData(_secret, Encoding.UTF8.GetBytes(toSign)));
 
         using var request = new HttpRequestMessage(HttpMethod.Post, _baseUrl + path);
         request.Headers.Accept.ParseAdd(accept);
         request.Headers.Add("x-ca-key", _appKey);
-        request.Headers.Add("x-ca-nonce", nonce);
-        request.Headers.Add("x-ca-timestamp", timestamp);
-        request.Headers.Add("x-ca-signature-headers", "x-ca-key,x-ca-nonce,x-ca-timestamp");
+        if (!legacy)
+        {
+            request.Headers.Add("x-ca-nonce", nonce);
+            request.Headers.Add("x-ca-timestamp", timestamp);
+            request.Headers.Add("x-ca-signature-headers", "x-ca-key,x-ca-nonce,x-ca-timestamp");
+        }
         request.Headers.Add("x-ca-signature", signature);
         request.Content = new StringContent(payload, Encoding.UTF8);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
@@ -224,6 +273,63 @@ public sealed class HikCentralClient : IDisposable
         return result;
     }
 
+    /// <summary>Puertas con su equipo (<c>acsDevIndexCode</c>): así se ubica cada puerta de un nivel en su terminal.</summary>
+    public async Task<List<HcpDoor>> GetDoorsAsync(CancellationToken ct)
+    {
+        var result = new List<HcpDoor>();
+        await foreach (var item in PagedAsync("/artemis/api/resource/v1/acsDoor/acsDoorList", 500, ct))
+            result.Add(new HcpDoor(
+                Str(item, "doorIndexCode") ?? "",
+                Str(item, "doorName") ?? "",
+                Str(item, "acsDevIndexCode") ?? "",
+                Int(item, "doorNo") ?? 0));
+        return result;
+    }
+
+    /// <summary>
+    /// Niveles de acceso de personas (<c>acs/v1/privilege/group</c>, tipo 1),
+    /// con su horario y sus puertas. Verificado contra HCP 3.1. Lanza
+    /// <see cref="HikCentralException"/> con código 8 si la versión no la tiene.
+    /// </summary>
+    public async Task<List<HcpAccessLevel>> GetAccessLevelsAsync(CancellationToken ct)
+    {
+        var result = new List<HcpAccessLevel>();
+        await foreach (var item in PagedAsync("/artemis/api/acs/v1/privilege/group", 100, ct, extra: new() { ["type"] = 1 }))
+        {
+            string scheduleId = "", scheduleName = "";
+            if (item.TryGetProperty("timeSchedule", out var schedule) && schedule.ValueKind == JsonValueKind.Object)
+            {
+                scheduleId = Str(schedule, "indexCode") ?? "";
+                scheduleName = Str(schedule, "name") ?? "";
+            }
+            var doors = new List<HcpLevelDoor>();
+            int others = 0;
+            if (item.TryGetProperty("ElementList", out var elements) && elements.ValueKind == JsonValueKind.Array)
+                foreach (var wrapper in elements.EnumerateArray())
+                {
+                    var element = wrapper.TryGetProperty("Element", out var inner) ? inner : wrapper;
+                    var info = element.TryGetProperty("BaseInfo", out var b) ? b : element;
+                    // 1002 = puerta; lo demás (pisos de ascensor, salidas) no lo migra TrueCentral.
+                    if (Int(info, "ElementType") is 1002 or null)
+                        doors.Add(new HcpLevelDoor(Str(element, "ID") ?? "", Str(info, "Name") ?? ""));
+                    else others++;
+                }
+            result.Add(new HcpAccessLevel(Str(item, "privilegeGroupId") ?? "", Str(item, "privilegeGroupName") ?? "",
+                scheduleId, scheduleName, doors, others));
+        }
+        return result;
+    }
+
+    /// <summary>Personas asignadas a un nivel (su <c>personId</c>), paginado.</summary>
+    public async Task<List<string>> GetAccessLevelPersonIdsAsync(string levelId, CancellationToken ct)
+    {
+        var result = new List<string>();
+        await foreach (var item in PagedAsync("/artemis/api/acs/v1/privilege/group/single/personList", 100, ct,
+                           extra: new() { ["privilegeGroupId"] = levelId, ["type"] = 1 }))
+            if ((Str(item, "id") ?? Str(item, "personId")) is { Length: > 0 } id) result.Add(id);
+        return result;
+    }
+
     /// <summary>
     /// Foto de carnet de la persona. HikCentral la devuelve como
     /// <c>data:image/jpeg;base64,…</c>; se entrega decodificada con su tipo.
@@ -272,12 +378,16 @@ public sealed class HikCentralClient : IDisposable
     // ------------------------------------------------------------------
 
     private async IAsyncEnumerable<JsonElement> PagedAsync(string path, int pageSize,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct, Action<int>? onTotal = null)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct, Action<int>? onTotal = null,
+        Dictionary<string, object>? extra = null)
     {
         int page = 1;
         while (true)
         {
-            var data = await CallAsync(path, new { pageNo = page, pageSize }, ct);
+            var body = extra is null ? new Dictionary<string, object>() : new Dictionary<string, object>(extra);
+            body["pageNo"] = page;
+            body["pageSize"] = pageSize;
+            var data = await CallAsync(path, body, ct);
             int total = Int(data, "total") ?? 0;
             onTotal?.Invoke(total);
             if (!data.TryGetProperty("list", out var list) || list.ValueKind != JsonValueKind.Array) yield break;
