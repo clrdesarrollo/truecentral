@@ -35,8 +35,12 @@ public sealed class MigratorSettings
     public string TrueCentralPasswordProtected { get; set; } = "";
     /// <summary>0 = el que usan los terminales, 1 = código de persona de HCP, 2 = lo asigna TrueCentral.</summary>
     public int EmployeeNoSource { get; set; }
-    /// <summary>Nivel de acceso a asignar al importar (null = ninguno).</summary>
+    /// <summary>Nivel de acceso a asignar al importar con «uno para todos» (null = ninguno).</summary>
     public int? TrueCentralLevelId { get; set; }
+    /// <summary>0 = ninguno, 1 = uno para todos, 2 = uno por puerta (ver <c>LevelMode</c>).</summary>
+    public int LevelMode { get; set; } = 2;
+    public bool OnlyFoundOnTerminals { get; set; }
+    public bool FacesFromTerminals { get; set; } = true;
     public bool UpdateExisting { get; set; } = true;
     public bool DownloadPhotos { get; set; } = true;
     public bool ImportToTrueCentral { get; set; } = true;
