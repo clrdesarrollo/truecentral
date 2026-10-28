@@ -1,5 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -17,8 +18,8 @@ namespace TrueCentralVms.Client.Views;
 /// El navegador se crea al cargarse el cuadro y se suelta al descargarse. Es el
 /// WebView2 de ventana propia (como el video): WebView2CompositionControl pide
 /// las proyecciones WinRT de un TFM con versión de Windows, que el cliente no
-/// usa. Por eso no se suelta nada encima de una página: se libera el cuadro
-/// con su ✕ y se suelta en él.
+/// usa. Como esa ventana se tragaría un arrastre, durante uno se esconde
+/// (<see cref="DragActive"/>).
 /// </summary>
 public partial class WebCellView : UserControl
 {
@@ -29,8 +30,17 @@ public partial class WebCellView : UserControl
     public WebCellView()
     {
         InitializeComponent();
-        Loaded += async (_, _) => await SafeStartAsync();
-        Unloaded += (_, _) => Stop();
+        Loaded += async (_, _) =>
+        {
+            DragActiveChanged += OnDragActiveChanged;
+            OnDragActiveChanged();
+            await SafeStartAsync();
+        };
+        Unloaded += (_, _) =>
+        {
+            DragActiveChanged -= OnDragActiveChanged;
+            Stop();
+        };
         // La plantilla puede reutilizarse con otra página (otro cuadro movido acá).
         DataContextChanged += async (_, _) =>
         {
@@ -54,6 +64,32 @@ public partial class WebCellView : UserControl
         }
     }
 
+    private static bool _dragActive;
+    private static event Action? DragActiveChanged;
+
+    /// <summary>
+    /// Hay un arrastre en curso (desde la lista o de un cuadro a otro): las
+    /// páginas se esconden mientras dura, así el cuadro recibe el arrastre y
+    /// se puede soltar una cámara o un recurso encima de una página (el
+    /// navegador es una ventana propia y se lo tragaría).
+    /// </summary>
+    public static bool DragActive
+    {
+        get => _dragActive;
+        set
+        {
+            if (_dragActive == value) return;
+            _dragActive = value;
+            DragActiveChanged?.Invoke();
+        }
+    }
+
+    private void OnDragActiveChanged()
+    {
+        if (_web is not null) _web.Visibility = _dragActive ? Visibility.Hidden : Visibility.Visible;
+        DragHint.Visibility = _dragActive && DataContext is WebCellPanel ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private static Task<CoreWebView2Environment> EnvironmentAsync() =>
         _environment ??= CoreWebView2Environment.CreateAsync(null, Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -72,6 +108,7 @@ public partial class WebCellView : UserControl
         {
             DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x15, 0x18, 0x1D),
             AllowExternalDrop = false,
+            Visibility = _dragActive ? Visibility.Hidden : Visibility.Visible,
         };
         Host.Child = web;
         try

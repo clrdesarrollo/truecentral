@@ -344,8 +344,9 @@ public partial class AuxLiveWindow : Window
         if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _dragCandidate = null;
+        WebCellView.DragActive = true; // las páginas web se esconden: el cuadro recibe el arrastre
         try { DragDrop.DoDragDrop(DeviceTree, new DataObject(node.GetType(), node), DragDropEffects.Copy); }
-        finally { _grow.Cancel(); }
+        finally { _grow.Cancel(); WebCellView.DragActive = false; }
     }
 
     private void OnGridPanelLoaded(object sender, RoutedEventArgs e)
@@ -442,8 +443,9 @@ public partial class AuxLiveWindow : Window
                 Math.Abs(position.Y - _cellDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         }
         _cellDragCandidate = null;
+        WebCellView.DragActive = true;
         try { DragDrop.DoDragDrop(source, new DataObject(typeof(VideoCellViewModel), cell), DragDropEffects.Move); }
-        finally { Vm.DropTargetCell = null; }
+        finally { Vm.DropTargetCell = null; WebCellView.DragActive = false; }
     }
 
     private static DragDropEffects CellDropEffect(DragEventArgs e, VideoCellViewModel cell) =>

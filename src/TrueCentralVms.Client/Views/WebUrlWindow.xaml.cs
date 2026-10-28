@@ -28,20 +28,50 @@ public partial class WebUrlWindow : Window
 
     private void OnOpenClick(object sender, RoutedEventArgs e)
     {
-        string text = UrlBox.Text.Trim();
-        // Sin esquema se asume https (lo que se escribe en la barra de un navegador).
-        if (text.Length > 0 && !text.Contains("://")) text = "https://" + text;
-        if (text.Length > 2048 || !Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) || string.IsNullOrEmpty(uri.Host))
+        string address = UrlBox.Text.Trim(), title = TitleBox.Text.Trim();
+        // La dirección quedó en el nombre (y algo que no es dirección, en la
+        // dirección): se dan vuelta en vez de abrir "https://teles/".
+        if (Parse(address) is null && Parse(title) is not null)
         {
-            ErrorText.Text = "Escriba una dirección web completa, por ejemplo https://www.ejemplo.cl.";
+            (address, title) = (title, address);
+            UrlBox.Text = address;
+            TitleBox.Text = title;
+        }
+        if (Parse(address) is not { } uri)
+        {
+            ErrorText.Text = address.Length == 0
+                ? "Escriba la dirección de la página, por ejemplo https://www.ejemplo.cl."
+                : $"«{address}» no es una dirección completa: falta el sitio con su dominio (por ejemplo " +
+                  "https://www.ejemplo.cl/pagina).";
             ErrorText.Visibility = Visibility.Visible;
+            UrlBox.Focus();
             return;
         }
         Url = uri.ToString();
-        PageTitle = TitleBox.Text.Trim() is { Length: > 0 } title ? title : uri.Host;
+        PageTitle = title.Length > 0 ? title : uri.Host;
         DialogResult = true;
     }
+
+    /// <summary>
+    /// La dirección escrita, como la entiende la barra de un navegador: sin
+    /// esquema se asume https. Sin esquema, el sitio tiene que tener dominio
+    /// ("www.ejemplo.cl"), ser una IP o localhost; escribiendo http:// o
+    /// https:// vale también un nombre de la red interna. Null si no sirve.
+    /// </summary>
+    private static Uri? Parse(string text)
+    {
+        if (text.Length == 0 || text.Any(char.IsWhiteSpace)) return null;
+        bool explicitScheme = text.Contains("://");
+        if (!explicitScheme) text = "https://" + text;
+        if (text.Length > 2048 || !Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) || string.IsNullOrEmpty(uri.Host))
+            return null;
+        return explicitScheme || !IsBareName(uri.Host) ? uri : null;
+    }
+
+    /// <summary>Un nombre suelto ("teles"): sin punto, ni IP ni localhost.</summary>
+    private static bool IsBareName(string host) =>
+        !host.Contains('.') && !host.Contains(':') && !host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
 
     private void OnCancelClick(object sender, RoutedEventArgs e) => DialogResult = false;
 }

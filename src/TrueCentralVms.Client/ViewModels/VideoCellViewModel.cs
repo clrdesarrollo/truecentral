@@ -234,6 +234,12 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     /// <summary>Abre un canal en esta celda (perfil main/sub según el tamaño de la grilla).</summary>
     public async Task OpenAsync(ChannelNode node, StreamProfile profile)
     {
+        // Una cámara reemplaza lo que el cuadro mostraba (página, puerta, tarjeta…).
+        if (Panel is { } previous)
+        {
+            Panel = null;
+            previous.Dispose();
+        }
         int sequence = ++_openSequence;
         StopClipRecording(notify: true);
         ResetDigitalZoom();
