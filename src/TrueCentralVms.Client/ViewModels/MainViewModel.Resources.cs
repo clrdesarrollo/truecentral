@@ -63,6 +63,23 @@ public partial class MainViewModel
         Group("Parlantes", ResourceKind.Speaker, visible.Where(r => r.Kind == ResourceKind.Speaker).Select(ResourceNode.From));
         Group("Módulos de E/S", ResourceKind.IoModule, visible.Where(r => r.Kind == ResourceKind.IoModule).Select(ResourceNode.From));
 
+        // Tarjetas de reporte: no son equipos, van siempre al final y en su orden.
+        var cards = new ResourceGroupNode("Tarjetas", "\uE9D2");
+        cards.Children.Add(ResourceNode.Card(CardKinds.Equipment, "Estado de los equipos", "\uE9D9",
+            "En línea por tipo de equipo y los que están sin conexión"));
+        cards.Children.Add(ResourceNode.Card(CardKinds.Server, "Servidor", "\uE977",
+            "CPU, memoria, disco y servicios del servidor"));
+        if (CanEvents)
+            cards.Children.Add(ResourceNode.Card(CardKinds.Alerts, "Últimas alertas", "\uE7BA",
+                "Alertas de las automatizaciones, con las pendientes de confirmar"));
+        if (CanLpr)
+            cards.Children.Add(ResourceNode.Card(CardKinds.Plates, "Últimas patentes", "\uE804",
+                "Reconocimientos de patente en vivo"));
+        if (PermissionScope.Current.Has(Permissions.AccessMonitor))
+            cards.Children.Add(ResourceNode.Card(CardKinds.Access, "Últimos accesos", "\uE8D7",
+                "Pasos por todas las puertas en vivo"));
+        ResourceGroups.Add(cards);
+
         DeviceTreeItems.Clear();
         foreach (var device in Devices) DeviceTreeItems.Add(device);
         foreach (var group in ResourceGroups) DeviceTreeItems.Add(group);
@@ -85,7 +102,17 @@ public partial class MainViewModel
     }
 
     /// <summary>El cuadro que muestra un recurso: su panel según el tipo.</summary>
-    public CellPanel? CreatePanel(ResourceNode node) => node.Kind switch
+    public CellPanel? CreatePanel(ResourceNode node) => node.CardKind switch
+    {
+        CardKinds.Equipment => new EquipmentCardPanel(_api),
+        CardKinds.Server => new ServerCardPanel(_api),
+        CardKinds.Alerts => new AlertsCardPanel(_api, _hub, OpenAlert),
+        CardKinds.Plates => new PlatesCardPanel(_api, _hub),
+        CardKinds.Access => new AccessCardPanel(_api, _hub),
+        _ => CreateResourcePanel(node),
+    };
+
+    private CellPanel? CreateResourcePanel(ResourceNode node) => node.Kind switch
     {
         ResourceKind.Door => new DoorCellPanel(_api, _hub, node),
         ResourceKind.Partition => new AlarmCellPanel(_api, Alarms, node.AlarmPanelId, node.IsWholePanel ? node.Name : node.Detail ?? node.Name),
@@ -110,6 +137,15 @@ public partial class MainViewModel
     {
         var cell = SelectedCell ?? Cells.FirstOrDefault(c => c.IsEmpty) ?? Cells.FirstOrDefault();
         if (cell is not null) await OpenResourceInCellAsync(node, cell);
+    }
+
+    /// <summary>«Ver» desde la tarjeta de alertas: la ventana de alarma de siempre, con esa alerta.</summary>
+    public void OpenAlert(WorkflowAlertDto alert)
+    {
+        if (System.Windows.Application.Current.MainWindow is not { IsLoaded: true } owner) return;
+        Views.AlertWindow.Show(owner, _api, _settings, _alertSound,
+            id => Devices.SelectMany(d => d.Channels).FirstOrDefault(c => c.Channel.Id == id),
+            [alert], alert.Id);
     }
 
     /// <summary>«Contestar» desde un cuadro de citófono: la ventana de llamada de siempre.</summary>

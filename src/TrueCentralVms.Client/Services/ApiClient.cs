@@ -589,6 +589,10 @@ public sealed class ApiClient
 
     // ---------- Centro de mando: recursos de todo tipo ----------
 
+    /// <summary>Resumen del panel de inicio (servidor, equipos en línea, caídos…) para las tarjetas.</summary>
+    public Task<DashboardSnapshot> GetDashboardAsync(CancellationToken ct = default) =>
+        SendAsync<DashboardSnapshot>(HttpMethod.Get, "/api/dashboard", null, ct);
+
     /// <summary>Recursos de todo tipo que ve esta sesión (cámaras, puertas, áreas, cercos…), con su ubicación y estado.</summary>
     public Task<List<ResourceDto>> GetResourcesAsync(CancellationToken ct = default) =>
         SendAsync<List<ResourceDto>>(HttpMethod.Get, "/api/resources", null, ct);

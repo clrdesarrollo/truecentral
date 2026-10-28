@@ -292,4 +292,174 @@
             </StackPanel>
         </ScrollViewer>
     </DataTemplate>
+
+    <!-- ============ Tarjetas de reporte ============ -->
+
+    <Style x:Key="CardBar" TargetType="ProgressBar">
+        <Setter Property="Height" Value="6"/>
+        <Setter Property="Maximum" Value="100"/>
+        <Setter Property="Margin" Value="0,3,0,8"/>
+        <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+
+    <!-- Estado de los equipos -->
+    <DataTemplate DataType="{x:Type vm:EquipmentCardPanel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
+            <StackPanel Margin="14,12">
+                <TextBlock Text="{Binding Summary}" FontSize="17" FontWeight="SemiBold" Style="{StaticResource LevelText}"/>
+                <TextBlock Text="{Binding UpdatedText}" Style="{StaticResource PanelHint}" Margin="0,2,0,8"/>
+                <ItemsControl ItemsSource="{Binding Lines}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="0,3">
+                                <TextBlock DockPanel.Dock="Left" Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="13"
+                                           Width="22" VerticalAlignment="Center" Style="{StaticResource LevelText}"/>
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding Count}" FontWeight="SemiBold"
+                                           FontFamily="{StaticResource MonoFont}" Style="{StaticResource LevelText}"/>
+                                <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextBrush}"/>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="SIN CONEXIÓN" Style="{StaticResource PanelSection}"
+                           Visibility="{Binding Offline.Count, Converter={x:Static vm:CountToVisibility.Instance}}"/>
+                <ItemsControl ItemsSource="{Binding Offline}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,2">
+                                <TextBlock Text="{Binding Name}" Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"/>
+                                <TextBlock Style="{StaticResource PanelHint}">
+                                    <Run Text="{Binding Detail, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Since, Mode=OneWay}"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="0,6,0,0"/>
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+
+    <!-- Servidor -->
+    <DataTemplate DataType="{x:Type vm:ServerCardPanel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
+            <StackPanel Margin="14,12">
+                <TextBlock Text="{Binding UptimeText}" Style="{StaticResource PanelHint}" Margin="0,0,0,10"/>
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding CpuText}" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextBrush}"/>
+                    <TextBlock Text="CPU" Foreground="{StaticResource MutedBrush}"/>
+                </DockPanel>
+                <ProgressBar Value="{Binding Cpu, Mode=OneWay}" Style="{StaticResource CardBar}"/>
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding RamText}" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextBrush}"/>
+                    <TextBlock Text="Memoria" Foreground="{StaticResource MutedBrush}"/>
+                </DockPanel>
+                <ProgressBar Value="{Binding Ram, Mode=OneWay}" Style="{StaticResource CardBar}"/>
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding DiskText}" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextBrush}"/>
+                    <TextBlock Text="Disco" Foreground="{StaticResource MutedBrush}"/>
+                </DockPanel>
+                <ProgressBar Value="{Binding Disk, Mode=OneWay}" Style="{StaticResource CardBar}"/>
+                <TextBlock Text="{Binding ServicesText}" FontWeight="SemiBold" Margin="0,4,0,0">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ServicesLevel}" Value="Ok"><Setter Property="Foreground" Value="{StaticResource OkBrush}"/></DataTrigger>
+                                <DataTrigger Binding="{Binding ServicesLevel}" Value="Warning"><Setter Property="Foreground" Value="{StaticResource WarnBrush}"/></DataTrigger>
+                                <DataTrigger Binding="{Binding ServicesLevel}" Value="Alarm"><Setter Property="Foreground" Value="{StaticResource DangerBrush}"/></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <TextBlock Text="{Binding Problems}" Style="{StaticResource PanelHint}" Margin="0,4,0,0"/>
+                <TextBlock Text="{Binding UpdatedText}" Style="{StaticResource PanelHint}" Margin="0,8,0,0"/>
+                <TextBlock Text="{Binding Status}" Style="{StaticResource PanelHint}"/>
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+
+    <!-- Últimas alertas -->
+    <DataTemplate DataType="{x:Type vm:AlertsCardPanel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
+            <StackPanel Margin="14,12">
+                <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,8"/>
+                <ItemsControl ItemsSource="{Binding Items}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,5">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="Ver" Style="{StaticResource PanelButton}" Margin="6,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"/>
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding State}" FontSize="11.5" Style="{StaticResource LevelText}"/>
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+                                        <TextBlock Style="{StaticResource PanelHint}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap">
+                                            <Run Text="{Binding Time, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Detail, Mode=OneWay}"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="0,6,0,0"/>
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+
+    <!-- Últimas patentes -->
+    <DataTemplate DataType="{x:Type vm:PlatesCardPanel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
+            <ItemsControl ItemsSource="{Binding Items}" Margin="14,10">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <DockPanel Margin="0,3">
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding Time}" Width="64" VerticalAlignment="Center"
+                                       Foreground="{StaticResource MutedBrush}" FontFamily="{StaticResource MonoFont}"/>
+                            <Border DockPanel.Dock="Left" Background="#F2F2F2" CornerRadius="3" Padding="8,1" Margin="0,0,10,0"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Plate}" Foreground="#111111" FontWeight="Bold" FontSize="14"
+                                           FontFamily="{StaticResource MonoFont}"/>
+                            </Border>
+                            <TextBlock Text="{Binding Where}" VerticalAlignment="Center" Foreground="{StaticResource TextBrush}"
+                                       TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DataTemplate>
+
+    <!-- Últimos accesos -->
+    <DataTemplate DataType="{x:Type vm:AccessCardPanel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
+            <ItemsControl ItemsSource="{Binding Items}" Margin="14,10">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,4">
+                            <StackPanel>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Left" Text="{Binding Time}" Width="64"
+                                               Foreground="{StaticResource MutedBrush}" FontFamily="{StaticResource MonoFont}"/>
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding What}" Style="{StaticResource LevelText}"/>
+                                    <TextBlock Text="{Binding Who}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
+                                <TextBlock Text="{Binding Door}" Style="{StaticResource PanelHint}" Margin="64,0,0,0"
+                                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DataTemplate>
 </ResourceDictionary>

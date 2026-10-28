@@ -25,8 +25,14 @@ public sealed partial class ResourceNode : ObservableObject
         _state = state;
     }
 
+    /// <summary>Tarjeta de reporte (no es un equipo): estado de equipos, servidor, últimas alertas…</summary>
+    public static ResourceNode Card(string cardKind, string name, string glyph, string description) =>
+        new(ResourceKind.Camera, 0, name, description, null) { CardKind = cardKind, CustomGlyph = glyph };
+
+    /// <summary>Las puertas suelen llamarse igual en cada equipo («Puerta 1»): su detalle es el equipo.</summary>
     public static ResourceNode From(ResourceDto dto) =>
-        new(dto.Kind, dto.Id, dto.Name, dto.Detail, dto.LocationId, dto.SourceId, dto.Health, dto.State);
+        new(dto.Kind, dto.Id, dto.Name, dto.Kind == ResourceKind.Door ? dto.Source : dto.Detail,
+            dto.LocationId, dto.SourceId, dto.Health, dto.State);
 
     public ResourceKind Kind { get; }
 
@@ -41,6 +47,11 @@ public sealed partial class ResourceNode : ObservableObject
     public string? Detail { get; }
     public int? LocationId { get; }
 
+    /// <summary>Clave de la tarjeta (<see cref="CardKinds"/>); null = es un equipo.</summary>
+    public string? CardKind { get; init; }
+
+    private string? CustomGlyph { get; init; }
+
     /// <summary>Panel de alarma entero (no un área suelta).</summary>
     public bool IsWholePanel { get; init; }
 
@@ -54,9 +65,10 @@ public sealed partial class ResourceNode : ObservableObject
     [ObservableProperty] private bool _isVisible = true;
     [ObservableProperty] private bool _isSelected;
 
-    public string Glyph => GlyphOf(Kind);
+    public string Glyph => CustomGlyph ?? GlyphOf(Kind);
 
-    public string TreeToolTip => string.Join(" · ", new[] { Detail, State }.Where(s => !string.IsNullOrWhiteSpace(s))) is { Length: > 0 } text
+    public string TreeToolTip => CardKind is not null ? $"{Detail}. Doble clic o arrastre a un cuadro"
+        : string.Join(" · ", new[] { Detail, State }.Where(s => !string.IsNullOrWhiteSpace(s))) is { Length: > 0 } text
         ? $"{text}. Doble clic o arrastre a un cuadro para operarlo"
         : "Doble clic o arrastre a un cuadro para operarlo";
 
@@ -64,13 +76,13 @@ public sealed partial class ResourceNode : ObservableObject
 
     public static string GlyphOf(ResourceKind kind) => kind switch
     {
-        ResourceKind.Door => "",
-        ResourceKind.Partition or ResourceKind.Zone => "",
-        ResourceKind.Fence => "",
-        ResourceKind.Speaker => "",
-        ResourceKind.Intercom => "",
-        ResourceKind.IoModule => "",
-        _ => "",
+        ResourceKind.Door => "\uE8D7",
+        ResourceKind.Partition or ResourceKind.Zone => "\uE730",
+        ResourceKind.Fence => "\uE945",
+        ResourceKind.Speaker => "\uE767",
+        ResourceKind.Intercom => "\uE717",
+        ResourceKind.IoModule => "\uE950",
+        _ => "\uE714",
     };
 }
 
