@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using TrueCentralVms.Client.Services;
 using TrueCentralVms.Client.ViewModels;
 
 namespace TrueCentralVms.Client.Views;
@@ -49,14 +50,31 @@ public partial class AuxLiveWindow : Window
         PreviewKeyDown += OnWindowKeyDown;
         // Cerrar la pantalla detiene y libera sus streams (la principal sigue).
         Closed += (_, _) => Vm.Dispose();
+        // Su lugar queda anotado por número de pantalla: la próxima vez que se
+        // abra la pantalla 2, vuelve al monitor donde estaba la 2.
+        Closing += (_, _) => WindowPlacements.Store(this, PlacementKey);
     }
 
+    private string PlacementKey => Vm.IsFleet ? "fleet-live" : $"aux{Vm.SlotNumber}";
+
     // ------------------------------------------------------------------
-    // Apertura: la pantalla parte maximizada en el primer monitor que no
-    // tenga ventanas de la aplicación (para eso existe: más monitores). Si
-    // todos están ocupados, cae en cascada sobre la ventana ancla.
+    // Apertura: la pantalla vuelve donde quedó la última vez que se cerró
+    // (con la opción de Configuración encendida). Si no hay lugar anotado,
+    // parte maximizada en el primer monitor que no tenga ventanas de la
+    // aplicación (para eso existe: más monitores). Si todos están ocupados,
+    // cae en cascada sobre la ventana ancla.
     // ------------------------------------------------------------------
     public void ShowOnFreeMonitor(IReadOnlyList<Window> occupied)
+    {
+        if (ClientSettings.Load().RememberWindowPlacement && WindowPlacements.Get(PlacementKey) is { } saved)
+        {
+            ShowAt(new Rect(saved.Left, saved.Top, saved.Width, saved.Height), saved.Maximized, occupied);
+            return;
+        }
+        ShowOnFirstFreeMonitor(occupied);
+    }
+
+    private void ShowOnFirstFreeMonitor(IReadOnlyList<Window> occupied)
     {
         var used = new HashSet<IntPtr>();
         foreach (var window in occupied)
@@ -113,7 +131,7 @@ public partial class AuxLiveWindow : Window
         }
         if (!usable)
         {
-            ShowOnFreeMonitor(occupied);
+            ShowOnFirstFreeMonitor(occupied);
             return;
         }
         Left = bounds.Left;

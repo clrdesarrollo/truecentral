@@ -21,6 +21,8 @@ public partial class LoginWindow : Window
     public LoginWindow(bool skipAutoLogin = false, string? notice = null)
     {
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "login");
         if (skipAutoLogin) _autoLoginAttempted = true;
         if (notice is not null)
         {

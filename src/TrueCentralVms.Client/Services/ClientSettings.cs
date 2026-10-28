@@ -167,15 +167,24 @@ public sealed class ClientSettings
     /// <summary>Paleta de la Consola (<see cref="ConsolePalettes"/>): "grafito" (por defecto), "control", "petroleo" o "ambar".</summary>
     public string ConsolePalette { get; set; } = ConsolePalettes.Default;
 
-    // ---------- Ventana de alarma ----------
+    // ---------- Viñetas de la ventana principal ----------
+
+    /// <summary>Orden de las viñetas de módulos elegido por el operador
+    /// arrastrándolas (claves de sección: Home, Live, Playback…). Las que no
+    /// están en la lista van al final, en su orden de siempre.</summary>
+    public List<string> TabOrder { get; set; } = [];
+
+    // ---------- Lugar de las ventanas ----------
 
     /// <summary>
-    /// Abrir la ventana de alarma donde quedó la última vez (monitor, posición
-    /// y tamaño) en vez de centrada. Sirve en puestos con dos pantallas: las
-    /// cámaras en una y la alarma en la de trabajo, donde el guardia la opera.
+    /// Abrir cada ventana donde quedó la última vez (monitor, posición, tamaño
+    /// y maximizada) en vez de centrada: en los puestos con varias pantallas
+    /// los avisos de alarma y de citofonía no saltan de monitor. Los lugares
+    /// van en windows.json (ver <see cref="WindowPlacements"/>).
     /// </summary>
-    public bool AlertWindowRememberPlacement { get; set; }
-    /// <summary>Último lugar de la ventana de alarma (se anota siempre al cerrarla).</summary>
+    public bool RememberWindowPlacement { get; set; } = true;
+    /// <summary>Lugar de la ventana de alarma de las versiones anteriores a
+    /// windows.json: solo se lee, para estrenar la ventana donde estaba.</summary>
     public WindowBounds? AlertWindowBounds { get; set; }
 
     // ---------- Exportación de grabaciones (diálogo Exportar) ----------
@@ -226,6 +235,9 @@ public sealed class ClientSettings
     [JsonIgnore]
     public string EffectiveExportFolder =>
         string.IsNullOrWhiteSpace(ExportFolder) ? EffectiveRecordingFolder : ExportFolder;
+
+    /// <summary>Ruta de client.json (windows.json va al lado).</summary>
+    public static string FileLocation => FilePath;
 
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

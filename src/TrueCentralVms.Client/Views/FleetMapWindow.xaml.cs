@@ -26,6 +26,8 @@ public partial class FleetMapWindow : Window
         _api = api;
         _openVehicle = openVehicle;
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "fleet-map");
         StateChanged += OnWindowStateChanged;
         Loaded += async (_, _) => await StartAsync();
         Closed += (_, _) => Web.Dispose();

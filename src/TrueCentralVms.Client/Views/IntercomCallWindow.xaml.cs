@@ -54,6 +54,8 @@ public partial class IntercomCallWindow : Window
         _voice = new IntercomVoiceClient(api);
         _cell = new VideoCellViewModel(api, settings);
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "intercom-call");
         VideoArea.DataContext = _cell;
 
         StateChanged += (_, _) => MaxGlyph.Text = WindowState == WindowState.Maximized ? "" : "";

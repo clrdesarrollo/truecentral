@@ -1,5 +1,6 @@
 using System.Windows;
 using TrueCentralVms.Client.ViewModels;
+using TrueCentralVms.Client.Services;
 
 namespace TrueCentralVms.Client.Views;
 
@@ -15,6 +16,8 @@ public partial class EventCenterWindow : Window
     {
         DataContext = viewModel;
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "event-center");
         Loaded += async (_, _) => await viewModel.LoadAsync();
         StateChanged += (_, _) =>
             MaxGlyph.Text = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
