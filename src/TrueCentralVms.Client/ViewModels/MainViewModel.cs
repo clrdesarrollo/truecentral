@@ -713,6 +713,7 @@ public partial class MainViewModel : ObservableObject
             ApplyLocationSearchFilter(text);
             return;
         }
+        ApplyResourceSearchFilter(text);
         foreach (var device in Devices)
         {
             bool deviceMatch = Matches(device.Header, text);
@@ -897,7 +898,9 @@ public partial class MainViewModel : ObservableObject
 
         _hub.ConfigChanged += entity =>
         {
-            if (entity is "devices" or "channels" or "locations")
+            // La lista del Centro de mando trae también puertas, paneles, cercos…
+            if (entity is "devices" or "channels" or "locations" or "access-devices" or "alarm-panels"
+                or "intercoms" or "speakers" or "io-modules")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadTreeAsync());
             if (entity is "fleet" or "channels" or "locations")
                 Application.Current.Dispatcher.InvokeAsync(() => { if (_fleetWindow?.Vm is { } fleet) _ = fleet.LoadFleetAsync(); });
@@ -1054,6 +1057,7 @@ public partial class MainViewModel : ObservableObject
                     node.Channels.Add(new ChannelNode(node, channel));
                 Devices.Add(node);
             }
+            await LoadResourcesAsync(); // puertas, paneles, cercos… (Centro de mando)
             await LoadLocationTreeAsync(); // mismos nodos de cámara, agrupados por ubicación
             ApplySearchFilter(); // el árbol nuevo debe respetar el filtro vigente
             RefreshLiveChannels(); // y marcar lo que ya está en pantalla

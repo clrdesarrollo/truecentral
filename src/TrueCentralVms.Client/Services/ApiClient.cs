@@ -587,6 +587,32 @@ public sealed class ApiClient
     public Task SendCercoCommandAsync(int panelId, string command, CancellationToken ct = default) =>
         SendAsync<object?>(HttpMethod.Post, $"/api/cerco/panels/{panelId}/{command}", null, ct);
 
+    // ---------- Centro de mando: recursos de todo tipo ----------
+
+    /// <summary>Recursos de todo tipo que ve esta sesión (cámaras, puertas, áreas, cercos…), con su ubicación y estado.</summary>
+    public Task<List<ResourceDto>> GetResourcesAsync(CancellationToken ct = default) =>
+        SendAsync<List<ResourceDto>>(HttpMethod.Get, "/api/resources", null, ct);
+
+    /// <summary>Puertas de control de acceso con su estado (filtradas por alcance).</summary>
+    public Task<List<AccessDoorStateDto>> GetAccessDoorsAsync(CancellationToken ct = default) =>
+        SendAsync<List<AccessDoorStateDto>>(HttpMethod.Get, "/api/access/doors", null, ct);
+
+    /// <summary>Orden a una puerta: "Open", "Close", "RemainOpen" o "RemainLocked". Devuelve el estado nuevo.</summary>
+    public Task<AccessDoorStateDto> SendAccessDoorCommandAsync(int doorId, string command, CancellationToken ct = default) =>
+        SendAsync<AccessDoorStateDto>(HttpMethod.Post, $"/api/access/doors/{doorId}/command", new AccessDoorCommandDto(command), ct);
+
+    /// <summary>Últimos eventos de control de acceso (la página más reciente).</summary>
+    public Task<AccessEventPageDto> GetAccessEventsAsync(int pageSize, CancellationToken ct = default) =>
+        SendAsync<AccessEventPageDto>(HttpMethod.Get, $"/api/access/events?page=1&pageSize={pageSize}", null, ct);
+
+    /// <summary>Módulos de E/S (relés) con el estado de sus entradas y salidas.</summary>
+    public Task<List<IoModuleDto>> GetIoModulesAsync(CancellationToken ct = default) =>
+        SendAsync<List<IoModuleDto>>(HttpMethod.Get, "/api/io/modules", null, ct);
+
+    /// <summary>Opera una salida (relé) de un módulo de E/S.</summary>
+    public Task<IoCommandResultDto> SendIoOutputAsync(int moduleId, int number, IoOutputCommandDto command, CancellationToken ct = default) =>
+        SendAsync<IoCommandResultDto>(HttpMethod.Post, $"/api/io/modules/{moduleId}/outputs/{number}", command, ct);
+
     /// <summary>Paneles de alarma con el estado de sus áreas y zonas.</summary>
     public Task<List<AlarmPanelDto>> GetAlarmPanelsAsync(CancellationToken ct = default) =>
         SendAsync<List<AlarmPanelDto>>(HttpMethod.Get, "/api/alarms/panels", null, ct);

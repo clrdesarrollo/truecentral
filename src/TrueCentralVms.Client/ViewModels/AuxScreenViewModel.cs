@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -32,8 +32,8 @@ public partial class AuxScreenViewModel : ObservableObject
     public bool IsFleet { get; }
 
     public string WindowTitle => IsFleet ? "Flota en vivo" : $"Pantalla auxiliar {SlotNumber}";
-    public string TreeCaption => IsFleet ? "VEHÍCULOS" : "CÁMARAS";
-    public string SearchHint => IsFleet ? "Buscar vehículo o cámara…" : "Buscar canal…";
+    public string TreeCaption => IsFleet ? "VEHÍCULOS" : "RECURSOS";
+    public string SearchHint => IsFleet ? "Buscar vehículo o cámara…" : "Buscar…";
     /// <summary>El selector Equipo/Ubicación es del árbol del shell; en Flota no se ofrece.</summary>
     public bool ShowTreeModeToggle => !IsFleet;
 
@@ -414,6 +414,21 @@ public partial class AuxScreenViewModel : ObservableObject
         finally { _layoutBusy = false; }
         SelectedCell = Cells[split.StripCells[0]];
         StatusMessage = $"Cuadro separado: la grilla queda en {split.Layout.CellCount} cuadros.";
+    }
+
+    /// <summary>Centro de mando: un recurso (puerta, panel, cerco…) en un cuadro de esta pantalla.</summary>
+    public async Task OpenResourceInCellAsync(ResourceNode node, VideoCellViewModel cell)
+    {
+        if (_shell.CreatePanel(node) is not { } panel) return;
+        await cell.ShowPanelAsync(panel);
+        SelectedCell = cell;
+    }
+
+    /// <summary>Doble clic en un recurso: en el cuadro seleccionado, o en el primero libre.</summary>
+    public async Task OpenResourceAsync(ResourceNode node)
+    {
+        var cell = SelectedCell ?? Cells.FirstOrDefault(c => c.IsEmpty) ?? Cells.FirstOrDefault();
+        if (cell is not null) await OpenResourceInCellAsync(node, cell);
     }
 
     /// <summary>Igual que en la grilla principal: no más cuadros que cámaras a la vista.</summary>

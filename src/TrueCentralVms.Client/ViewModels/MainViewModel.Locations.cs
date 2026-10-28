@@ -72,7 +72,7 @@ public partial class MainViewModel
     public bool IsTreeByDevice => !IsTreeByLocation;
 
     /// <summary>Lo que muestran los árboles de cámaras según el modo elegido.</summary>
-    public IEnumerable TreeItems => IsTreeByLocation ? LocationRoots : Devices;
+    public IEnumerable TreeItems => IsTreeByLocation ? LocationRoots : DeviceTreeItems;
 
     [RelayCommand]
     private void ShowTreeByDevice() => IsTreeByLocation = false;
@@ -122,12 +122,20 @@ public partial class MainViewModel
             else
                 unassigned.Children.Add(channel);
         }
+        // Centro de mando: puertas, áreas, cercos… junto a las cámaras de su ubicación.
+        foreach (var resource in _locatedResources.OrderBy(r => r.Kind).ThenBy(r => r.Name, NaturalOrder))
+        {
+            if (resource.LocationId is { } id && nodes.TryGetValue(id, out var owner))
+                owner.Children.Add(resource);
+            else
+                unassigned.Children.Add(resource);
+        }
 
         LocationRoots.Clear();
         foreach (var root in roots)
             if (Prune(root)) LocationRoots.Add(root);
-        unassigned.ChannelCount = unassigned.Children.Count;
-        if (unassigned.ChannelCount > 0) LocationRoots.Add(unassigned);
+        unassigned.ChannelCount = unassigned.Children.OfType<ChannelNode>().Count();
+        if (unassigned.Children.Count > 0) LocationRoots.Add(unassigned);
 
         // Cuenta las cámaras de cada subárbol y quita las ramas sin ninguna.
         static bool Prune(LocationNode node)
@@ -135,8 +143,11 @@ public partial class MainViewModel
             foreach (var child in node.Children.OfType<LocationNode>().ToList())
                 if (!Prune(child)) node.Children.Remove(child);
             node.ChannelCount = node.AllChannels().Count();
-            return node.ChannelCount > 0;
+            return node.ChannelCount > 0 || HasResources(node);
         }
+
+        static bool HasResources(LocationNode node) =>
+            node.Children.OfType<ResourceNode>().Any() || node.Children.OfType<LocationNode>().Any(HasResources);
     }
 
     /// <summary>Buscador en el árbol por ubicación: una cámara se ve si calza su
@@ -159,6 +170,11 @@ public partial class MainViewModel
                 {
                     channel.IsVisible = match || Matches(channel.Header, text) || Matches(channel.Device.Name, text);
                     anyVisible |= channel.IsVisible;
+                }
+                else if (child is ResourceNode resource)
+                {
+                    resource.IsVisible = match || Matches(resource.Name, text) || Matches(resource.Detail ?? "", text);
+                    anyVisible |= resource.IsVisible;
                 }
             }
             node.IsVisible = match || anyVisible;

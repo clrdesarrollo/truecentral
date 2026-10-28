@@ -311,6 +311,12 @@ public partial class AuxLiveWindow : Window
     // ------------------------------------------------------------------
     private async void OnTreeDoubleClick(object sender, MouseButtonEventArgs e)
     {
+        // Centro de mando: puertas, paneles, cercos… se abren en un cuadro igual que una cámara.
+        if (DeviceTree.SelectedItem is ResourceNode resource)
+        {
+            await Vm.OpenResourceAsync(resource);
+            return;
+        }
         if (DeviceTree.SelectedItem is ChannelNode node)
             await Vm.OpenChannelAsync(node);
         else if (DeviceTree.SelectedItem is DeviceNode device)
@@ -319,12 +325,14 @@ public partial class AuxLiveWindow : Window
             await Vm.OpenLocationAsync(location);
     }
 
-    private ChannelNode? _dragCandidate;
+    /// <summary>Canal o recurso del árbol que puede empezar a arrastrarse.</summary>
+    private object? _dragCandidate;
     private Point _dragStart;
 
     private void OnTreeMouseDown(object sender, MouseButtonEventArgs e)
     {
-        _dragCandidate = (e.OriginalSource as FrameworkElement)?.DataContext as ChannelNode;
+        _dragCandidate = (e.OriginalSource as FrameworkElement)?.DataContext is ChannelNode or ResourceNode
+            ? ((FrameworkElement)e.OriginalSource).DataContext : null;
         _dragStart = e.GetPosition(this);
     }
 
@@ -336,7 +344,7 @@ public partial class AuxLiveWindow : Window
         if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _dragCandidate = null;
-        try { DragDrop.DoDragDrop(DeviceTree, new DataObject(typeof(ChannelNode), node), DragDropEffects.Copy); }
+        try { DragDrop.DoDragDrop(DeviceTree, new DataObject(node.GetType(), node), DragDropEffects.Copy); }
         finally { _grow.Cancel(); }
     }
 
@@ -441,7 +449,8 @@ public partial class AuxLiveWindow : Window
     private static DragDropEffects CellDropEffect(DragEventArgs e, VideoCellViewModel cell) =>
         e.Data.GetData(typeof(VideoCellViewModel)) is VideoCellViewModel dragged
             ? ReferenceEquals(dragged, cell) ? DragDropEffects.None : DragDropEffects.Move
-            : e.Data.GetDataPresent(typeof(ChannelNode)) ? DragDropEffects.Copy : DragDropEffects.None;
+            : e.Data.GetDataPresent(typeof(ChannelNode)) || e.Data.GetDataPresent(typeof(ResourceNode))
+                ? DragDropEffects.Copy : DragDropEffects.None;
 
     private void HandleCellDragOver(VideoCellViewModel cell, DragEventArgs e, Visual source)
     {
@@ -475,6 +484,11 @@ public partial class AuxLiveWindow : Window
         {
             e.Handled = true;
             await Vm.OpenChannelInCellAsync(node, cell);
+        }
+        else if (e.Data.GetData(typeof(ResourceNode)) is ResourceNode resource)
+        {
+            e.Handled = true;
+            await Vm.OpenResourceInCellAsync(resource, cell);
         }
     }
 
