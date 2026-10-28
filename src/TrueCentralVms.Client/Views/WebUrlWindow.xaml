@@ -1,0 +1,53 @@
+<!-- «Otra dirección…» del Centro de mando: una página web escrita a mano para
+     un cuadro (con el permiso "Abrir cualquier página web"). Misma receta de
+     ventana que los demás diálogos: sin marco de Windows y ✕ propio. -->
+<Window x:Class="TrueCentralVms.Client.Views.WebUrlWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Página web — CLR TrueCentral VMS"
+        Width="460" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None" ShowInTaskbar="False"
+        Icon="/TrueCentralVms.Client;component/Assets/logo.png"
+        Background="{StaticResource BgBrush}">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="44" ResizeBorderThickness="0"
+                      GlassFrameThickness="0,0,0,1" CornerRadius="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Height="44" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource TitleBarCloseButton}" Content="&#xE8BB;"
+                        Width="44" Click="OnCancelClick" ToolTip="Cancelar"
+                        WindowChrome.IsHitTestVisibleInChrome="True"/>
+                <StackPanel Orientation="Horizontal" Margin="14,0">
+                    <TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                               Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Text="Otra página web" Foreground="{StaticResource TextBrush}"
+                               FontSize="13" FontWeight="SemiBold" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,10">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource GhostButton}" Padding="14,6" Content="Cancelar" Click="OnCancelClick"/>
+                <Button Style="{StaticResource PrimaryButton}" Padding="14,6" Margin="8,0,0,0" Content="Abrir"
+                        IsDefault="True" Click="OnOpenClick"/>
+            </StackPanel>
+        </Border>
+        <StackPanel Margin="16,14,16,12">
+            <TextBlock Text="Dirección" Foreground="{StaticResource MutedBrush}" FontSize="11.5" Margin="0,0,0,4"/>
+            <TextBox x:Name="UrlBox" Style="{StaticResource DarkTextBox}" Padding="9,6" FontSize="12.5"/>
+            <TextBlock Text="Rótulo del cuadro (opcional)" Foreground="{StaticResource MutedBrush}" FontSize="11.5"
+                       Margin="0,12,0,4"/>
+            <TextBox x:Name="TitleBox" Style="{StaticResource DarkTextBox}" Padding="9,6" FontSize="12.5" MaxLength="128"/>
+            <TextBlock x:Name="ErrorText" Foreground="{StaticResource DangerBrush}" FontSize="11.5" Margin="0,10,0,0"
+                       TextWrapping="Wrap" Visibility="Collapsed"/>
+            <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,0"
+                       Text="Algunos sitios no se dejan mostrar dentro de otra aplicación. Las que se usan siempre conviene pedirlas a la lista del servidor (panel web → Tableros)."/>
+        </StackPanel>
+    </DockPanel>
+</Window>

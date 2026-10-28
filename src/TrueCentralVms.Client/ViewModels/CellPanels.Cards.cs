@@ -22,6 +22,10 @@ public static class CardKinds
     public const string Alerts = "card-alerts";
     public const string Plates = "card-plates";
     public const string Access = "card-access";
+    /// <summary>Página web de la lista del servidor (no es tarjeta: es lo que pide la lista).</summary>
+    public const string Web = "web";
+    /// <summary>«Otra dirección…»: se escribe al abrirla.</summary>
+    public const string WebCustom = "web-custom";
 }
 
 /// <summary>Base de las tarjetas que se releen solas cada cierto tiempo.</summary>

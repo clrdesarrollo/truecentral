@@ -597,6 +597,10 @@ public sealed class ApiClient
     public Task<List<ResourceDto>> GetResourcesAsync(CancellationToken ct = default) =>
         SendAsync<List<ResourceDto>>(HttpMethod.Get, "/api/resources", null, ct);
 
+    /// <summary>Páginas web de la lista del servidor (para ponerlas en un cuadro).</summary>
+    public Task<List<WebLinkDto>> GetWebLinksAsync(CancellationToken ct = default) =>
+        SendAsync<List<WebLinkDto>>(HttpMethod.Get, "/api/web-links", null, ct);
+
     /// <summary>Puertas de control de acceso con su estado (filtradas por alcance).</summary>
     public Task<List<AccessDoorStateDto>> GetAccessDoorsAsync(CancellationToken ct = default) =>
         SendAsync<List<AccessDoorStateDto>>(HttpMethod.Get, "/api/access/doors", null, ct);

@@ -54,12 +54,20 @@ public class LiveSessionGrid
     public List<LiveSessionCell> Cells { get; set; } = [];
 }
 
-/// <summary>Un cuadro con cámara: posición (0..n-1), id del canal y stream (0 principal, 1 secundario).</summary>
+/// <summary>
+/// Un cuadro: posición (0..n-1) y, si es una cámara, id del canal y stream (0
+/// principal, 1 secundario). Si no (Kind con valor), lo que muestra en el
+/// formato de los tableros: recurso, tarjeta o página web.
+/// </summary>
 public sealed class LiveSessionCell
 {
     public int Index { get; set; }
     public int ChannelId { get; set; }
     public int Profile { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Kind { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? RefId { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Ref { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Title { get; set; }
 }
 
 /// <summary>Una pantalla auxiliar: su grilla y dónde estaba su ventana.</summary>

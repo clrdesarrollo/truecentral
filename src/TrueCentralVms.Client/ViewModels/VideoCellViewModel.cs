@@ -67,6 +67,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
 
     /// <summary>El cuadro cambió de canal (o quedó libre): el shell actualiza
     /// la marca de "en vivo" del árbol.</summary>
+    /// <summary>Cambió lo que muestra el cuadro (una cámara, o un recurso, tarjeta o página web).</summary>
     public event Action? AssignedChannelChanged;
 
     /// <summary>Se guardó un archivo local (título, glifo MDL2, ruta completa):
@@ -839,6 +840,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     }
 
     partial void OnAssignedChannelChanged(ChannelNode? value) => AssignedChannelChanged?.Invoke();
+    partial void OnPanelChanged(CellPanel? value) => AssignedChannelChanged?.Invoke();
 
     [RelayCommand]
     private void ToggleAudio() => IsAudioOn = !IsAudioOn;

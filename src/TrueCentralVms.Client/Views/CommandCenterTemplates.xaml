@@ -4,7 +4,8 @@
      estilos son los de App.xaml (y del tema Consola). -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels">
+                    xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
+                    xmlns:views="clr-namespace:TrueCentralVms.Client.Views">
 
     <SolidColorBrush x:Key="WarnBrush" Color="#F59E0B"/>
 
@@ -185,7 +186,9 @@
                     <Button Content="Silenciar sirena" Style="{StaticResource PanelButton}" IsEnabled="{Binding Item.CanSilence}"
                             Command="{Binding Cerco.SilenceCommand}" CommandParameter="{Binding Item}"/>
                 </WrapPanel>
-                <TextBlock Text="{Binding Item.ReadOnlyHint}" Style="{StaticResource PanelHint}"/>
+                <!-- El aviso del cerco siempre trae texto: se muestra solo si no se puede operar -->
+                <TextBlock Text="{Binding Item.ReadOnlyHint}" Style="{StaticResource PanelHint}"
+                           Visibility="{Binding Item.IsReadOnly, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                 <TextBlock Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="0,6,0,0"/>
             </StackPanel>
         </ScrollViewer>
@@ -516,4 +519,24 @@
             </ItemsControl>
         </ScrollViewer>
     </DataTemplate>
+    <!-- Página web: el navegador del cuadro y, abajo, dónde está y Recargar -->
+    <DataTemplate DataType="{x:Type vm:WebCellPanel}">
+        <DockPanel Background="{StaticResource CellBgBrush}">
+            <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}" Padding="8,2">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="8,1" FontSize="11"
+                            Command="{Binding ReloadCommand}" ToolTip="Volver a cargar la página">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" FontSize="10" VerticalAlignment="Center"/>
+                            <TextBlock Text="Recargar" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <TextBlock Text="{Binding CurrentUrl}" FontSize="10.5" Foreground="{StaticResource MutedBrush}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding CurrentUrl}"/>
+                </DockPanel>
+            </Border>
+            <views:WebCellView/>
+        </DockPanel>
+    </DataTemplate>
+
 </ResourceDictionary>

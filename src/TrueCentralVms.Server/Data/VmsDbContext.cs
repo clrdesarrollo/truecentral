@@ -121,6 +121,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     // Vistas guardadas del monitoreo en vivo (Custom View de iVMS-4200)
     public DbSet<LiveView> LiveViews => Set<LiveView>();
     public DbSet<LiveViewItem> LiveViewItems => Set<LiveViewItem>();
+    public DbSet<LiveViewRole> LiveViewRoles => Set<LiveViewRole>();
+    public DbSet<WebLink> WebLinks => Set<WebLink>();
 
     // Ubicaciones: el árbol lógico de Recursos (cada recurso apunta a una)
     public DbSet<Location> Locations => Set<Location>();
@@ -1204,13 +1206,34 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
                 .WithMany(v => v.Items)
                 .HasForeignKey(i => i.LiveViewId)
                 .OnDelete(DeleteBehavior.Cascade);
-            // Un cuadro sin canal no tiene sentido: si el canal desaparece del
-            // inventario, el cuadro se va con él y la vista abre con ese hueco.
+            // Si el canal desaparece del inventario, su cuadro se va con él y el
+            // tablero abre con ese hueco (los cuadros que no son cámara no tienen canal).
             e.HasOne(i => i.Channel)
                 .WithMany()
                 .HasForeignKey(i => i.ChannelId)
                 .OnDelete(DeleteBehavior.Cascade);
+            e.Property(i => i.Kind).HasMaxLength(16).HasDefaultValue("camera");
+            e.Property(i => i.Ref).HasMaxLength(2048);
+            e.Property(i => i.Title).HasMaxLength(128);
             e.HasIndex(i => new { i.LiveViewId, i.CellIndex }).IsUnique();
+        });
+
+        modelBuilder.Entity<LiveViewRole>(e =>
+        {
+            e.ToTable("LiveViewRoles");
+            e.HasKey(r => new { r.LiveViewId, r.RoleId });
+            e.HasOne<LiveView>().WithMany(v => v.Roles).HasForeignKey(r => r.LiveViewId).OnDelete(DeleteBehavior.Cascade);
+            // Borrar un rol lo saca de los tableros; si era el único, el tablero
+            // queda visible solo para quien administra los tableros (RestrictToRoles).
+            e.HasOne<Role>().WithMany().HasForeignKey(r => r.RoleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WebLink>(e =>
+        {
+            e.Property(l => l.Name).HasMaxLength(128);
+            e.Property(l => l.Url).HasMaxLength(2048);
+            e.Property(l => l.Description).HasMaxLength(500);
+            e.HasIndex(l => l.Name).IsUnique();
         });
 
         // -------------------------------------------------------------------

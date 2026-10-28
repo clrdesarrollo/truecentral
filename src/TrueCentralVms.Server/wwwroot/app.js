@@ -2283,6 +2283,7 @@ const routes = {
   "#/walls": renderWalls,
   "#/walls/edit": renderWallEditor,
   "#/resources": renderResources,
+  "#/boards": renderBoards,
   "#/sessions": renderSessions,
   "#/users": renderUsers,
   "#/roles": renderRoles,
@@ -2440,6 +2441,7 @@ function leaveCurrentPage() {
   if (typeof cercoDetachHub === "function") cercoDetachHub(); // suelta hub + delegaciones de cerco
   if (typeof accessDetachHub === "function") accessDetachHub(); // ídem el monitoreo de puertas
   if (typeof resourcesDetachHub === "function") resourcesDetachHub(); // ídem la página Recursos
+  if (typeof boardsDetachHub === "function") boardsDetachHub();       // ídem la página Tableros
   if (typeof rolesDetachHub === "function") rolesDetachHub(); // ídem la página Roles
   if (typeof ioModulesDetachHub === "function") ioModulesDetachHub(); // ídem los módulos de E/S
   if (typeof patrolDetachHub === "function") patrolDetachHub(); // ídem el control de rondas
@@ -2473,7 +2475,7 @@ const MANUAL_CHAPTERS = {
   "#/anpr": "12-reconocimiento-de-patentes",
   "#/workflows": "13-automatizaciones", "#/workflow-runs": "13-automatizaciones", "#/workflow-alerts": "13-automatizaciones",
   "#/devices": "14-fuentes-de-video", "#/device-maintenance": "14-fuentes-de-video",
-  "#/resources": "15-recursos-y-ubicaciones",
+  "#/resources": "15-recursos-y-ubicaciones", "#/boards": "03-vista-en-vivo",
   "#/users": "16-usuarios-y-roles", "#/roles": "16-usuarios-y-roles", "#/audit": "16-usuarios-y-roles",
   "#/sessions": "17-sistema", "#/services": "17-sistema", "#/isup": "17-sistema", "#/license": "17-sistema",
   "#/backups": "17-sistema", "#/mail": "17-sistema", "#/time": "17-sistema", "#/wan": "17-sistema",

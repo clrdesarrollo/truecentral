@@ -9,7 +9,7 @@
   <script>if (document.documentMode) { document.write('<p style="font-family:Segoe UI,Arial,sans-serif;margin:40px">Internet Explorer no es compatible con este panel. Ábralo con Microsoft Edge u otro navegador actual.</p>'); document.execCommand('Stop'); }</script>
   <link rel="icon" href="favicon.ico">
   <link rel="stylesheet" href="vendor/mdi/css/materialdesignicons.min.css?v=1">
-  <link rel="stylesheet" href="styles.css?v=93">
+  <link rel="stylesheet" href="styles.css?v=94">
 </head>
 <body>
   <!-- Pantallas de acceso (setup inicial / login / cambio de clave) -->
@@ -123,6 +123,7 @@
           </div>
         </div>
         <a href="#/resources" data-route="resources" data-needs-license><i class="mdi mdi-file-tree" aria-hidden="true"></i><span class="nav-text">Recursos</span></a>
+        <a href="#/boards" data-route="boards" data-needs-license data-perm="dashboards.manage"><i class="mdi mdi-view-dashboard" aria-hidden="true"></i><span class="nav-text">Tableros</span></a>
 
         <div class="nav-group" data-group="access">
           <button type="button" class="nav-toggle">
@@ -252,12 +253,13 @@
   <script src="cerco-alarm.js?v=5"></script>
   <script src="resources.js?v=10"></script>
   <!-- live.js va DESPUÉS de resources.js: usa sus íconos de ubicación. -->
-  <script src="live.js?v=13"></script>
+  <script src="live.js?v=14"></script>
+  <script src="boards.js?v=2"></script>
   <script src="live-joystick.js?v=2"></script>
   <!-- playback.js usa LvSession y utilidades de live.js. -->
   <script src="playback.js?v=6"></script>
   <script src="roles.js?v=3"></script>
   <script src="dashboard.js?v=9"></script>
-  <script src="app.js?v=89"></script>
+  <script src="app.js?v=90"></script>
 </body>
 </html>

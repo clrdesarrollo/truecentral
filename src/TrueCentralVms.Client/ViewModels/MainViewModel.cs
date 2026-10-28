@@ -901,6 +901,11 @@ public partial class MainViewModel : ObservableObject
             // Un administrador cambió los roles de este usuario o un rol suyo.
             if (entity is "permissions")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadPermissionsAsync());
+            // La lista de páginas web va en el árbol; los tableros compartidos, en su desplegable.
+            if (entity is "web-links")
+                Application.Current.Dispatcher.InvokeAsync(() => _ = LoadTreeAsync());
+            if (entity is "live-views")
+                Application.Current.Dispatcher.InvokeAsync(() => { if (IsViewsPopupOpen) _ = LoadSavedViewsAsync(); });
         };
         _hub.DeviceStatusChanged += dto => Application.Current.Dispatcher.InvokeAsync(() =>
         {

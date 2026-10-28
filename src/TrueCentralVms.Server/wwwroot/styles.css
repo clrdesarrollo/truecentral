@@ -1816,6 +1816,45 @@ a.res-source .res-ico { color: var(--muted); }
 .res-eq-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; font-size: 13.5px; }
 .res-eq-row b { font-weight: 600; }
 .res-eq-row .muted { flex: 1; }
+/* Configuración → Tableros: listas y editor (grilla a la izquierda, buscador a la derecha). */
+.bd-intro { margin-bottom: 14px; }
+.bd-h { margin: 18px 0 8px; font-size: 15px; }
+.bd-note { margin: -4px 0 10px; }
+.bd-sub { font-size: 12px; }
+.bd-url { max-width: 360px; overflow-wrap: anywhere; }
+.bd-aud { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; }
+.field label.bd-radio, .field label.bd-check { display: inline-flex; align-items: center; gap: 6px; margin: 0;
+  font-weight: 400; font-size: 13px; color: var(--text); cursor: pointer; }
+.field .bd-radio input, .field .bd-check input { width: auto; margin: 0; padding: 0; }
+.bd-roles { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.bd-roles.off { opacity: .55; }
+.bd-editor { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; margin-top: 10px; }
+.bd-grid { display: grid; gap: 4px; aspect-ratio: 16 / 9; background: var(--panel-2); border-radius: 8px; padding: 4px; position: relative; }
+.bd-grid.locked { display: block; aspect-ratio: auto; background: none; padding: 0; }
+.bd-cell { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-width: 0; min-height: 0; padding: 4px 6px; border: 1px dashed var(--border); border-radius: 6px; background: var(--panel);
+  color: var(--text); font: inherit; font-size: 12px; cursor: pointer; overflow: hidden; }
+.bd-cell.full { border-style: solid; }
+.bd-cell.sel { outline: 2px solid var(--accent); outline-offset: -1px; }
+.bd-cell-n { position: absolute; top: 3px; left: 5px; font-size: 10.5px; color: var(--muted); }
+.bd-cell-ico { color: var(--accent); font-size: 16px; line-height: 1; }
+.bd-cell-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-cell-x { position: absolute; top: 1px; right: 5px; font-size: 15px; color: var(--muted); }
+.bd-cell-x:hover { color: var(--danger, #d33); }
+.bd-outside { position: absolute; left: 6px; right: 6px; bottom: 6px; margin: 0; }
+.bd-picker { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.bd-pick-hint { padding: 8px 2px; }
+.bd-pick-list { max-height: 300px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.bd-pick-group { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--muted); padding: 6px 6px 2px; }
+.bd-opt { display: flex; align-items: center; gap: 7px; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px;
+  background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.bd-opt:hover { background: var(--panel-2); }
+.bd-opt-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-opt-sub { margin-left: auto; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.bd-pick-url { display: flex; flex-direction: column; gap: 5px; }
+.bd-pick-url-row { display: flex; gap: 6px; }
+.bd-pick-url-row input { flex: 1; }
+@media (max-width: 860px) { .bd-editor { grid-template-columns: 1fr; } }
 /* Campo Ubicación: dónde crear la «Nueva, con el nombre del equipo». */
 .loc-new { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border); }
 .loc-new label { font-size: 12.5px; }

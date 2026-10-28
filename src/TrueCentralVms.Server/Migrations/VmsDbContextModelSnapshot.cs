@@ -2392,6 +2392,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("OwnerUserId")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("RestrictToRoles")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("Rows")
                         .HasColumnType("integer");
 
@@ -2422,14 +2425,32 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int>("CellIndex")
                         .HasColumnType("integer");
 
-                    b.Property<int>("ChannelId")
+                    b.Property<int?>("ChannelId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("camera");
 
                     b.Property<int>("LiveViewId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Ref")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<int?>("RefId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("StreamType")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
 
                     b.HasKey("Id");
 
@@ -2439,6 +2460,21 @@ namespace TrueCentralVms.Server.Migrations
                         .IsUnique();
 
                     b.ToTable("LiveViewItems", (string)null);
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveViewRole", b =>
+                {
+                    b.Property<int>("LiveViewId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RoleId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("LiveViewId", "RoleId");
+
+                    b.HasIndex("RoleId");
+
+                    b.ToTable("LiveViewRoles", (string)null);
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Location", b =>
@@ -4385,6 +4421,42 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("WallScreens");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.WebLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("WebLinks");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Workflow", b =>
                 {
                     b.Property<int>("Id")
@@ -5012,8 +5084,7 @@ namespace TrueCentralVms.Server.Migrations
                     b.HasOne("TrueCentralVms.Server.Data.Entities.Channel", "Channel")
                         .WithMany()
                         .HasForeignKey("ChannelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("TrueCentralVms.Server.Data.Entities.LiveView", "View")
                         .WithMany("Items")
@@ -5024,6 +5095,21 @@ namespace TrueCentralVms.Server.Migrations
                     b.Navigation("Channel");
 
                     b.Navigation("View");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveViewRole", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.LiveView", null)
+                        .WithMany("Roles")
+                        .HasForeignKey("LiveViewId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.Role", null)
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Location", b =>
@@ -5599,6 +5685,8 @@ namespace TrueCentralVms.Server.Migrations
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.LiveView", b =>
                 {
                     b.Navigation("Items");
+
+                    b.Navigation("Roles");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Location", b =>

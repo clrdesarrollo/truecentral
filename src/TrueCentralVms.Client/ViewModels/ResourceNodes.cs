@@ -29,6 +29,19 @@ public sealed partial class ResourceNode : ObservableObject
     public static ResourceNode Card(string cardKind, string name, string glyph, string description) =>
         new(ResourceKind.Camera, 0, name, description, null) { CardKind = cardKind, CustomGlyph = glyph };
 
+    /// <summary>Página web de la lista del servidor (Id = la de la lista).</summary>
+    public static ResourceNode Web(WebLinkDto link) =>
+        new(ResourceKind.Camera, link.Id, link.Name, link.Description ?? link.Url, null)
+        { CardKind = CardKinds.Web, CustomGlyph = "\uE774", Url = link.Url };
+
+    /// <summary>«Otra dirección…»: la página se escribe al abrirla.</summary>
+    public static ResourceNode WebCustom() =>
+        new(ResourceKind.Camera, 0, "Otra dirección…", "Escribir la dirección de una página web", null)
+        { CardKind = CardKinds.WebCustom, CustomGlyph = "\uE71B" };
+
+    /// <summary>Dirección de una página web de la lista.</summary>
+    public string? Url { get; init; }
+
     /// <summary>Las puertas suelen llamarse igual en cada equipo («Puerta 1»): su detalle es el equipo.</summary>
     public static ResourceNode From(ResourceDto dto) =>
         new(dto.Kind, dto.Id, dto.Name, dto.Kind == ResourceKind.Door ? dto.Source : dto.Detail,

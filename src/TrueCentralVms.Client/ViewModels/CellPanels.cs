@@ -31,8 +31,20 @@ public abstract partial class CellPanel : ObservableObject, IDisposable
     /// <summary>Id del recurso en el servidor (0 si el tipo no tiene uno, como una tarjeta).</summary>
     public virtual int ResourceId => 0;
 
+    /// <summary>Qué es, en el formato de los tableros y de la última sesión (lo fija
+    /// quien crea el panel); null = no se guarda.</summary>
+    public CellContentRef? Content { get; set; }
+
     /// <summary>Carga el estado inicial (lo llama el cuadro al recibir el panel).</summary>
     public virtual Task LoadAsync() => Task.CompletedTask;
 
     public virtual void Dispose() { }
 }
+
+/// <summary>
+/// Lo que hay en un cuadro que no es cámara, para guardarlo en un tablero o en
+/// la última sesión y volver a armarlo: un recurso (tipo en Ref, id en RefId),
+/// una tarjeta (clave en Ref) o una página web (de la lista: RefId; libre: la
+/// dirección en Ref). Mismo formato que <c>LiveViewItemDto</c>.
+/// </summary>
+public sealed record CellContentRef(string Kind, int? RefId = null, string? Ref = null, string? Title = null);
