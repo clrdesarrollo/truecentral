@@ -249,15 +249,10 @@ que ve el operador:
 
 === Dónde se abre la ventana de alarma
 
-En puestos con dos pantallas conviene que la ventana de alarma se abra siempre
-en la misma. Este ajuste es de cada puesto:
+La ventana de alarma se abre en el monitor, la posición y el tamaño en que se
+cerró la anterior: en puestos con dos pantallas basta con dejarla una vez en
+la de trabajo. Si ese monitor ya no está conectado, aparece centrada.
 
-+ En el cliente de monitoreo, haga clic en el engranaje *Configuración* del
-  riel.
-+ Abra el apartado *Sistema*.
-+ Marque *Abrir la ventana de alarma donde quedó la última vez*.
-+ Haga clic en #boton("Guardar").
-
-Desde entonces la ventana de alarma se abre en el monitor, la posición y el
-tamaño en que se cerró la anterior. Si ese monitor ya no está conectado,
-aparece centrada sobre la ventana principal.
+Es la opción *Abrir cada ventana donde quedó la última vez* (Configuración →
+*Sistema*), que viene encendida y vale para todas las ventanas del cliente;
+apagada, la ventana de alarma aparece centrada.
