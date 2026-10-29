@@ -68,10 +68,14 @@
                 <TextBlock Text="Si lo deja vacío, el nombre del sitio" Style="{StaticResource FieldPlaceholder}"
                            Tag="{Binding Text, ElementName=TitleBox}"/>
             </Grid>
+            <!-- Queda en la lista (Páginas web, con estrella) para no escribirla cada vez -->
+            <CheckBox x:Name="SaveBox" Style="{StaticResource DarkCheckBox}" IsChecked="True" Margin="0,12,0,0"
+                      Content="Guardar en «Mis páginas» para abrirla otra vez desde la lista"
+                      ToolTip="Solo la ve su usuario. Se quita con clic derecho sobre ella en la lista."/>
             <TextBlock x:Name="ErrorText" Foreground="{StaticResource DangerBrush}" FontSize="11.5" Margin="0,10,0,0"
                        TextWrapping="Wrap" Visibility="Collapsed"/>
             <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,0"
-                       Text="Algunos sitios no se dejan mostrar dentro de otra aplicación. Las que se usan siempre conviene pedirlas a la lista del servidor (panel web → Tableros)."/>
+                       Text="Algunos sitios no se dejan mostrar dentro de otra aplicación. Para que la vean todos los puestos, pídala a la lista del servidor (panel web → Tableros)."/>
         </StackPanel>
     </DockPanel>
 </Window>

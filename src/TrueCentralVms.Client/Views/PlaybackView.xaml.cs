@@ -29,9 +29,11 @@ public partial class PlaybackView : UserControl
 
         // Esc sale de la pantalla completa: se escucha a nivel de ventana
         // porque el foco puede estar en el árbol o en la barra.
+        // La viñeta se puede extraer a su propia ventana (y volver): el enganche sigue a la ventana.
         Loaded += (_, _) =>
         {
-            if (_hostWindow is not null || Window.GetWindow(this) is not { } window) return;
+            if (Window.GetWindow(this) is not { } window || window == _hostWindow) return;
+            if (_hostWindow is { } previous) previous.PreviewKeyDown -= OnKeyDown;
             _hostWindow = window;
             window.PreviewKeyDown += OnKeyDown;
         };
@@ -80,7 +82,11 @@ public partial class PlaybackView : UserControl
             ToggleFullscreen();
     }
 
-    private void ToggleFullscreen() => Vm.IsGridFullscreen = !Vm.IsGridFullscreen;
+    private void ToggleFullscreen()
+    {
+        Vm.FullscreenSection = "Playback";
+        Vm.IsGridFullscreen = !Vm.IsGridFullscreen;
+    }
 
     private void OnToggleFullscreen(object sender, RoutedEventArgs e) => ToggleFullscreen();
 

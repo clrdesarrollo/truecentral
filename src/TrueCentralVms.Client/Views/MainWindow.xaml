@@ -268,7 +268,7 @@
         <!-- ===== Navbar / barra de título (oculto en pantalla completa) ===== -->
         <Border Grid.Row="0" Height="42" Background="{StaticResource ChromeBrush}"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1"
-                Visibility="{Binding IsGridFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                Visibility="{Binding IsShellFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
             <DockPanel>
                 <!-- Logo -->
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="10,0,14,0">
@@ -295,6 +295,58 @@
                 <!-- Estado de conexión y usuario -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
                             Margin="0,0,12,0">
+                    <!-- Versión nueva del cliente en el servidor: el ícono late y un clic la instala -->
+                    <Grid VerticalAlignment="Center" Margin="0,0,10,0"
+                          Visibility="{Binding IsUpdateAvailable, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <ToggleButton x:Name="UpdateToggle" Style="{StaticResource UserMenuToggle}"
+                                      IsChecked="{Binding IsUpdatePopupOpen, Mode=TwoWay}" ToolTip="{Binding UpdateTitle}">
+                            <Grid>
+                                <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                                           Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center">
+                                    <TextBlock.Triggers>
+                                        <EventTrigger RoutedEvent="Loaded">
+                                            <BeginStoryboard>
+                                                <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                     From="1" To="0.4" Duration="0:0:0.9"/>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </EventTrigger>
+                                    </TextBlock.Triggers>
+                                </TextBlock>
+                                <Ellipse Width="7" Height="7" Fill="{StaticResource OkBrush}"
+                                         HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-5,0"/>
+                            </Grid>
+                        </ToggleButton>
+                        <Popup PlacementTarget="{Binding ElementName=UpdateToggle}" Placement="Bottom"
+                               AllowsTransparency="True" StaysOpen="False"
+                               IsOpen="{Binding IsUpdatePopupOpen, Mode=TwoWay}">
+                            <Border Background="{StaticResource Panel2Brush}" BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="8" Width="320" Margin="8" Padding="16,14">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.45" Color="#000000"/>
+                                </Border.Effect>
+                                <StackPanel>
+                                    <TextBlock Text="ACTUALIZACIÓN DISPONIBLE" FontSize="10.5" FontWeight="SemiBold"
+                                               Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBlock Text="{Binding UpdateTitle}" FontSize="15" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextBrush}" Margin="0,4,0,0"/>
+                                    <TextBlock Text="{Binding UpdateDetail}" FontSize="11.5" TextWrapping="Wrap"
+                                               Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
+                                    <ProgressBar Height="5" Margin="0,12,0,0" Maximum="100" Value="{Binding UpdateProgress}"
+                                                 Foreground="{StaticResource AccentBrush}" Background="{StaticResource BgBrush}"
+                                                 BorderThickness="0"
+                                                 Visibility="{Binding IsUpdating, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                    <TextBlock Text="{Binding UpdateStatus}" FontSize="11.5" TextWrapping="Wrap" Margin="0,8,0,0"
+                                               Foreground="{StaticResource TextBrush}"
+                                               Visibility="{Binding UpdateStatus, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+                                    <Button Style="{StaticResource PrimaryButton}" Padding="14,7" Margin="0,12,0,0"
+                                            HorizontalAlignment="Stretch" Content="Actualizar ahora"
+                                            Command="{Binding InstallUpdateCommand}"/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </Grid>
                     <!-- Salud del servidor: CPU / RAM / disco -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,12,0"
                                 Visibility="{Binding HasMetrics, Converter={x:Static vm:BoolToVisibility.Instance}}">
@@ -374,7 +426,9 @@
                     </Grid>
                 </StackPanel>
 
-                <!-- Viñetas de módulos: se reordenan arrastrándolas (el orden se recuerda) -->
+                <!-- Viñetas de módulos: se reordenan arrastrándolas (el orden se recuerda) y,
+                     arrastradas hacia abajo o fuera de la ventana, se extraen a su propia ventana
+                     como las pestañas de un navegador (MainWindow.Tabs). -->
                 <StackPanel x:Name="TabStrip" Orientation="Horizontal" Background="Transparent"
                             PreviewMouseLeftButtonDown="OnTabStripMouseDown"
                             PreviewMouseMove="OnTabStripMouseMove"
@@ -545,7 +599,7 @@
             <!-- Menú de navegación lateral (oculto en pantalla completa) -->
             <Border Grid.Column="0" Width="52" Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
-                    Visibility="{Binding IsGridFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                    Visibility="{Binding IsShellFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,6">
                         <Button Style="{StaticResource RailDownloadButton}" Content="&#xE896;"
@@ -620,20 +674,21 @@
 
             <!-- Páginas: se conmutan por Visibility para que la Vista en Vivo
                  conserve sus streams al pasar por Inicio -->
-            <Grid Grid.Column="1">
+            <!-- Las viñetas que se extraen a su propia ventana se llevan su vista de aquí (MainWindow.Tabs) -->
+            <Grid x:Name="SectionHost" Grid.Column="1">
                 <views:HomeView Visibility="{Binding ActiveSection,
                                 Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Home}"/>
-                <views:LiveView Visibility="{Binding ActiveSection,
+                <views:LiveView x:Name="LiveSection" Visibility="{Binding ActiveSection,
                                 Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Live}"/>
-                <views:PlaybackView Visibility="{Binding ActiveSection,
+                <views:PlaybackView x:Name="PlaybackSection" Visibility="{Binding ActiveSection,
                                     Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Playback}"/>
-                <views:WallView Visibility="{Binding ActiveSection,
+                <views:WallView x:Name="WallSection" Visibility="{Binding ActiveSection,
                                 Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Wall}"/>
-                <views:AlarmsView DataContext="{Binding Alarms}"
+                <views:AlarmsView x:Name="AlarmsSection" DataContext="{Binding Alarms}"
                                   Visibility="{Binding DataContext.ActiveSection,
                                                RelativeSource={RelativeSource AncestorType=Window},
                                                Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Alarms}"/>
-                <views:CercoView DataContext="{Binding Cerco}"
+                <views:CercoView x:Name="CercoSection" DataContext="{Binding Cerco}"
                                  Visibility="{Binding DataContext.ActiveSection,
                                               RelativeSource={RelativeSource AncestorType=Window},
                                               Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Cerco}"/>
@@ -643,11 +698,11 @@
                                                     Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Events}"/>
                 <!-- Este módulo tiene ViewModel propio, así que su DataContext
                      NO es el de la ventana: la visibilidad se ata al shell. -->
-                <views:LprView DataContext="{Binding Lpr}"
+                <views:LprView x:Name="LprSection" DataContext="{Binding Lpr}"
                                Visibility="{Binding DataContext.ActiveSection,
                                             RelativeSource={RelativeSource AncestorType=Window},
                                             Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Lpr}"/>
-                <views:IntercomView DataContext="{Binding Intercom}"
+                <views:IntercomView x:Name="IntercomSection" DataContext="{Binding Intercom}"
                                     Visibility="{Binding DataContext.ActiveSection,
                                                  RelativeSource={RelativeSource AncestorType=Window},
                                                  Converter={x:Static vm:SectionToVisibility.Instance}, ConverterParameter=Intercom}"/>
@@ -657,7 +712,7 @@
         <!-- ===== Barra de estado (oculta en pantalla completa) ===== -->
         <Border Grid.Row="2" Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,4"
-                Visibility="{Binding IsGridFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                Visibility="{Binding IsShellFullscreen, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
             <DockPanel>
                 <!-- Aviso de licencia (prueba por vencer, gracia, restricción) -->
                 <TextBlock DockPanel.Dock="Right" Text="{Binding LicenseWarning}" FontSize="11.5" FontWeight="SemiBold"

@@ -29,6 +29,17 @@ public static class DashboardItemKinds
 
     public static bool IsCamera(string? kind) => string.IsNullOrEmpty(kind) || kind == Camera;
 
+    /// <summary>La clave de la tarjeta sin sus opciones: "card-plates?devices=3,7" → "card-plates".</summary>
+    public static string CardKey(string? reference)
+    {
+        string text = reference ?? "";
+        int q = text.IndexOf('?');
+        return q < 0 ? text : text[..q];
+    }
+
+    /// <summary>Es una tarjeta conocida (con o sin opciones).</summary>
+    public static bool IsKnownCard(string? reference) => Cards.Contains(CardKey(reference));
+
     /// <summary>Zoom de una página entre 25 % y 500 %; 100 % (o nada) = null.</summary>
     public static int? CleanZoom(int? zoom) => zoom is { } z && z != 100 ? Math.Clamp(z, 25, 500) : null;
 }
@@ -75,7 +86,11 @@ public sealed record LiveViewSaveRequest(
 public sealed record DashboardRoleDto(int Id, string Name);
 
 /// <summary>Página web de la lista del servidor: lo que los cuadros pueden mostrar sin permiso aparte.</summary>
-public sealed record WebLinkDto(int Id, string Name, string Url, string? Description);
+/// <param name="Personal">Es una página de «Mis páginas» de quien consulta (la guardó al
+/// escribirla en un cuadro): solo la ve él, no las demás cuentas.</param>
+public sealed record WebLinkDto(int Id, string Name, string Url, string? Description, bool Personal = false);
 
 /// <summary>Alta o modificación de una página web de la lista.</summary>
-public sealed record WebLinkSaveRequest(string Name, string Url, string? Description = null);
+/// <param name="Personal">Alta en «Mis páginas» de quien la guarda (pide "Abrir cualquier
+/// página web"); sin esto, va a la lista compartida (pide administrar los tableros).</param>
+public sealed record WebLinkSaveRequest(string Name, string Url, string? Description = null, bool Personal = false);

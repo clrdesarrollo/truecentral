@@ -95,7 +95,10 @@ public sealed class SelectedCellComparer : IMultiValueConverter
 {
     public static readonly SelectedCellComparer Instance = new();
     public object Convert(object[] values, Type t, object p, CultureInfo c) =>
-        values.Length == 2 && values[0] is not null && ReferenceEquals(values[0], values[1]);
+        values.Length == 2 && values[0] is not null && (ReferenceEquals(values[0], values[1]) ||
+            // Divisiones: la misma clave es la misma división aunque sea otra instancia
+            // (la del selector vertical, o la que se rearmó al abrir un tablero).
+            values[0] is VideoLayout a && values[1] is VideoLayout b && a.Key == b.Key);
     public object[] ConvertBack(object value, Type[] t, object p, CultureInfo c) => throw new NotSupportedException();
 }
 

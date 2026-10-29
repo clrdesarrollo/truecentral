@@ -853,10 +853,13 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         AssignedChannelChanged?.Invoke();
     }
 
-    /// <summary>Cambió lo que se guarda del panel (el zoom de una página): se guarda la sesión.</summary>
+    /// <summary>Cambió lo que se guarda del panel (el zoom de una página, las cámaras de una
+    /// tarjeta): se guarda la sesión. El título también sigue al del panel: las tarjetas lo
+    /// ponen al cargar y la barra quedaba vacía.</summary>
     private void OnPanelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(CellPanel.Content)) AssignedChannelChanged?.Invoke();
+        if (e.PropertyName == nameof(CellPanel.Title) && sender == Panel) Title = Panel.Title;
     }
 
     [RelayCommand]

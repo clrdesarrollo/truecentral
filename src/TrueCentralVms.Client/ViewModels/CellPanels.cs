@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 namespace TrueCentralVms.Client.ViewModels;
 
@@ -37,6 +38,17 @@ public abstract partial class CellPanel : ObservableObject, IDisposable
 
     /// <summary>Carga el estado inicial (lo llama el cuadro al recibir el panel).</summary>
     public virtual Task LoadAsync() => Task.CompletedTask;
+
+    /// <summary>El cuadro muestra el engranaje en su barra (la tarjeta tiene opciones).</summary>
+    public virtual bool CanConfigure => false;
+
+    /// <summary>Qué se configura con el engranaje (su ayuda emergente).</summary>
+    public virtual string ConfigureHint => "Configurar";
+
+    /// <summary>El engranaje de la barra del cuadro: lo que guarde va en <see cref="Content"/>
+    /// (tableros y última sesión).</summary>
+    [RelayCommand]
+    protected virtual Task ConfigureAsync() => Task.CompletedTask;
 
     public virtual void Dispose() { }
 }

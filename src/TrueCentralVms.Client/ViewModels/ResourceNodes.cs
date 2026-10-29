@@ -29,10 +29,25 @@ public sealed partial class ResourceNode : ObservableObject
     public static ResourceNode Card(string cardKind, string name, string glyph, string description) =>
         new(ResourceKind.Camera, 0, name, description, null) { CardKind = cardKind, CustomGlyph = glyph };
 
-    /// <summary>Página web de la lista del servidor (Id = la de la lista).</summary>
-    public static ResourceNode Web(WebLinkDto link) =>
+    /// <summary>Página web de la lista del servidor (Id = la de la lista). Las de «Mis páginas»
+    /// (las que el usuario escribió y quedaron guardadas) llevan la estrella y se pueden quitar.</summary>
+    public static ResourceNode Web(WebLinkDto link, Func<ResourceNode, Task>? remove = null) =>
         new(ResourceKind.Camera, link.Id, link.Name, link.Description ?? link.Url, null)
-        { CardKind = CardKinds.Web, CustomGlyph = "\uE774", Url = link.Url };
+        {
+            CardKind = CardKinds.Web, CustomGlyph = link.Personal ? "\uE734" : "\uE774", Url = link.Url,
+            IsPersonalWeb = link.Personal, _remove = remove,
+        };
+
+    /// <summary>Página de «Mis páginas»: el clic derecho la quita de la lista.</summary>
+    public bool IsPersonalWeb { get; init; }
+
+    private Func<ResourceNode, Task>? _remove;
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private async Task RemoveFromListAsync()
+    {
+        if (_remove is { } remove) await remove(this);
+    }
 
     /// <summary>Grupo de parlantes: hablarle (o hacer sonar) a todos de una vez.</summary>
     public static ResourceNode SpeakerGroup(SpeakerGroupDto group) =>

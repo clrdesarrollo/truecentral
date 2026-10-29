@@ -2468,8 +2468,8 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<string>("LayoutName")
                         .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -4590,6 +4590,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -4601,7 +4604,12 @@ namespace TrueCentralVms.Server.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"OwnerUserId\" IS NULL");
+
+                    b.HasIndex("OwnerUserId", "Name")
+                        .IsUnique()
+                        .HasFilter("\"OwnerUserId\" IS NOT NULL");
 
                     b.ToTable("WebLinks");
                 });
@@ -5806,6 +5814,14 @@ namespace TrueCentralVms.Server.Migrations
                         .IsRequired();
 
                     b.Navigation("VideoWall");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.WebLink", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.WorkflowAction", b =>

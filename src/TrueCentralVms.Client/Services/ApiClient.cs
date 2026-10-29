@@ -620,6 +620,14 @@ public sealed class ApiClient
     public Task<List<WebLinkDto>> GetWebLinksAsync(CancellationToken ct = default) =>
         SendAsync<List<WebLinkDto>>(HttpMethod.Get, "/api/web-links", null, ct);
 
+    /// <summary>Guarda una página escrita a mano en «Mis páginas» de este usuario (si ya la tenía, devuelve esa).</summary>
+    public Task<WebLinkDto> SavePersonalWebLinkAsync(string name, string url, CancellationToken ct = default) =>
+        SendAsync<WebLinkDto>(HttpMethod.Post, "/api/web-links", new WebLinkSaveRequest(name, url, Personal: true), ct);
+
+    /// <summary>Quita una página de la lista (de «Mis páginas», si es suya).</summary>
+    public Task DeleteWebLinkAsync(int id, CancellationToken ct = default) =>
+        SendAsync<object?>(HttpMethod.Delete, $"/api/web-links/{id}", null, ct);
+
     /// <summary>Puertas de control de acceso con su estado (filtradas por alcance).</summary>
     public Task<List<AccessDoorStateDto>> GetAccessDoorsAsync(CancellationToken ct = default) =>
         SendAsync<List<AccessDoorStateDto>>(HttpMethod.Get, "/api/access/doors", null, ct);
@@ -806,6 +814,41 @@ public sealed class ApiClient
         }
         if (total == 0)
             throw new ApiException("El servidor no entregó video para ese tramo.");
+    }
+
+    // ---------- Actualización del cliente ----------
+
+    /// <summary>Versión de este cliente (la de VERSION al compilarlo).</summary>
+    public static string ClientVersion => typeof(ApiClient).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
+    /// <summary>El instalador del cliente que publica el servidor (lo deja la suite al instalarse o actualizarse).</summary>
+    public Task<ClientInstallerInfo> GetClientInstallerInfoAsync(CancellationToken ct = default) =>
+        SendAsync<ClientInstallerInfo>(HttpMethod.Get, "/api/system/client-installer/info", null, ct);
+
+    /// <summary>
+    /// Descarga el instalador del cliente a <paramref name="path"/> avisando el
+    /// avance (0..1). Va con la versión de este cliente: el servidor deja en la
+    /// bitácora que el puesto se actualizó y desde qué versión.
+    /// </summary>
+    public async Task DownloadClientInstallerAsync(string path, IProgress<double>? progress, CancellationToken ct = default)
+    {
+        using var response = await SendDownloadAsync(
+            $"/api/system/client-installer?update={Uri.EscapeDataString(ClientVersion)}", ct, allowRelogin: true);
+        long? total = response.Content.Headers.ContentLength;
+        await using var source = await response.Content.ReadAsStreamAsync(ct);
+        await using (var target = File.Create(path))
+        {
+            var buffer = new byte[81920];
+            long done = 0;
+            int read;
+            while ((read = await source.ReadAsync(buffer, ct)) > 0)
+            {
+                await target.WriteAsync(buffer.AsMemory(0, read), ct);
+                done += read;
+                if (total is > 0) progress?.Report((double)done / total.Value);
+            }
+            if (done == 0) throw new ApiException("El servidor entregó un instalador vacío.");
+        }
     }
 
     private async Task<HttpResponseMessage> SendDownloadAsync(string path, CancellationToken ct, bool allowRelogin)

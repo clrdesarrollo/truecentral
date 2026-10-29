@@ -71,12 +71,13 @@ public partial class MainViewModel
             }
         }
 
-        // Páginas web: las de la lista del servidor y, con permiso, «Otra dirección…».
+        // Páginas web: las de la lista del servidor, las de «Mis páginas» (las que el
+        // usuario escribió y quedaron guardadas) y, con permiso, «Otra dirección…».
         List<WebLinkDto> links;
         try { links = await _api.GetWebLinksAsync(); }
         catch (ApiException) { links = []; } // servidor anterior: sin lista
         var web = new ResourceGroupNode("Páginas web", "\uE774");
-        foreach (var link in links) web.Children.Add(ResourceNode.Web(link));
+        foreach (var link in links) web.Children.Add(ResourceNode.Web(link, RemovePersonalWebLinkAsync));
         if (CanOpenAnyUrl) web.Children.Add(ResourceNode.WebCustom());
         if (web.Children.Count > 0) ResourceGroups.Add(web);
     }
@@ -98,16 +99,19 @@ public partial class MainViewModel
     }
 
     /// <summary>El cuadro que muestra un recurso: su panel según el tipo (null si no se pudo o se canceló).</summary>
-    public CellPanel? CreatePanel(ResourceNode node)
+    /// <param name="cardRef">Clave guardada de una tarjeta con sus opciones (las cámaras de
+    /// «Últimas patentes»); null = la tarjeta como sale de la lista.</param>
+    public CellPanel? CreatePanel(ResourceNode node, string? cardRef = null)
     {
         var panel = node.CardKind switch
         {
             CardKinds.Equipment => new EquipmentCardPanel(_api),
             CardKinds.Server => new ServerCardPanel(_api),
             CardKinds.Alerts => new AlertsCardPanel(_api, _hub, OpenAlert),
-            CardKinds.Plates => new PlatesCardPanel(_api, _hub),
+            CardKinds.Plates => new PlatesCardPanel(_api, _hub, CardKinds.PlatesDevices(cardRef)),
             CardKinds.Access => new AccessCardPanel(_api, _hub),
-            CardKinds.Web when node.Url is { } url => new WebCellPanel(url, node.Name, node.Id, _api),
+            // Las de «Mis páginas» se guardan en el cuadro como dirección: son solo de este usuario.
+            CardKinds.Web when node.Url is { } url => new WebCellPanel(url, node.Name, node.IsPersonalWeb ? null : node.Id, _api),
             CardKinds.WebCustom => AskWebPage(),
             CardKinds.SpeakerGroup => new SpeakerGroupCellPanel(_api, Speakers, node.Id, node.Name)
             {
@@ -118,18 +122,47 @@ public partial class MainViewModel
         // Lo que se guarda en los tableros y en la última sesión.
         if (panel is not null && panel.Content is null)
             panel.Content = node.CardKind is { } card
-                ? new CellContentRef(DashboardItemKinds.Card, null, card)
+                ? new CellContentRef(DashboardItemKinds.Card, null, cardRef ?? card)
                 : new CellContentRef(DashboardItemKinds.Resource, node.Id, node.Kind.ToString(), node.Name);
         return panel;
     }
 
-    /// <summary>«Otra dirección…»: pide la página (null si se canceló).</summary>
+    /// <summary>
+    /// «Otra dirección…»: pide la página (null si se canceló). Si el operador
+    /// deja marcado «Guardar en Mis páginas», queda en la lista para abrirla
+    /// otra vez sin escribirla.
+    /// </summary>
     private CellPanel? AskWebPage()
     {
         if (!CanOpenAnyUrl) return null;
         var owner = System.Windows.Application.Current.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive)
                     ?? System.Windows.Application.Current.MainWindow;
-        return Views.WebUrlWindow.Ask(owner) is { } page ? new WebCellPanel(page.Url, page.Title, null, _api) : null;
+        if (Views.WebUrlWindow.Ask(owner) is not { } page) return null;
+        if (page.Save) _ = SavePersonalWebLinkAsync(page.Title, page.Url);
+        return new WebCellPanel(page.Url, page.Title, null, _api);
+    }
+
+    private async Task SavePersonalWebLinkAsync(string name, string url)
+    {
+        try
+        {
+            var link = await _api.SavePersonalWebLinkAsync(name, url);
+            StatusMessage = $"\"{link.Name}\" quedó en la lista de páginas web (Mis páginas).";
+            await LoadTreeAsync();
+        }
+        catch (ApiException ex) { StatusMessage = $"No se pudo guardar la página en la lista: {ex.Message}"; }
+    }
+
+    /// <summary>Clic derecho → «Quitar de Mis páginas». Los cuadros que la muestran siguen abiertos.</summary>
+    private async Task RemovePersonalWebLinkAsync(ResourceNode node)
+    {
+        try
+        {
+            await _api.DeleteWebLinkAsync(node.Id);
+            StatusMessage = $"\"{node.Name}\" se quitó de Mis páginas.";
+            await LoadTreeAsync();
+        }
+        catch (ApiException ex) { StatusMessage = $"No se pudo quitar la página: {ex.Message}"; }
     }
 
     /// <summary>
@@ -146,8 +179,10 @@ public partial class MainViewModel
                 var node = _locatedResources.FirstOrDefault(r => r.Kind == resourceKind && r.Id == refId);
                 return node is null ? null : CreatePanel(node);
             case DashboardItemKinds.Card:
-                var card = ResourceGroups.SelectMany(g => g.Children).FirstOrDefault(n => n.CardKind == reference);
-                return card is null ? null : CreatePanel(card);
+                // La clave puede traer opciones: "card-plates?devices=3,7".
+                string key = DashboardItemKinds.CardKey(reference);
+                var card = ResourceGroups.SelectMany(g => g.Children).FirstOrDefault(n => n.CardKind == key);
+                return card is null ? null : CreatePanel(card, reference);
             case DashboardItemKinds.SpeakerGroup:
                 var speakerGroup = ResourceGroups.SelectMany(g => g.Children)
                     .FirstOrDefault(n => n.CardKind == CardKinds.SpeakerGroup && n.Id == refId);

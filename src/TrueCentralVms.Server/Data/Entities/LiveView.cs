@@ -76,6 +76,12 @@ public class WebLink
     public string Name { get; set; } = "";
     public string Url { get; set; } = "";
     public string? Description { get; set; }
+    /// <summary>
+    /// Dueño de una página de «Mis páginas»: la guardó al escribirla en un
+    /// cuadro del cliente y solo la ve él (se borra con su cuenta). null = de
+    /// la lista compartida, que administra quien administra los tableros.
+    /// </summary>
+    public int? OwnerUserId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

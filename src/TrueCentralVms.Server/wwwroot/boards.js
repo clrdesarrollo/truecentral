@@ -66,7 +66,8 @@ async function bdLoad(quiet) {
       Api.get("/api/live-views"), Api.get("/api/web-links"), Api.get("/api/live-views/roles"), Api.get("/api/resources"),
       Api.get("/api/speakers/groups").catch(() => []),
     ]);
-    Object.assign(bdState, { views: views.filter((v) => v.shared), links, roles, resources, speakerGroups });
+    // Las de «Mis páginas» de cada usuario no son de la lista compartida que se administra aquí.
+    Object.assign(bdState, { views: views.filter((v) => v.shared), links: links.filter((l) => !l.personal), roles, resources, speakerGroups });
     bdState.byKey = new Map(resources.map((r) => [`${r.kind}:${r.id}`, r]));
   } catch (err) {
     if (!quiet && $("#bd-views")) $("#bd-views").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
@@ -303,8 +304,12 @@ function bdItemInfo(it) {
         sub: group ? `Grupo de parlantes · ${group.speakerIds.length}` : "Grupo de parlantes" };
     }
     case "card": {
-      const card = BD_CARDS.find((c) => c.key === it.ref);
-      return { icon: `<i class="mdi mdi-chart-bar" aria-hidden="true"></i>`, name: card?.label ?? it.ref, sub: "Tarjeta" };
+      // La clave puede traer opciones de la tarjeta ("card-plates?devices=3,7": las cámaras elegidas en el cliente).
+      const [key, options] = (it.ref || "").split("?");
+      const card = BD_CARDS.find((c) => c.key === key);
+      const cams = /devices=([\d,]+)/.exec(options || "")?.[1].split(",").length ?? 0;
+      return { icon: `<i class="mdi mdi-chart-bar" aria-hidden="true"></i>`, name: card?.label ?? it.ref,
+        sub: cams ? `Tarjeta · ${cams} cámara${cams === 1 ? "" : "s"}` : "Tarjeta" };
     }
     default:
       return { icon: `<i class="mdi mdi-web" aria-hidden="true"></i>`, name: it.title || it.ref, sub: it.refId ? "Página de la lista" : it.ref };

@@ -21,6 +21,7 @@ public partial class MainWindow : Window
         // Abre donde quedó la última vez (ver WindowPlacements).
         WindowPlacements.Remember(this, "main");
         ApplyTabOrder();
+        SetUpTearOff();
         // El menú del usuario cuelga alineado a la DERECHA de su botón: es lo
         // último del navbar y el menú es más ancho que el botón.
         UserMenuPopup.CustomPopupPlacementCallback = PlaceUserMenu;
@@ -31,10 +32,22 @@ public partial class MainWindow : Window
             // se buscan en él. Aunque la carga falle, hay que decidir igual.
             try { await _vm.LoadTreeAsync(); }
             finally { await _vm.RestoreLastSessionAsync(); }
+            // Las viñetas que estaban en su propia ventana vuelven a ella.
+            RestoreDetachedTabs();
+            // ¿Hay una versión nueva del cliente en el servidor? (ícono de la barra de título)
+            _vm.StartUpdateChecks();
+        };
+        // Actualizar: el instalador ya está corriendo y espera a que el cliente se cierre.
+        _vm.ExitForUpdateRequested += () =>
+        {
+            _exitingForUpdate = true;
+            Close();
         };
         Closing += OnShellClosing;
         Closed += (_, _) =>
         {
+            // Antes de soltar todo: las viñetas extraídas se anotan y vuelven aquí sin cerrar sus módulos.
+            CloseDetachedTabs();
             _vm.Shutdown();
             if (!_loggingOut) ReleaseSeatOnExit();
         };
@@ -43,8 +56,12 @@ public partial class MainWindow : Window
         StateChanged += OnWindowStateChanged;
         _vm.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(MainViewModel.IsGridFullscreen))
-                ApplyGridFullscreen(_vm.IsGridFullscreen);
+            // La pantalla completa es de esta ventana solo si el módulo que la pidió está aquí.
+            if (e.PropertyName == nameof(MainViewModel.IsGridFullscreen) && _vm.IsShellFullscreen != _shellFullscreen)
+            {
+                _shellFullscreen = _vm.IsShellFullscreen;
+                ApplyGridFullscreen(_shellFullscreen);
+            }
         };
     }
 
@@ -66,7 +83,8 @@ public partial class MainWindow : Window
     private void OnShellClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         // Cerrar sesión ya preguntó lo suyo y la aplicación no se va: sigue el login.
-        if (_loggingOut) return;
+        // Al actualizar ya se confirmó en el aviso de la actualización.
+        if (_loggingOut || _exitingForUpdate) return;
 
         bool downloading = _vm.Downloads.HasActiveJobs;
         string message;
@@ -119,6 +137,9 @@ public partial class MainWindow : Window
     /// "¿Cerrar CLR TrueCentral VMS?" porque la aplicación sigue viva en el
     /// login.</summary>
     private bool _loggingOut;
+
+    /// <summary>Se cierra para que el instalador de la actualización reemplace el cliente.</summary>
+    private bool _exitingForUpdate;
 
     /// <summary>Aire que el Border del menú deja para su sombra (su Margin en
     /// el XAML): entra en el tamaño del popup y hay que descontarlo para que el
@@ -192,6 +213,7 @@ public partial class MainWindow : Window
     // ------------------------------------------------------------------
     private Rect _fullscreenRestoreBounds;
     private WindowState _fullscreenRestoreState;
+    private bool _shellFullscreen;
 
     private void ApplyGridFullscreen(bool on)
     {

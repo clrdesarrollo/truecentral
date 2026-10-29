@@ -168,14 +168,19 @@ public sealed class VideoLayout
         ["13"] = "13 combinada",
     };
 
-    /// <summary>División del selector con esa clave (acepta las claves antiguas
-    /// y las de una división a medida: "m43…").</summary>
+    /// <summary>División del selector con esa clave (acepta las claves antiguas,
+    /// las de una división a medida: "m43…" y las uniformes "C×R").</summary>
     public static VideoLayout? Find(string? key)
     {
         if (string.IsNullOrEmpty(key)) return null;
         if (key.StartsWith(CustomPrefix)) return Decode(key);
         if (LegacyKeys.TryGetValue(key, out var current)) key = current;
-        return Standard.FirstOrDefault(l => l.Key == key);
+        if (Standard.FirstOrDefault(l => l.Key == key) is { } standard) return standard;
+        // Las uniformes que no son del selector horizontal (las del vertical, "3×5").
+        var parts = key.Split('×');
+        return parts.Length == 2 && int.TryParse(parts[0], out int columns) && int.TryParse(parts[1], out int rows) &&
+               columns is >= 1 and <= 16 && rows is >= 1 and <= 16
+            ? Grid(columns, rows) : null;
     }
 
     // ------------------------------------------------------------------
@@ -239,16 +244,17 @@ public sealed class VideoLayout
     }
 
     // ------------------------------------------------------------------
-    // Divisiones a medida (grilla ampliada o con cuadros unidos). Clave
-    // compacta: "m" + columnas + filas + 2 caracteres por cada cuadro de más
-    // de una celda (columna, fila, ancho-1 y alto-1 en 3 bits cada uno); las
-    // celdas libres son cuadros simples. Cabe en los 32 caracteres de las
-    // vistas guardadas con hasta 14 cuadros grandes. La web (live.js)
-    // entiende la misma clave.
+    // Divisiones a medida (grilla ampliada, con cuadros unidos o con un
+    // cuadro subdividido). Clave compacta: "m" + columnas + filas + 2
+    // caracteres por cada cuadro de más de una celda (columna, fila, ancho-1
+    // y alto-1 en 3 bits cada uno); las celdas libres son cuadros simples.
+    // Cabe en los 64 caracteres de los tableros con hasta 30 cuadros grandes
+    // (antes 32 y 14: subdividir un cuadro de una grilla de 16 deja 15). La
+    // web (live.js) entiende la misma clave.
     // ------------------------------------------------------------------
     private const string CustomPrefix = "m";
     private const string CustomAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    public const int MaxBigCells = 14;
+    public const int MaxBigCells = 30;
 
     /// <summary>
     /// La división de esos cuadros (quedan en orden de lectura): la del
@@ -379,6 +385,54 @@ public sealed class VideoLayout
         return new LayoutGrowth(layout, placement, [placement[index]]);
     }
 
+    // ------------------------------------------------------------------
+    // Subdividir un cuadro: el cuadro pasa a ser across×down cuadros del
+    // mismo tamaño entre sí (para poner más de una cámara donde había una).
+    // Si su tamaño no se parte justo, la cuadrícula entera se refina (cada
+    // celda pasa a ser 2×2, por ejemplo) y los demás cuadros conservan su
+    // forma y su lugar: son cuadros normales, se unen y se separan igual.
+    // ------------------------------------------------------------------
+
+    private static int Gcd(int a, int b) => b == 0 ? a : Gcd(b, a % b);
+
+    /// <summary>
+    /// La división con el cuadro <paramref name="index"/> partido en
+    /// <paramref name="across"/>×<paramref name="down"/>, o null (con el
+    /// porqué) si se pasa de los topes. Placement[i] es el lugar nuevo del
+    /// cuadro i (el subdividido queda en su primer pedazo, arriba a la
+    /// izquierda) y StripCells son los pedazos en orden de lectura.
+    /// </summary>
+    public LayoutGrowth? Subdivide(int index, int across, int down, out string? reason)
+    {
+        var cell = Cells[index];
+        // Cuánto hay que refinar la cuadrícula para que el cuadro se parta justo.
+        int fx = across / Gcd(cell.ColSpan, across), fy = down / Gcd(cell.RowSpan, down);
+        int columns = Columns * fx, rows = Rows * fy;
+        int count = CellCount - 1 + across * down;
+        reason = columns > MaxGrowColumns || rows > MaxGrowRows
+                ? $"La grilla quedaría de {columns}×{rows} celdas y el máximo es {MaxGrowColumns}×{MaxGrowRows}: " +
+                  "subdivida un cuadro más grande o use una división con menos cuadros."
+            : count > MaxGrowCells ? $"La grilla no puede pasar de {MaxGrowCells} cuadros."
+            : null;
+        if (reason is not null) return null;
+
+        var scaled = Cells.Select(c => new LayoutCell(c.Col * fx, c.Row * fy, c.ColSpan * fx, c.RowSpan * fy)).ToList();
+        var big = scaled[index];
+        int w = big.ColSpan / across, h = big.RowSpan / down;
+        var parts = new List<LayoutCell>();
+        for (int y = 0; y < down; y++)
+            for (int x = 0; x < across; x++)
+                parts.Add(new LayoutCell(big.Col + x * w, big.Row + y * h, w, h));
+        var layout = FromCells(columns, rows, scaled.Where((_, i) => i != index).Concat(parts).ToList());
+        if (layout is null)
+        {
+            reason = $"La grilla quedaría con más de {MaxBigCells} cuadros de distinto tamaño, el máximo.";
+            return null;
+        }
+        var placement = scaled.Select((c, i) => IndexOf(layout, i == index ? parts[0] : c)).ToArray();
+        return new LayoutGrowth(layout, placement, parts.Select(p => IndexOf(layout, p)).ToList());
+    }
+
     private static int IndexOf(VideoLayout layout, LayoutCell cell)
     {
         for (int i = 0; i < layout.Cells.Count; i++)
@@ -507,6 +561,82 @@ public sealed class VideoLayout
     /// <summary>Todas las divisiones del selector, en su orden.</summary>
     public static readonly IReadOnlyList<VideoLayout> Standard =
         Groups.SelectMany(g => g.Layouts).ToList();
+
+    // ------------------------------------------------------------------
+    // Monitores verticales: el selector cambia a divisiones más altas que
+    // anchas (más filas que columnas, el cuadro principal arriba). Se guardan
+    // con su clave de siempre: la del selector si coincide con una, "C×R" si
+    // es uniforme o "m…" a medida, así los tableros y la web las entienden.
+    // ------------------------------------------------------------------
+
+    /// <summary>La división de esos cuadros con el número de cuadros como rótulo de la miniatura.</summary>
+    private static VideoLayout Portrait(int columns, int rows, List<LayoutCell> cells)
+    {
+        var layout = FromCells(columns, rows, cells)
+                     ?? throw new InvalidOperationException($"División vertical {columns}×{rows} sin clave.");
+        // Las del selector horizontal se usan tal cual (la miniatura activa se marca por clave igual).
+        return Standard.Contains(layout) ? layout : new VideoLayout
+        {
+            Key = layout.Key, Name = layout.CellCount.ToString(),
+            Columns = layout.Columns, Rows = layout.Rows, Cells = layout.Cells,
+        };
+    }
+
+    private static VideoLayout PortraitGrid(int columns, int rows) =>
+        Portrait(columns, rows, Grid(columns, rows).Cells.ToList());
+
+    private static VideoLayout PortraitMap(params string[] rows)
+    {
+        var map = Map("vertical", rows);
+        return Portrait(map.Columns, map.Rows, map.Cells.ToList());
+    }
+
+    /// <summary>La misma división girada (columnas ↔ filas).</summary>
+    private static VideoLayout Transposed(VideoLayout layout) =>
+        Portrait(layout.Rows, layout.Columns,
+            layout.Cells.Select(c => new LayoutCell(c.Row, c.Col, c.RowSpan, c.ColSpan)).ToList());
+
+    /// <summary>Familias del selector para monitores verticales.</summary>
+    public static readonly IReadOnlyList<VideoLayoutGroup> VerticalGroups = BuildVerticalGroups();
+
+    /// <summary>
+    /// Cada división aparece una sola vez (en la primera familia que la
+    /// tiene: 2×3 es uniforme y también «6 en filas») y las combinadas giradas
+    /// quedan solo si salen más altas que anchas.
+    /// </summary>
+    private static List<VideoLayoutGroup> BuildVerticalGroups()
+    {
+        var seen = new HashSet<string>();
+        VideoLayoutGroup Group(string title, IEnumerable<VideoLayout> layouts) =>
+            new() { Title = title, Layouts = layouts.Where(l => seen.Add(l.Key)).ToList() };
+        return
+        [
+            Group("Uniformes",
+            [
+                PortraitGrid(1, 1), PortraitGrid(1, 2), PortraitGrid(1, 3), PortraitGrid(2, 2),
+                PortraitGrid(2, 3), PortraitGrid(2, 4), PortraitGrid(3, 3), PortraitGrid(3, 4),
+                PortraitGrid(3, 5), PortraitGrid(4, 4), PortraitGrid(3, 6), PortraitGrid(4, 6),
+                PortraitGrid(4, 8), PortraitGrid(6, 8),
+            ]),
+            Group("Con cuadro principal arriba",
+            [
+                PortraitMap("AA", "AA", "BC"),
+                PortraitMap("AAA", "AAA", "BCD"),
+                PortraitMap("AA", "AA", "BC", "DE"),
+                Groups[1].Layouts[0], // 6 con principal: sirve igual parado
+                PortraitMap("AAA", "AAA", "BCD", "EFG"),
+                Groups[1].Layouts[1], // 8 con principal
+                PortraitMap("AAA", "AAA", "AAA", "BCD", "EFG", "HIJ"),
+                PortraitMap("AAAA", "AAAA", "AAAA", "BCDE", "FGHI", "JKLM"),
+                PortraitMap("AAAA", "AAAA", "BCDE", "FGHI", "JKLM", "NOPQ"),
+            ]),
+            Group("En filas", Groups[3].Layouts.Concat([PortraitGrid(1, 4), PortraitMap("AA", "AA", "BB", "BB", "CD")])),
+            Group("Combinadas", Groups[4].Layouts.Select(Transposed).Where(l => l.Rows >= l.Columns)),
+        ];
+    }
+
+    /// <summary>Familias del selector según la orientación del monitor.</summary>
+    public static IReadOnlyList<VideoLayoutGroup> GroupsFor(bool vertical) => vertical ? VerticalGroups : Groups;
 
     /// <summary>División inicial de la grilla (2×2).</summary>
     public static VideoLayout Default => Standard[1];

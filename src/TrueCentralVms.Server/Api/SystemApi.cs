@@ -73,8 +73,10 @@ public static class SystemApi
 
         // La descarga acepta el token por query: la inicia el navegador (no
         // fetch) y no puede mandar la cabecera Authorization.
+        // ?update=x.y.z: la pide el propio cliente para actualizarse (ícono de la barra de título).
         app.MapGet("/api/system/client-installer", async (HttpContext ctx, IConfiguration config, IWebHostEnvironment env,
-            AuditService audit, Services.Https.ServerCertificateManager certificates, Services.Https.WebPorts ports) =>
+            AuditService audit, Services.Https.ServerCertificateManager certificates, Services.Https.WebPorts ports,
+            string? update) =>
         {
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             var file = FindClientInstaller(config, env);
@@ -83,8 +85,11 @@ public static class SystemApi
                     statusCode: StatusCodes.Status404NotFound);
             string name = ClientInstallerName(file.Name, ctx.Request.Host.Host, ports.HttpsPort,
                 Services.Https.ServerCertificateManager.SpkiFingerprint(certificates.Current));
+            string? from = update?.Trim() is { Length: > 0 and <= 32 } version ? version : null;
             await audit.LogAsync(ctx, "system", "client-installer-downloaded",
-                detail: $"Descargó el instalador del cliente de escritorio ({name}).");
+                detail: from is null
+                    ? $"Descargó el instalador del cliente de escritorio ({name})."
+                    : $"Actualizó el cliente de escritorio desde la versión {from}: descargó el instalador ({name}).");
             return Results.File(file.FullName, "application/octet-stream", name);
         });
 
