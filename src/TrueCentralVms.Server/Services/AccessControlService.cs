@@ -31,6 +31,7 @@ public sealed class AccessControlService(
     Isup.IsupService isup,
     Isup.IsupHostManager isupHost,
     Licensing.LicenseService license,
+    IConfiguration config,
     ILogger<AccessControlService> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
@@ -39,6 +40,15 @@ public sealed class AccessControlService(
 
     private readonly SemaphoreSlim _wake = new(0);
 
+    /// <summary>
+    /// Si se le pregunta a los terminales por su cámara, su altavoz y sus
+    /// entradas y salidas (<c>Access:ReadTerminalParts</c>). Apagado, los
+    /// terminales que comparten el equipo con otro sistema (un kiosco que
+    /// también entra por el SDK) no reciben más consultas que las de siempre;
+    /// las partes que ya tienen se conservan.
+    /// </summary>
+    public bool ReadTerminalParts { get; } = config.GetValue("Access:ReadTerminalParts", true);
+
     /// <summary>La configuración cambió: sondear ahora en vez de esperar el ciclo.</summary>
     public void RequestReconcile()
     {
@@ -46,7 +56,8 @@ public sealed class AccessControlService(
     }
 
     public AccessConnectionInfo ConnectionOf(AccessDevice device) =>
-        new(device.Host, device.Port, device.UseHttps, device.Username, credentials.Unprotect(device.PasswordCiphertext), device.IsupDeviceId);
+        new(device.Host, device.Port, device.UseHttps, device.Username, credentials.Unprotect(device.PasswordCiphertext), device.IsupDeviceId,
+            ReadTerminalParts);
 
     public IAccessControlDriver DriverOf(AccessDevice device) =>
         drivers.Find(device.DriverKey)?.Create()
@@ -237,6 +248,8 @@ public sealed class AccessControlService(
         {
             if (online) _ = Task.Run(() => ProvisionIsupAsync(isupId, stoppingToken), stoppingToken);
         };
+        if (!ReadTerminalParts)
+            logger.LogInformation("Access:ReadTerminalParts = false: no se busca la cámara, el altavoz ni las E/S de los terminales de acceso.");
         // Dar tiempo a que la API y el hub estén arriba antes del primer sondeo.
         try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
         catch (OperationCanceledException) { return; }
@@ -366,7 +379,7 @@ public sealed class AccessControlService(
             }
 
             // Los agregados antes de que el VMS supiera ver sus partes: se le pregunta una sola vez.
-            if (!device.PartsChecked && device.IsupDeviceId is null && EquipmentParts.Supports(device.DriverKey))
+            if (ReadTerminalParts && !device.PartsChecked && device.IsupDeviceId is null && EquipmentParts.Supports(device.DriverKey))
             {
                 try
                 {

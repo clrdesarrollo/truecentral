@@ -52,8 +52,9 @@ public static class AccessApi
     }
 
     private static async Task<(AccessDeviceInfo? Info, string? Error)> ProbeAsync(AccessDriverRegistry drivers,
-        string driverKey, AccessConnectionInfo conn, CancellationToken ct)
+        AccessControlService service, string driverKey, AccessConnectionInfo conn, CancellationToken ct)
     {
+        conn = conn with { ReadParts = service.ReadTerminalParts };
         try { return (await drivers.Find(driverKey)!.Create().ProbeAsync(conn, ct), null); }
         catch (DriverException ex) { return (null, ex.Message); }
         catch (Exception ex) { return (null, $"Error inesperado al comunicarse con el equipo: {ex.Message}"); }
@@ -285,7 +286,7 @@ public static class AccessApi
             string? waiting = null;
             if (!viaIsup || isup.IsOnline(isupId!))
             {
-                (info, var probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+                (info, var probeError) = await ProbeAsync(drivers, service, request.DriverKey, conn, ct);
                 if (info is null)
                 {
                     await audit.LogAsync(ctx, "access", "device-created", targetType: "access-device", targetName: request.Name.Trim(),
@@ -394,7 +395,7 @@ public static class AccessApi
             {
                 var conn = new AccessConnectionInfo(host, port, !viaIsup && request.UseHttps, username, password, isupId);
                 string? probeError;
-                (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+                (info, probeError) = await ProbeAsync(drivers, service, request.DriverKey, conn, ct);
                 if (info is null) return Error(probeError!);
             }
             if (!device.Enabled && request.Enabled &&
@@ -517,7 +518,7 @@ public static class AccessApi
             if (device.IsupDeviceId is { } isupId && !isup.IsOnline(isupId))
                 probeError = await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct);
             else
-                (info, probeError) = await ProbeAsync(drivers, device.DriverKey, service.ConnectionOf(device), ct);
+                (info, probeError) = await ProbeAsync(drivers, service, device.DriverKey, service.ConnectionOf(device), ct);
             if (info is null)
             {
                 device.Status = AccessDeviceStatus.Offline;
@@ -545,8 +546,8 @@ public static class AccessApi
 
         // Probar conexión (sin persistir). Con ?deviceId= reutiliza la clave guardada.
         app.MapPost("/api/access/probe", async (HttpContext ctx, AccessDeviceWriteDto request, VmsDbContext db,
-            AccessDriverRegistry drivers, CredentialProtector protector, AuditService audit, IsupService isup, IsupHostManager isupHost,
-            int? deviceId, CancellationToken ct) =>
+            AccessDriverRegistry drivers, AccessControlService service, CredentialProtector protector, AuditService audit,
+            IsupService isup, IsupHostManager isupHost, int? deviceId, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
@@ -582,7 +583,7 @@ public static class AccessApi
                 conn = new AccessConnectionInfo(host, request.Port, request.UseHttps, request.Username, password ?? "");
                 target = $"{host}:{request.Port}";
             }
-            var (info, probeError) = await ProbeAsync(drivers, request.DriverKey, conn, ct);
+            var (info, probeError) = await ProbeAsync(drivers, service, request.DriverKey, conn, ct);
             await audit.LogAsync(ctx, "access", "device-probed", targetType: "access-device", targetName: request.Name.Trim(),
                 detail: info is null
                     ? $"Probó la conexión con el equipo de control de acceso {target}: {probeError}"

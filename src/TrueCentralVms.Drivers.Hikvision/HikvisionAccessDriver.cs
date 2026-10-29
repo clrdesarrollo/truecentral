@@ -326,11 +326,13 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
     /// <summary>
     /// Cámara, altavoz y entradas/salidas de alarma. Por ISUP no se ofrecen
-    /// (ni el video ni el audio llegan por esa vía todavía).
+    /// (ni el video ni el audio llegan por esa vía todavía). Sin
+    /// <see cref="AccessConnectionInfo.ReadParts"/> no se pregunta nada: ni
+    /// siquiera el inicio de sesión del SDK.
     /// </summary>
     private static async Task<DeviceParts?> ReadPartsAsync(AccessConnectionInfo info, HikvisionIsapiClient client, CancellationToken ct)
     {
-        if (client.IsIsup) return null;
+        if (client.IsIsup || !info.ReadParts) return null;
         bool speaker = await HikvisionParts.HasSpeakerAsync(client, ct);
         // Los faciales sin audio bidireccional por ISAPI (DS-K1T321MFWX V3.9) lo tienen por el SDK, como un citófono.
         bool viaSdk = !speaker && await HikvisionSdkVoice.HasVoiceAsync(info.Host, SdkPort, info.Username, info.Password, ct);
