@@ -350,7 +350,7 @@
         <!-- ===== Lista + ficha de detalle ===== -->
         <Grid Grid.Row="3" Margin="14">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="360" MinWidth="280"/>
+                <ColumnDefinition Width="290" MinWidth="240"/>
                 <ColumnDefinition Width="14"/>
                 <ColumnDefinition Width="*" MinWidth="420"/>
             </Grid.ColumnDefinitions>
@@ -366,7 +366,7 @@
                                       VerticalAlignment="Center"
                                       ToolTip="Seleccionar automáticamente cada lectura nueva"/>
                             <TextBlock Text="{Binding CountText}" FontSize="12.5" VerticalAlignment="Center"
-                                       Foreground="{StaticResource MutedBrush}"/>
+                                       Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
                         </DockPanel>
                     </Border>
 
@@ -404,9 +404,12 @@
                                                        FontFamily="{StaticResource PlateFont}"
                                                        Foreground="{StaticResource TextBrush}"/>
                                         </DockPanel>
-                                        <TextBlock FontSize="12" TextTrimming="CharacterEllipsis">
-                                            <Run Text="{Binding TimeText, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding SourceText, Mode=OneWay}" Foreground="{StaticResource MutedBrush}"/>
-                                        </TextBlock>
+                                        <TextBlock Text="{Binding TimeText}" FontSize="12"/>
+                                        <!-- La cámara en su propia línea: la lista queda más angosta
+                                             y la escena de la ficha gana ese ancho. -->
+                                        <TextBlock Text="{Binding SourceText}" FontSize="12"
+                                                   Foreground="{StaticResource MutedBrush}"
+                                                   TextTrimming="CharacterEllipsis"/>
                                         <TextBlock Text="{Binding VehicleSummary}" FontSize="12"
                                                    Foreground="{StaticResource MutedBrush}"
                                                    TextTrimming="CharacterEllipsis"
