@@ -215,6 +215,8 @@ public static class AccessTerminalParts
                 var info = await registry.Find(speaker.DriverKey)!.Create().ProbeAsync(new SpeakerConnectionInfo(
                     terminal.Host, terminal.Port, terminal.UseHttps, terminal.Username, protector.Unprotect(terminal.PasswordCiphertext)), ct);
                 Api.SpeakersApi.ApplyProbe(speaker, info);
+                // El terminal ya mostró su canal de audio bidireccional (aunque no conteste sus capacidades).
+                speaker.SupportsLiveAudio = true;
             }
             catch (DriverException ex)
             {

@@ -337,12 +337,19 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     private static async Task<bool> HasSpeakerAsync(HikvisionIsapiClient client, CancellationToken ct)
     {
-        try
+        // La lista de canales (la que se usa para abrir la voz) primero: hay firmwares
+        // de terminales que no contestan la ruta de capacidades.
+        foreach (string path in new[] { "/ISAPI/System/TwoWayAudio/channels", "/ISAPI/System/TwoWayAudio/channels/capabilities" })
         {
-            return await client.RequestAsync(HttpMethod.Get, "/ISAPI/System/TwoWayAudio/channels/capabilities", ct: ct) is { } xml &&
-                   xml.Contains("TwoWayAudioChannel", StringComparison.Ordinal);
+            try
+            {
+                if (await client.RequestAsync(HttpMethod.Get, path, ct: ct) is { } xml &&
+                    xml.Contains("TwoWayAudioChannel", StringComparison.Ordinal))
+                    return true;
+            }
+            catch (DriverException) { /* se prueba la otra ruta */ }
         }
-        catch (DriverException) { return false; }
+        return false;
     }
 
     /// <summary>
@@ -351,15 +358,33 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// </summary>
     private static async Task<AccessIoInfo?> ReadIoAsync(HikvisionIsapiClient client, CancellationToken ct)
     {
+        // La lista completa; si el equipo no la contesta, las de entradas y de salidas por separado.
+        async Task<int> CountAsync(string path, string element)
+        {
+            try
+            {
+                return await client.RequestAsync(HttpMethod.Get, path, ct: ct) is { } xml
+                    ? XDocument.Parse(xml).Descendants().Count(e => e.Name.LocalName == element) : -1;
+            }
+            catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { return -1; }
+        }
+        int inputs, outputs;
         try
         {
-            if (await client.RequestAsync(HttpMethod.Get, "/ISAPI/System/IO", ct: ct) is not { } xml) return null;
-            var all = XDocument.Parse(xml).Descendants().ToList();
-            int inputs = all.Count(e => e.Name.LocalName == "IOInputPort");
-            int outputs = all.Count(e => e.Name.LocalName == "IOOutputPort");
-            return inputs + outputs == 0 ? null : new AccessIoInfo(inputs, outputs);
+            string? list = await client.RequestAsync(HttpMethod.Get, "/ISAPI/System/IO", ct: ct);
+            var all = list is null ? null : XDocument.Parse(list).Descendants().ToList();
+            inputs = all?.Count(e => e.Name.LocalName == "IOInputPort") ?? -1;
+            outputs = all?.Count(e => e.Name.LocalName == "IOOutputPort") ?? -1;
         }
-        catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { return null; }
+        catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { inputs = outputs = -1; }
+        if (inputs < 0 && outputs < 0)
+        {
+            inputs = await CountAsync("/ISAPI/System/IO/inputs", "IOInputPort");
+            outputs = await CountAsync("/ISAPI/System/IO/outputs", "IOOutputPort");
+        }
+        inputs = Math.Max(0, inputs);
+        outputs = Math.Max(0, outputs);
+        return inputs + outputs == 0 ? null : new AccessIoInfo(inputs, outputs);
     }
 
     /// <summary>
