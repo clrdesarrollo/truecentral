@@ -130,7 +130,7 @@ public static class AccessApi
     /// equipo se llevaría su grabación, sus tableros y sus automatizaciones—,
     /// salvo que sea otro equipo (cambió el modelo). Null = el driver no las ve.
     /// </summary>
-    internal static void ApplyParts(AccessDevice device, string? model, AccessDeviceParts? parts)
+    internal static void ApplyParts(AccessDevice device, string? model, DeviceParts? parts)
     {
         if (parts is null) return;
         bool sameDevice = device.PartsChecked && string.Equals(device.Model, model, StringComparison.OrdinalIgnoreCase);
@@ -145,7 +145,7 @@ public static class AccessApi
     }
 
     /// <summary>
-    /// Partes del terminal recién guardado (<see cref="AccessTerminalParts"/>):
+    /// Partes del terminal recién guardado (<see cref="EquipmentParts"/>):
     /// las crea, las pone al día o las quita, guarda y, si cambió algo, rehace
     /// las rutas de video, avisa a los servicios de parlantes y de E/S y a los
     /// puestos. Devuelve las altas y bajas para la bitácora.
@@ -153,7 +153,7 @@ public static class AccessApi
     private static async Task<List<string>> SyncPartsAsync(HttpContext ctx, VmsDbContext db, AccessDevice device,
         int? previousLocationId, CancellationToken ct)
     {
-        var changes = await AccessTerminalParts.SyncAsync(db, device, previousLocationId, ctx.RequestServices, ct);
+        var changes = await EquipmentParts.SyncAsync(db, device, previousLocationId, ctx.RequestServices, ct);
         if (!db.ChangeTracker.HasChanges()) return changes;
         await db.SaveChangesAsync(ct);
         await PartsChangedAsync(ctx.RequestServices, ct);

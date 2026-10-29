@@ -87,6 +87,18 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
         }
     }, ct);
 
+    /// <summary>
+    /// Altavoz y entradas/salidas de alarma de la cámara o del grabador, por ISAPI
+    /// (las mismas rutas que en los terminales de acceso). Por ISUP, nada todavía.
+    /// </summary>
+    public async Task<DeviceParts?> ReadPartsAsync(DeviceConnectionInfo info, int httpPort, CancellationToken ct = default)
+    {
+        if (info.IsupId is { Length: > 0 } || httpPort <= 0) return null;
+        var client = new HikvisionIsapiClient(new AlarmConnectionInfo(info.Host, httpPort, false, info.Username, info.Password),
+            digestOnly: true, deviceNoun: "equipo");
+        return new DeviceParts(null, await HikvisionParts.HasSpeakerAsync(client, ct), await HikvisionParts.ReadIoAsync(client, ct));
+    }
+
     public string BuildRtspUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel, StreamProfile profile)
     {
         int path = rtspChannel * 100 + (profile == StreamProfile.Main ? 1 : 2);

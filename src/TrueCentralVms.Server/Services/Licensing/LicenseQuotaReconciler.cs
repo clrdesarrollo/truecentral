@@ -109,7 +109,7 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
         await RunAsync(db, sp, f, new Spec<Speaker>(
             "parlantes IP", LicenseFeatures.ModuleSpeakers, LicenseFeatures.SpeakerChannels,
             // El altavoz de un terminal de acceso viene con el terminal: no cuenta ni se apaga por cupo.
-            d => d.Speakers.Where(s => s.AccessDeviceId == null), x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
+            d => d.Speakers.Where(s => s.AccessDeviceId == null && s.DeviceId == null), x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
             (x, on) => { x.Enabled = on; x.DisabledByLicense = !on; }, x => x.Name,
             async (s, _, _, _) =>
             {
@@ -132,7 +132,7 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
         await RunAsync(db, sp, f, new Spec<IoModule>(
             "módulos de E/S", LicenseFeatures.ModuleIo, LicenseFeatures.IoModules,
             // Las entradas y salidas de un terminal de acceso vienen con el terminal.
-            d => d.IoModules.Where(m => m.AccessDeviceId == null), x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
+            d => d.IoModules.Where(m => m.AccessDeviceId == null && m.DeviceId == null), x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
             (x, on) => { x.Enabled = on; x.DisabledByLicense = !on; }, x => x.Name,
             async (s, off, _, _) =>
             {
@@ -269,7 +269,7 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
             sp.GetService<AccessControlService>()?.RequestReconcile();
             // Sus partes (cámara, altavoz, entradas y salidas) se apagan y vuelven con él.
             foreach (var device in off.Concat(on))
-                await AccessTerminalParts.FollowEnabledAsync(db, device, ct);
+                await EquipmentParts.FollowEnabledAsync(db, device, ct);
             await db.SaveChangesAsync(ct);
             if (sp.GetService<MediaMtxManager>() is { } mtx) await mtx.RefreshPathsAsync(ct);
             sp.GetService<SpeakerService>()?.RequestReconcile();

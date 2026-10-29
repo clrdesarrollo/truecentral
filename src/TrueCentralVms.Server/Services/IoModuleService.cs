@@ -103,7 +103,7 @@ public sealed class IoModuleService(
             Enumerable.Range(0, inputCount).Select(n => Point(IoPointKind.Input, n, state?.Inputs)).ToList(),
             Enumerable.Range(0, outputCount).Select(n => Point(IoPointKind.Output, n, state?.Outputs)).ToList(),
             m.CreatedAt, m.UpdatedAt, m.LocationId, Auth.LocationPaths.Of(m.LocationId), DisabledByLicense: m.DisabledByLicense,
-            AccessDeviceId: m.AccessDeviceId);
+            AccessDeviceId: m.AccessDeviceId, DeviceId: m.DeviceId);
     }
 
     // ------------------------------------------------------------------

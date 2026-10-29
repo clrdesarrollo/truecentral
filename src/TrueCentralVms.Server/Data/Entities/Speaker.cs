@@ -51,6 +51,16 @@ public class Speaker : ILocatable, IIsupEquipment
     public int? AccessDeviceId { get; set; }
     public AccessDevice? AccessDevice { get; set; }
 
+    /// <summary>
+    /// Altavoz de una cámara o de un grabador (su salida de audio): igual que el
+    /// de un terminal, lo crea y lo mantiene el VMS a partir del equipo de video.
+    /// </summary>
+    public int? DeviceId { get; set; }
+    public Device? Device { get; set; }
+
+    /// <summary>Es parte de otro equipo (terminal o cámara): se administra desde ese equipo.</summary>
+    public bool IsPart => AccessDeviceId is not null || DeviceId is not null;
+
     // Datos obtenidos del parlante al validar credenciales.
     public string? Model { get; set; }
     public string? SerialNumber { get; set; }

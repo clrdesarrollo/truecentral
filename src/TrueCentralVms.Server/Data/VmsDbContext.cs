@@ -270,6 +270,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(d => d.IsupDeviceId).HasMaxLength(32);
             // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
             e.HasIndex(d => d.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
+            e.Property(d => d.PartsNote).HasMaxLength(256);
             // Cámara de un terminal de acceso: una por terminal, y se va con él (sus canales también).
             e.HasOne(d => d.AccessDevice).WithOne()
                 .HasForeignKey<Device>(d => d.AccessDeviceId)
@@ -387,10 +388,14 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         // -------------------------------------------------------------------
         modelBuilder.Entity<Speaker>(e =>
         {
-            // Altavoz de un terminal de acceso: uno por terminal, y se va con él.
+            // Altavoz de un terminal de acceso o de un equipo de video: uno por equipo, y se va con él.
             e.HasOne(s => s.AccessDevice).WithOne()
                 .HasForeignKey<Speaker>(s => s.AccessDeviceId)
                 .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(s => s.Device).WithOne()
+                .HasForeignKey<Speaker>(s => s.DeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Ignore(s => s.IsPart);
             e.Property(s => s.Name).HasMaxLength(128);
             e.Property(s => s.DriverKey).HasMaxLength(32);
             e.Property(s => s.Host).HasMaxLength(255);
@@ -443,10 +448,14 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(m => m.Status).HasConversion<string>().HasMaxLength(16);
             e.HasIndex(m => new { m.Host, m.Port }).IsUnique();
             e.Property(m => m.Username).HasMaxLength(64);
-            // Entradas y salidas de un terminal de acceso: un módulo por terminal, y se va con él.
+            // Entradas y salidas de un terminal de acceso o de un equipo de video: un módulo por equipo, y se va con él.
             e.HasOne(m => m.AccessDevice).WithOne()
                 .HasForeignKey<IoModule>(m => m.AccessDeviceId)
                 .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(m => m.Device).WithOne()
+                .HasForeignKey<IoModule>(m => m.DeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Ignore(m => m.IsPart);
             e.HasMany(m => m.Points).WithOne(p => p.IoModule)
                 .HasForeignKey(p => p.IoModuleId).OnDelete(DeleteBehavior.Cascade);
         });

@@ -318,73 +318,18 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             Value("macAddress"), kind, capabilities, doors, profile, await ReadPartsAsync(client, ct));
     }
 
-    public Task<AccessDeviceParts?> ReadPartsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+    public Task<DeviceParts?> ReadPartsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
         ReadPartsAsync(Client(info), ct);
 
     /// <summary>
     /// Cámara, altavoz y entradas/salidas de alarma. Por ISUP no se ofrecen
     /// (ni el video ni el audio llegan por esa vía todavía).
     /// </summary>
-    private static async Task<AccessDeviceParts?> ReadPartsAsync(HikvisionIsapiClient client, CancellationToken ct)
+    private static async Task<DeviceParts?> ReadPartsAsync(HikvisionIsapiClient client, CancellationToken ct)
     {
         if (client.IsIsup) return null;
-        return new AccessDeviceParts(await ReadCameraAsync(client, ct), await HasSpeakerAsync(client, ct), await ReadIoAsync(client, ct));
-    }
-
-    /// <summary>
-    /// Altavoz: el canal de audio bidireccional de los faciales (el mismo con
-    /// que los parlantes IP Hikvision reciben la voz en vivo y los sonidos).
-    /// </summary>
-    private static async Task<bool> HasSpeakerAsync(HikvisionIsapiClient client, CancellationToken ct)
-    {
-        // La lista de canales (la que se usa para abrir la voz) primero: hay firmwares
-        // de terminales que no contestan la ruta de capacidades.
-        foreach (string path in new[] { "/ISAPI/System/TwoWayAudio/channels", "/ISAPI/System/TwoWayAudio/channels/capabilities" })
-        {
-            try
-            {
-                if (await client.RequestAsync(HttpMethod.Get, path, ct: ct) is { } xml &&
-                    xml.Contains("TwoWayAudioChannel", StringComparison.Ordinal))
-                    return true;
-            }
-            catch (DriverException) { /* se prueba la otra ruta */ }
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// Entradas y salidas de alarma: <c>/ISAPI/System/IO</c> las lista (las de
-    /// puerta —contacto, botón, cerradura— no van ahí). Null si no tiene.
-    /// </summary>
-    private static async Task<AccessIoInfo?> ReadIoAsync(HikvisionIsapiClient client, CancellationToken ct)
-    {
-        // La lista completa; si el equipo no la contesta, las de entradas y de salidas por separado.
-        async Task<int> CountAsync(string path, string element)
-        {
-            try
-            {
-                return await client.RequestAsync(HttpMethod.Get, path, ct: ct) is { } xml
-                    ? XDocument.Parse(xml).Descendants().Count(e => e.Name.LocalName == element) : -1;
-            }
-            catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { return -1; }
-        }
-        int inputs, outputs;
-        try
-        {
-            string? list = await client.RequestAsync(HttpMethod.Get, "/ISAPI/System/IO", ct: ct);
-            var all = list is null ? null : XDocument.Parse(list).Descendants().ToList();
-            inputs = all?.Count(e => e.Name.LocalName == "IOInputPort") ?? -1;
-            outputs = all?.Count(e => e.Name.LocalName == "IOOutputPort") ?? -1;
-        }
-        catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { inputs = outputs = -1; }
-        if (inputs < 0 && outputs < 0)
-        {
-            inputs = await CountAsync("/ISAPI/System/IO/inputs", "IOInputPort");
-            outputs = await CountAsync("/ISAPI/System/IO/outputs", "IOOutputPort");
-        }
-        inputs = Math.Max(0, inputs);
-        outputs = Math.Max(0, outputs);
-        return inputs + outputs == 0 ? null : new AccessIoInfo(inputs, outputs);
+        return new DeviceParts(await ReadCameraAsync(client, ct), await HikvisionParts.HasSpeakerAsync(client, ct),
+            await HikvisionParts.ReadIoAsync(client, ct));
     }
 
     /// <summary>

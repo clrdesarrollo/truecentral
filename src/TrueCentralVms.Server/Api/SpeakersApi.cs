@@ -110,8 +110,8 @@ public static class SpeakersApi
     }
 
     private const string TerminalManagedInAccess =
-        "Es el altavoz de un terminal de acceso: se administra desde Control de acceso → Equipos " +
-        "(su dirección y credenciales son las del terminal).";
+        "Es el altavoz de un terminal de acceso o de una cámara: se administra desde ese equipo " +
+        "(Control de acceso → Equipos, o Fuentes de video); su dirección y credenciales son las del equipo.";
 
     internal static void ApplyProbe(Speaker speaker, SpeakerInfo info)
     {
@@ -199,7 +199,7 @@ public static class SpeakersApi
             bool viaAgent = UsesAgent(drivers, request.DriverKey);
             if (!viaIsup && !viaAgent && string.IsNullOrEmpty(request.Password)) return Error("La contraseña del parlante es obligatoria.");
             if (license.Deny(LicenseFeatures.ModuleSpeakers, request.Enabled ? LicenseFeatures.SpeakerChannels : null,
-                    await db.Speakers.CountAsync(s => s.Enabled && s.AccessDeviceId == null, ct)) is { } denied)
+                    await db.Speakers.CountAsync(s => s.Enabled && s.AccessDeviceId == null && s.DeviceId == null, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "speaker", request.Name?.Trim());
             string host = viaIsup || viaAgent ? "" : request.Host.Trim();
             string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
@@ -282,7 +282,7 @@ public static class SpeakersApi
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.Id == id, ct);
             if (speaker is null) return Results.NotFound();
-            if (speaker.AccessDeviceId is not null) return Error(TerminalManagedInAccess, StatusCodes.Status409Conflict);
+            if (speaker.IsPart) return Error(TerminalManagedInAccess, StatusCodes.Status409Conflict);
             if (ValidateWrite(request, drivers, speaker.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
             bool viaIsup = UsesIsup(drivers, request.DriverKey);
             bool viaAgent = UsesAgent(drivers, request.DriverKey);
@@ -371,7 +371,7 @@ public static class SpeakersApi
             speaker.LocationId = locationId;
             if (!speaker.Enabled && request.Enabled
                 && license.Deny(LicenseFeatures.ModuleSpeakers, LicenseFeatures.SpeakerChannels,
-                    await db.Speakers.CountAsync(s => s.Enabled && s.Id != id && s.AccessDeviceId == null, ct)) is { } denied)
+                    await db.Speakers.CountAsync(s => s.Enabled && s.Id != id && s.AccessDeviceId == null && s.DeviceId == null, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "speaker", speaker.Name);
             speaker.Enabled = request.Enabled;
             speaker.UpdatedAt = DateTime.UtcNow;
@@ -394,7 +394,7 @@ public static class SpeakersApi
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             var speaker = await db.Speakers.FindAsync([id], ct);
             if (speaker is null) return Results.NotFound();
-            if (speaker.AccessDeviceId is not null) return Error(TerminalManagedInAccess, StatusCodes.Status409Conflict);
+            if (speaker.IsPart) return Error(TerminalManagedInAccess, StatusCodes.Status409Conflict);
             if (service.BusyOf(id) is { } busy)
                 return Error($"El parlante está en uso ({busy}); deténgalo antes de eliminarlo.", StatusCodes.Status409Conflict);
             HikvisionSpeakerDriver.Forget(service.ConnectionOf(speaker));

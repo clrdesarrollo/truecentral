@@ -67,7 +67,9 @@ public sealed record IoModuleDto(
     /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
     bool DisabledByLicense = false,
     /// <summary>Son las entradas y salidas de un terminal de acceso: su conexión la pone el terminal y no ocupa módulo de la licencia.</summary>
-    int? AccessDeviceId = null);
+    int? AccessDeviceId = null,
+    /// <summary>Son las entradas y salidas de una cámara o de un grabador (se administra desde Fuentes de video).</summary>
+    int? DeviceId = null);
 
 /// <summary>Nombre (y lógica, en las entradas) de una entrada o salida al guardar el módulo.</summary>
 public sealed record IoPointWriteDto(IoPointKind Kind, int Number, string? Name, bool Inverted = true);

@@ -280,13 +280,14 @@ public static class ResourceDetails
         Add(facts, "Biblioteca de audios propia", YesNo(s.SupportsLibrary));
         Add(facts, "Texto a voz", YesNo(s.SupportsTts));
         Add(facts, "Grupos", groups.Count > 0 ? string.Join(", ", groups) : null);
-        bool ofTerminal = s.AccessDeviceId is not null;
-        if (ofTerminal) Add(facts, "Licencia", "Altavoz de un terminal de acceso: incluido, no ocupa parlante");
+        bool isPart = s.IsPart;
+        if (isPart) Add(facts, "Licencia", $"Altavoz de {(s.AccessDeviceId is not null ? "un terminal de acceso" : "una cámara o grabador")}: incluido, no ocupa parlante");
         return new Part(
-            new ResourceSourceDto(ofTerminal ? "access" : "speakers", s.AccessDeviceId ?? s.Id, s.Name, s.Model, s.SerialNumber, s.FirmwareVersion,
+            new ResourceSourceDto(s.AccessDeviceId is not null ? "access" : s.DeviceId is not null ? "devices" : "speakers",
+                s.AccessDeviceId ?? s.DeviceId ?? s.Id, s.Name, s.Model, s.SerialNumber, s.FirmwareVersion,
                 Address(s.Host, s.Port, s.UseHttps), OnlineText(s.Status, s.Enabled), s.LastSeenAt),
-            facts, CanRename: !ofTerminal,
-            RenameNote: ofTerminal ? "Es el altavoz de un terminal de acceso: lleva el nombre del terminal (se cambia en Control de acceso)." : null,
+            facts, CanRename: !isPart,
+            RenameNote: isPart ? "Es el altavoz de otro equipo: lleva el nombre de ese equipo (se cambia ahí)." : null,
             FixedCameras: []);
     }
 
@@ -322,13 +323,14 @@ public static class ResourceDetails
         Add(facts, "Salidas (relés)", outputs.Count == 0 ? "Ninguna" : Names(outputs));
         if (m.ReportedModel is { } reported && reported != m.Model)
             Add(facts, "Modelo que informa el equipo", reported);
-        bool ofTerminal = m.AccessDeviceId is not null;
-        if (ofTerminal) Add(facts, "Licencia", "Entradas y salidas de un terminal de acceso: incluidas, no ocupan módulo");
+        bool isPart = m.IsPart;
+        if (isPart) Add(facts, "Licencia", $"Entradas y salidas de {(m.AccessDeviceId is not null ? "un terminal de acceso" : "una cámara o grabador")}: incluidas, no ocupan módulo");
         return new Part(
-            new ResourceSourceDto(ofTerminal ? "access" : "io-modules", m.AccessDeviceId ?? m.Id, m.Name, m.Model, null, null,
+            new ResourceSourceDto(m.AccessDeviceId is not null ? "access" : m.DeviceId is not null ? "devices" : "io-modules",
+                m.AccessDeviceId ?? m.DeviceId ?? m.Id, m.Name, m.Model, null, null,
                 Address(m.Host, m.Port), OnlineText(m.Status, m.Enabled), m.LastSeenAt),
-            facts, CanRename: !ofTerminal,
-            RenameNote: ofTerminal ? "Son las entradas y salidas de un terminal de acceso: llevan el nombre del terminal (sus entradas y salidas se nombran en Módulos de E/S)." : null,
+            facts, CanRename: !isPart,
+            RenameNote: isPart ? "Son las entradas y salidas de otro equipo: llevan el nombre de ese equipo (sus entradas y salidas se nombran en Módulos de E/S)." : null,
             FixedCameras: []);
     }
 }

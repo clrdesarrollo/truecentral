@@ -82,6 +82,15 @@ public interface IDeviceDriver
     Task<byte[]?> CaptureSnapshotAsync(DeviceConnectionInfo info, int channelNumber, CancellationToken ct = default);
 
     /// <summary>
+    /// Lo que el equipo trae además del video y que el VMS ofrece como recursos
+    /// propios: su altavoz (audio bidireccional) y sus entradas y salidas de
+    /// alarma. Se pregunta por HTTP (<paramref name="httpPort"/>), no por el
+    /// puerto de gestión. Null = el driver no sabe verlas.
+    /// </summary>
+    Task<DeviceParts?> ReadPartsAsync(DeviceConnectionInfo info, int httpPort, CancellationToken ct = default) =>
+        Task.FromResult<DeviceParts?>(null);
+
+    /// <summary>
     /// Movimiento PTZ continuo: stop=false lo inicia y stop=true lo detiene
     /// (velocidad 1..7). Devuelve false si el driver o el canal no lo
     /// soportan. Implementación por defecto: sin soporte PTZ.

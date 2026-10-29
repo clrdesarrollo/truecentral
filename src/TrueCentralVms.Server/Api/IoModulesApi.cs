@@ -125,7 +125,7 @@ public static class IoModulesApi
         // Sin nombre vuelve al de fábrica del terminal ("Entrada de alarma 2"), no al rótulo DI1.
         var names = request.Points?.Select(p => p with
         {
-            Name = string.IsNullOrWhiteSpace(p.Name) ? AccessTerminalParts.DefaultPointName(p.Kind, p.Number) : p.Name,
+            Name = string.IsNullOrWhiteSpace(p.Name) ? EquipmentParts.DefaultPointName(p.Kind, p.Number) : p.Name,
             Inverted = module.Points.FirstOrDefault(x => x.Kind == p.Kind && x.Number == p.Number)?.Inverted ?? false,
         }).ToList();
         changes.AddRange(SyncPoints(module, null, names));
@@ -183,7 +183,7 @@ public static class IoModulesApi
             if (ApiSecurity.Require(ctx, Permissions.IoConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (license.Deny(LicenseFeatures.ModuleIo, request.Enabled ? LicenseFeatures.IoModules : null,
-                    await db.IoModules.CountAsync(m => m.Enabled && m.AccessDeviceId == null, ct)) is { } denied)
+                    await db.IoModules.CountAsync(m => m.Enabled && m.AccessDeviceId == null && m.DeviceId == null, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "io-module", request.Name.Trim());
             string host = request.Host.Trim();
             if (await db.IoModules.AnyAsync(m => m.Host == host && m.Port == request.Port, ct))
@@ -246,7 +246,7 @@ public static class IoModulesApi
             if (ApiSecurity.Require(ctx, Permissions.IoConfigure, out _) is { } failure) return failure;
             var module = await db.IoModules.Include(m => m.Points).FirstOrDefaultAsync(m => m.Id == id, ct);
             if (module is null) return Results.NotFound();
-            if (module.AccessDeviceId is not null)
+            if (module.IsPart)
                 return await UpdateTerminalModuleAsync(ctx, module, request, db, hub, service, audit, ct);
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             string host = request.Host.Trim();
@@ -256,7 +256,7 @@ public static class IoModulesApi
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
             if (!module.Enabled && request.Enabled
                 && license.Deny(LicenseFeatures.ModuleIo, LicenseFeatures.IoModules,
-                    await db.IoModules.CountAsync(m => m.Enabled && m.Id != id && m.AccessDeviceId == null, ct)) is { } denied)
+                    await db.IoModules.CountAsync(m => m.Enabled && m.Id != id && m.AccessDeviceId == null && m.DeviceId == null, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "io-module", module.Name);
 
             var changes = new List<string>();
@@ -317,9 +317,9 @@ public static class IoModulesApi
             if (ApiSecurity.Require(ctx, Permissions.IoConfigure, out _) is { } failure) return failure;
             var module = await db.IoModules.FindAsync([id], ct);
             if (module is null) return Results.NotFound();
-            if (module.AccessDeviceId is not null)
-                return Error("Son las entradas y salidas de un terminal de acceso: se quitan desde Control de acceso → Equipos.",
-                    StatusCodes.Status409Conflict);
+            if (module.IsPart)
+                return Error("Son las entradas y salidas de un terminal de acceso o de una cámara: se quitan desde ese equipo " +
+                             "(Control de acceso → Equipos, o Fuentes de video).", StatusCodes.Status409Conflict);
             // Primero se cierra la conexión: suelta los pulsos y parpadeos en curso.
             await service.DetachAsync(id);
             db.IoModules.Remove(module);

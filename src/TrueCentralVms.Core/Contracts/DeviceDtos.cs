@@ -44,7 +44,20 @@ public sealed record DeviceDto(
     bool HasIsupKey = false,
     /// <summary>Es la cámara de un terminal de acceso: se administra desde Control de acceso
     /// (dirección y credenciales son las del terminal) y no ocupa canal de video de la licencia.</summary>
-    int? AccessDeviceId = null);
+    int? AccessDeviceId = null,
+    /// <summary>Puerto HTTP (ISAPI): por ahí se leen y operan su altavoz y sus entradas y salidas.</summary>
+    int HttpPort = 80,
+    /// <summary>Tiene altavoz (audio bidireccional); se ofrece como parlante, incluido.</summary>
+    bool HasSpeaker = false,
+    bool UseSpeaker = true,
+    /// <summary>Entradas y salidas de alarma (0 si no tiene o no se le preguntó); se ofrecen como módulo de E/S, incluido.</summary>
+    int IoInputs = 0,
+    int IoOutputs = 0,
+    bool UseIo = true,
+    /// <summary>Se le preguntó qué partes tiene (las ve el VMS en esta marca).</summary>
+    bool PartsChecked = false,
+    /// <summary>Por qué alguna de sus partes no está en uso aunque la tenga, o null.</summary>
+    string? PartsNote = null);
 
 /// <summary>
 /// Alta/edición de dispositivo. En edición, Password null o vacía = mantener
@@ -69,7 +82,13 @@ public sealed record DeviceWriteDto(
     /// <summary>Solo con un driver ISUP: ID con que el equipo se registra en el servidor.</summary>
     string? IsupDeviceId = null,
     /// <summary>Solo con un driver ISUP: su clave; vacía en edición = conservar la guardada.</summary>
-    string? IsupKey = null);
+    string? IsupKey = null,
+    /// <summary>Puerto HTTP (ISAPI) para su altavoz y sus entradas y salidas: null = conservar (en el alta, 80).</summary>
+    int? HttpPort = null,
+    /// <summary>Ofrecer su altavoz como parlante: null = conservar (en el alta, sí).</summary>
+    bool? UseSpeaker = null,
+    /// <summary>Ofrecer sus entradas y salidas de alarma como módulo de E/S: null = conservar (en el alta, sí).</summary>
+    bool? UseIo = null);
 
 /// <summary>Resultado del botón "Probar conexión" del asistente (no persiste nada).</summary>
 public sealed record DeviceProbeResultDto(

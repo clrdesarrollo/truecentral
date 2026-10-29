@@ -134,7 +134,8 @@ async function renderSpeakers() {
           ${speakers.map((s) => `
             <tr data-id="${s.id}">
               <td>${esc(s.name)}${s.disabledByLicense ? licenseWaitTag(s) : s.enabled ? "" : ` <span class="tag operator" title="Desactivado">pausado</span>`}${s.accessDeviceId
-                ? `<div class="muted field-hint">Altavoz de un terminal de acceso · incluido, no ocupa licencia</div>` : ""}${locationLineHtml(s.location)}</td>
+                ? `<div class="muted field-hint">Altavoz de un terminal de acceso · incluido, no ocupa licencia</div>`
+                : s.deviceId ? `<div class="muted field-hint">Altavoz de una cámara o grabador · incluido, no ocupa licencia</div>` : ""}${locationLineHtml(s.location)}</td>
               <td class="muted">${esc(s.groupName ?? "—")}</td>
               <td class="muted">${speakerAddressHtml(s)}</td>
               <td>${esc(s.model ?? "—")}<div class="muted" style="font-size:11px">${esc(s.serialNumber ?? "")}</div></td>
@@ -152,7 +153,9 @@ async function renderSpeakers() {
                 ${isAdmin && isAgentSpeaker(s) && (s.agentId || s.enrollmentExpiresAt) ? `<button class="btn ghost btn-revoke" title="El equipo deja de poder conectarse hasta enrolarlo otra vez">Revocar</button>` : ""}
                 ${isAdmin && s.accessDeviceId ? `<a class="btn ghost" href="#/access/device?id=${s.accessDeviceId}"
                   title="Su dirección y credenciales son las del terminal: se administra en Control de acceso">Ver terminal</a>` : ""}
-                ${isAdmin && !s.accessDeviceId ? `<button class="btn ghost btn-edit">Editar</button>
+                ${isAdmin && s.deviceId ? `<a class="btn ghost" href="#/devices"
+                  title="Su dirección y credenciales son las de la cámara: se administra en Fuentes de video">Ver equipo</a>` : ""}
+                ${isAdmin && !s.accessDeviceId && !s.deviceId ? `<button class="btn ghost btn-edit">Editar</button>
                 <button class="btn danger btn-delete">Eliminar</button>` : ""}
               </div></td>
             </tr>

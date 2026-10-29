@@ -323,10 +323,10 @@ public sealed class AccessControlService(
     /// cambió alguna.
     /// </summary>
     private async Task<bool> ApplyPartsAsync(VmsDbContext db, IServiceProvider services, AccessDevice device,
-        AccessDeviceParts? parts, CancellationToken ct)
+        DeviceParts? parts, CancellationToken ct)
     {
         Api.AccessApi.ApplyParts(device, device.Model, parts);
-        var changes = await AccessTerminalParts.SyncAsync(db, device, device.LocationId, services, ct);
+        var changes = await EquipmentParts.SyncAsync(db, device, device.LocationId, services, ct);
         bool any = db.ChangeTracker.HasChanges();
         await db.SaveChangesAsync(ct);
         foreach (var change in changes)
@@ -340,7 +340,7 @@ public sealed class AccessControlService(
     }
 
     private sealed record PollResult(AccessDeviceStatus Status, string? Error, IReadOnlyList<AccessDoorStatus> Doors,
-        bool PartsRead = false, AccessDeviceParts? Parts = null);
+        bool PartsRead = false, DeviceParts? Parts = null);
 
     private async Task<PollResult> PollOneAsync(AccessDevice device, CancellationToken ct)
     {
@@ -366,7 +366,7 @@ public sealed class AccessControlService(
             }
 
             // Los agregados antes de que el VMS supiera ver sus partes: se le pregunta una sola vez.
-            if (!device.PartsChecked && device.IsupDeviceId is null && AccessTerminalParts.Supports(device.DriverKey))
+            if (!device.PartsChecked && device.IsupDeviceId is null && EquipmentParts.Supports(device.DriverKey))
             {
                 try
                 {

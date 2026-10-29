@@ -52,6 +52,7 @@ public static class AuditCatalog
             new("device-updated", "Dispositivo modificado"),
             new("device-deleted", "Dispositivo eliminado"),
             new("device-revalidated", "Dispositivo revalidado"),
+            new("device-parts-added", "Partes del equipo detectadas (altavoz, entradas y salidas)"),
             new("device-probed", "Prueba de conexión"),
             new("channel-updated", "Canal modificado"),
             new("channels-enabled-bulk", "Canales con señal habilitados en bloque"),

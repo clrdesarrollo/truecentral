@@ -69,6 +69,11 @@ public sealed class DeviceStatusMonitor(
             .Select(d => new { Device = d, ChannelCount = d.Channels.Count, EnabledCount = d.Channels.Count(c => c.Enabled) })
             .ToListAsync(ct);
         if (devices.Count == 0) return;
+        try { await CheckPartsAsync(scope.ServiceProvider, db, devices.Select(x => x.Device).ToList(), ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "No se pudieron revisar las partes (altavoz, entradas y salidas) de los equipos de video.");
+        }
 
         var results = await Task.WhenAll(devices.Select(async x =>
             (x.Device, x.ChannelCount, x.EnabledCount, Reachable: x.Device.IsupDeviceId is { } isupId
@@ -115,6 +120,38 @@ public sealed class DeviceStatusMonitor(
                     dto.Status == DeviceStatus.Online ? null
                     : dto.IsupDeviceId is null ? "el equipo no responde en su puerto de gestión" : "el equipo cortó su conexión ISUP"));
         }
+    }
+
+    /// <summary>Equipos a los que ya se les preguntó en esta ejecución (los que no contestan no se repiten cada 30 s).</summary>
+    private readonly HashSet<int> _partsTried = [];
+
+    /// <summary>
+    /// Equipos de video agregados antes de que el VMS supiera ver sus partes
+    /// (altavoz, entradas y salidas de alarma): se les pregunta una vez, en línea,
+    /// y lo que tengan se ofrece como recursos, igual que al darlos de alta hoy.
+    /// </summary>
+    private async Task CheckPartsAsync(IServiceProvider services, VmsDbContext db, List<Data.Entities.Device> devices, CancellationToken ct)
+    {
+        bool any = false;
+        foreach (var device in devices.Where(d => !d.PartsChecked && d.Status == DeviceStatus.Online && EquipmentParts.Applies(d)))
+        {
+            if (!_partsTried.Add(device.Id) || drivers.Find(device.DriverKey) is not { } factory) continue;
+            if (await EquipmentParts.ReadAsync(device, factory.Create(), protector, ct) is not { } parts) continue;
+            await db.Entry(device).Collection(d => d.Channels).LoadAsync(ct);
+            EquipmentParts.ApplyParts(device, device.Model, parts);
+            var changes = await EquipmentParts.SyncAsync(db, device, device.LocationId, services, ct);
+            await db.SaveChangesAsync(ct);
+            any = true;
+            foreach (var change in changes)
+            {
+                logger.LogInformation("Equipo de video '{Device}' ({Host}): {Change}.", device.Name, device.Host, change);
+                await audit.LogSystemAsync("devices", "device-parts-added", "device", device.Id.ToString(), device.Name,
+                    $"El equipo de video '{device.Name}': el servidor {change}.");
+            }
+        }
+        if (!any) return;
+        services.GetRequiredService<Auth.UserScopeService>().Invalidate();
+        await Api.AccessApi.PartsChangedAsync(services, ct);
     }
 
     /// <summary>

@@ -99,14 +99,15 @@ function ioOutputsHtml(m, canOperate) {
 
 function ioCardHtml(m, canOperate, canConfigure) {
   // Las de un terminal no tienen modelo propio: se dice cuántas son.
-  const model = m.accessDeviceId ? `${m.inputs.length} entrada(s) · ${m.outputs.length} salida(s)`
+  const model = m.accessDeviceId || m.deviceId ? `${m.inputs.length} entrada(s) · ${m.outputs.length} salida(s)`
     : m.model ? `${esc(m.model)}${m.modelKey ? ` <span class="muted" title="Elegido a mano">(a mano)</span>` : ""}` : "—";
   return `
     <div class="io-card" data-id="${m.id}">
       <div class="io-card-head">
         <div class="io-card-title">
           <b>${esc(m.name)}</b>
-          ${m.accessDeviceId ? `<div class="muted field-hint">Entradas y salidas de alarma de un terminal de acceso · incluidas, no ocupan licencia</div>` : ""}
+          ${m.accessDeviceId ? `<div class="muted field-hint">Entradas y salidas de alarma de un terminal de acceso · incluidas, no ocupan licencia</div>`
+            : m.deviceId ? `<div class="muted field-hint">Entradas y salidas de alarma de una cámara o grabador · incluidas, no ocupan licencia</div>` : ""}
           ${locationLineHtml(m.location)}
         </div>
         <div class="io-card-meta">
@@ -114,9 +115,10 @@ function ioCardHtml(m, canOperate, canConfigure) {
           <span>${model}</span>
           <span class="io-status">${ioStatusCell(m)}</span>
         </div>
-        ${canConfigure && m.accessDeviceId ? `<div class="row-actions">
-          <button class="btn ghost io-names" title="Nombrar sus entradas y salidas (la conexión es la del terminal)">Nombres</button>
-          <a class="btn ghost" href="#/access/device?id=${m.accessDeviceId}" title="Se administra en Control de acceso">Ver terminal</a>
+        ${canConfigure && (m.accessDeviceId || m.deviceId) ? `<div class="row-actions">
+          <button class="btn ghost io-names" title="Nombrar sus entradas y salidas (la conexión es la del equipo)">Nombres</button>
+          <a class="btn ghost" href="${m.accessDeviceId ? `#/access/device?id=${m.accessDeviceId}` : "#/devices"}"
+             title="Se administra desde su equipo">Ver equipo</a>
         </div>` : canConfigure ? `<div class="row-actions">
           <button class="btn ghost io-edit">Editar</button>
           <button class="btn danger io-delete">Eliminar</button>
@@ -245,7 +247,8 @@ function ioTerminalNamesModal(module) {
   openModal(`
     <h3>Entradas y salidas de «${esc(module.name)}»</h3>
     <div id="io-modal-error"></div>
-    <p class="muted">Son las del terminal de acceso: su conexión se administra en Control de acceso. Póngales el nombre de lo
+    <p class="muted">Son las de ${module.accessDeviceId ? "un terminal de acceso: su conexión se administra en Control de acceso"
+      : "una cámara o grabador: su conexión se administra en Fuentes de video"}. Póngales el nombre de lo
       que tienen cableado; así aparecen en el Centro de mando, en las automatizaciones y en la bitácora.</p>
     <form id="io-names-form">
       <div class="io-points">

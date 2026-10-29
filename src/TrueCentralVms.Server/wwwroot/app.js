@@ -861,7 +861,7 @@ async function renderDevices() {
         <tbody>
           ${devices.map((d) => `
             <tr data-id="${d.id}">
-              <td>${esc(d.name)}${d.accessDeviceId ? `<div class="muted field-hint">Cámara de un terminal de acceso · incluida, no ocupa canal de video</div>` : ""}${locationLineHtml(d.location)}</td>
+              <td>${esc(d.name)}${d.accessDeviceId ? `<div class="muted field-hint">Cámara de un terminal de acceso · incluida, no ocupa canal de video</div>` : ""}${devicePartsLine(d)}${locationLineHtml(d.location)}</td>
               <td>${esc(typeLabel(d.deviceType))}</td>
               <td class="muted">${esc(brandOf(d.driverKey))}</td>
               <td class="muted">${d.isupDeviceId ? isupAddressHtml(d.isupDeviceId)
@@ -942,6 +942,46 @@ async function renderDevices() {
       renderDevices();
     } catch (err) { toast(err.error, true); }
   }));
+}
+
+/** Drivers de video cuyas partes (altavoz, entradas y salidas de alarma) sabe ver el VMS. */
+const DEVICE_PARTS_DRIVERS = ["hikvision-netsdk"];
+
+/** Debajo del nombre: las partes del equipo que se ofrecen como recursos. */
+function devicePartsLine(d) {
+  const parts = [];
+  if (d.hasSpeaker && d.useSpeaker !== false) parts.push("altavoz");
+  const io = (d.ioInputs ?? 0) + (d.ioOutputs ?? 0);
+  if (io > 0 && d.useIo !== false) parts.push(`${d.ioInputs} entrada(s) y ${d.ioOutputs} salida(s) de alarma`);
+  return parts.length ? `<div class="muted field-hint">Con ${esc(parts.join(" y "))} · incluidos, no ocupan licencia</div>` : "";
+}
+
+/** Partes del equipo en su formulario: puerto HTTP (ISAPI) y qué se ofrece como recurso. */
+function devicePartsFieldHtml(device) {
+  const hint = (text) => `<div class="muted field-hint acd-part-hint">${text}</div>`;
+  const known = (has, use, yes, off) => !device?.partsChecked ? ""
+    : has && use !== false ? hint(yes) : has ? hint(off) : hint("No se le detectó (se vuelve a mirar al revalidarlo).");
+  const io = device ? (device.ioInputs ?? 0) + (device.ioOutputs ?? 0) : 0;
+  return `
+      <div class="acd-parts" id="df-parts">
+        <div class="acd-parts-title">Partes del equipo <span class="muted">(incluidas: no ocupan licencia)</span></div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Puerto HTTP (ISAPI)</label>
+            <input id="df-httpport" type="number" min="1" max="65535" value="${device?.httpPort ?? 80}">
+            <div class="muted field-hint">Por ahí se leen y se operan su altavoz y sus entradas y salidas.</div>
+          </div>
+        </div>
+        <label class="checkbox-row" title="Su salida de audio (audio bidireccional): voz en vivo y sonidos desde el Centro de mando, grupos de parlantes y automatizaciones.">
+          <input type="checkbox" id="df-speaker" ${device?.useSpeaker === false ? "" : "checked"}> Su altavoz, como un parlante más</label>
+        ${known(device?.hasSpeaker, device?.useSpeaker, `Está en Parlantes IP como «${esc(device?.name ?? "")}».`, "Tiene altavoz, pero no se está ofreciendo.")}
+        <label class="checkbox-row" title="Sus entradas y salidas de alarma: estado en vivo, «Operar relé» y disparadores de automatizaciones.">
+          <input type="checkbox" id="df-io" ${device?.useIo === false ? "" : "checked"}> Sus entradas y salidas de alarma, como un módulo de E/S</label>
+        ${known(io > 0, device?.useIo,
+          `${device?.ioInputs ?? 0} entrada(s) y ${device?.ioOutputs ?? 0} salida(s) en Módulos de E/S como «${esc(device?.name ?? "")}».`,
+          `Tiene ${device?.ioInputs ?? 0} entrada(s) y ${device?.ioOutputs ?? 0} salida(s), pero no se están ofreciendo.`)}
+        ${device?.partsNote ? `<div class="field-hint" style="color:var(--warn-text)">${esc(device.partsNote)}</div>` : ""}
+      </div>`;
 }
 
 /**
@@ -1474,6 +1514,7 @@ async function deviceModal(device, prefill) {
           <label>${isNew || device?.isupDeviceId ? "Contraseña del equipo" : "Contraseña (vacío = no cambiar)"}</label>
           <input id="df-password" type="password" autocomplete="new-password" ${isNew || device?.isupDeviceId ? "required" : ""}>
         </div>
+        ${devicePartsFieldHtml(device)}
       </div>
       <div id="df-isup-wrap">${isupFieldsHtml("df", device, isNew, "equipo")}</div>
       <div id="probe-result"></div>
@@ -1499,6 +1540,10 @@ async function deviceModal(device, prefill) {
   };
   wireIsupFields("df", "equipo");
   toggleIsup(drivers.find((x) => x.key === $("#df-driver").value));
+  // Las partes (altavoz, entradas y salidas) solo en las marcas que el VMS sabe ver.
+  const toggleParts = () => { $("#df-parts").hidden = !DEVICE_PARTS_DRIVERS.includes($("#df-driver").value); };
+  toggleParts();
+  $("#df-driver").addEventListener("change", toggleParts);
   $("#df-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#df-driver").value);
     if (dr && isNew && !dr.usesIsup) { $("#df-sdkport").value = dr.defaultSdkPort; $("#df-rtspport").value = dr.defaultRtspPort; }
@@ -1572,6 +1617,11 @@ async function deviceModal(device, prefill) {
       password: $("#df-password").value || null,
       locationId: locationFieldValue("df-location"),
     };
+    if (!isup && !$("#df-parts").hidden) {
+      body.httpPort = Number($("#df-httpport").value) || 80;
+      body.useSpeaker = $("#df-speaker").checked;
+      body.useIo = $("#df-io").checked;
+    }
     if (pickerActive()) body.enabledChannels = pickedChannels();
     return body;
   };

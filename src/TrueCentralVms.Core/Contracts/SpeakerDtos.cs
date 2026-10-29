@@ -54,7 +54,9 @@ public sealed record SpeakerDto(
     /// <summary>Solo agentes: el equipo tiene el WebSocket abierto ahora.</summary>
     bool AgentConnected = false,
     /// <summary>Es el altavoz de un terminal de acceso: se administra desde Control de acceso y no ocupa parlante de la licencia.</summary>
-    int? AccessDeviceId = null);
+    int? AccessDeviceId = null,
+    /// <summary>Es el altavoz de una cámara o de un grabador (se administra desde Fuentes de video).</summary>
+    int? DeviceId = null);
 
 public sealed record SpeakerWriteDto(
     string Name,

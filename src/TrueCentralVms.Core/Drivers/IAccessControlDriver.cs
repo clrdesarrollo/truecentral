@@ -37,14 +37,14 @@ public sealed record AccessCapabilities(
 public sealed record AccessCameraInfo(int RtspPort);
 
 /// <summary>Entradas y salidas de alarma del equipo (las que no son de una puerta).</summary>
-public sealed record AccessIoInfo(int Inputs, int Outputs);
+public sealed record DeviceIoInfo(int Inputs, int Outputs);
 
 /// <summary>
 /// Lo que el equipo trae además de sus puertas y que el VMS ofrece como
 /// recursos propios, incluidos con el equipo (no ocupan licencia): su cámara,
 /// su altavoz y sus entradas y salidas de alarma. Null en cada uno = no tiene.
 /// </summary>
-public sealed record AccessDeviceParts(AccessCameraInfo? Camera, bool HasSpeaker, AccessIoInfo? Io);
+public sealed record DeviceParts(AccessCameraInfo? Camera, bool HasSpeaker, DeviceIoInfo? Io);
 
 /// <summary>Identificación del equipo obtenida al validar las credenciales.</summary>
 public sealed record AccessDeviceInfo(
@@ -59,7 +59,7 @@ public sealed record AccessDeviceInfo(
     /// <summary>Ficha de capacidades declaradas por el equipo; null si el driver no la sabe leer.</summary>
     AccessCapabilityProfile? Profile = null,
     /// <summary>Su cámara, su altavoz y sus entradas y salidas; null si el driver no sabe verlos.</summary>
-    AccessDeviceParts? Parts = null);
+    DeviceParts? Parts = null);
 
 /// <summary>Lo que el equipo informa de una puerta en el monitoreo en vivo.</summary>
 public sealed record AccessDoorStatus(
@@ -246,8 +246,8 @@ public interface IAccessControlDriver
     /// lectura que hace <see cref="ProbeAsync"/>, para los equipos agregados
     /// antes de que el VMS los supiera ver). Null = el driver no sabe verlos.
     /// </summary>
-    Task<AccessDeviceParts?> ReadPartsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
-        Task.FromResult<AccessDeviceParts?>(null);
+    Task<DeviceParts?> ReadPartsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+        Task.FromResult<DeviceParts?>(null);
 
     /// <summary>
     /// Olvida lo que el driver tenga cacheado de ese equipo (credenciales
