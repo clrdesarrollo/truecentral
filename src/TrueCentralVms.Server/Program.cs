@@ -223,6 +223,7 @@ builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Ada
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.ZkTeco.C3IoDriverFactory>();
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionIoDriverFactory>();
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionSdkIoDriverFactory>();
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionAcsIoDriverFactory>();
 builder.Services.AddSingleton<IoModuleDriverRegistry>();
 builder.Services.AddSingleton<IoModuleService>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Patrol.PatrolService>();

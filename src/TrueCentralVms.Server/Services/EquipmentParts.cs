@@ -70,11 +70,18 @@ public static class EquipmentParts
         public int SpeakerPort => SpeakerViaSdk ? DeviceSdkPort : Port;
         public bool SpeakerHttps => !SpeakerViaSdk && UseHttps;
 
-        /// <summary>Driver, puerto y lectura de las entradas y salidas: ISAPI por HTTP, o el SDK (más espaciado: el estado de un grabador pesa).</summary>
-        public string IoDriver => IoViaSdk ? HikvisionSdkIoDriver.DriverKey : PartDriversOf[DriverKey].Io;
-        public int IoPort => IoViaSdk ? DeviceSdkPort : Port;
-        public bool IoHttps => !IoViaSdk && UseHttps;
-        public int IoPoll => IoViaSdk ? 3000 : IoPollMs;
+        /// <summary>Las de un terminal que no están en /ISAPI/System/IO: estado por AcsWorkStatus, órdenes por el SDK.</summary>
+        private bool IoViaAcs => IoViaSdk && AccessDeviceId is not null;
+
+        /// <summary>
+        /// Driver, puerto y lectura de las entradas y salidas: ISAPI por HTTP; el SDK en los grabadores (más espaciado:
+        /// el estado de un grabador pesa); el estado de acceso en los terminales (más espaciado aún: llevan el acceso).
+        /// </summary>
+        public string IoDriver => !IoViaSdk ? PartDriversOf[DriverKey].Io
+            : IoViaAcs ? HikvisionAcsIoDriver.DriverKey : HikvisionSdkIoDriver.DriverKey;
+        public int IoPort => IoViaSdk && !IoViaAcs ? DeviceSdkPort : Port;
+        public bool IoHttps => (!IoViaSdk || IoViaAcs) && UseHttps;
+        public int IoPoll => !IoViaSdk ? IoPollMs : IoViaAcs ? 5000 : 3000;
     }
 
     // ------------------------------------------------------------------
