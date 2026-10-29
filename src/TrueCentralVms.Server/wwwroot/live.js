@@ -2106,6 +2106,7 @@ function lvMergeCells(from, to) {
   }
   lvRelayout(m.layout, m.placement);
   lvSelectCell(lv.cells[m.merged]);
+  lvSetMergeMode(false); // la herramienta es de un uso: unido, se apaga (antes del aviso)
   lvStatus(`${m.inside.length} cuadros unidos en uno.` + (closed.length ? ` Se cerró: ${closed.map((t) => `"${t}"`).join(", ")}.` : ""));
 }
 
@@ -2114,6 +2115,7 @@ function lvSplitCell(index) {
   if (!s) { lvStatus("Ese cuadro no está unido: arrastre hasta otro cuadro para unirlos."); return; }
   lvRelayout(s.layout, s.placement);
   lvSelectCell(lv.cells[s.first]);
+  lvSetMergeMode(false); // separar también termina la herramienta
   lvStatus(`Cuadro separado: la grilla queda en ${s.layout.cells.length} cuadros.`);
 }
 
