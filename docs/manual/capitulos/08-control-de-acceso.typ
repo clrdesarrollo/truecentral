@@ -1,5 +1,5 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Server/wwwroot/access-monitor.js, src/TrueCentralVms.Server/wwwroot/access-catalog.js, src/TrueCentralVms.Server/wwwroot/enroll.js, src/TrueCentralVms.Server/wwwroot/access.js, src/TrueCentralVms.Server/Services/EquipmentParts.cs, src/TrueCentralVms.Server/Api/AccessApi.cs, src/TrueCentralVms.Server/wwwroot/index.html, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.WebControl/MainWindow.xaml, src/TrueCentralVms.WebControl/App.xaml.cs, installer/complemento.iss
+// Fuentes: src/TrueCentralVms.Server/wwwroot/access-monitor.js, src/TrueCentralVms.Server/wwwroot/access-catalog.js, src/TrueCentralVms.Server/wwwroot/enroll.js, src/TrueCentralVms.Server/wwwroot/access.js, src/TrueCentralVms.Server/Services/EquipmentParts.cs, src/TrueCentralVms.Server/Api/AccessApi.cs, src/TrueCentralVms.Server/wwwroot/index.html, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.WebControl/MainWindow.xaml, src/TrueCentralVms.WebControl/App.xaml.cs, installer/complemento.iss, src/TrueCentralVms.Drivers.ZkTeco/C3AccessDriver.cs, src/TrueCentralVms.Drivers.ZkTeco/C3AccessSettings.cs
 
 = Control de acceso <cap-control-de-acceso>
 
@@ -39,8 +39,10 @@ Las páginas del módulo están en el menú lateral:
 )
 
 #nota[Las personas, sus credenciales y sus horarios se escriben en los equipos
-  Hikvision. En los equipos Dahua y ZKTeco las personas se cargan en el propio
-  equipo.]
+  Hikvision y en las controladoras ZKTeco inBio y C3 y los terminales ZKTeco MA.
+  En los equipos Dahua y en los demás terminales ZKTeco, las personas se cargan
+  en el propio equipo. Qué hace el sistema con cada marca se resume en _Agregar
+  un equipo de control de acceso_.]
 
 == Ver el estado de las puertas
 
@@ -357,10 +359,12 @@ en segundo plano (_Persona agregada. Se está escribiendo en los equipos._).
   tarjeta no puede estar en dos personas a la vez.
 - *Clave de teclado*: de 4 a 8 dígitos, solo para terminales con teclado. Al
   editar, déjela vacía para no cambiarla, o marque *Quitarle la clave*.
-- *Huellas*: se capturan con un lector USB conectado a su PC; ver _Capturar
-  las huellas_.
-- *Rostro*: una foto para los terminales con reconocimiento facial; ver
-  _Cargar la foto del rostro_.
+- *Huellas*: se capturan con un lector USB conectado a su PC y van a los
+  terminales Hikvision; ver _Capturar las huellas_.
+- *Huellas ZKTeco*: las que se enrolan en el menú de un terminal ZKTeco y se
+  traen al sistema; ver _Traer las huellas de un terminal ZKTeco_.
+- *Rostro*: una foto para los terminales Hikvision con reconocimiento facial;
+  ver _Cargar la foto del rostro_.
 
 === Paso 3: Accesos
 
@@ -390,10 +394,11 @@ El número se agrega a la lista, la ventana se cierra y un aviso lo confirma
 haga clic en #boton("Cancelar"). Si la tarjeta ya estaba en la lista, lo avisa
 y sigue esperando otra.
 
-#nota[Solo los equipos Hikvision leen una tarjeta a pedido; los Dahua y ZKTeco
-  no aparecen en la lista. Si no hay ninguno en línea, el sistema avisa _No hay
-  equipos en línea que puedan leer una tarjeta (solo los Hikvision lo hacen).
-  Escriba el número con «+ tarjeta»._]
+#nota[Leen una tarjeta a pedido los equipos Hikvision y las controladoras
+  ZKTeco inBio y C3 y los terminales ZKTeco MA; los equipos Dahua y los demás
+  terminales ZKTeco no aparecen en la lista. En una controladora ZKTeco sirve
+  cualquiera de sus lectores. Si no hay ningún equipo en línea que pueda leerla,
+  el sistema lo avisa: escriba el número con #boton("+ tarjeta").]
 
 == Capturar las huellas
 
@@ -405,6 +410,10 @@ Para enrolar huellas necesita:
   donde está usando el panel web;
 - el complemento de enrolamiento instalado en ese mismo PC (ver _Instalar el
   complemento de enrolamiento_).
+
+Las huellas capturadas así van a los terminales Hikvision con lector de huella.
+Los equipos ZKTeco guardan las huellas en otro formato: se enrolan en el propio
+terminal (ver _Traer las huellas de un terminal ZKTeco_).
 
 En el paso *Credenciales*, el campo *Huellas* muestra cuántas tiene la persona
 (por ejemplo, _2 de 10_) y un dibujo de las dos manos, con las palmas hacia
@@ -516,12 +525,35 @@ TrueCentral VMS — Complemento de enrolamiento*.
   web para enrolar. Si abre el panel en otro equipo, la ventana de captura no lo
   encuentra.]
 
+== Traer las huellas de un terminal ZKTeco
+
+#requiere("Administrar personas")
+
+Las controladoras ZKTeco inBio y C3 y los terminales ZKTeco MA no usan las
+huellas del lector USB. Sus huellas se enrolan en el menú de un terminal ZKTeco
+y después se traen al sistema, que las copia a los demás equipos ZKTeco por
+donde la persona tiene acceso.
+
++ Guarde primero la persona: hasta entonces, *Huellas ZKTeco* dice _Guarde la
+  persona primero: después se le pueden traer las huellas._
++ En el menú del terminal ZKTeco, enrole las huellas con un ID de usuario igual
+  al *Identificador en los equipos* de la persona. El campo *Huellas ZKTeco*
+  muestra ese número.
++ En el paso *Credenciales* de la persona, en *Huellas ZKTeco*, elija el equipo
+  donde las enroló y haga clic en #boton("Traer huellas desde el equipo").
+
+Un aviso confirma cuántas se trajeron (_Se trajeron … huella(s). Se están
+copiando a sus equipos ZKTeco._) y el campo muestra los dedos. Quedan guardadas
+en el acto, sin guardar la ficha, y reemplazan las huellas ZKTeco que la persona
+tuviera. Si el equipo no tiene huellas de la persona, el sistema lo avisa con el
+ID de usuario que debe usar al enrolarlas.
+
 == Cargar la foto del rostro
 
 #requiere("Administrar personas")
 
-Los terminales con reconocimiento facial arman el modelo del rostro a partir de
-una foto.
+Los terminales Hikvision con reconocimiento facial arman el modelo del rostro a
+partir de una foto. Los equipos de las otras marcas no reciben el rostro.
 
 + En el paso *Credenciales*, junto a *Rostro*, haga clic en
   #boton("Elegir foto") y elija el archivo.
@@ -729,13 +761,26 @@ sistema trabaja con estas marcas:
   table.header[Marca / protocolo][Puerto][Credencial],
   [Hikvision DS-K], [80], [Usuario y contraseña del equipo.],
   [Dahua ASI/ASC], [80], [Usuario y contraseña del equipo.],
-  [ZKTeco], [4370], [Clave de comunicación del equipo (Comm Key).],
+  [ZKTeco inBio / C3 / MA], [4370], [Clave de comunicación de la controladora (la que se fija en ZKAccess). De fábrica no tiene: el campo queda vacío.],
+  [ZKTeco (los demás terminales)], [4370], [Clave de comunicación del equipo (Comm Key).],
 )
 
-Solo los equipos Hikvision reciben el padrón (personas, credenciales y
-horarios) y leen tarjetas a pedido. Los parámetros de sus puertas se
-configuran desde la página del equipo en los Hikvision y en los ZKTeco
-inBio / C3 / MA (ver _La página del equipo_, más adelante).
+Lo que el sistema hace con cada uno depende de la marca:
+
+#table(
+  columns: (25%, 1fr, 1fr, 1fr),
+  table.header[Función][Hikvision DS-K][ZKTeco inBio / C3 / MA][Dahua y los demás ZKTeco],
+  [Padrón (personas, tarjetas, clave de teclado y horarios)], [Sí.], [Sí, con una tarjeta por persona.], [No: las personas se cargan en el propio equipo.],
+  [Huellas], [Las del lector USB.], [Las enroladas en un terminal ZKTeco y traídas al sistema.], [No.],
+  [Rostro], [En los terminales con reconocimiento facial.], [No.], [No.],
+  [Leer una tarjeta a pedido], [Sí.], [Sí.], [No.],
+  [Parámetros desde su página], [Pestañas *Puertas*, *Lectores* y *Capacidades*.], [Pestañas *Puertas* y *Controladora*.], [No: se configuran en la página web del equipo.],
+)
+
+#nota[Las controladoras ZKTeco inBio y C3 y los terminales ZKTeco MA admiten
+  hasta 3 tramos por día en cada horario. Si un nivel de acceso de esas puertas
+  usa un horario con más tramos, la persona no se escribe en ese equipo: queda
+  *Con problemas* y el detalle de la escritura lo explica.]
 
 === Desde la tabla de equipos en línea
 
@@ -774,7 +819,9 @@ cámaras; ver #capitulo(<cap-fuentes-de-video>).
     del equipo (normalmente _admin_, el mismo de su página web). Marque *Usar
     HTTPS (certificado autofirmado aceptado)* si el equipo lo exige.
   - ZKTeco: *Clave de comunicación*, la que tiene el equipo en Comunicación ›
-    Seguridad (de fábrica, 0).
+    Seguridad (de fábrica, 0). En las controladoras inBio y C3 y los
+    terminales MA es la que se fija en ZKAccess con _Modificar clave de
+    comunicación_; si nunca se fijó, deje el campo vacío.
 + Deje marcado *Activo*: el sistema revisa su estado y sus puertas ocupan cupo
   de la licencia.
 + En *Partes del terminal*, deje marcado lo que quiera usar del terminal: su
@@ -835,8 +882,8 @@ El estado de conexión se actualiza solo. En cada fila:
 - #boton("Revalidar") vuelve a leer del equipo su modelo, firmware,
   capacidades y puertas; úselo después de actualizar su firmware o cambiar sus
   puertas;
-- #boton("Reenviar padrón") (solo Hikvision) le reescribe sus personas (ver la
-  sección siguiente);
+- #boton("Reenviar padrón") (solo en los equipos Hikvision conectados por IP)
+  le reescribe sus personas (ver la sección siguiente);
 - #boton("Configurar") abre la página del equipo;
 - #boton("Eliminar") lo borra junto con sus puertas, previa confirmación.
 
@@ -887,11 +934,13 @@ Debajo, *Puertas del equipo* lista cada puerta con:
   cupo de la licencia, se la quita de los niveles de acceso en los equipos y en
   el monitoreo aparece como _Puerta pausada_, sin órdenes.
 
-=== Puertas y Lectores
+=== Puertas, Lectores y Controladora
 
 Estas pestañas muestran los parámetros propios del equipo, tal como están en
 él: se leen al abrir la pestaña y se escriben en el equipo al guardar. El
 sistema no los guarda.
+
+En los equipos Hikvision:
 
 - *Puertas*: por ejemplo *Tiempo de apertura*, *Contacto de puerta (sensor
   magnético)*, *Botón de salida*, *Alarma de puerta abierta demasiado tiempo* o
@@ -901,31 +950,35 @@ sistema no los guarda.
   (tamper)*, los umbrales del reconocimiento facial o *Antisuplantación facial
   (detección de vida)*.
 
+En las controladoras ZKTeco inBio y C3 y los terminales ZKTeco MA:
+
+- *Puertas*: por ejemplo *Tiempo de apertura de la cerradura*, *Alarma de
+  puerta abierta*, *Sensor de puerta*, *Modo de verificación* (con qué tiene
+  que identificarse la persona en los lectores de esa puerta), *Intervalo
+  mínimo entre pasadas* o *Trabar al cerrar*.
+- *Controladora*, una pestaña propia de estos equipos: *Antipassback*,
+  *Interbloqueo* (mientras una puerta del grupo está abierta, las otras no
+  abren), *Horario de verano automático* y, en las de 4 puertas, *Usar como 2
+  puertas de doble lector*. El antipassback y el interbloqueo los aplica la
+  propia controladora entre sus puertas y lectores, aunque se corte la red.
+- *Lectores* indica _El equipo no informó lectores configurables._
+
 Los campos dependen del modelo. Para cambiarlos:
 
-+ Modifique los campos de una puerta o un lector. Aparece _Hay cambios sin
-  guardar._
++ Modifique los campos de una puerta, un lector o la controladora. Aparece _Hay
+  cambios sin guardar._
 + Haga clic en #boton("Guardar") de ese bloque.
 
 El bloque se vuelve a mostrar con lo que el equipo dejó, que puede acotar o
-redondear algún valor. Los campos de contraseña (*Código de coacción*,
-*Contraseña maestra*, *Código de desbloqueo*) se dejan vacíos para no
-cambiarlos. *Otros parámetros que informa el equipo* despliega, solo para
-consulta, lo demás que entrega el equipo.
+redondear algún valor. Los campos de contraseña (por ejemplo, *Código de
+coacción* o *Contraseña maestra* en Hikvision, y *Clave de coacción* o *Clave
+de emergencia* en ZKTeco) se dejan vacíos para no cambiarlos. Cuando el equipo
+entrega más datos de los que se pueden editar, *Otros parámetros que informa el
+equipo* los despliega, solo para consulta.
 
 Los parámetros de una sola puerta, con los de sus lectores de entrada y de
 salida, también se cambian desde la pestaña *Parámetros* de su ficha en
 Recursos.
-
-Las controladoras y terminales _ZKTeco inBio / C3 / MA_ tienen además la
-pestaña *Controladora*, con los parámetros de la controladora entera:
-*Antipassback*, *Interbloqueo*, *Horario de verano automático* y, en las de 4
-puertas, *Usar como 2 puertas de doble lector*. El antipassback y el
-interbloqueo los aplica la propia controladora entre sus puertas y lectores,
-aunque se corte la red. En estos equipos, la pestaña *Puertas* trae, por
-ejemplo, *Tiempo de apertura de la cerradura*, *Sensor de puerta* y *Modo de
-verificación*, y *Lectores* indica _El equipo no informó lectores
-configurables._
 
 #nota[Se configuran desde estas pestañas los equipos Hikvision y los ZKTeco
   inBio / C3 / MA. Con otra marca (Dahua, u otros ZKTeco) aparece _Los equipos
