@@ -26,40 +26,46 @@ patente, equipo y fecha.
 + El módulo se abre en la pestaña *Reconocimiento de patentes* de la barra
   superior.
 
-Bajo el título del módulo, un punto verde y el texto _N de M fuente(s)
-activa(s)_ indican cuántas cámaras están entregando lecturas en este momento.
-El punto queda gris si ninguna está conectada.
+La pantalla es la misma de la página ANPR del panel web. Junto al título
+aparece cada cámara activada como fuente, con un punto verde si está
+entregando lecturas y rojo si no tiene conexión; al pasar el mouse sobre ella
+se ve el motivo y la hora de la última lectura. Si no hay ninguna, se lee _Sin
+cámaras activas como fuente_.
 
 Cerrar la pestaña solo saca el módulo de la vista: el servidor sigue recibiendo
 y guardando las lecturas.
 
 == Seguir las lecturas en vivo
 
-La lista *Últimos reconocimientos*, a la izquierda, muestra las lecturas más
-nuevas arriba. Cada fila tiene:
+La lista de la izquierda muestra las lecturas más nuevas arriba. Cada fila
+tiene:
 
 - una miniatura con el primer plano de la placa (o la escena, si la cámara no
-  envió el recorte);
+  envió el recorte; _Sin foto_ si no envió ninguna);
 - la patente y la confianza de la lectura;
 - la hora del equipo, con milésimas de segundo, y la cámara que la leyó;
 - un resumen del vehículo (tipo, color y velocidad), cuando la cámara lo
   informa.
 
-La lista guarda las 50 lecturas más recientes; arriba a la derecha se ve
-cuántas hay en pantalla. Con las flechas #tecla("↑") y #tecla("↓") se recorre
-la lista.
+La lista guarda tantas lecturas como indique el filtro *Mostrar* (100 por
+omisión). Arriba de la lista se ve cuántas hay; si llegó a ese máximo, el
+contador lo indica (_últimas 100_, por ejemplo). Con las flechas #tecla("↑") y
+#tecla("↓") se recorre la lista.
 
 Con *Seguir en vivo* marcado, la ficha de la derecha salta sola a cada lectura
-nueva: es el modo para una caseta de control. Desmárquelo para estudiar una
-lectura con calma sin que la ficha cambie cuando llega otra.
+nueva: es el modo para una caseta de control. Al elegir a mano una lectura que
+no es la más nueva, se desmarca solo, para que la ficha no cambie mientras la
+revisa; márquelo de nuevo para volver a seguir las lecturas.
 
 == Revisar la ficha de una lectura
 
 Haga clic en una lectura de la lista para ver su ficha:
 
-- arriba, la patente en grande, la fecha y hora, la cámara y la confianza;
 - a la izquierda, la escena completa con un recuadro verde sobre la placa;
-- a la derecha, el primer plano de la placa y los datos que envió la cámara.
+- a la derecha, el primer plano de la placa y, bajo él, la patente leída en
+  letras verdes sobre negro, para compararla de un vistazo con la placa real.
+  La patente sale en rojo si no es una patente chilena válida;
+- debajo, los datos que envió la cámara.
 
 La ficha muestra solo los datos que la cámara envió, en este orden:
 
@@ -71,6 +77,8 @@ La ficha muestra solo los datos que la cámara envió, en este orden:
   [Equipo, Canal], [Cámara que hizo la lectura.],
   [Confianza de lectura], [Seguridad de la cámara sobre la patente leída, en
     porcentaje. Un guion indica que no la informó.],
+  [Patente chilena], [Si la patente leída es válida en Chile: su formato y el
+    dígito verificador, o, en rojo, por qué no lo es.],
   [Confianza por carácter], [La misma seguridad, letra por letra.],
   [Tipo de vehículo, Color del vehículo, Marca reconocida, Observado en el
     vehículo], [Lo que la cámara reconoció del vehículo.],
@@ -86,47 +94,57 @@ La ficha muestra solo los datos que la cámara envió, en este orden:
   _Fecha y hora del equipo_ difiere mucho de _Recibido por el servidor_, el
   reloj de la cámara está desajustado.]
 
-Si la cámara no envió la escena, la ficha muestra _El equipo no envió la
-imagen de la escena._
+Si la cámara no envió la escena, la ficha muestra _El equipo no envió la foto
+de la escena._; si no envió el recorte de la placa, _Sin primer plano de la
+placa_.
 
-=== Copiar la patente y guardar las fotos
+=== Copiar la patente y descargar la lectura
 
-- #boton("Copiar patente") copia la patente al portapapeles, para pegarla en
-  otro programa.
-- #boton("Guardar imágenes") guarda la escena y el primer plano de la placa
-  como JPG en la *Carpeta de capturas* de la configuración del cliente, con
-  nombres como `ABCD12_20261009_143005_escena.jpg` y
-  `ABCD12_20261009_143005_placa.jpg`. Aparece la notificación _Reconocimiento
-  guardado_ con la ruta; haga clic en ella para abrir la carpeta.
-
-Si la lectura no tiene fotos, aparece _Este reconocimiento no tiene imágenes
-que guardar._
+- Haga clic en la patente verde para copiarla al portapapeles y pegarla en
+  otro programa. La barra de avisos confirma _Patente … copiada al
+  portapapeles._
+- #boton("Descargar ZIP") guarda en la *Carpeta de capturas* de la
+  configuración del cliente un archivo con las fotos de la lectura (escena y
+  placa) y un JSON con todos sus datos, con un nombre como
+  `ABCD12_09102026_143005.zip`. Aparece la notificación _Reconocimiento
+  descargado_ con la ruta; haga clic en ella para abrir la carpeta. Cada
+  descarga queda en la bitácora de auditoría.
 
 == Buscar una patente en el cliente
 
 #requiere("Ver patentes")
 
-+ Si quiere limitar la búsqueda a una cámara, elíjala en la lista de equipos de
-  la barra superior (vacía, busca en todas).
-+ Escriba la patente completa o una parte en el cuadro de búsqueda. No importan
-  las mayúsculas, los guiones ni los espacios: `cd-12` encuentra `ABCD12`.
-+ Haga clic en #boton("Buscar") o presione #tecla("Enter").
+Los filtros están sobre la lista, cada uno con su nombre arriba:
 
-La lista muestra las 50 lecturas más recientes que coinciden. Mientras el
-filtro esté puesto, las lecturas nuevas que no coinciden no se agregan a la
-lista. #boton("Limpiar") quita los filtros y vuelve a las últimas lecturas.
+#table(
+  columns: (auto, 1fr),
+  table.header[Filtro][Uso],
+  [*Equipo*], [_Todos_ o una cámara. Las que no están activas como fuente
+    aparecen con _(inactiva)_.],
+  [*Patente*], [La patente completa o una parte. No importan las mayúsculas,
+    los guiones ni los espacios: `cd-12` encuentra `ABCD12`.],
+  [*Desde (hora del equipo)*, *Hasta (hora del equipo)*], [Fecha y hora según
+    el reloj de la cámara, escritas como `dd-mm-aaaa hh:mm` (por ejemplo
+    `09-10-2026 14:30`). Con solo la fecha, *Desde* toma el día desde las 00:00
+    y *Hasta* hasta las 23:59:59. Vacíos, no limitan la búsqueda.],
+  [*Mostrar*], [Cuántas lecturas traer: 50, 100, 200 o 500.],
+)
 
-Si nada coincide, aparece _Ningún reconocimiento coincide con la búsqueda._
+Haga clic en #boton("Buscar") o presione #tecla("Enter") en *Patente*,
+*Desde* o *Hasta*. Mientras haya un filtro puesto, las lecturas nuevas que no
+coinciden no se agregan a la lista. #boton("Limpiar") quita todos los filtros y
+vuelve a las últimas lecturas.
 
-#consejo[Para buscar entre fechas o revisar más de 50 lecturas, use la página
-  ANPR del panel web.]
+Si nada coincide, aparece _No hay lecturas que coincidan con los filtros._ Si
+una fecha está mal escrita, la barra de avisos lo indica (_“Desde” no es una
+fecha válida…_) y la búsqueda no se hace.
 
 == Usar la página ANPR del panel web
 
 #requiere("Ver patentes")
 
 La página se abre en #menu("Aplicaciones", "ANPR"). Muestra las mismas lecturas
-que el cliente, con más filtros, y se actualiza sola cada pocos segundos.
+y los mismos filtros que el cliente, y se actualiza sola cada pocos segundos.
 
 #captura-pendiente("Panel web: página ANPR con la barra de filtros, la lista de lecturas y la ficha de una lectura", alto: 6cm)
 

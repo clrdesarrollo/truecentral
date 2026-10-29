@@ -14,7 +14,7 @@ namespace TrueCentralVms.Client.ViewModels;
 ///
 /// La miniatura se carga en cuanto el elemento entra a la lista; la escena
 /// completa, recién al seleccionarlo (pesa cientos de kB y no se justifica
-/// bajarla para las 50 lecturas de la lista).
+/// bajarla para todas las lecturas de la lista).
 /// </summary>
 public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto) : ObservableObject
 {
@@ -51,6 +51,21 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
 
     public string ConfidenceText => Event.Confidence < 0 ? "—" : $"{Event.Confidence}%";
 
+    /// <summary>No pasa como PPU chilena: la patente grande va en rojo, como en la página ANPR.</summary>
+    public bool InvalidChile => Event.Chile is { Valid: false };
+
+    public string PlateHint => InvalidChile
+        ? "Patente leída por el equipo (no es una patente chilena válida). Clic para copiarla."
+        : "Patente leída por el equipo. Clic para copiarla.";
+
+    /// <summary>El equipo no mandó el primer plano: la ficha lo dice en vez de dejar el hueco.</summary>
+    public bool MissingPlateImage => !Event.HasPlateImage;
+
+    public bool MissingSceneImage => !Event.HasSceneImage;
+
+    /// <summary>Sin ninguna de las dos fotos: la miniatura de la lista dice "Sin foto".</summary>
+    public bool MissingPhoto => !Event.HasPlateImage && !Event.HasSceneImage;
+
     /// <summary>Resumen del vehículo para la fila de la lista ("Automóvil gris").</summary>
     public string VehicleSummary
     {
@@ -82,6 +97,11 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
                 new("Canal", $"{Event.ChannelName} (n.º {Event.ChannelNumber})"),
                 new("Confianza de lectura", ConfidenceText),
             };
+            // Validación como patente chilena (formato, serie y dígito verificador según el Registro Civil).
+            if (Event.Chile is { } chile)
+                rows.Add(chile.Valid
+                    ? new PlateDetailRow("Patente chilena", $"Válida · {chile.Format} · dígito verificador {chile.CheckDigit}")
+                    : new PlateDetailRow("Patente chilena", $"No válida: {chile.Problem}", Bad: true));
             Add(rows, "Confianza por carácter", CharConfidenceText);
             Add(rows, "Tipo de vehículo", Event.VehicleType);
             Add(rows, "Color del vehículo", Event.VehicleColor);
@@ -167,7 +187,7 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
             var plate = Event.HasPlateImage ? Decode(await api.GetPlateImageAsync(Event.Id, "plate", ct)) : null;
             if (ct.IsCancellationRequested) return;
             SceneImage = scene;
-            PlateImage = plate ?? scene ?? Thumbnail;
+            PlateImage = plate;
         }
         finally
         {
@@ -217,5 +237,5 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
     }
 }
 
-/// <summary>Fila etiqueta/valor de la ficha de detalle.</summary>
-public sealed record PlateDetailRow(string Label, string Value);
+/// <summary>Fila etiqueta/valor de la ficha de detalle (<paramref name="Bad"/>: el valor va en rojo).</summary>
+public sealed record PlateDetailRow(string Label, string Value, bool Bad = false);

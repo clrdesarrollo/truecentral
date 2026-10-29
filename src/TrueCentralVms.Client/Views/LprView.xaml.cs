@@ -202,7 +202,8 @@ public partial class LprView : UserControl
     // Interacción
     // ------------------------------------------------------------------
 
-    private void OnPlateFilterKeyDown(object sender, KeyEventArgs e)
+    /// <summary>Enter en un campo de filtro busca, como en la web.</summary>
+    private void OnFilterKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter || _model is null) return;
         e.Handled = true;

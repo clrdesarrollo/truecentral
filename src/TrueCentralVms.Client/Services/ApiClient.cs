@@ -509,6 +509,21 @@ public sealed class ApiClient
         }
     }
 
+    /// <summary>
+    /// Descarga de un reconocimiento: ZIP con sus fotos y un JSON con todos
+    /// sus datos (el mismo del botón "Descargar ZIP" del panel web).
+    /// </summary>
+    public async Task<(byte[] Content, string FileName)> GetPlateEventZipAsync(long eventId, CancellationToken ct = default)
+    {
+        if (BaseUrl is null)
+            throw new ApiException("Sin conexión con el servidor.");
+        using var response = await SendDownloadAsync($"/api/anpr/events/{eventId}/zip", ct, allowRelogin: true);
+        string name = response.Content.Headers.ContentDisposition?.FileNameStar
+                      ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+                      ?? $"reconocimiento-{eventId}.zip";
+        return (await response.Content.ReadAsByteArrayAsync(ct), name);
+    }
+
     // -----------------------------------------------------------------
     // Parlantes IP
     // -----------------------------------------------------------------

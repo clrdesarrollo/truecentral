@@ -94,7 +94,7 @@ Reglas:
 
 | Archivo | Pantalla y estado | Marcas |
 |---|---|---|
-| `cliente-patentes.png` | Lista y ficha (patentes ficticias) | Fuentes activas · filtro de equipo · patente · Buscar/Limpiar · Seguir en vivo · Fuentes · lista · Copiar patente / Guardar imágenes · escena · datos |
+| `cliente-patentes.png` | Lista y ficha (patentes ficticias) | Fuentes junto al título · filtros (Equipo, Patente, Desde/Hasta, Mostrar) · Buscar/Limpiar · Fuentes · contador y Seguir en vivo · lista · patente verde (clic = copiar) · escena · datos · Descargar ZIP |
 | `cliente-patentes-fuentes.png` | Panel Fuentes desplegado | Casilla · dirección y lecturas · estado · error en rojo |
 | `web-anpr.png` | Filtros, lista y ficha | Fuentes junto al título · filtros · Mostrar · contador y Seguir en vivo · lista · botones de la ficha |
 | `web-fuentes-de-video-patentes.png` | Fuentes de video, columna Patentes | Un «Activo» · un «Activar» · un «—» |
