@@ -889,6 +889,9 @@ function resByEquipmentModal(resources) {
 const RES_TABS = [
   { key: "general", label: "General" },
   { key: "device", label: "Equipo" },
+  // La configuración de la puerta y sus lectores en el equipo (contacto, botón
+  // de salida, tiempos, umbrales del rostro…): la de la página del equipo.
+  { key: "params", label: "Parámetros", kinds: ["Door"], perm: "access.configure" },
   { key: "cameras", label: "Cámaras asociadas" },
   { key: "workflows", label: "Automatizaciones" },
   { key: "history", label: "Historial" },
@@ -998,7 +1001,7 @@ async function resOpenSheet() {
         : err.error)}</div>`;
     return;
   }
-  if (!sheet.detail.supportsCameras && sheet.tab === "cameras") sheet.tab = "general";
+  if (!resSheetTabs(sheet.detail).some((t) => t.key === sheet.tab)) sheet.tab = "general";
   resDrawSheet();
 }
 
@@ -1016,7 +1019,7 @@ function resDrawSheet() {
   const { detail, tab } = resState.sheet;
   const r = detail.resource;
   const kind = RES_KINDS[r.kind];
-  const tabs = RES_TABS.filter((t) => t.key !== "cameras" || detail.supportsCameras);
+  const tabs = resSheetTabs(detail);
   $("#page-title").textContent = `Recursos · ${r.name}`;
   $("#res-sheet").innerHTML = `
     <div class="res-sheet-back"><a class="btn ghost small" href="#/resources">← Volver a la lista</a></div>
@@ -1040,6 +1043,12 @@ function resDrawSheet() {
   resDrawSheetTab();
 }
 
+/** Pestañas que corresponden a este recurso (Parámetros: solo puertas, con permiso de configurar equipos). */
+function resSheetTabs(detail) {
+  return RES_TABS.filter((t) => (t.key !== "cameras" || detail.supportsCameras) &&
+    (!t.kinds || t.kinds.includes(detail.resource.kind)) && (!t.perm || Perms.can(t.perm)));
+}
+
 function resSheetTab(tab) {
   const sheet = resState.sheet;
   sheet.tab = tab;
@@ -1050,6 +1059,39 @@ function resSheetTab(tab) {
     b.setAttribute("aria-selected", String(b.dataset.tab === tab));
   });
   resDrawSheetTab();
+}
+
+// ---------- Parámetros (puertas) ----------
+// Los mismos bloques que las pestañas Puertas y Lectores de la página del
+// equipo, pero solo los de ESTA puerta: ella y sus lectores de entrada y
+// salida. Se leen del equipo al abrir la pestaña y se le escriben al guardar.
+
+async function resDrawSheetParams(body) {
+  const sheet = resState.sheet;
+  body.innerHTML = `<div class="muted">Leyendo la configuración del equipo… (puede tardar unos segundos)</div>`;
+  let data;
+  try { data = sheet.params ??= await Api.get(`/api/access/doors/${sheet.id}/settings`); }
+  catch (err) {
+    if (resState.sheet !== sheet || sheet.tab !== "params") return;
+    body.innerHTML = `
+      <div class="error-box">${esc(err.error)}</div>
+      ${err.status === 501 ? "" : `<button class="btn ghost small" type="button" id="rs-params-retry">Volver a intentar</button>`}`;
+    $("#rs-params-retry")?.addEventListener("click", () => resDrawSheetTab());
+    return;
+  }
+  // Si cambió de pestaña o de ficha mientras el equipo contestaba, no se pisa lo nuevo.
+  if (resState.sheet !== sheet || sheet.tab !== "params") return;
+  body.innerHTML = `
+    <p class="muted res-tab-intro">Parámetros de esta puerta y de sus lectores tal como están en el equipo
+      <a href="#/access/device?id=${data.accessDeviceId}&tab=doors">${esc(data.accessDeviceName)}</a>
+      (puerta ${data.doorNumber}): se leen al abrir esta pestaña y se escriben en el equipo al guardar.</p>
+    ${data.notes.length ? `<div class="info-box">${data.notes.map(esc).join("<br>")}</div>` : ""}
+    ${data.sections.length ? data.sections.map(acdSectionHtml).join("")
+      : `<div class="info-box">El equipo no informó parámetros de esta puerta.</div>`}`;
+  data.sections.forEach((s) => acdBindSection(s, {
+    url: `/api/access/doors/${sheet.id}/settings/${encodeURIComponent(s.key)}`,
+    sections: data.sections,
+  }));
 }
 
 async function resDrawSheetTab() {
@@ -1067,6 +1109,9 @@ async function resDrawSheetTab() {
     case "device":
       body.innerHTML = resSheetDeviceHtml(sheet.detail);
       resBindSheetDevice();
+      break;
+    case "params":
+      await resDrawSheetParams(body);
       break;
     case "cameras":
       body.innerHTML = resSheetCamerasHtml(sheet.detail);

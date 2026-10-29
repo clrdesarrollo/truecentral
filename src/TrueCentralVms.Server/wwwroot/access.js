@@ -983,7 +983,14 @@ function acdFieldValue(input) {
   }
 }
 
-function acdBindSection(s) {
+/**
+ * Activa el formulario de un bloque. Por omisión guarda en la página del
+ * equipo; la ficha de una puerta en Recursos pasa su propia dirección y su
+ * lista de bloques (target = { url, sections }).
+ */
+function acdBindSection(s, target = null) {
+  const url = target?.url ?? `/api/access/devices/${acdState.id}/settings/${encodeURIComponent(s.key)}`;
+  const sections = target?.sections ?? acdState.settings.sections;
   const card = $(`#view .acd-card[data-section="${CSS.escape(s.key)}"]`);
   if (!card) return;
   const form = card.querySelector("form");
@@ -1015,12 +1022,12 @@ function acdBindSection(s) {
     save.disabled = true;
     save.textContent = "Guardando…";
     try {
-      const fresh = await Api.put(`/api/access/devices/${acdState.id}/settings/${encodeURIComponent(s.key)}`, { values });
+      const fresh = await Api.put(url, { values });
       // Se redibuja el bloque con lo que el equipo DEJÓ (puede acotar o redondear).
-      const index = acdState.settings.sections.findIndex((x) => x.key === s.key);
-      if (index >= 0) acdState.settings.sections[index] = fresh;
+      const index = sections.findIndex((x) => x.key === s.key);
+      if (index >= 0) sections[index] = fresh;
       card.outerHTML = acdSectionHtml(fresh);
-      acdBindSection(fresh);
+      acdBindSection(fresh, target);
       toast(`${fresh.title}: cambios guardados en el equipo.`);
     } catch (err) {
       errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
