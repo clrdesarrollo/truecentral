@@ -232,9 +232,8 @@ abre además la ventana de verificación (#capitulo(<cap-recursos-y-ubicaciones>
 Cuando los paneles están ubicados en el árbol de ubicaciones, una sola orden
 arma o desarma todas las áreas de una ubicación y de sus sububicaciones.
 
-+ En la Vista en vivo, haga clic en #boton("Ubicación") sobre la lista de
-  cámaras para agruparla por ubicación.
-+ Haga clic derecho sobre la ubicación.
++ En el Centro de mando del cliente, busque la ubicación en la lista de
+  recursos y haga clic derecho sobre ella.
 + Elija *Armar total sus áreas de alarma…*, *Armar parcial sus áreas de
   alarma…* o *Desarmar sus áreas de alarma…*.
 + El sistema muestra las áreas que va a tocar y pregunta «¿Continuar?».

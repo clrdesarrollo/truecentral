@@ -1,5 +1,5 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Server/wwwroot/resources.js, src/TrueCentralVms.Server/wwwroot/app.js, src/TrueCentralVms.Server/wwwroot/live.js, src/TrueCentralVms.Client/Views/VerificationWindow.xaml, src/TrueCentralVms.Client/Views/VerificationWindow.xaml.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.Client/ViewModels/LocationTreeNodes.cs, src/TrueCentralVms.Client/Views/LiveView.xaml, src/TrueCentralVms.Server/Api/LocationsApi.cs, src/TrueCentralVms.Server/Api/ResourcesApi.cs
+// Fuentes: src/TrueCentralVms.Server/wwwroot/resources.js, src/TrueCentralVms.Server/wwwroot/app.js, src/TrueCentralVms.Server/wwwroot/live.js, src/TrueCentralVms.Client/Views/VerificationWindow.xaml, src/TrueCentralVms.Client/Views/VerificationWindow.xaml.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.Client/ViewModels/LocationTreeNodes.cs, src/TrueCentralVms.Client/Views/LiveView.xaml, src/TrueCentralVms.Server/Api/LocationsApi.cs, src/TrueCentralVms.Server/Api/ResourcesApi.cs, src/TrueCentralVms.Server/wwwroot/access.js, src/TrueCentralVms.Server/Api/AccessSettingsApi.cs, src/TrueCentralVms.Server/Services/ResourceDetails.cs
 
 = Recursos y ubicaciones <cap-recursos-y-ubicaciones>
 
@@ -9,7 +9,8 @@ zonas de alarma, cercos, parlantes y citófonos— son los *recursos*, y la pág
 #menu("Recursos") los ordena según dónde están, en un árbol de *ubicaciones*
 (sitio, edificio, piso, sector, punto). Con ese orden:
 
-- las cámaras se encuentran por lugar en la vista en vivo y en la reproducción;
+- las cámaras se encuentran por lugar en el Centro de mando del cliente, en la
+  vista en vivo del panel web y en la reproducción;
 - cada recurso tiene una ficha con consignas para el operador y cámaras
   asociadas, que el puesto de monitoreo muestra cuando el recurso avisa algo;
 - se puede armar o desarmar todo lo de un lugar con una sola orden;
@@ -27,14 +28,14 @@ ni se borran desde esta página.
 #table(
   columns: (auto, 1fr),
   table.header[Recurso][De dónde sale],
-  [Cámara], [Cada canal de una fuente de video: una cámara IP o un canal de un grabador.],
+  [Cámara], [Cada canal de una fuente de video: una cámara IP o un canal de un grabador. También la cámara de un terminal de acceso facial.],
   [Puerta], [Cada puerta de un equipo de control de acceso.],
   [Área de alarma], [Cada área de un panel de alarma.],
   [Zona], [Cada zona de un panel de alarma.],
   [Cerco], [Cada panel de cerco eléctrico.],
-  [Parlante], [Cada parlante IP.],
+  [Parlante], [Cada parlante IP. También el altavoz de un terminal de acceso, una cámara o un grabador.],
   [Citófono], [Cada frente de citofonía.],
-  [Módulo de E/S], [Cada módulo de entradas y salidas (con todos sus relés y entradas).],
+  [Módulo de E/S], [Cada módulo de entradas y salidas (con todos sus relés y entradas). También las entradas y salidas de alarma de un terminal de acceso, una cámara o un grabador.],
 )
 
 Cada recurso está en *una sola* ubicación, o en *Por ubicar* si nadie lo ha
@@ -75,6 +76,10 @@ Abra #menu("Recursos") en la sección _Configuración_ del menú lateral.
   solo ese tipo. El buscador encuentra por nombre, equipo o estado, aunque no
   escriba las tildes, y la lista *Todos los equipos* deja ver solo los recursos
   de un equipo.
+- *Mostrar deshabilitados*. Los recursos deshabilitados (por ejemplo, canales
+  que quedaron fuera de la licencia, o puertas y áreas apagadas) están ocultos
+  en la lista y no se cuentan en el árbol. Este interruptor los muestra; a su
+  lado, entre paréntesis, dice cuántos hay. El navegador recuerda la elección.
 - *Lista de recursos*, con las columnas *Recurso* (nombre, tipo y detalle, como
   el número de canal o de puerta), *Equipo físico*, *Ubicación* y *Estado*.
 
@@ -156,6 +161,34 @@ Arrastre una fila de la lista hasta una ubicación del árbol. Si la fila está
 marcada, se llevan todas las marcadas; si no, solo esa. Soltar sobre *Por
 ubicar* les quita la ubicación.
 
+=== Una ubicación por equipo
+
+Para ordenar de una vez lo que llegó de muchos equipos, el sistema puede crear
+una ubicación con el nombre de cada equipo y dejar ahí sus recursos.
+
++ En el árbol, elija *Por ubicar* y haga clic en
+  #boton("Una ubicación por equipo…"). Se toman todos los recursos por ubicar,
+  también los deshabilitados que no se están mostrando. Para hacerlo solo con
+  algunos, márquelos y use #boton("Una por equipo…") en la barra de los
+  marcados.
++ En *Dentro de*, elija dónde van las ubicaciones: _La raíz del árbol_ u otra
+  ubicación.
++ Revise la vista previa: dice cuántos recursos de cuántos equipos se van a
+  ubicar y lista cada ubicación con sus recursos, marcada _nueva_ o _ya
+  existe_. Si cambia *Dentro de*, la vista previa se recalcula.
++ Haga clic en #boton("Ubicar").
+
+Así se arma cada ubicación:
+
+- Lleva el nombre del equipo del recurso: el grabador de un canal, el equipo de
+  acceso de una puerta, el panel de un área o una zona. Un parlante, un
+  citófono, un cerco o un módulo de E/S es su propio equipo.
+- Si en ese lugar ya hay una ubicación con ese nombre, se usa esa. Las nuevas
+  se crean de tipo _Sector_. Dos equipos con el mismo nombre comparten la
+  ubicación.
+- Si el equipo no tenía ubicación, queda también en la nueva: lo que descubra
+  después llega ahí.
+
 #consejo[Use *Por ubicar* como bandeja de entrada: después de agregar un equipo,
   revise ahí sus recursos y ubíquelos de una vez.]
 
@@ -168,9 +201,10 @@ ubicar* les quita la ubicación.
 #requiere("Fuentes de video", "Paneles de alarma", "Paneles de cerco", "Equipos de acceso", "Parlantes IP", "Citofonía", "Módulos de E/S")
 
 Los formularios para agregar o editar un equipo en _Dispositivos_ (fuentes de
-video, paneles de alarma, paneles de cerco, control de acceso, parlantes IP y
-citofonía) tienen el campo *Ubicación*, con el árbol y la opción *Por ubicar*.
-Cada formulario exige el permiso de configuración de su propio módulo.
+video, paneles de alarma, paneles de cerco, control de acceso, parlantes IP,
+módulos de E/S y citofonía) tienen el campo *Ubicación*, con el árbol y la
+opción *Por ubicar*. Cada formulario exige el permiso de configuración de su
+propio módulo.
 
 En los equipos que tienen recursos adentro (un grabador y sus canales, un panel
 de alarma y sus áreas y zonas, un equipo de acceso y sus puertas), la ubicación
@@ -190,6 +224,23 @@ limitado a ciertas ubicaciones.
 #nota[Si el panel no logra leer el árbol de ubicaciones, el campo *Ubicación*
   queda bloqueado con el texto _No se pudo leer el árbol: se conserva la
   actual_, y al guardar el equipo conserva la ubicación que tenía.]
+
+=== Una ubicación nueva con el nombre del equipo
+
+#requiere("Recursos y ubicaciones")
+
+Si además tiene el permiso _Recursos y ubicaciones_, el campo *Ubicación* de
+esos formularios ofrece *Nueva, con el nombre del equipo*:
+
++ Elija *Nueva, con el nombre del equipo*. Al agregar un equipo ya viene
+  elegida, para que lo nuevo no se acumule en *Por ubicar*.
++ En *Dentro de*, elija dónde crearla: _La raíz del árbol_ u otra ubicación.
++ Guarde el equipo.
+
+Al guardar, el sistema crea una ubicación de tipo _Sector_ con el nombre que
+usted le dio al equipo y deja ahí el equipo; sus recursos la heredan. Si en
+ese lugar ya hay una ubicación con ese nombre, se usa esa.
+#boton("Probar conexión") no crea nada.
 
 == La ficha del recurso
 
@@ -218,6 +269,14 @@ las áreas y zonas lo define el panel de alarma (se cambia en el propio panel) y
 el de un cerco se cambia en #menu("Dispositivos", "Paneles de cerco"); en esos
 casos el campo está bloqueado y dice por qué.
 
+Lo mismo pasa con las partes de otro equipo (el altavoz o las entradas y
+salidas de alarma de un terminal de acceso, una cámara o un grabador): llevan
+el nombre de ese equipo y no se renombran desde la ficha. El campo lo indica:
+_Es el altavoz de otro equipo: lleva el nombre de ese equipo (se cambia ahí)._
+o _Son las entradas y salidas de otro equipo: llevan el nombre de ese equipo
+(sus entradas y salidas se nombran en Módulos de E/S)._ La cámara de un
+terminal de acceso, en cambio, sí se renombra aquí.
+
 Sin el permiso, la pestaña muestra la ubicación, la descripción y las consignas
 como texto.
 
@@ -232,7 +291,42 @@ la entrega, dice _El equipo no entregó una imagen (sin conexión o sin señal).
 Muestra el *Equipo físico* (nombre, modelo, número de serie, firmware,
 dirección, estado de conexión y cuándo se vio por última vez) y las
 *Características* del recurso según su tipo. #boton("Ir al equipo") abre la
-página del equipo.
+página del equipo. En la cámara, el altavoz o las entradas y salidas de otro
+equipo, el *Equipo físico* es ese equipo, y en *Características* la fila
+*Licencia* aclara que vienen incluidos con él.
+
+=== Parámetros
+
+#requiere("Equipos de acceso")
+
+Solo en las puertas. Muestra los parámetros de la puerta y de sus lectores tal
+como están en el equipo: los mismos de las pestañas *Puertas* y *Lectores* de
+la página del equipo, pero solo los de esta puerta. Se leen del equipo al abrir
+la pestaña (puede tardar unos segundos) y se escriben en él al guardar; el
+sistema no los guarda. El nombre del equipo, al comienzo de la pestaña, lleva a
+su página.
+
+#captura-pendiente("Panel web: ficha de una puerta en Recursos, pestaña Parámetros — texto de introducción con el enlace al equipo, el bloque de la puerta y los bloques Lector 1 · lector de entrada y Lector 2 · lector de salida, uno con «Hay cambios sin guardar.» y su botón Guardar habilitado")
+
+Hay un bloque para la puerta y, en los equipos que los informan, uno por cada
+uno de sus lectores, con su papel en el título: por ejemplo, _Lector 1 · lector
+de entrada_ y _Lector 2 · lector de salida_. Los campos dependen del modelo.
+
++ Modifique los campos de un bloque. Aparece _Hay cambios sin guardar._
++ Haga clic en #boton("Guardar") de ese bloque.
+
+El bloque se vuelve a mostrar con lo que el equipo dejó, que puede acotar o
+redondear algún valor. Los campos de contraseña se dejan vacíos para no
+cambiarlos, y *Otros parámetros que informa el equipo* despliega, solo para
+consulta, lo demás que entrega el equipo. Cada cambio queda en el *Historial*
+de la puerta.
+
+Si el equipo no responde, la pestaña muestra el motivo y el botón
+#boton("Volver a intentar"). Con un equipo de una marca que no se configura
+desde el sistema aparece _Los equipos de esta marca todavía no se configuran
+desde el VMS: use la página web del equipo._
+#modulo("access")[Los demás parámetros del equipo se cambian en su página; ver
+  #capitulo(<cap-control-de-acceso>).]
 
 === Cámaras asociadas
 
@@ -251,6 +345,13 @@ pestaña no existe en las cámaras.
 Se pueden asociar hasta 16 cámaras por recurso. En un citófono, la cámara de su
 frente aparece fija, marcada _Cámara del frente_; esa se cambia en la
 configuración de citofonía.
+
+En una puerta de un terminal facial, la cámara del propio terminal aparece
+fija y primera, como *Principal*, marcada _Cámara del terminal_: no tiene
+flechas ni #boton("Quitar"), y las cámaras que usted asocie van después de
+ella. Se quita desde su equipo, en #menu("Dispositivos", "Control de acceso"):
+desmarcando _Su cámara, como una cámara más_ en la página del terminal.
+#modulo("access")[Ver #capitulo(<cap-control-de-acceso>).]
 
 === Automatizaciones
 
@@ -301,8 +402,8 @@ Para atender el aviso:
 
 + Lea las consignas y siga las instrucciones.
 + Revise el video de las cámaras.
-+ Si necesita más detalle, haga clic en #boton("Abrir en la Vista en vivo"):
-  las cámaras pasan a la grilla principal.
++ Si necesita más detalle, haga clic en #boton("Abrir en el Centro de mando"):
+  las cámaras pasan a la grilla del Centro de mando.
 + Haga clic en #boton("Cerrar") cuando termine.
 
 Una sola ventana reúne todos los avisos: si llegan varios, use las flechas
@@ -323,20 +424,20 @@ aparecen en las alertas del Centro de eventos
 
 #requiere("Ver video en vivo", "Ver grabaciones")
 
-En la vista en vivo y en la reproducción del cliente de monitoreo, y en la
-vista en vivo del panel web, la lista de cámaras tiene el selector
-#boton("Equipo") | #boton("Ubicación"). Con *Ubicación*:
+En el cliente de monitoreo, la lista del Centro de mando y el árbol de la
+reproducción siguen siempre el árbol de Recursos:
 
-- las cámaras se agrupan según el árbol de Recursos, y las ubicaciones sin
-  cámaras no se muestran;
-- las cámaras que nadie ubicó van al final, en *Sin ubicación*;
+- cada ubicación muestra sus cámaras y, en el Centro de mando, también sus
+  demás recursos; las ubicaciones vacías no se muestran;
+- lo que nadie ubicó va al final, en *Sin ubicación*, agrupado por su equipo;
 - el buscador también encuentra por el nombre de la ubicación;
 - doble clic en una ubicación abre todas sus cámaras, incluidas las de sus
   sububicaciones.
 
-El cliente recuerda el modo elegido, y las pantallas auxiliares siguen al de la
-ventana principal.
-#modulo("video")[La vista en vivo se explica en #capitulo(<cap-vista-en-vivo>).]
+En la vista en vivo del panel web, la lista de cámaras tiene el selector
+#boton("Equipo") | #boton("Ubicación"); con *Ubicación* se agrupa igual, y el
+navegador recuerda el modo elegido.
+#modulo("video")[El Centro de mando se explica en #capitulo(<cap-vista-en-vivo>).]
 
 == Órdenes por ubicación
 
@@ -364,8 +465,8 @@ clic derecho sobre una ubicación ofrece las mismas órdenes que en el cliente
 
 === Desde el cliente de monitoreo
 
-+ En la vista en vivo, con la lista de cámaras por *Ubicación*, haga clic
-  derecho en la ubicación (o selecciónela y presione #tecla("Mayús") +
++ En la lista de recursos del Centro de mando, haga clic derecho en la
+  ubicación (o selecciónela y presione #tecla("Mayús") +
   #tecla("F10")).
 + Elija _Armar total sus áreas de alarma…_, _Armar parcial sus áreas de
   alarma…_ o _Desarmar sus áreas de alarma…_. El mismo menú tiene _Abrir sus

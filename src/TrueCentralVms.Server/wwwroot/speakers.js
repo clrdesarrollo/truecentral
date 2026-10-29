@@ -743,7 +743,7 @@ async function speakerModal(speaker) {
             <input id="sp-host" required value="${esc(speaker?.isupDeviceId || isAgentSpeaker(speaker) ? "" : speaker?.host ?? "")}" placeholder="192.168.1.73">
           </div>
           <div class="field">
-            <label>Puerto HTTP</label>
+            <label id="sp-port-label">Puerto HTTP</label>
             <input id="sp-port" type="number" min="1" max="65535" required value="${speaker?.isupDeviceId || isAgentSpeaker(speaker) ? 80 : speaker?.port || driver0?.defaultPort || 80}">
           </div>
         </div>
@@ -786,6 +786,8 @@ async function speakerModal(speaker) {
     $("#sp-agent-box").hidden = !agent;
     $("#sp-local-user-hint").hidden = agent;
     $("#sp-probe").hidden = agent && isNew;
+    // La voz por el SDK va al puerto del equipo (8000), no al HTTP.
+    $("#sp-port-label").textContent = dr?.key === "hikvision-sdk-voice" ? "Puerto del equipo (SDK)" : "Puerto HTTP";
     for (const el of $$("#sp-ip-box input, #sp-isup-wrap input")) {
       const hide = el.closest("[hidden]") != null;
       if (hide) { if (el.required) el.dataset.req = "1"; el.required = false; }

@@ -556,7 +556,7 @@ public sealed partial class SpeakerItem : ObservableObject
         get
         {
             var parts = new List<string> { $"{Dto.Model ?? Dto.DriverKey} · {(Dto.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : Dto.Host)}" };
-            if (Dto.GroupName is { Length: > 0 } group) parts.Add($"Grupo: {group}");
+            if (Dto.GroupName is { Length: > 0 } group) parts.Add($"{(group.Contains(", ") ? "Grupos" : "Grupo")}: {group}");
             parts.Add(Dto.Status switch
             {
                 SpeakerStatus.Online => "En línea",

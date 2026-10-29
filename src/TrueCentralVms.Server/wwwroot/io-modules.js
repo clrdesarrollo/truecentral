@@ -74,10 +74,12 @@ function ioStateHtml(point) {
 
 function ioInputsHtml(m) {
   if (m.inputs.length === 0) return `<div class="muted">Este modelo no tiene entradas.</div>`;
+  // En las entradas de un terminal, cámara o grabador la lógica la decide el equipo.
+  const part = m.accessDeviceId != null || m.deviceId != null;
   return `<div class="io-inputs">${m.inputs.map((p) => `
     <div class="io-input" data-point="Input:${p.number}">
       ${ioDotHtml(p)}
-      <span class="io-name" title="${esc(p.name)} · ${esc(p.code)} · ${p.inverted ? "activa al cerrar el contacto" : "activa al abrir el contacto"}">${esc(p.name)}</span>
+      <span class="io-name" title="${esc(p.name)} · ${esc(p.code)}${part ? "" : ` · ${p.inverted ? "activa al cerrar el contacto" : "activa al abrir el contacto"}`}">${esc(p.name)}</span>
       <span class="io-code">${esc(p.code)}</span>
       ${ioStateHtml(p)}
     </div>`).join("")}</div>`;

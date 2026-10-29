@@ -1,5 +1,5 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Server/wwwroot/app.js (renderDevices, deviceModal, channelsModal, initModal, changeIpModal), src/TrueCentralVms.Server/wwwroot/maintenance.js, src/TrueCentralVms.Server/Api/DevicesApi.cs, src/TrueCentralVms.Server/Api/DiscoveryApi.cs, src/TrueCentralVms.Server/Api/DeviceMaintenanceApi.cs
+// Fuentes: src/TrueCentralVms.Server/wwwroot/app.js (renderDevices, devicePartsLine, devicePartsFieldHtml, deviceModal, channelsModal, initModal, changeIpModal), src/TrueCentralVms.Server/wwwroot/maintenance.js, src/TrueCentralVms.Server/Api/DevicesApi.cs, src/TrueCentralVms.Server/Api/DiscoveryApi.cs, src/TrueCentralVms.Server/Api/DeviceMaintenanceApi.cs, src/TrueCentralVms.Server/Services/EquipmentParts.cs, src/TrueCentralVms.Server/Services/DeviceStatusMonitor.cs (CheckPartsAsync), src/TrueCentralVms.Server/Services/MediaMtxManager.cs (cámara de un terminal desactivado)
 
 = Fuentes de video <cap-fuentes-de-video>
 
@@ -23,10 +23,10 @@ sistema encuentra en la red (vea «Buscar equipos en la red»).
 #table(
   columns: (auto, 1fr),
   table.header[Columna][Qué muestra],
-  [*Nombre*], [El nombre y, debajo, su ubicación en Recursos, o _Por ubicar_.],
+  [*Nombre*], [El nombre y, debajo, su ubicación en Recursos, o _Por ubicar_. Si el equipo aporta su altavoz o sus entradas y salidas de alarma, una línea lo indica, por ejemplo _Con altavoz y 2 entrada(s) y 1 salida(s) de alarma · incluidos, no ocupan licencia_ (vea «Altavoz y entradas y salidas de alarma»). La cámara de un terminal de acceso dice _Cámara de un terminal de acceso · incluida, no ocupa canal de video_.],
   [*Tipo*], [Cámara, DVR, NVR o XVR. Lo detecta el sistema con lo que informa el equipo.],
   [*Marca*], [La marca o el protocolo con que se conecta: _Hikvision (SDK nativo)_, _Dahua (SDK nativo)_ u _ONVIF (otras marcas)_.],
-  [*Dirección*], [La IP o el nombre del equipo y su puerto SDK.],
+  [*Dirección*], [La IP o el nombre del equipo y su puerto SDK. En la cámara de un terminal de acceso, la IP y su puerto RTSP, por ejemplo _10.0.0.20 · RTSP 554_.],
   [*Modelo*, *N° serie*, *Firmware*], [Los datos que informó el equipo la última vez que se validó.],
   [*Canales*], [Canales habilitados del total (vea abajo).],
   [*Patentes*], [Si el equipo entrega lecturas de patentes. «—» si no puede.],
@@ -94,6 +94,8 @@ decodificador no llega al equipo). Vea #menu("Sistema", "Conexión ISUP") en
   marca.
 + Escriba la *Dirección (IP o hostname)* y revise *Puerto SDK* y *Puerto RTSP*.
 + Escriba el *Usuario del equipo* y la *Contraseña del equipo*.
++ Con la marca _Hikvision (SDK nativo)_, revise la sección *Partes del equipo*
+  (vea «Altavoz y entradas y salidas de alarma»).
 + Haga clic en #boton("Probar conexión"). El sistema se conecta al equipo sin
   guardar nada y muestra lo que encontró.
 + Haga clic en #boton("Guardar"). Mientras dice _Validando…_, el sistema vuelve
@@ -302,6 +304,87 @@ Algunas cámaras anuncian su audio de una forma que el sistema no acepta, y el
 canal da error de reproducción aunque el equipo esté en línea. Marque *Proxy*
 en ese canal y guarde: el video se ve, pero sin audio.
 
+== Altavoz y entradas y salidas de alarma
+
+#requiere("Fuentes de video")
+
+Las cámaras y los grabadores Hikvision pueden tener altavoz (audio
+bidireccional) y entradas y salidas de alarma. El sistema los ofrece como
+recursos propios, incluidos con el equipo, que no ocupan licencia:
+
+- el altavoz, como un parlante más en #menu("Dispositivos", "Parlantes IP"),
+  para hablar y hacer sonar sonidos desde el Centro de mando, los grupos de
+  parlantes y las automatizaciones#modulo("speakers")[ (vea
+  #capitulo(<cap-parlantes-ip>))];
+- las entradas y salidas de alarma, como un módulo más en
+  #menu("Dispositivos", "Módulos de E/S"), con su estado en vivo, sus salidas
+  operables y sus entradas como disparador de automatizaciones#modulo("io")[
+  (vea #capitulo(<cap-modulos-de-es>))].
+
+#captura-pendiente("Panel web: formulario Editar dispositivo de una cámara Hikvision con la sección Partes del equipo — Puerto HTTP (ISAPI) en 80, las dos casillas marcadas y sus textos de estado debajo")
+
+El formulario del equipo muestra la sección *Partes del equipo (incluidas: no
+ocupan licencia)* solo con la marca _Hikvision (SDK nativo)_:
+
+#table(
+  columns: (auto, 1fr),
+  table.header[Campo][Para qué sirve],
+  [*Puerto HTTP (ISAPI)*], [El puerto web del equipo, 80 por omisión. Por ahí se leen y se operan su altavoz y sus entradas y salidas.],
+  [*Su altavoz, como un parlante más*], [Ofrece el altavoz del equipo como parlante, con el nombre del equipo.],
+  [*Sus entradas y salidas de alarma, como un módulo de E/S*], [Ofrece sus entradas y salidas como módulo de E/S, con el nombre del equipo.],
+)
+
+Las dos casillas vienen marcadas. El sistema le pregunta al equipo qué partes
+tiene al agregarlo, al revalidarlo y al cambiar su conexión o su *Puerto HTTP
+(ISAPI)*. Los equipos que ya estaban agregados se revisan una vez solos,
+cuando están en línea. Debajo de cada casilla se indica lo que se encontró:
+
+#table(
+  columns: (1fr, 1fr),
+  table.header[Texto][Qué significa],
+  [Está en Parlantes IP como «…».], [El altavoz ya se ofrece como parlante.],
+  [N entrada(s) y M salida(s) en Módulos de E/S como «…».], [Las entradas y salidas ya se ofrecen como módulo de E/S.],
+  [Tiene altavoz, pero no se está ofreciendo. \ Tiene N entrada(s) y M salida(s), pero no se están ofreciendo.], [El equipo los tiene, pero la casilla está desmarcada.],
+  [No se le detectó (se vuelve a mirar al revalidarlo).], [El equipo no informó esa parte.],
+)
+
+Si algo no se pudo ofrecer, debajo aparece un aviso en color; por ejemplo,
+_Su altavoz ya está en Parlantes IP como "…": se usa ese._ cuando ese altavoz
+ya se había agregado a mano como parlante.
+
+Para dejar de ofrecer una parte, desmarque su casilla y guarde: el parlante o
+el módulo se quita. Revise antes los grupos de parlantes y las automatizaciones
+que lo usan. Al eliminar el equipo, sus partes se quitan con él.
+
+== Cámaras de los terminales de acceso
+
+Los terminales de acceso faciales Hikvision tienen cámara. Si en su formulario
+de Control de acceso está marcada la casilla *Su cámara, como una cámara
+más*, el sistema la agrega sola a esta lista, con el nombre del terminal: se ve
+en la vista en vivo y en los tableros como cualquier cámara y no ocupa canal de
+video de la licencia#modulo("access")[ (vea
+#capitulo(<cap-control-de-acceso>))].
+
+En la lista se distingue por:
+
+- la línea _Cámara de un terminal de acceso · incluida, no ocupa canal de
+  video_ bajo el nombre;
+- su *Dirección*, que se ve como la IP y el puerto RTSP (_10.0.0.20 · RTSP
+  554_);
+- sus botones: solo #boton("Canales") y #boton("Ver terminal"), que abre el
+  terminal en Control de acceso. No tiene #boton("Editar"),
+  #boton("Revalidar") ni #boton("Eliminar").
+
+Su dirección y sus credenciales son las del terminal: se cambian allá y la
+cámara las sigue sola. En #boton("Canales") se puede cambiar el nombre del
+canal y sus casillas como en cualquier equipo; habilitarlo no ocupa cupo de la
+licencia. Si el terminal está desactivado, su cámara no se ve hasta que se
+active de nuevo. Si se desmarca la casilla o se elimina el terminal, la cámara
+se quita de la lista.
+
+#nota[Si la cámara del terminal ya estaba agregada a mano en esta lista, no se
+  duplica: se sigue usando la que estaba.]
+
 == Editar, revalidar y eliminar
 
 #requiere("Fuentes de video")
@@ -316,7 +399,8 @@ en ese canal y guarde: el video se ve, pero sin audio.
   Úselo después de cambiar el firmware o de conectar cámaras nuevas a un
   grabador. Aparece «Equipo revalidado: información y canales actualizados.».
 - *Eliminar*: #boton("Eliminar") pide confirmación y borra el equipo con todos
-  sus canales.
+  sus canales y, si los ofrecía, su altavoz y sus entradas y salidas de
+  alarma.
 
 Al revalidar, los canales que ya existían conservan su nombre y si estaban
 habilitados; los canales nuevos entran con el nombre que informa el equipo
@@ -493,4 +577,8 @@ Los botones están deshabilitados si el equipo no está en línea.
   [El equipo no está activado: actívelo antes de cambiarle la IP. \ El equipo
     está sin inicializar: inicialícelo primero…],
   [Active o inicialice el equipo y luego cambie su IP con la misma contraseña.],
+  [Es la cámara de un terminal de acceso: se administra desde Control de
+    acceso → Equipos (su dirección y credenciales son las del terminal).],
+  [Cambie la dirección, las credenciales o el nombre en el terminal: use
+    #boton("Ver terminal").],
 )

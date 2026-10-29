@@ -1114,7 +1114,7 @@ async function resDrawSheetTab() {
       await resDrawSheetParams(body);
       break;
     case "cameras":
-      body.innerHTML = resSheetCamerasHtml(sheet.detail);
+      body.innerHTML = resSheetCamerasHtml(sheet.detail, sheet.kind);
       resBindSheetCameras();
       break;
     case "workflows":
@@ -1216,7 +1216,11 @@ function resBindSheetDevice() {
 
 // ---------- Cámaras asociadas ----------
 
-function resSheetCamerasHtml(d) {
+function resSheetCamerasHtml(d, kind) {
+  // La cámara fija de un citófono es la de su frente; la de una puerta, la del propio terminal facial.
+  const fixedTag = kind === "Door"
+    ? `<span class="tag operator" title="La cámara del propio terminal de acceso: se quita desde su equipo, en Control de acceso">Cámara del terminal</span>`
+    : `<span class="tag operator" title="Se cambia en Dispositivos → Citofonía">Cámara del frente</span>`;
   const isAdmin = Perms.can("resources.manage");
   const editable = d.cameras.filter((c) => !c.fixed);
   const cards = d.cameras.map((c, i) => {
@@ -1233,7 +1237,7 @@ function resSheetCamerasHtml(d) {
           <div class="res-sub res-sub-flat">${esc(c.deviceName)} · canal ${c.channelNumber}</div>
           <div class="res-cam-tags">
             ${i === 0 ? `<span class="tag admin">Principal</span>` : ""}
-            ${c.fixed ? `<span class="tag operator" title="Se cambia en Dispositivos → Citofonía">Cámara del frente</span>` : ""}
+            ${c.fixed ? fixedTag : ""}
             ${c.isOnline ? "" : `<span class="tag off">Sin señal</span>`}
           </div>
         </div>
