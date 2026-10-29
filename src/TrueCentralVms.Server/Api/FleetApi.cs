@@ -372,13 +372,15 @@ public static class FleetApi
         app.MapGet("/api/fleet/map/settings", async (HttpContext ctx, Services.Fleet.FleetPositionService positions, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireAny(ctx, out _, Permissions.FleetView, Permissions.FleetManage) is { } failure) return failure;
-            // Con teselas en línea, el navegador de cada operador las pide directo al proveedor: la plantilla (con su clave, si
-            // la lleva) va a todos los que ven el mapa.
-            return Results.Ok(await positions.LoadSettingsAsync(ct));
+            // Las teselas en línea pasan por el servidor (/api/fleet/map/tiles): la plantilla, con la clave del proveedor, solo
+            // la ve quien puede cambiarla.
+            var settings = await positions.LoadSettingsAsync(ct);
+            return Results.Ok(ApiSecurity.Has(ctx, Permissions.FleetManage) ? settings : settings with { RasterUrl = null });
         });
 
         app.MapPut("/api/fleet/map/settings", async (HttpContext ctx, FleetMapSettingsWriteDto request,
-            Services.Fleet.FleetPositionService positions, AuditService audit, IHubContext<VmsHub> hub, CancellationToken ct) =>
+            Services.Fleet.FleetPositionService positions, Services.Fleet.FleetTileProxy tiles, AuditService audit,
+            IHubContext<VmsHub> hub, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.FleetManage, out _) is { } failure) return failure;
             if (request.Mode is not ("none" or "raster" or "pmtiles")) return Error("Modo de mapa base desconocido.");
@@ -389,12 +391,29 @@ public static class FleetApi
             if (request.Zoom is < 2 or > 18 || Math.Abs(request.CenterLatitude) > 85 || Math.Abs(request.CenterLongitude) > 180)
                 return Error("Posición inicial inválida.");
             var before = await positions.LoadSettingsAsync(ct);
-            await positions.SaveSettingsAsync(request with { RasterUrl = request.Mode == "raster" ? request.RasterUrl!.Trim() : null }, ct);
+            string? rasterUrl = request.Mode == "raster" ? request.RasterUrl!.Trim() : null;
+            await positions.SaveSettingsAsync(request with { RasterUrl = rasterUrl }, ct);
+            tiles.Invalidate();
+            // La plantilla lleva la clave del proveedor: en la bitácora va solo su servidor.
+            string provider = rasterUrl is null ? ""
+                : $" ({(Uri.TryCreate(rasterUrl.Replace("{", "").Replace("}", ""), UriKind.Absolute, out var u) ? u.Host : "?")}" +
+                  (rasterUrl != before.RasterUrl && before.Mode == "raster" ? ", plantilla cambiada" : "") + ")";
             await audit.LogAsync(ctx, "fleet", "map-settings-updated", detail:
-                $"Mapa base: {ModeLabel(request.Mode)}; retención de posiciones {request.PositionRetentionDays} días" +
+                $"Mapa base: {ModeLabel(request.Mode)}{provider}; retención de posiciones {request.PositionRetentionDays} días" +
                 (before.PositionRetentionDays != request.PositionRetentionDays ? $" (antes {before.PositionRetentionDays})" : "") + ".");
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "fleet-map", cancellationToken: ct);
             return Results.NoContent();
+        });
+
+        // Mapa base en línea: el servidor trae cada tesela del proveedor (la clave no sale del servidor).
+        app.MapGet("/api/fleet/map/tiles/{z:int}/{x:int}/{y:int}", async (HttpContext ctx, int z, int x, int y,
+            Services.Fleet.FleetTileProxy tiles, CancellationToken ct) =>
+        {
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.FleetView, Permissions.FleetManage) is { } failure) return failure;
+            var (tile, status) = await tiles.GetAsync(z, x, y, ct);
+            if (tile is null) return Results.StatusCode(status);
+            ctx.Response.Headers.CacheControl = "private, max-age=86400";
+            return Results.Bytes(tile.Data, tile.ContentType);
         });
 
         // Mapa base sin internet (PMTiles): lo lee el navegador por rangos, con la sesión del usuario.

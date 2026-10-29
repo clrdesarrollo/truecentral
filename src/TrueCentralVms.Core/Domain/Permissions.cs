@@ -159,7 +159,7 @@ public static class Permissions
         new(DevicesManage, "Configuración", "Fuentes de video",
             "Agregar y configurar cámaras, grabadores, decodificadores y muros; buscar equipos en la red.", []),
         new(FleetManage, "Configuración", "Vehículos de flota",
-            "Agregar, importar y configurar vehículos y sus grabadores móviles.", [FleetView]),
+            "Agregar, importar y configurar vehículos y sus grabadores móviles, y los ajustes del mapa de flota (mapa base, posición inicial y retención de posiciones).", [FleetView]),
         new(AccessConfigure, "Configuración", "Equipos de acceso",
             "Agregar y configurar terminales y puertas, y sincronizarlos.", []),
         new(AlarmsConfigure, "Configuración", "Paneles de alarma",

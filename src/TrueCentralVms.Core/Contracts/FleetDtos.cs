@@ -19,8 +19,9 @@ public sealed record FleetTrackPointDto(DateTime At, double Latitude, double Lon
 
 /// <summary>
 /// Mapa base del módulo Flota (Sistema → Mapa). <paramref name="Mode"/>: "none" (sin mapa base: solo los vehículos sobre un fondo
-/// liso), "raster" (plantilla de teselas de un proveedor, con su clave si la pide) o "pmtiles" (archivo del servidor, sin
-/// internet). La posición inicial se usa si no hay vehículos con posición.
+/// liso), "raster" (plantilla de teselas de un proveedor, con su clave si la pide; el servidor las intermedia y la plantilla solo
+/// llega a quien tiene <c>fleet.manage</c>) o "pmtiles" (archivo del servidor, sin internet). La posición inicial se usa si no
+/// hay vehículos con posición.
 /// </summary>
 public sealed record FleetMapSettingsDto(string Mode, string? RasterUrl, string? Attribution, bool PmtilesAvailable,
     double CenterLatitude, double CenterLongitude, int Zoom, int PositionRetentionDays);
