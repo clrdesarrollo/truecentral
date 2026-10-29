@@ -162,8 +162,9 @@ resumen). A la derecha está el editor del rol elegido.
   [Operador],
   [Rol para la operación diaria. Se puede ajustar, pero no eliminar ni
     renombrar. En una instalación nueva incluye todos los permisos de los
-    grupos _Video_ y _Monitoreo y operación_, más _Ver personas_, _Ver automatizaciones_ y _Ver hora y
-    mantenimiento_.],
+    grupos _Video_ (salvo _Ver recorridos de vehículos_) y _Monitoreo y
+    operación_, más _Ver rondas_, _Exportar rondas_, _Ver personas_, _Ver
+    automatizaciones_ y _Ver hora y mantenimiento_.],
 )
 
 Los roles de sistema llevan la etiqueta _Sistema_ en la lista.
@@ -269,12 +270,15 @@ control sobre la seguridad del sistema.
   [Exportar grabaciones], [Descargar tramos de video grabado al equipo del operador. #incluye[Ver grabaciones]],
   [Operar el muro de video], [Poner cámaras en el muro, limpiarlo y aplicar diseños guardados. #incluye[Ver video en vivo]],
   [Guardar diseños del muro], [Guardar y borrar diseños del muro de video. #incluye[Operar el muro de video]],
+  [Ver la flota], [Ver los vehículos, su estado y sus cámaras en el árbol de Flota.],
+  [Ver video de vehículos], [Abrir en vivo las cámaras de los vehículos (consume datos móviles del vehículo). #incluye[Ver la flota]],
+  [Ver recorridos de vehículos], [Consultar por dónde anduvo un vehículo (historial de posiciones GPS: dato personal del conductor). #incluye[Ver la flota]],
   grupo[Monitoreo y operación],
   [Atender alertas], [Ver el centro de eventos y dar por atendidas las alertas.],
   [Órdenes por ubicación], [Armar o desarmar con una sola orden todas las áreas de alarma de una ubicación.],
   [Ver alarmas], [Ver el estado de los paneles de alarma y sus eventos.],
   [Operar alarmas], [Armar, desarmar, reponer alarmas y anular zonas. #incluye[Ver alarmas]],
-  [Ver cercos eléctricos], [Ver el estado de los cercos eléctricos y sus eventos.],
+  [Ver cercos eléctricos], [Ver el estado de los cercos eléctricos y sus eventos, y exportar su historial a CSV.],
   [Operar cercos eléctricos], [Armar, desarmar, silenciar y activar la sirena de los cercos. #incluye[Ver cercos eléctricos]],
   [Ver control de acceso], [Ver puertas, su estado y los registros de acceso.],
   [Abrir y cerrar puertas], [Abrir, cerrar o dejar fijas las puertas a distancia. #incluye[Ver control de acceso]],
@@ -283,11 +287,19 @@ control sobre la seguridad del sistema.
   [Usar parlantes], [Reproducir audios, hablar y ajustar el volumen de los parlantes IP.],
   [Operar relés], [Ver las entradas y salidas de los módulos de E/S y activar sus relés a mano (barreras, portones, balizas).],
   [Atender citofonía], [Contestar, rechazar y cortar llamadas, y abrir la puerta del frente.],
+  grupo[Control de rondas],
+  [Ver rondas], [Ver la bitácora de rondas, los guardias, los puntos de control y el estado de los bastones y sus bases.],
+  [Leer bastones a pedido], [Leer un bastón desde el navegador o pedirle a una base que lo lea ahora. #incluye[Ver rondas]],
+  [Vaciar bastones a pedido], [Borrar la memoria de un bastón después de leerlo a pedido (la base lo hace sola tras cada descarga). #incluye[Leer bastones a pedido]],
+  [Corregir la bitácora de rondas], [Cambiar el guardia de un paso o anularlo, siempre con motivo (queda registrado). #incluye[Ver rondas]],
+  [Exportar rondas], [Exportar la bitácora y los informes de rondas. #incluye[Ver rondas]],
+  [Configurar rondas], [Administrar guardias, llaveros, puntos de control, bastones y bases de descarga. #incluye[Ver rondas]],
   grupo[Personas],
   [Ver personas], [Ver las personas registradas, sus fotos, tarjetas y niveles de acceso.],
   [Administrar personas], [Crear, modificar y borrar personas, sus credenciales, niveles de acceso y horarios. #incluye[Ver personas]],
   grupo[Configuración],
   [Fuentes de video], [Agregar y configurar cámaras, grabadores, decodificadores y muros; buscar equipos en la red.],
+  [Vehículos de flota], [Agregar, importar y configurar vehículos y sus grabadores móviles. #incluye[Ver la flota]],
   [Equipos de acceso], [Agregar y configurar terminales y puertas, y sincronizarlos.],
   [Paneles de alarma], [Agregar y configurar paneles de alarma.],
   [Paneles de cerco], [Agregar y configurar paneles de cerco, sus controles remotos y su firmware.],
@@ -308,6 +320,10 @@ control sobre la seguridad del sistema.
   [Sesiones], [Ver quién está conectado, cortar transmisiones y liberar puestos.],
   [Servicios del servidor #seg], [Detener, iniciar y reiniciar los servicios y el servidor.],
   [Licencia #seg], [Activar, renovar y desactivar la licencia del sistema.],
+  [Respaldos #seg], [Configurar los respaldos y su contraseña, respaldar a pedido, probarlos y descargarlos (un respaldo contiene toda la información del sistema).],
+  [Certificado HTTPS #seg], [Cargar o quitar el certificado con que el servidor se presenta por HTTPS.],
+  [Acceso desde Internet #seg], [Encender o apagar el acceso desde Internet y definir la dirección pública, las redes locales y los puertos.],
+  [Entrar desde Internet #seg], [Iniciar sesión y operar desde fuera de las redes locales (con el acceso desde Internet encendido). Sin él, el usuario solo entra desde la red local.],
 )
 
 #nota[Algunas páginas se ven sin permiso especial, pero solo con lectura: por
