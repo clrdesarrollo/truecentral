@@ -86,9 +86,12 @@ public static class Permissions
     public sealed record Definition(string Key, string Group, string Label, string Description,
         string[] Requires, bool Sensitive = false);
 
-    /// <summary>Grupos en el orden en que se muestran.</summary>
+    /// <summary>
+    /// Grupos en el orden en que se muestran. El editor de roles dibuja solo
+    /// estos: un permiso de un grupo que no esté acá no se puede marcar.
+    /// </summary>
     public static readonly string[] Groups =
-        ["Video", "Monitoreo y operación", "Personas", "Configuración", "Sistema y seguridad"];
+        ["Video", "Monitoreo y operación", "Control de rondas", "Personas", "Configuración", "Sistema y seguridad"];
 
     public static readonly IReadOnlyList<Definition> All =
     [
