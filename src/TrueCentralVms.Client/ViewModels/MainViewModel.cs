@@ -702,28 +702,14 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnSearchTextChanged(string value) => ApplySearchFilter();
 
-    /// <summary>Filtra el árbol: un canal se muestra si su nombre (o el de su
-    /// equipo) contiene el texto; un equipo, si él o alguno de sus canales
-    /// calza. Ignora mayúsculas y tildes.</summary>
+    /// <summary>Filtra la lista: un recurso se muestra si su nombre, el de su
+    /// equipo o el de alguna ubicación que lo contiene calza con el texto.
+    /// Ignora mayúsculas y tildes.</summary>
     private void ApplySearchFilter()
     {
         string text = SearchText.Trim();
-        if (IsTreeByLocation)
-        {
-            ApplyLocationSearchFilter(text);
-            return;
-        }
-        foreach (var device in Devices)
-        {
-            bool deviceMatch = Matches(device.Header, text);
-            bool anyChannelVisible = false;
-            foreach (var channel in device.Channels)
-            {
-                channel.IsVisible = text.Length == 0 || deviceMatch || Matches(channel.Header, text);
-                anyChannelVisible |= channel.IsVisible;
-            }
-            device.IsVisible = text.Length == 0 || deviceMatch || anyChannelVisible;
-        }
+        ApplyLocationSearchFilter(text);
+        ApplyResourceSearchFilter(text);
     }
 
     private static bool Matches(string haystack, string needle) =>
@@ -892,12 +878,11 @@ public partial class MainViewModel : ObservableObject
         _hub = hub;
         _alertSound = new AlertSoundPlayer(api);
 
-        // Árbol por equipo o por ubicación: preferencia de este puesto.
-        _isTreeByLocation = _settings.TreeByLocation;
-
         _hub.ConfigChanged += entity =>
         {
-            if (entity is "devices" or "channels" or "locations")
+            // La lista del Centro de mando trae también puertas, paneles, cercos…
+            if (entity is "devices" or "channels" or "locations" or "access-devices" or "alarm-panels"
+                or "intercoms" or "speakers" or "io-modules")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadTreeAsync());
             if (entity is "fleet" or "channels" or "locations")
                 Application.Current.Dispatcher.InvokeAsync(() => { if (_fleetWindow?.Vm is { } fleet) _ = fleet.LoadFleetAsync(); });
@@ -916,6 +901,11 @@ public partial class MainViewModel : ObservableObject
             // Un administrador cambió los roles de este usuario o un rol suyo.
             if (entity is "permissions")
                 Application.Current.Dispatcher.InvokeAsync(() => _ = LoadPermissionsAsync());
+            // La lista de páginas web va en el árbol; los tableros compartidos, en su desplegable.
+            if (entity is "web-links" or "speaker-groups")
+                Application.Current.Dispatcher.InvokeAsync(() => _ = LoadTreeAsync());
+            if (entity is "live-views")
+                Application.Current.Dispatcher.InvokeAsync(() => { if (IsViewsPopupOpen) _ = LoadSavedViewsAsync(); });
         };
         _hub.DeviceStatusChanged += dto => Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -1054,6 +1044,7 @@ public partial class MainViewModel : ObservableObject
                     node.Channels.Add(new ChannelNode(node, channel));
                 Devices.Add(node);
             }
+            await LoadResourcesAsync(); // puertas, paneles, cercos… (Centro de mando)
             await LoadLocationTreeAsync(); // mismos nodos de cámara, agrupados por ubicación
             ApplySearchFilter(); // el árbol nuevo debe respetar el filtro vigente
             RefreshLiveChannels(); // y marcar lo que ya está en pantalla

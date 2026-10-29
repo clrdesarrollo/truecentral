@@ -36,6 +36,8 @@ public static class IoModulesApi
             return $"La lectura de las entradas debe ser cada {IoModuleService.MinPollMs} a {IoModuleService.MaxPollMs} ms.";
         if (drivers.Find(request.DriverKey) is not { } factory)
             return $"Driver desconocido: '{request.DriverKey}'.";
+        if (factory.Internal)
+            return "Ese driver lo usa el servidor para las entradas y salidas de otros equipos (terminales de acceso).";
         if (ModelKeyOf(request) is { } key && factory.Create().Models.All(m => !string.Equals(m.Key, key, StringComparison.OrdinalIgnoreCase)))
             return $"Modelo desconocido para ese driver: '{key}'.";
         if (request.Points?.FirstOrDefault(p => (p.Name?.Trim().Length ?? 0) > MaxPointName) is { } longName)
@@ -108,6 +110,36 @@ public static class IoModulesApi
         return changes;
     }
 
+    /// <summary>
+    /// Entradas y salidas de un terminal de acceso: la conexión, el modelo, la
+    /// ubicación y si está activo los pone el terminal. Acá solo se cambian el
+    /// los nombres de sus entradas y salidas (el del módulo es el del terminal).
+    /// </summary>
+    private static async Task<IResult> UpdateTerminalModuleAsync(HttpContext ctx, IoModule module, IoModuleWriteDto request,
+        VmsDbContext db, IHubContext<VmsHub> hub, IoModuleService service, AuditService audit, CancellationToken ct)
+    {
+        if (request.Points?.FirstOrDefault(p => (p.Name?.Trim().Length ?? 0) > MaxPointName) is { } longName)
+            return Error($"El nombre de {Code(longName.Kind, longName.Number)} no puede superar los {MaxPointName} caracteres.");
+        var changes = new List<string>();
+        // La lógica (activa al cerrar o abrir) la informa el terminal: solo los nombres.
+        // Sin nombre vuelve al de fábrica del terminal ("Entrada de alarma 2"), no al rótulo DI1.
+        var names = request.Points?.Select(p => p with
+        {
+            Name = string.IsNullOrWhiteSpace(p.Name) ? EquipmentParts.DefaultPointName(p.Kind, p.Number) : p.Name,
+            Inverted = module.Points.FirstOrDefault(x => x.Kind == p.Kind && x.Number == p.Number)?.Inverted ?? false,
+        }).ToList();
+        changes.AddRange(SyncPoints(module, null, names));
+        module.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync(ctx, "io", "io-module-updated",
+            targetType: "io-module", targetId: module.Id.ToString(), targetName: module.Name,
+            detail: $"Modificó las entradas y salidas del terminal '{module.Name}': " +
+                    (changes.Count > 0 ? string.Join(", ", changes) + "." : "sin cambios."));
+        service.RequestReconcile();
+        await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "io-modules", cancellationToken: ct);
+        return Results.Ok(new { module = service.ToDto(module), warning = (string?)null });
+    }
+
     public static void MapIoModulesApi(this WebApplication app)
     {
         // ------------------------------------------------------------------
@@ -121,7 +153,7 @@ public static class IoModulesApi
                 var driver = f.Create();
                 return new IoDriverDto(f.DriverKey, f.DisplayName, f.DefaultPort,
                     driver.Models.Select(m => new IoModelDto(m.Key, m.Name, m.Inputs, m.Outputs, m.Description)).ToList(),
-                    (int)driver.MinBlinkInterval.TotalMilliseconds);
+                    (int)driver.MinBlinkInterval.TotalMilliseconds, f.Internal);
             }));
         });
 
@@ -151,7 +183,7 @@ public static class IoModulesApi
             if (ApiSecurity.Require(ctx, Permissions.IoConfigure, out _) is { } failure) return failure;
             if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             if (license.Deny(LicenseFeatures.ModuleIo, request.Enabled ? LicenseFeatures.IoModules : null,
-                    await db.IoModules.CountAsync(m => m.Enabled, ct)) is { } denied)
+                    await db.IoModules.CountAsync(m => m.Enabled && m.AccessDeviceId == null && m.DeviceId == null, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "io-module", request.Name.Trim());
             string host = request.Host.Trim();
             if (await db.IoModules.AnyAsync(m => m.Host == host && m.Port == request.Port, ct))
@@ -212,9 +244,11 @@ public static class IoModulesApi
             AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.IoConfigure, out _) is { } failure) return failure;
-            if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             var module = await db.IoModules.Include(m => m.Points).FirstOrDefaultAsync(m => m.Id == id, ct);
             if (module is null) return Results.NotFound();
+            if (module.IsPart)
+                return await UpdateTerminalModuleAsync(ctx, module, request, db, hub, service, audit, ct);
+            if (ValidateWrite(request, drivers) is { } invalid) return Error(invalid);
             string host = request.Host.Trim();
             if (await db.IoModules.AnyAsync(m => m.Id != id && m.Host == host && m.Port == request.Port, ct))
                 return Error("Ya existe otro módulo con esa dirección y puerto.", StatusCodes.Status409Conflict);
@@ -222,7 +256,7 @@ public static class IoModulesApi
             if (locationError is not null) return Error(locationError, StatusCodes.Status404NotFound);
             if (!module.Enabled && request.Enabled
                 && license.Deny(LicenseFeatures.ModuleIo, LicenseFeatures.IoModules,
-                    await db.IoModules.CountAsync(m => m.Enabled && m.Id != id, ct)) is { } denied)
+                    await db.IoModules.CountAsync(m => m.Enabled && m.Id != id && m.AccessDeviceId == null && m.DeviceId == null, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "io-module", module.Name);
 
             var changes = new List<string>();
@@ -283,6 +317,9 @@ public static class IoModulesApi
             if (ApiSecurity.Require(ctx, Permissions.IoConfigure, out _) is { } failure) return failure;
             var module = await db.IoModules.FindAsync([id], ct);
             if (module is null) return Results.NotFound();
+            if (module.IsPart)
+                return Error("Son las entradas y salidas de un terminal de acceso o de una cámara: se quitan desde ese equipo " +
+                             "(Control de acceso → Equipos, o Fuentes de video).", StatusCodes.Status409Conflict);
             // Primero se cierra la conexión: suelta los pulsos y parpadeos en curso.
             await service.DetachAsync(id);
             db.IoModules.Remove(module);

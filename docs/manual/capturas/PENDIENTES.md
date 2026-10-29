@@ -1,6 +1,6 @@
 # Capturas pendientes
 
-Las 30 capturas que faltan en el manual. Cada una está en su capítulo como
+Las 37 capturas que faltan en el manual. Cada una está en su capítulo como
 `#captura-pendiente("…")`. Al tomarla, se reemplaza por
 `#captura("archivo.png", marcas: (…), pie: […])` y se borra de esta lista.
 
@@ -12,10 +12,13 @@ Reglas:
   interesa. Cliente de monitoreo: ventana a 1600×900.
 - Las marcas son la lista numerada de cada fila, en ese orden.
 
-## 3 · Vista en vivo
+## 3 · Centro de mando
 
 | Archivo | Pantalla y estado | Marcas |
 |---|---|---|
+| `cliente-centro-de-mando.png` | Tablero cargado con cámaras, una puerta, un panel de alarma, la tarjeta Estado de los equipos y una página web; la lista RECURSOS abierta en una ubicación con cámaras y recursos (reemplaza a `cliente-vista-en-vivo.png`) | Lista RECURSOS · Buscar… · Tarjetas / Grupos de parlantes / Páginas web · Tableros y su nombre · cuadro de puerta · cuadro de alarma · tarjeta · página web con Recargar y zoom |
+| `cliente-centro-de-mando-tableros.png` | Desplegable TABLEROS con un tablero propio y uno compartido con candado (reemplaza a `cliente-vista-en-vivo-vistas.png`) | Candado · detalle «N cámara(s) y M cuadro(s) más · división · para …» · lápiz · basurero · Nombre del tablero… y Guardar · Compartir con todos |
+| `web-tableros-editor.png` | Configuración › Tableros, Nuevo tablero compartido con división 4, «Solo estos roles:» con un rol, dos cuadros llenos y el cuadro 3 elegido | Nombre · División · Lo ven · grilla con un cuadro lleno y su × · Buscar cámara, puerta, tarjeta, página… · Otra dirección con Rótulo y Poner · Guardar |
 | `cliente-vista-en-vivo-ptz.png` | Panel PTZ de una cámara PTZ, con Shift apretado si se puede | Encabezado · flechas · Zoom/Foco/Iris · Preset con Ir/Guardar/Borrar · Velocidad · píldora PRECISIÓN |
 
 ## 4 · Reproducción
@@ -49,6 +52,7 @@ Reglas:
 | `web-acceso-monitoreo.png` | Puertas normal, mantenida abierta, bloqueada y sin conexión | Casilla y Seleccionar todas · órdenes por lote · filtro y buscador · resumen · una tarjeta · Lo que va pasando · Último acceso |
 | `web-acceso-registros.png` | Últimos 7 días, dos puertas marcadas | Período · Puntos de acceso · Resultado y Credencial · Buscar por · Buscar/Limpiar · reporte Excel/PDF · columnas ordenables · paginación |
 | `web-acceso-equipo.png` | Página de un equipo, pestaña Conexión, una puerta pausada | Encabezado · Revalidar · pestañas · Probar conexión / Guardar cambios · Puertas del equipo |
+| `web-acceso-equipo-partes.png` | Terminal facial, pestaña Conexión, sección Partes del terminal con las tres casillas marcadas; cámara y altavoz en uso, 1 entrada y 1 salida | Título «(incluidas: no ocupan licencia)» · Su cámara y su estado · Su altavoz y su estado · Sus entradas y salidas y su estado |
 
 ## 9 · Citofonía
 
@@ -64,6 +68,7 @@ Reglas:
 |---|---|---|
 | `cliente-vista-en-vivo-parlantes.png` | Panel PARLANTES con dos parlantes marcados | Marcar todos · casillas · Volumen · micrófono, Probar y nivel · Mantener para hablar · Detener · tono · sonido del servidor · biblioteca · texto a voz · estado |
 | `web-parlantes.png` | Tabla y formulario tras Probar conexión | Reproducir en varios… · Agregar parlante · Volumen · Biblioteca · resultado |
+| `cliente-centro-de-mando-grupo-parlantes.png` | Centro de mando con el cuadro del grupo «Perímetro», un integrante sin conexión | Nombre y resumen · Hablar al grupo · Detener · sonido y Reproducir · línea de estado · PARLANTES con el punto de cada integrante |
 
 ## Módulos de E/S
 
@@ -100,10 +105,11 @@ Reglas:
 |---|---|---|
 | `web-fuentes-de-video-cambiar-ip.png` | Cambiar IP | Modo · IP nueva «está libre» · Sincronizar fecha y hora · Aplicar |
 | `web-hora-y-mantenimiento.png` | Terminales de acceso, uno Desfasado | Tarjetas · Política… · Poner en hora · Estado · Corrección automática · Ajustar… / Reiniciar / Restablecer… |
+| `web-fuentes-de-video-partes.png` | Editar dispositivo de una cámara Hikvision con altavoz y entradas y salidas de alarma | Partes del equipo · Puerto HTTP (ISAPI) · Su altavoz, como un parlante más y su texto · Sus entradas y salidas de alarma… y su texto |
 
 ## 15 · Recursos y ubicaciones
 
 | Archivo | Pantalla y estado | Marcas |
 |---|---|---|
-| `cliente-verificacion-aviso.png` | Verificación del aviso con dos cámaras | Consignas · ubicación · cuadro 1 · Abrir en la Vista en vivo · paginador |
-
+| `cliente-verificacion-aviso.png` | Verificación del aviso con dos cámaras | Consignas · ubicación · cuadro 1 · Abrir en el Centro de mando · paginador |
+| `web-recursos-ficha-parametros.png` | Ficha de una puerta de un terminal Hikvision, pestaña Parámetros, un bloque con cambios sin guardar | Pestaña Parámetros · enlace al equipo · bloque de la puerta · Lector 1 · lector de entrada · «Hay cambios sin guardar.» y Guardar |

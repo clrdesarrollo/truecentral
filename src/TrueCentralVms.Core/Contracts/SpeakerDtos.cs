@@ -19,7 +19,7 @@ public sealed record SpeakerDto(
     string? Model,
     string? SerialNumber,
     string? FirmwareVersion,
-    /// <summary>Grupo lógico (sector) para elegir varios parlantes de una vez; libre.</summary>
+    /// <summary>Grupos de parlantes a los que pertenece, unidos por coma ("Perímetro, Todos"); null = ninguno.</summary>
     string? GroupName,
     bool Enabled,
     SpeakerStatus Status,
@@ -52,7 +52,11 @@ public sealed record SpeakerDto(
     /// <summary>Solo agentes: vencimiento del código de enrolamiento vigente (null = no hay uno pendiente).</summary>
     DateTime? EnrollmentExpiresAt = null,
     /// <summary>Solo agentes: el equipo tiene el WebSocket abierto ahora.</summary>
-    bool AgentConnected = false);
+    bool AgentConnected = false,
+    /// <summary>Es el altavoz de un terminal de acceso: se administra desde Control de acceso y no ocupa parlante de la licencia.</summary>
+    int? AccessDeviceId = null,
+    /// <summary>Es el altavoz de una cámara o de un grabador (se administra desde Fuentes de video).</summary>
+    int? DeviceId = null);
 
 public sealed record SpeakerWriteDto(
     string Name,
@@ -64,6 +68,7 @@ public sealed record SpeakerWriteDto(
     /// <summary>Al editar, vacío = conservar la actual.</summary>
     string? Password,
     bool Enabled = true,
+    /// <summary>Ya no se usa: los grupos se arman aparte (<see cref="SpeakerGroupWriteDto"/>).</summary>
     string? GroupName = null,
     /// <summary>Ubicación en el árbol de Recursos: null = conservar la actual (en el alta,
     /// por ubicar); 0 = por ubicar.</summary>
@@ -146,3 +151,9 @@ public sealed record SpeakerTtsLanguageDto(string Key, string Label);
 /// <summary>Parlante elegible en la acción "sonar parlante" de las automatizaciones.</summary>
 public sealed record WorkflowSpeakerDto(int Id, string Name, string? GroupName, bool Enabled,
     bool SupportsLibrary, bool SupportsTts, bool SupportsLiveAudio);
+
+/// <summary>Grupo de parlantes con sus integrantes.</summary>
+public sealed record SpeakerGroupDto(int Id, string Name, string? Description, IReadOnlyList<int> SpeakerIds);
+
+/// <summary>Alta o modificación de un grupo de parlantes.</summary>
+public sealed record SpeakerGroupWriteDto(string Name, string? Description, List<int> SpeakerIds);

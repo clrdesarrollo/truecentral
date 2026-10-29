@@ -83,6 +83,8 @@ async function renderCercoPanels() {
 
   // Delegación de acciones (sobrevive a las actualizaciones incrementales).
   $("#view").addEventListener("click", onCercoAdminClick);
+  // «Agregar panel» sube a la cabecera (fuera de #view): su clic va directo.
+  $("#btn-cerco-new")?.addEventListener("click", () => cercoPanelModal(null));
 
   // Tiempo real: actualizar la fila del panel que cambió (y el modal de configuración si está abierto).
   cercoBind("CercoPanelStateChanged", (p) => {
@@ -130,7 +132,6 @@ function cercoRow(p, isAdmin) {
 async function onCercoAdminClick(e) {
   const btn = e.target.closest("button");
   if (!btn) return;
-  if (btn.id === "btn-cerco-new") return cercoPanelModal(null);
   const tr = btn.closest("tr[data-id]");
   if (!tr) return;
   const id = Number(tr.dataset.id), name = tr.dataset.name;
@@ -151,7 +152,7 @@ async function cercoPanelModal(panel) {
   openModal(`
     <h3>${editing ? "Editar" : "Agregar"} panel de cerco</h3>
     <div class="field"><label>Nombre</label><input id="c-name" maxlength="128" value="${editing ? esc(panel.name) : ""}" placeholder="Cerco perímetro norte"></div>
-    ${locationFieldHtml("c-location", places, editing ? panel.locationId ?? null : null)}
+    ${locationFieldHtml("c-location", places, editing ? panel.locationId ?? null : null, null, { equipment: true, isNew: !editing })}
     <div class="field checkbox"><label><input type="checkbox" id="c-enabled" ${!editing || panel.enabled ? "checked" : ""}> Habilitado</label></div>
     ${editing ? "" : `<div class="info-box">Al guardar, el sistema genera el <b>ID de equipo</b> (6 dígitos) y el <b>código de enrolamiento</b> (8 dígitos, válido 48 h). Se muestran una sola vez: el instalador los carga en el panel.</div>`}
     <div class="modal-actions">
@@ -163,6 +164,7 @@ async function cercoPanelModal(panel) {
     const body = { name: $("#c-name").value.trim(), locationId: locationFieldValue("c-location"), enabled: $("#c-enabled").checked };
     if (!body.name) { toast("El nombre es obligatorio.", true); return; }
     try {
+      await locationFieldCommit("c-location", body);
       if (editing) {
         const dto = await Api.put(`/api/cerco/panels/${panel.id}`, body); closeModal(); toast("Panel actualizado.");
         const tr = document.getElementById(`cerco-row-${panel.id}`);

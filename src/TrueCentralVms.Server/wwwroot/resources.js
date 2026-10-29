@@ -65,7 +65,9 @@ const resState = {
   locations: [],
   byId: new Map(),
   children: new Map(),      // id del padre ("root" = raíz) → ubicaciones hijas ordenadas
-  resources: [],
+  resources: [],             // los que se muestran (sin los deshabilitados, salvo que se pida verlos)
+  allResources: [],          // todos, tal como llegan del servidor
+  showDisabled: false,       // interruptor «Mostrar deshabilitados» (recordado en este navegador)
   selected: "all",          // "all" | "pending" | id de ubicación
   kind: "",                 // filtro por tipo de recurso ("" = todos)
   source: "",               // filtro por equipo "módulo:id" ("" = todos)
@@ -83,7 +85,14 @@ const resState = {
 
 try {
   for (const id of JSON.parse(localStorage.getItem("tcvms.res.collapsed") || "[]")) resState.collapsed.add(id);
+  resState.showDisabled = localStorage.getItem("tcvms.res.showDisabled") === "1";
 } catch { /* preferencia corrupta: se ignora */ }
+
+/** Lo que se muestra: los deshabilitados (canales fuera de la licencia, puertas apagadas…) solo con el interruptor. */
+function resApplyDisabled() {
+  resState.resources = resState.showDisabled
+    ? resState.allResources : resState.allResources.filter((r) => r.enabled !== false);
+}
 
 /** Suelta hub y sondeo al salir de la página (lo llama navigate() de app.js). */
 function resourcesDetachHub() {
@@ -202,7 +211,8 @@ async function resLoad({ quiet = false } = {}) {
   if (quiet && signature === resState.signature) return;
   resState.signature = signature;
   resState.locations = locations;
-  resState.resources = resources;
+  resState.allResources = resources;
+  resApplyDisabled();
   resIndex();
   resDraw();
 }
@@ -231,6 +241,11 @@ async function renderResources() {
         <div class="res-filters">
           <input type="search" id="res-text" placeholder="Buscar por nombre, equipo o estado…" value="${esc(resState.text)}">
           <select id="res-source" title="Solo los recursos de un equipo"></select>
+          <label class="ui-switch" title="Canales fuera de la licencia, puertas o áreas apagadas…: ocultos salvo que se pidan">
+            <input type="checkbox" id="res-show-disabled"${resState.showDisabled ? " checked" : ""}>
+            <span class="ui-switch-track" aria-hidden="true"></span>
+            <span>Mostrar deshabilitados <span class="muted" id="res-disabled-count"></span></span>
+          </label>
         </div>
         <div id="res-bulk"></div>
         <div id="res-table"></div>`}
@@ -240,6 +255,13 @@ async function renderResources() {
   if (!resState.sheet) {
     $("#res-text").addEventListener("input", (e) => { resState.text = e.target.value; resDrawList(); });
     $("#res-source").addEventListener("change", (e) => { resState.source = e.target.value; resDrawList(); });
+    $("#res-show-disabled").addEventListener("change", (e) => {
+      resState.showDisabled = e.target.checked;
+      try { localStorage.setItem("tcvms.res.showDisabled", resState.showDisabled ? "1" : "0"); } catch { /* modo privado */ }
+      resApplyDisabled();
+      resIndex();
+      resDraw();
+    });
     resBindList(isAdmin);
   }
   resBindTree(isAdmin);
@@ -258,6 +280,8 @@ async function renderResources() {
 }
 
 function resDraw() {
+  const hidden = resState.allResources.filter((r) => r.enabled === false).length;
+  if ($("#res-disabled-count")) $("#res-disabled-count").textContent = hidden ? `(${hidden})` : "";
   resDrawTree();
   if (resState.sheet) { resSheetRefreshState(); return; } // con la ficha abierta, la lista no está en pantalla
   resDrawHead();
@@ -316,6 +340,8 @@ function resDrawHead() {
   } else if (sel === "pending") {
     title = "Por ubicar";
     note = "Recursos sin ubicación. Aquí llega lo que descubre un equipo nuevo: márquelos y use «Mover a…», o arrástrelos al árbol.";
+    if (isAdmin && resInSelection().length)
+      actions = `<button class="btn small" id="res-pending-by-equipment" title="Cada recurso a una ubicación con el nombre de su equipo">Una ubicación por equipo…</button>`;
   } else {
     const loc = resState.byId.get(sel);
     const path = resPath(sel);
@@ -347,6 +373,8 @@ function resDrawHead() {
       <button class="btn ghost small" type="button" data-op="location:${sel}" data-cmd="arm-stay">Armar parcial</button>
       <button class="btn ghost small" type="button" data-op="location:${sel}" data-cmd="disarm">Desarmar</button>
     </div>` : ""}`;
+  $("#res-pending-by-equipment")?.addEventListener("click", () =>
+    resByEquipmentModal(resState.allResources.filter((r) => r.locationId == null)));
   if (typeof sel === "number") {
     $("#res-loc-child")?.addEventListener("click", () => resLocationModal(null, sel));
     $("#res-loc-edit")?.addEventListener("click", () => resLocationModal(resState.byId.get(sel), null));
@@ -478,10 +506,12 @@ function resDrawBulk(list) {
     <div class="res-bulk">
       <span class="grow"><b>${checked.length}</b> marcado(s)${hidden > 0 ? ` <span class="muted">(${hidden} fuera de la vista actual)</span>` : ""}</span>
       <button class="btn small" id="res-move">Mover a…</button>
+      <button class="btn ghost small" id="res-by-equipment" title="Cada recurso a una ubicación con el nombre de su equipo">Una por equipo…</button>
       ${checked.some((r) => r.locationId != null) ? `<button class="btn ghost small" id="res-unlocate">Quitar ubicación</button>` : ""}
       <button class="btn ghost small" id="res-clear">Desmarcar</button>
     </div>`;
   $("#res-move").addEventListener("click", () => resMoveModal(checked));
+  $("#res-by-equipment").addEventListener("click", () => resByEquipmentModal(checked));
   $("#res-unlocate")?.addEventListener("click", () => resAssign(null, checked));
   $("#res-clear").addEventListener("click", () => { resState.checked.clear(); resDrawList(); });
 }
@@ -791,6 +821,65 @@ function resMoveModal(resources) {
   });
 }
 
+/**
+ * «Una ubicación por equipo»: cada recurso va a una ubicación con el nombre de
+ * su equipo (el grabador de un canal, la controladora de una puerta, el panel
+ * de un área; el equipo mismo si es un parlante o un citófono) dentro de la
+ * que se elija; si ahí ya hay una con ese nombre, se usa esa. Antes de
+ * hacerlo se muestra qué ubicaciones usaría y cuáles crearía.
+ */
+function resByEquipmentModal(resources) {
+  if (!resources.length) return;
+  const refs = resources.map((r) => ({ kind: r.kind, id: r.id }));
+  const start = typeof resState.selected === "number" ? resState.selected : null;
+  openModal(`
+    <h3>Una ubicación por equipo</h3>
+    <p class="muted" style="margin-top:-8px">${resources.length} recurso(s): cada uno va a una ubicación con el nombre de su equipo. El equipo queda ahí también, así lo que descubra después llega a la misma ubicación.</p>
+    <div class="field"><label for="res-eq-parent">Dentro de</label>
+      <select id="res-eq-parent"><option value="">La raíz del árbol</option>${resLocationOptions(start)}</select></div>
+    <div id="res-eq-plan"><div class="muted">Calculando…</div></div>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" id="res-eq-cancel">Cancelar</button>
+      <button class="btn" type="button" id="res-eq-ok" disabled>Ubicar</button>
+    </div>`, true);
+  const request = (dryRun) => Api.post("/api/resources/locate-by-equipment", {
+    parentId: $("#res-eq-parent").value ? Number($("#res-eq-parent").value) : null, resources: refs, dryRun,
+  });
+  const preview = async () => {
+    $("#res-eq-ok").disabled = true;
+    $("#res-eq-plan").innerHTML = `<div class="muted">Calculando…</div>`;
+    try {
+      const plan = await request(true);
+      $("#res-eq-plan").innerHTML = `
+        <div class="info-box">${esc(plan.message)}</div>
+        <div class="res-loc-pick res-eq-plan">${plan.locations.map((l) => `
+          <div class="res-eq-row">${resIcon(LOC_KINDS.Sector.icon)} <b>${esc(l.name)}</b>
+            <span class="muted">${l.resources} recurso(s)</span>
+            <span class="tag ${l.created ? "on" : "operator"}">${l.created ? "nueva" : "ya existe"}</span></div>`).join("")}
+        </div>`;
+      $("#res-eq-ok").disabled = false;
+    } catch (err) {
+      $("#res-eq-plan").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+    }
+  };
+  $("#res-eq-parent").addEventListener("change", preview);
+  $("#res-eq-cancel").addEventListener("click", closeModal);
+  $("#res-eq-ok").addEventListener("click", async () => {
+    $("#res-eq-ok").disabled = true;
+    try {
+      const result = await request(false);
+      closeModal();
+      toast(result.message);
+      for (const r of resources) resState.checked.delete(resKey(r));
+      await resLoad();
+    } catch (err) {
+      $("#res-eq-ok").disabled = false;
+      toast(err.error, true);
+    }
+  });
+  preview();
+}
+
 // ---------------------------------------------------------------------------
 // Ficha del recurso: General, Equipo, Cámaras asociadas, Automatizaciones e
 // Historial. Se abre desde el nombre de un recurso en la lista y tiene su
@@ -800,6 +889,9 @@ function resMoveModal(resources) {
 const RES_TABS = [
   { key: "general", label: "General" },
   { key: "device", label: "Equipo" },
+  // La configuración de la puerta y sus lectores en el equipo (contacto, botón
+  // de salida, tiempos, umbrales del rostro…): la de la página del equipo.
+  { key: "params", label: "Parámetros", kinds: ["Door"], perm: "access.configure" },
   { key: "cameras", label: "Cámaras asociadas" },
   { key: "workflows", label: "Automatizaciones" },
   { key: "history", label: "Historial" },
@@ -909,7 +1001,7 @@ async function resOpenSheet() {
         : err.error)}</div>`;
     return;
   }
-  if (!sheet.detail.supportsCameras && sheet.tab === "cameras") sheet.tab = "general";
+  if (!resSheetTabs(sheet.detail).some((t) => t.key === sheet.tab)) sheet.tab = "general";
   resDrawSheet();
 }
 
@@ -917,7 +1009,7 @@ async function resOpenSheet() {
 function resSheetRefreshState() {
   const sheet = resState.sheet;
   if (!sheet?.detail || !$("#rs-state")) return;
-  const fresh = resState.resources.find((r) => r.kind === sheet.kind && r.id === sheet.id);
+  const fresh = resState.allResources.find((r) => r.kind === sheet.kind && r.id === sheet.id);
   if (!fresh) return;
   sheet.detail.resource = { ...sheet.detail.resource, health: fresh.health, state: fresh.state };
   $("#rs-state").innerHTML = resStateTag(sheet.detail.resource);
@@ -927,7 +1019,7 @@ function resDrawSheet() {
   const { detail, tab } = resState.sheet;
   const r = detail.resource;
   const kind = RES_KINDS[r.kind];
-  const tabs = RES_TABS.filter((t) => t.key !== "cameras" || detail.supportsCameras);
+  const tabs = resSheetTabs(detail);
   $("#page-title").textContent = `Recursos · ${r.name}`;
   $("#res-sheet").innerHTML = `
     <div class="res-sheet-back"><a class="btn ghost small" href="#/resources">← Volver a la lista</a></div>
@@ -951,6 +1043,12 @@ function resDrawSheet() {
   resDrawSheetTab();
 }
 
+/** Pestañas que corresponden a este recurso (Parámetros: solo puertas, con permiso de configurar equipos). */
+function resSheetTabs(detail) {
+  return RES_TABS.filter((t) => (t.key !== "cameras" || detail.supportsCameras) &&
+    (!t.kinds || t.kinds.includes(detail.resource.kind)) && (!t.perm || Perms.can(t.perm)));
+}
+
 function resSheetTab(tab) {
   const sheet = resState.sheet;
   sheet.tab = tab;
@@ -961,6 +1059,39 @@ function resSheetTab(tab) {
     b.setAttribute("aria-selected", String(b.dataset.tab === tab));
   });
   resDrawSheetTab();
+}
+
+// ---------- Parámetros (puertas) ----------
+// Los mismos bloques que las pestañas Puertas y Lectores de la página del
+// equipo, pero solo los de ESTA puerta: ella y sus lectores de entrada y
+// salida. Se leen del equipo al abrir la pestaña y se le escriben al guardar.
+
+async function resDrawSheetParams(body) {
+  const sheet = resState.sheet;
+  body.innerHTML = `<div class="muted">Leyendo la configuración del equipo… (puede tardar unos segundos)</div>`;
+  let data;
+  try { data = sheet.params ??= await Api.get(`/api/access/doors/${sheet.id}/settings`); }
+  catch (err) {
+    if (resState.sheet !== sheet || sheet.tab !== "params") return;
+    body.innerHTML = `
+      <div class="error-box">${esc(err.error)}</div>
+      ${err.status === 501 ? "" : `<button class="btn ghost small" type="button" id="rs-params-retry">Volver a intentar</button>`}`;
+    $("#rs-params-retry")?.addEventListener("click", () => resDrawSheetTab());
+    return;
+  }
+  // Si cambió de pestaña o de ficha mientras el equipo contestaba, no se pisa lo nuevo.
+  if (resState.sheet !== sheet || sheet.tab !== "params") return;
+  body.innerHTML = `
+    <p class="muted res-tab-intro">Parámetros de esta puerta y de sus lectores tal como están en el equipo
+      <a href="#/access/device?id=${data.accessDeviceId}&tab=doors">${esc(data.accessDeviceName)}</a>
+      (puerta ${data.doorNumber}): se leen al abrir esta pestaña y se escriben en el equipo al guardar.</p>
+    ${data.notes.length ? `<div class="info-box">${data.notes.map(esc).join("<br>")}</div>` : ""}
+    ${data.sections.length ? data.sections.map(acdSectionHtml).join("")
+      : `<div class="info-box">El equipo no informó parámetros de esta puerta.</div>`}`;
+  data.sections.forEach((s) => acdBindSection(s, {
+    url: `/api/access/doors/${sheet.id}/settings/${encodeURIComponent(s.key)}`,
+    sections: data.sections,
+  }));
 }
 
 async function resDrawSheetTab() {
@@ -979,8 +1110,11 @@ async function resDrawSheetTab() {
       body.innerHTML = resSheetDeviceHtml(sheet.detail);
       resBindSheetDevice();
       break;
+    case "params":
+      await resDrawSheetParams(body);
+      break;
     case "cameras":
-      body.innerHTML = resSheetCamerasHtml(sheet.detail);
+      body.innerHTML = resSheetCamerasHtml(sheet.detail, sheet.kind);
       resBindSheetCameras();
       break;
     case "workflows":
@@ -1082,7 +1216,11 @@ function resBindSheetDevice() {
 
 // ---------- Cámaras asociadas ----------
 
-function resSheetCamerasHtml(d) {
+function resSheetCamerasHtml(d, kind) {
+  // La cámara fija de un citófono es la de su frente; la de una puerta, la del propio terminal facial.
+  const fixedTag = kind === "Door"
+    ? `<span class="tag operator" title="La cámara del propio terminal de acceso: se quita desde su equipo, en Control de acceso">Cámara del terminal</span>`
+    : `<span class="tag operator" title="Se cambia en Dispositivos → Citofonía">Cámara del frente</span>`;
   const isAdmin = Perms.can("resources.manage");
   const editable = d.cameras.filter((c) => !c.fixed);
   const cards = d.cameras.map((c, i) => {
@@ -1099,7 +1237,7 @@ function resSheetCamerasHtml(d) {
           <div class="res-sub res-sub-flat">${esc(c.deviceName)} · canal ${c.channelNumber}</div>
           <div class="res-cam-tags">
             ${i === 0 ? `<span class="tag admin">Principal</span>` : ""}
-            ${c.fixed ? `<span class="tag operator" title="Se cambia en Dispositivos → Citofonía">Cámara del frente</span>` : ""}
+            ${c.fixed ? fixedTag : ""}
             ${c.isOnline ? "" : `<span class="tag off">Sin señal</span>`}
           </div>
         </div>

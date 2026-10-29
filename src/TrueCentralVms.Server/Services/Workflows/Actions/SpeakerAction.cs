@@ -131,9 +131,10 @@ public sealed class SpeakerAction(WorkflowStore store, SpeakerService speakers, 
         {
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
-            ids.AddRange(await db.Speakers.AsNoTracking()
-                .Where(s => s.Enabled && s.GroupName != null && s.GroupName.ToLower() == group.ToLower())
-                .Select(s => s.Id).ToListAsync(ct));
+            string name = group.ToLower();
+            ids.AddRange(await db.SpeakerGroupMembers.AsNoTracking()
+                .Where(m => m.Group!.Name.ToLower() == name && m.Speaker!.Enabled)
+                .Select(m => m.SpeakerId).ToListAsync(ct));
         }
         ids = ids.Distinct().ToList();
         if (ids.Count == 0)

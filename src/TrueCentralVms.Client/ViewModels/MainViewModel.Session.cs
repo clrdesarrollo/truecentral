@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Threading;
 using TrueCentralVms.Client.Services;
+using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Core.Drivers;
 
 namespace TrueCentralVms.Client.ViewModels;
@@ -105,14 +106,16 @@ public partial class MainViewModel
             grid.LayoutName = layout.Key;
             grid.Columns = layout.Columns;
             grid.Rows = layout.Rows;
-            grid.Cells = cells.Select((cell, index) => (cell, index))
-                .Where(x => x.cell.AssignedChannel is not null)
-                .Select(x => new LiveSessionCell
-                {
-                    Index = x.index,
-                    ChannelId = x.cell.AssignedChannel!.Channel.Id,
-                    Profile = (int)x.cell.Profile,
-                })
+            // Cámaras y también recursos, tarjetas y páginas web (mismo formato que los tableros).
+            grid.Cells = cells.Select((cell, index) => DashboardItemOf(cell, index))
+                .OfType<LiveViewItemDto>()
+                .Select(item => DashboardItemKinds.IsCamera(item.Kind)
+                    ? new LiveSessionCell { Index = item.CellIndex, ChannelId = item.ChannelId, Profile = item.StreamType }
+                    : new LiveSessionCell
+                    {
+                        Index = item.CellIndex, Kind = item.Kind, RefId = item.RefId, Ref = item.Ref, Title = item.Title,
+                        Zoom = item.Zoom,
+                    })
                 .ToList();
         }
     }
@@ -147,7 +150,7 @@ public partial class MainViewModel
 
         _restoringSession = true;
         IsBulkOpening = true;
-        BulkOpeningText = $"Volviendo a abrir la última sesión ({total} cámara(s))…";
+        BulkOpeningText = $"Volviendo a abrir la última sesión ({total} cuadro(s))…";
         StatusMessage = BulkOpeningText;
         OpenLiveView();
         var loading = Application.Current.MainWindow is { IsLoaded: true } owner
@@ -192,8 +195,8 @@ public partial class MainViewModel
             }
 
             StatusMessage = missing == 0
-                ? $"Última sesión restaurada: {opened} cámara(s) en pantalla."
-                : $"Última sesión restaurada: {opened} cámara(s) en pantalla; {missing} ya no está(n) disponible(s) " +
+                ? $"Última sesión restaurada: {opened} cuadro(s) en pantalla."
+                : $"Última sesión restaurada: {opened} cuadro(s) en pantalla; {missing} ya no está(n) disponible(s) " +
                   "y su cuadro quedó libre.";
         }
         catch (Exception ex)
@@ -212,20 +215,33 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// Abre las cámaras guardadas en sus cuadros, por tandas (mismo criterio
-    /// que abrir un equipo completo). Devuelve cuántas se abrieron y cuántas ya
-    /// no estaban en el inventario de este usuario.
+    /// Vuelve a poner en sus cuadros los recursos, tarjetas y páginas web, y
+    /// abre las cámaras por tandas (mismo criterio que abrir un equipo
+    /// completo). Devuelve cuántos cuadros se abrieron y cuántos ya no estaban
+    /// (o ya no están al alcance de este usuario).
     /// </summary>
-    private static async Task<(int Opened, int Missing)> OpenSessionCellsAsync(IList<VideoCellViewModel> cells,
+    private async Task<(int Opened, int Missing)> OpenSessionCellsAsync(IList<VideoCellViewModel> cells,
         IReadOnlyList<LiveSessionCell> saved, IReadOnlyDictionary<int, ChannelNode> byId, Action<int> progress)
     {
-        var targets = saved
-            .Where(c => c.Index >= 0 && c.Index < cells.Count && byId.ContainsKey(c.ChannelId))
+        var inGrid = saved
+            .Where(c => c.Index >= 0 && c.Index < cells.Count)
             .GroupBy(c => c.Index).Select(g => g.First())
             .OrderBy(c => c.Index)
             .ToList();
-        int missing = saved.Count - targets.Count;
-        if (missing > 0) progress(missing);
+        var cameras = inGrid.Where(c => c.Kind is null).ToList();
+        var targets = cameras.Where(c => byId.ContainsKey(c.ChannelId)).ToList();
+        int missing = saved.Count - inGrid.Count + cameras.Count - targets.Count;
+        int panels = 0;
+        foreach (var item in inGrid.Where(c => c.Kind is not null))
+        {
+            if (PanelFor(item.Kind, item.RefId, item.Ref, item.Title, item.Zoom) is { } panel)
+            {
+                await cells[item.Index].ShowPanelAsync(panel);
+                panels++;
+            }
+            else missing++;
+        }
+        if (missing + panels > 0) progress(missing + panels);
 
         for (int i = 0; i < targets.Count; i += OpenBatchSize)
         {
@@ -241,6 +257,6 @@ public partial class MainViewModel
             progress(upTo - i);
             await BreatheAsync();
         }
-        return (targets.Count, missing);
+        return (targets.Count + panels, missing);
     }
 }

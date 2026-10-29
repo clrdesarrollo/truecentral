@@ -115,6 +115,54 @@ public class AccessDevice : IIsupEquipment
     /// </summary>
     public bool LiveEvents { get; set; } = true;
 
+    /// <summary>
+    /// Su cámara propia (terminal facial): puerto RTSP que declaró, o null si
+    /// no tiene. El VMS la muestra como una cámara más
+    /// (<see cref="Device.AccessDeviceId"/>), incluida con el equipo: no ocupa
+    /// canal de video de la licencia.
+    /// </summary>
+    public int? CameraRtspPort { get; set; }
+
+    /// <summary>
+    /// Ya se le preguntó qué partes tiene —cámara, altavoz, entradas y salidas—
+    /// (al validarlo; a los agregados antes, en su primer sondeo en línea).
+    /// </summary>
+    public bool PartsChecked { get; set; }
+
+    /// <summary>
+    /// Mostrar su cámara como una cámara más. Si el administrador la quita, no
+    /// vuelve sola al revalidar el equipo.
+    /// </summary>
+    public bool UseCamera { get; set; } = true;
+
+    /// <summary>
+    /// Su altavoz (el audio bidireccional de los faciales): se ofrece como un
+    /// parlante más (<see cref="Speaker.AccessDeviceId"/>), incluido con el equipo.
+    /// </summary>
+    public bool HasSpeaker { get; set; }
+
+    /// <summary>Ofrecer su altavoz como parlante. Si se quita, no vuelve solo al revalidar.</summary>
+    public bool UseSpeaker { get; set; } = true;
+
+    /// <summary>Su altavoz va por el audio bidireccional del SDK (puerto 8000), no por ISAPI.</summary>
+    public bool SpeakerViaSdk { get; set; }
+
+    /// <summary>
+    /// Sus entradas y salidas de alarma (null = no tiene): se ofrecen como un
+    /// módulo de E/S (<see cref="IoModule.AccessDeviceId"/>), incluido con el equipo.
+    /// </summary>
+    public int? IoInputs { get; set; }
+    public int? IoOutputs { get; set; }
+
+    /// <summary>Ofrecer sus entradas y salidas como módulo de E/S. Si se quita, no vuelve solo.</summary>
+    public bool UseIo { get; set; } = true;
+
+    /// <summary>Sus entradas y salidas se leen y operan por el SDK (puerto 8000), no por ISAPI.</summary>
+    public bool IoViaSdk { get; set; }
+
+    /// <summary>Por qué alguna de sus partes no está en uso aunque la tenga, o null.</summary>
+    public string? PartsNote { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

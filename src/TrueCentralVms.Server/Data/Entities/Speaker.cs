@@ -36,11 +36,30 @@ public class Speaker : ILocatable, IIsupEquipment
     /// <summary>SHA-256 del código de enrolamiento vigente (de un solo uso).</summary>
     public string? EnrollmentCodeHash { get; set; }
     public DateTime? EnrollmentExpiresAt { get; set; }
-    /// <summary>Grupo lógico (sector) para elegir varios parlantes de una vez; libre.</summary>
-    public string? GroupName { get; set; }
+    /// <summary>Grupos de parlantes a los que pertenece (puede estar en varios).</summary>
+    public List<SpeakerGroupMember> GroupMemberships { get; set; } = [];
 
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
+
+    /// <summary>
+    /// Altavoz de un terminal de acceso (facial): el VMS lo crea y lo mantiene a
+    /// partir del terminal (dirección, credenciales, nombre y ubicación son los
+    /// suyos) y se borra con él. No se edita en Parlantes IP y no ocupa parlante
+    /// de la licencia.
+    /// </summary>
+    public int? AccessDeviceId { get; set; }
+    public AccessDevice? AccessDevice { get; set; }
+
+    /// <summary>
+    /// Altavoz de una cámara o de un grabador (su salida de audio): igual que el
+    /// de un terminal, lo crea y lo mantiene el VMS a partir del equipo de video.
+    /// </summary>
+    public int? DeviceId { get; set; }
+    public Device? Device { get; set; }
+
+    /// <summary>Es parte de otro equipo (terminal o cámara): se administra desde ese equipo.</summary>
+    public bool IsPart => AccessDeviceId is not null || DeviceId is not null;
 
     // Datos obtenidos del parlante al validar credenciales.
     public string? Model { get; set; }
@@ -67,4 +86,28 @@ public class Speaker : ILocatable, IIsupEquipment
     public int? Volume { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Grupo de parlantes ("Perímetro", "Bodega", "Todos"): para hablar o hacer
+/// sonar varios de una vez desde el Centro de mando, un tablero o una
+/// automatización. Un parlante puede estar en varios grupos.
+/// </summary>
+public class SpeakerGroup
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public string? Description { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public List<SpeakerGroupMember> Members { get; set; } = [];
+}
+
+/// <summary>Parlante de un grupo.</summary>
+public class SpeakerGroupMember
+{
+    public int SpeakerGroupId { get; set; }
+    public SpeakerGroup? Group { get; set; }
+    public int SpeakerId { get; set; }
+    public Speaker? Speaker { get; set; }
 }

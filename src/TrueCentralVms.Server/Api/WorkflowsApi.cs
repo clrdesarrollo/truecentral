@@ -320,7 +320,8 @@ public static class WorkflowsApi
             var devices = await db.Devices.AsNoTracking().OrderBy(d => d.Name).ToListAsync(ct);
             return Results.Ok(devices.Where(d => scope.CanViewDevice(d.Id)).Select(d =>
             {
-                var caps = drivers.Find(d.DriverKey)?.Capabilities;
+                // La cámara de un terminal de acceso sirve para «Conexión de un equipo», no para analíticas ni patentes.
+                var caps = d.AccessDeviceId is null ? drivers.Find(d.DriverKey)?.Capabilities : null;
                 return new WorkflowDeviceDto(d.Id, d.Name, d.DriverKey, caps?.SupportsEvents ?? false,
                     caps?.SupportsAnpr ?? false, d.AnprEnabled);
             }));
@@ -337,13 +338,20 @@ public static class WorkflowsApi
         });
 
         // Parlantes elegibles en la acción "sonar parlante IP" (inventario del módulo Parlantes).
-        app.MapGet("/api/workflows/speakers", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/workflows/speakers", async (HttpContext ctx, VmsDbContext db, SpeakerService service, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
-            var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.GroupName).ThenBy(s => s.Name).ToListAsync(ct);
-            return Results.Ok(speakers.Where(s => scope.CanViewSpeaker(s.Id)).Select(s => new WorkflowSpeakerDto(s.Id, s.Name, s.GroupName, s.Enabled,
+            var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
+            return Results.Ok(speakers.Where(s => scope.CanViewSpeaker(s.Id)).Select(s => new WorkflowSpeakerDto(s.Id, s.Name, service.GroupsOf(s.Id), s.Enabled,
                 s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio)));
+        });
+
+        // Grupos de parlantes elegibles en la misma acción (se guardan por nombre).
+        app.MapGet("/api/workflows/speaker-groups", (HttpContext ctx, SpeakerService service) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsView, out _) is { } failure) return failure;
+            return Results.Ok(service.Groups);
         });
 
         // Módulos de E/S con sus entradas y salidas (acción "operar relé" y disparador de entradas).

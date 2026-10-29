@@ -313,7 +313,7 @@ async function alarmPanelModal(panel) {
         <input id="al-name" required maxlength="128" value="${esc(panel?.name ?? "")}" placeholder="Panel bodega, Central oficina...">
       </div>
       ${locationFieldHtml("al-location", places, panel?.locationId ?? null,
-        "Sus áreas y zonas la heredan; las que ubique aparte en Recursos se quedan donde están.")}
+        "Sus áreas y zonas la heredan; las que ubique aparte en Recursos se quedan donde están.", { equipment: true, isNew })}
       <div class="field">
         <label>Marca / conexión</label>
         <select id="al-driver">
@@ -435,6 +435,7 @@ async function alarmPanelModal(panel) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
+      await locationFieldCommit("al-location", body);
       const saved = isNew ? await Api.post("/api/alarms/panels", body) : await Api.put(`/api/alarms/panels/${panel.id}`, body);
       closeModal();
       // Por ISUP el panel puede no haberse conectado todavía: se guarda igual y se avisa qué falta.

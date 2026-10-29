@@ -73,7 +73,9 @@ public sealed class AccessControlService(
         SupportsCardCapture(d.DriverKey),
         d.IsupDeviceId,
         d.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: d.DisabledByLicense, HolidayNote: d.HolidayNote,
-        LiveEvents: d.LiveEvents);
+        LiveEvents: d.LiveEvents, HasCamera: d.CameraRtspPort is not null, UseCamera: d.UseCamera,
+        HasSpeaker: d.HasSpeaker, UseSpeaker: d.UseSpeaker, IoInputs: d.IoInputs ?? 0, IoOutputs: d.IoOutputs ?? 0, UseIo: d.UseIo,
+        PartsNote: d.PartsNote);
 
     /// <summary>Puerta con su equipo, para el monitoreo en vivo y los niveles de acceso.</summary>
     public AccessDoorStateDto ToDoorDto(AccessDoor door)
@@ -273,6 +275,7 @@ public sealed class AccessControlService(
 
         using var writeScope = scopeFactory.CreateScope();
         var writeDb = writeScope.ServiceProvider.GetRequiredService<VmsDbContext>();
+        bool partsChanged = false;
         foreach (var (snapshot, result) in results)
         {
             var device = await writeDb.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == snapshot.Id, ct);
@@ -282,6 +285,8 @@ public sealed class AccessControlService(
             device.LastError = result.Error;
             if (result.Status == AccessDeviceStatus.Online) device.LastSeenAt = DateTime.UtcNow;
             await ApplyDoorStatusAsync(writeDb, device, result.Doors, ct);
+            if (result.PartsRead && !device.PartsChecked)
+                partsChanged |= await ApplyPartsAsync(writeDb, writeScope.ServiceProvider, device, result.Parts, ct);
             if (previous == result.Status) continue;
             await writeDb.SaveChangesAsync(ct);
 
@@ -304,10 +309,40 @@ public sealed class AccessControlService(
                         result.Status.ToString(), result.Error));
         }
         await writeDb.SaveChangesAsync(ct);
+        if (partsChanged)
+        {
+            writeScope.ServiceProvider.GetRequiredService<Auth.UserScopeService>().Invalidate();
+            await Api.AccessApi.PartsChangedAsync(writeScope.ServiceProvider, ct);
+        }
     }
 
-    private async Task<(AccessDeviceStatus Status, string? Error, IReadOnlyList<AccessDoorStatus> Doors)> PollOneAsync(
-        AccessDevice device, CancellationToken ct)
+    /// <summary>
+    /// Primera lectura de las partes (cámara, altavoz, entradas y salidas) de un
+    /// terminal agregado antes de que el VMS las supiera ver: las que tenga se
+    /// agregan como recursos, igual que al darlo de alta hoy. Devuelve true si
+    /// cambió alguna.
+    /// </summary>
+    private async Task<bool> ApplyPartsAsync(VmsDbContext db, IServiceProvider services, AccessDevice device,
+        DeviceParts? parts, CancellationToken ct)
+    {
+        Api.AccessApi.ApplyParts(device, device.Model, parts);
+        var changes = await EquipmentParts.SyncAsync(db, device, device.LocationId, services, ct);
+        bool any = db.ChangeTracker.HasChanges();
+        await db.SaveChangesAsync(ct);
+        foreach (var change in changes)
+        {
+            logger.LogInformation("Terminal '{Device}' ({Host}): {Change}.", device.Name, device.Host, change);
+            await audit.LogSystemAsync("access", "device-parts-added",
+                targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
+                detail: $"El terminal de acceso '{device.Name}': el servidor {change}.");
+        }
+        return any;
+    }
+
+    private sealed record PollResult(AccessDeviceStatus Status, string? Error, IReadOnlyList<AccessDoorStatus> Doors,
+        bool PartsRead = false, DeviceParts? Parts = null);
+
+    private async Task<PollResult> PollOneAsync(AccessDevice device, CancellationToken ct)
     {
         try
         {
@@ -315,7 +350,7 @@ public sealed class AccessControlService(
             if (device.IsupDeviceId is { } isupId)
             {
                 if (!isup.IsOnline(isupId))
-                    return (AccessDeviceStatus.Offline, await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct), []);
+                    return new(AccessDeviceStatus.Offline, await Isup.IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct), []);
             }
             var driver = DriverOf(device);
             var connection = ConnectionOf(device);
@@ -329,17 +364,28 @@ public sealed class AccessControlService(
                 try { doors = await driver.ReadDoorStatusAsync(connection, device.Doors.Count, ct); }
                 catch (DriverException ex) { logger.LogDebug(ex, "El equipo {Device} no entregó el estado de sus puertas.", device.Name); }
             }
-            return (AccessDeviceStatus.Online, null, doors);
+
+            // Los agregados antes de que el VMS supiera ver sus partes: se le pregunta una sola vez.
+            if (!device.PartsChecked && device.IsupDeviceId is null && EquipmentParts.Supports(device.DriverKey))
+            {
+                try
+                {
+                    if (await driver.ReadPartsAsync(connection, ct) is { } parts)
+                        return new(AccessDeviceStatus.Online, null, doors, true, parts);
+                }
+                catch (DriverException ex) { logger.LogDebug(ex, "El equipo {Device} no dijo qué partes tiene.", device.Name); }
+            }
+            return new(AccessDeviceStatus.Online, null, doors);
         }
         catch (DriverException ex)
         {
             bool auth = ex.Message.Contains("credenciales", StringComparison.OrdinalIgnoreCase) ||
                         ex.Message.Contains("clave de comunicación", StringComparison.OrdinalIgnoreCase);
-            return (auth ? AccessDeviceStatus.AuthFailed : AccessDeviceStatus.Offline, ex.Message, []);
+            return new(auth ? AccessDeviceStatus.AuthFailed : AccessDeviceStatus.Offline, ex.Message, []);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return (AccessDeviceStatus.Offline, ex.Message, []);
+            return new(AccessDeviceStatus.Offline, ex.Message, []);
         }
     }
 

@@ -25,4 +25,16 @@ public interface IAccessDeviceSettingsProvider
     /// </summary>
     Task<AccessSettingsSectionDto> ApplyAsync(AccessConnectionInfo info, string sectionKey,
         IReadOnlyDictionary<string, string?> values, CancellationToken ct = default);
+
+    /// <summary>
+    /// Bloques que son de una puerta, para la pestaña Parámetros de su ficha en
+    /// Recursos: la puerta misma y sus lectores, con el papel de cada uno
+    /// ("entrada", "salida"). Por omisión, solo el bloque de la puerta.
+    /// </summary>
+    IReadOnlyList<AccessDoorSection> SectionsOfDoor(int doorNumber) => [new($"door:{doorNumber}", null)];
 }
+
+/// <summary>Un bloque de configuración que pertenece a una puerta y qué papel cumple en ella.</summary>
+/// <param name="Key">Clave del bloque ("door:1", "reader:2").</param>
+/// <param name="Role">Papel en la puerta ("lector de entrada"); null para la puerta misma.</param>
+public sealed record AccessDoorSection(string Key, string? Role);

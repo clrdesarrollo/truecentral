@@ -34,7 +34,29 @@ public static class DevicesApi
         d.AnprEnabled, enabledChannelCount, warning,
         // Mismo criterio que ToDto(Channel): sin el equipo en línea no hay señal.
         d.Status == DeviceStatus.Online ? disabledWithSignal : 0,
-        d.LocationId, LocationPaths.Of(d.LocationId), d.IsupDeviceId, d.IsupKeyCiphertext is { Length: > 0 });
+        d.LocationId, LocationPaths.Of(d.LocationId), d.IsupDeviceId, d.IsupKeyCiphertext is { Length: > 0 },
+        d.AccessDeviceId, d.HttpPort, d.HasSpeaker, d.UseSpeaker, d.IoInputs ?? 0, d.IoOutputs ?? 0, d.UseIo,
+        d.PartsChecked, d.PartsNote);
+
+    /// <summary>
+    /// Altavoz y entradas/salidas de la cámara o del grabador (<see cref="EquipmentParts"/>):
+    /// con <paramref name="read"/> se le pregunta al equipo qué tiene; después se crean,
+    /// se ponen al día o se quitan, se guarda y, si cambió algo, se avisa a los
+    /// servicios de parlantes y de E/S y a los puestos. Devuelve las altas y bajas.
+    /// </summary>
+    private static async Task<List<string>> SyncPartsAsync(HttpContext ctx, VmsDbContext db, Device device, DriverRegistry drivers,
+        CredentialProtector protector, bool read, int? previousLocationId, CancellationToken ct)
+    {
+        if (read && drivers.Find(device.DriverKey) is { } factory &&
+            await EquipmentParts.ReadAsync(device, factory.Create(), protector, ct) is { } parts)
+            EquipmentParts.ApplyParts(device, device.Model, parts);
+        var changes = await EquipmentParts.SyncAsync(db, device, previousLocationId, ctx.RequestServices, ct);
+        if (!db.ChangeTracker.HasChanges()) return changes;
+        await db.SaveChangesAsync(ct);
+        await AccessApi.PartsChangedAsync(ctx.RequestServices, ct);
+        if (changes.Count > 0) EquipmentLocation.Changed(ctx);
+        return changes;
+    }
 
     /// <summary>Dónde está el equipo, para textos de bitácora: dirección y puerto, o su ID ISUP.</summary>
     internal static string WhereOf(Device d) => d.IsupDeviceId is { } isupId ? $"ISUP {isupId}" : $"{d.Host}:{d.SdkPort}";
@@ -184,7 +206,7 @@ public static class DevicesApi
         // Grabador de un vehículo: no consume canales de video, pero tiene un tope de canales por vehículo.
         int quota = device.IsMobile ? LicenseFeatures.MaxChannelsPerVehicle
             : license.IsModuleEnabled(LicenseFeatures.ModuleVideo) ? license.Quota(LicenseFeatures.VideoChannels) : 0;
-        int elsewhere = device.IsMobile ? 0 : await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != device.Id && !c.Device.IsMobile, ct);
+        int elsewhere = device.IsMobile ? 0 : await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != device.Id && !c.Device.IsMobile && c.Device.AccessDeviceId == null, ct);
         int allowed = Math.Max(0, quota - elsewhere);
         int trimmed = 0;
         foreach (var channel in device.Channels.Where(c => c.Enabled).OrderBy(c => c.ChannelNumber))
@@ -203,7 +225,7 @@ public static class DevicesApi
         LicenseService license, VmsDbContext db, int? excludeDeviceId, CancellationToken ct)
     {
         int quota = license.IsModuleEnabled(LicenseFeatures.ModuleVideo) ? license.Quota(LicenseFeatures.VideoChannels) : 0;
-        int inUse = await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != excludeDeviceId && !c.Device.IsMobile, ct);
+        int inUse = await db.Channels.CountAsync(c => c.Enabled && c.DeviceId != excludeDeviceId && !c.Device.IsMobile && c.Device.AccessDeviceId == null, ct);
         return (quota, inUse, Math.Max(0, quota - inUse));
     }
 
@@ -268,6 +290,10 @@ public static class DevicesApi
 
     private const string MobileManagedInFleet =
         "Es el grabador de un vehículo: se administra desde Flota → Vehículos.";
+
+    private const string TerminalManagedInAccess =
+        "Es la cámara de un terminal de acceso: se administra desde Control de acceso → Equipos " +
+        "(su dirección y credenciales son las del terminal).";
 
     public static void MapDevicesApi(this WebApplication app)
     {
@@ -354,6 +380,9 @@ public static class DevicesApi
                 IsupDeviceId = isupId,
                 IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(request.IsupKey, protector) : null,
                 LocationId = locationId,
+                HttpPort = request.HttpPort ?? 80,
+                UseSpeaker = request.UseSpeaker ?? true,
+                UseIo = request.UseIo ?? true,
             };
 
             // Un equipo ISUP solo se conecta una vez que el servidor lo conoce: se guarda sin canales y se completa
@@ -388,6 +417,7 @@ public static class DevicesApi
             db.Devices.Add(device);
             await db.SaveChangesAsync(ct);
             if (viaIsup) isup.InvalidateDirectory();
+            var parts = waiting is null ? await SyncPartsAsync(ctx, db, device, drivers, protector, read: true, device.LocationId, ct) : [];
 
             await audit.LogAsync(ctx, "devices", "device-created",
                 targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
@@ -395,8 +425,10 @@ public static class DevicesApi
                         (waiting is null
                             ? $"{device.Channels.Count} canales, {device.Channels.Count(c => c.Enabled)} habilitados"
                             : "a la espera de que se conecte por ISUP para leer sus canales") +
-                        (device.LocationId is null ? "" : $", en {EquipmentLocation.Describe(device.LocationId)}") + ").",
-                data: new { device.Host, device.SdkPort, device.RtspPort, device.DriverKey, device.IsupDeviceId, device.Model, device.SerialNumber, device.LocationId });
+                        (device.LocationId is null ? "" : $", en {EquipmentLocation.Describe(device.LocationId)}") + ")" +
+                        (parts.Count == 0 ? "." : $"; {string.Join("; ", parts)}."),
+                data: new { device.Host, device.SdkPort, device.RtspPort, device.DriverKey, device.IsupDeviceId, device.Model, device.SerialNumber, device.LocationId,
+                    speaker = device.HasSpeaker, device.IoInputs, device.IoOutputs });
             EquipmentLocation.Changed(ctx);
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
@@ -414,6 +446,7 @@ public static class DevicesApi
             var device = await db.Devices.Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
             if (device is null) return Results.NotFound();
             if (device.IsMobile) return Error(MobileManagedInFleet, StatusCodes.Status409Conflict);
+            if (device.AccessDeviceId is not null) return Error(TerminalManagedInAccess, StatusCodes.Status409Conflict);
             if (ValidateWrite(request, drivers, device.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
             bool viaIsup = UsesIsup(drivers, request.DriverKey);
             string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
@@ -488,6 +521,13 @@ public static class DevicesApi
             bool isupChanged = device.IsupDeviceId != isupId || (viaIsup && !string.IsNullOrEmpty(request.IsupKey));
             if (locationId != previousLocation)
                 changes.Add(EquipmentLocation.Change(previousLocation, locationId));
+            int httpPort = request.HttpPort ?? device.HttpPort;
+            if (httpPort is < 1 or > 65535) return Error("El puerto HTTP debe estar entre 1 y 65535.");
+            bool httpChanged = device.HttpPort != httpPort;
+            if (httpChanged) changes.Add($"puerto HTTP {device.HttpPort} → {httpPort}");
+            bool useSpeaker = request.UseSpeaker ?? device.UseSpeaker, useIo = request.UseIo ?? device.UseIo;
+            if (device.UseSpeaker != useSpeaker) changes.Add(useSpeaker ? "su altavoz se ofrece como parlante" : "su altavoz deja de ofrecerse");
+            if (device.UseIo != useIo) changes.Add(useIo ? "sus entradas y salidas se ofrecen como módulo de E/S" : "sus entradas y salidas dejan de ofrecerse");
             // Los canales que estaban con el equipo lo siguen; los ubicados aparte se quedan.
             var followers = EquipmentLocation.Follow(device.Channels, previousLocation, locationId);
 
@@ -500,9 +540,15 @@ public static class DevicesApi
             device.PasswordCiphertext = viaIsup ? [] : protector.Protect(password);
             device.IsupDeviceId = isupId;
             device.IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(isupKey, protector) : null;
+            device.HttpPort = httpPort;
+            device.UseSpeaker = useSpeaker;
+            device.UseIo = useIo;
             device.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             if (isupChanged) isup.InvalidateDirectory();
+            // Otra dirección, otras credenciales u otro puerto HTTP: se le vuelve a preguntar qué partes tiene.
+            changes.AddRange(await SyncPartsAsync(ctx, db, device, drivers, protector,
+                read: waiting is null && (connectionChanged || httpChanged || !device.PartsChecked), previousLocation, ct));
 
             await audit.LogAsync(ctx, "devices", "device-updated",
                 targetType: "device", targetId: device.Id.ToString(), targetName: device.Name,
@@ -535,6 +581,7 @@ public static class DevicesApi
             var device = await db.Devices.FindAsync([id], ct);
             if (device is null) return Results.NotFound();
             if (device.IsMobile) return Error(MobileManagedInFleet, StatusCodes.Status409Conflict);
+            if (device.AccessDeviceId is not null) return Error(TerminalManagedInAccess, StatusCodes.Status409Conflict);
 
             // El canal de eventos de patentes es una sesión viva contra el
             // equipo: se cierra antes de que la fila desaparezca.
@@ -546,12 +593,21 @@ public static class DevicesApi
             // sistema ya no conoce.
             await walls.ReleaseDeviceAsync(id);
 
-            db.Devices.Remove(device); // canales caen por cascada
+            var gone = new List<string>();
+            if (await db.Speakers.AnyAsync(s => s.DeviceId == id, ct)) gone.Add("altavoz");
+            if (await db.IoModules.FirstOrDefaultAsync(m => m.DeviceId == id, ct) is { } module)
+            {
+                gone.Add("entradas y salidas");
+                await ctx.RequestServices.GetRequiredService<IoModuleService>().DetachAsync(module.Id);   // suelta pulsos en curso
+            }
+            db.Devices.Remove(device); // canales y partes caen por cascada
             await db.SaveChangesAsync(ct);
             if (device.IsupDeviceId is not null) isup.InvalidateDirectory();
+            if (gone.Count > 0) await AccessApi.PartsChangedAsync(ctx.RequestServices, ct);
             await audit.LogAsync(ctx, "devices", "device-deleted",
                 targetType: "device", targetId: id.ToString(), targetName: device.Name,
-                detail: $"Eliminó el dispositivo '{device.Name}' ({WhereOf(device)}) y todos sus canales.");
+                detail: $"Eliminó el dispositivo '{device.Name}' ({WhereOf(device)}) y todos sus canales" +
+                        (gone.Count > 0 ? $", con su {string.Join(" y ", gone)}." : "."));
             EquipmentLocation.Changed(ctx);
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
@@ -572,6 +628,7 @@ public static class DevicesApi
             if (device is null) return Results.NotFound();
             if (ApiSecurity.Require(ctx, device.IsMobile ? Permissions.FleetManage : Permissions.DevicesManage, out _) is { } wrong)
                 return wrong;
+            if (device.AccessDeviceId is not null) return Error(TerminalManagedInAccess, StatusCodes.Status409Conflict);
             // Por ISUP solo se puede revalidar con el equipo conectado: si no, se explica qué configurar en él.
             if (device.IsupDeviceId is { } isupId && !isup.IsOnline(isupId))
                 return Error(await IsupEquipmentRules.NotConnectedMessageAsync(isup, isupHost, isupId, "equipo", ct));
@@ -589,11 +646,13 @@ public static class DevicesApi
             ApplyProbe(device, info);
             int trimmed = await EnforceChannelQuotaAsync(license, db, device, ct);
             await db.SaveChangesAsync(ct);
+            var parts = await SyncPartsAsync(ctx, db, device, drivers, protector, read: true, device.LocationId, ct);
             // Pudieron aparecer canales nuevos (ya ubicados donde está el equipo).
             EquipmentLocation.Changed(ctx);
             await audit.LogAsync(ctx, "devices", "device-revalidated",
                 targetType: "device", targetId: id.ToString(), targetName: device.Name,
-                detail: $"Revalidó '{device.Name}': {device.Channels.Count} canales, firmware {device.FirmwareVersion ?? "—"}{QuotaNote(trimmed)}.");
+                detail: $"Revalidó '{device.Name}': {device.Channels.Count} canales, firmware {device.FirmwareVersion ?? "—"}{QuotaNote(trimmed)}" +
+                        (parts.Count == 0 ? "." : $"; {string.Join("; ", parts)}."));
             await mtx.RefreshPathsAsync(ct);
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", cancellationToken: ct);
             return Results.Ok(ToDto(device, trimmed));
@@ -707,9 +766,10 @@ public static class DevicesApi
                     return await license.DenyAsync(ctx,
                         $"Un vehículo admite hasta {LicenseFeatures.MaxChannelsPerVehicle} canales habilitados.", "channel", channel.Name);
             }
-            else if (!channel.Enabled && request.Enabled
+            // La cámara de un terminal de acceso viene incluida: no pasa por el cupo.
+            else if (!channel.Enabled && request.Enabled && channel.Device.AccessDeviceId is null
                 && license.Deny(LicenseFeatures.ModuleVideo, LicenseFeatures.VideoChannels,
-                    await db.Channels.CountAsync(c => c.Enabled && c.Id != channelId && !c.Device.IsMobile, ct)) is { } denied)
+                    await db.Channels.CountAsync(c => c.Enabled && c.Id != channelId && !c.Device.IsMobile && c.Device.AccessDeviceId == null, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "channel", channel.Name);
 
             var changes = new List<string>();
@@ -762,7 +822,9 @@ public static class DevicesApi
             if (candidates.Count == 0)
                 return Results.Ok(new ChannelBulkEnableResultDto(0, 0, $"'{device.Name}' no tiene canales con señal deshabilitados."));
 
-            var budget = await VideoChannelBudgetAsync(license, db, null, ct);
+            // La cámara de un terminal de acceso viene incluida: no pasa por el cupo.
+            var budget = device.AccessDeviceId is null ? await VideoChannelBudgetAsync(license, db, null, ct)
+                : (Quota: 0, InUse: 0, Available: int.MaxValue);
             var enabled = candidates.Take(Math.Max(0, budget.Available)).ToList();
             var left = candidates.Skip(enabled.Count).ToList();
             foreach (var channel in enabled)

@@ -83,13 +83,45 @@ public sealed class SpeakerService(
         drivers.Find(speaker.DriverKey)?.Create()
         ?? throw new DriverException($"El parlante '{speaker.Name}' usa un driver desconocido ('{speaker.DriverKey}').");
 
+    // ------------------------------------------------------------------
+    // Grupos de parlantes: en memoria (parlante → sus grupos) para que cada
+    // DTO diga a qué grupos pertenece sin consultar la base. Se relee al
+    // arrancar y cada vez que se crea, cambia o borra un grupo.
+    // ------------------------------------------------------------------
+
+    private volatile IReadOnlyList<SpeakerGroupDto> _groups = [];
+    private volatile IReadOnlyDictionary<int, string> _groupNames = new Dictionary<int, string>();
+
+    /// <summary>Los grupos con sus integrantes (copia en memoria).</summary>
+    public IReadOnlyList<SpeakerGroupDto> Groups => _groups;
+
+    /// <summary>Grupos del parlante unidos por coma; null si no está en ninguno.</summary>
+    public string? GroupsOf(int speakerId) => _groupNames.GetValueOrDefault(speakerId);
+
+    /// <summary>Integrantes del grupo con ese nombre (sin distinguir mayúsculas); vacío si no existe.</summary>
+    public IReadOnlyList<int> MembersOf(string groupName) =>
+        _groups.FirstOrDefault(g => string.Equals(g.Name, groupName.Trim(), StringComparison.OrdinalIgnoreCase))?.SpeakerIds ?? [];
+
+    public async Task ReloadGroupsAsync(CancellationToken ct = default)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+        var groups = await db.SpeakerGroups.AsNoTracking().Include(g => g.Members)
+            .OrderBy(g => g.Name).ToListAsync(ct);
+        _groups = groups.Select(g => new SpeakerGroupDto(g.Id, g.Name, g.Description,
+            g.Members.Select(m => m.SpeakerId).Order().ToList())).ToList();
+        _groupNames = groups.SelectMany(g => g.Members.Select(m => (m.SpeakerId, g.Name)))
+            .GroupBy(x => x.SpeakerId)
+            .ToDictionary(x => x.Key, x => string.Join(", ", x.Select(y => y.Name)));
+    }
+
     public SpeakerDto ToDto(Speaker s) => new(s.Id, s.Name, s.DriverKey, s.Host, s.Port, s.UseHttps, s.Username,
-        s.Model, s.SerialNumber, s.FirmwareVersion, s.GroupName, s.Enabled, s.Status, s.LastError, s.LastSeenAt, s.Volume,
+        s.Model, s.SerialNumber, s.FirmwareVersion, GroupsOf(s.Id), s.Enabled, s.Status, s.LastError, s.LastSeenAt, s.Volume,
         s.SupportsLibrary, s.SupportsTts, s.SupportsLiveAudio, BusyOf(s.Id), s.CreatedAt, s.UpdatedAt,
         s.LocationId, Auth.LocationPaths.Of(s.LocationId), s.IsupDeviceId, s.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: s.DisabledByLicense,
         AgentId: s.AgentId,
         EnrollmentExpiresAt: s.EnrollmentCodeHash is not null && s.EnrollmentExpiresAt > DateTime.UtcNow ? s.EnrollmentExpiresAt : null,
-        AgentConnected: agents.IsOnline(s.AgentId));
+        AgentConnected: agents.IsOnline(s.AgentId), AccessDeviceId: s.AccessDeviceId, DeviceId: s.DeviceId);
 
     // ------------------------------------------------------------------
     // Sondeo de estado
@@ -98,6 +130,8 @@ public sealed class SpeakerService(
     protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         _stopping = stoppingToken;
+        try { await ReloadGroupsAsync(stoppingToken); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "No se pudieron leer los grupos de parlantes."); }
         // Un parlante ISUP que se conecta: si se agregó antes de conectarse, se completa (modelo y capacidades) y se sondea ya.
         isup.DeviceOnlineChanged += (isupId, online) =>
         {
@@ -691,6 +725,9 @@ public sealed class SpeakerService(
     /// ocupados o fallen quedan informados en <see cref="TalkSession.Rejected"/>;
     /// si ninguno abre, lanza <see cref="DriverException"/>.
     /// </summary>
+    /// <summary>Tope para que cada parlante acepte la voz en vivo.</summary>
+    private static readonly TimeSpan TalkOpenTimeout = TimeSpan.FromSeconds(6);
+
     public async Task<TalkSession> OpenTalkAsync(IReadOnlyList<int> ids, string actor, CancellationToken ct)
     {
         var speakers = await LoadAsync(ids, ct);
@@ -709,9 +746,17 @@ public sealed class SpeakerService(
             claimed.Add(speaker);
         }
 
+        // Cada parlante tiene un tope para aceptar: uno sin conexión no deja
+        // esperando a los demás (ni al operador, que espera el canal de voz).
         var opened = await Task.WhenAll(claimed.Select(async speaker =>
         {
-            try { return (speaker, (ISpeakerAudioSession?)await DriverOf(speaker).OpenLiveAudioAsync(ConnectionOf(speaker), ct), (string?)null); }
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TalkOpenTimeout);
+            try { return (speaker, (ISpeakerAudioSession?)await DriverOf(speaker).OpenLiveAudioAsync(ConnectionOf(speaker), timeout.Token), (string?)null); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return (speaker, null, $"No respondió en {TalkOpenTimeout.TotalSeconds:0} s (¿sin conexión?).");
+            }
             catch (DriverException ex) { return (speaker, null, ex.Message); }
             catch (Exception ex) when (ex is not OperationCanceledException) { return (speaker, null, ex.Message); }
         }));

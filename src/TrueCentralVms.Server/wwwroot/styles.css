@@ -1790,6 +1790,15 @@ label.with-ico .ico { width: 14px; height: 14px; color: var(--muted); }
 .res-filters input:focus, .res-filters select:focus { border-color: var(--accent); }
 .res-filters input { flex: 1; min-width: 220px; }
 .res-filters select { max-width: 260px; }
+.res-filters .ui-switch { align-self: center; }
+/* Interruptor (checkbox con forma de switch): <label class="ui-switch"><input type="checkbox"><span class="ui-switch-track"></span>texto</label> */
+.ui-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text); user-select: none; }
+.ui-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.ui-switch-track { position: relative; flex: none; width: 34px; height: 18px; border-radius: 999px; background: var(--border); transition: background .15s; }
+.ui-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
+.ui-switch input:checked + .ui-switch-track { background: var(--accent); }
+.ui-switch input:checked + .ui-switch-track::after { transform: translateX(16px); }
+.ui-switch input:focus-visible + .ui-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .res-bulk {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 10px;
   background: rgba(var(--accent-rgb), .08); border: 1px solid rgba(var(--accent-rgb), .35); border-radius: 8px; font-size: 13px;
@@ -1811,6 +1820,59 @@ a.res-source .res-ico { color: var(--muted); }
 .res-loc-pick { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
 .res-loc-pick label { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13.5px; }
 .res-loc-pick label:hover { background: var(--panel-2); }
+/* «Una ubicación por equipo»: lo que haría, antes de hacerlo. */
+.res-eq-plan { margin-top: 8px; max-height: 40vh; }
+.res-eq-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; font-size: 13.5px; }
+.res-eq-row b { font-weight: 600; }
+.res-eq-row .muted { flex: 1; }
+/* Parlantes IP: grupos de parlantes. */
+.sp-groups-head { display: flex; align-items: center; justify-content: space-between; margin: 22px 0 4px; }
+.sp-groups-head h3 { margin: 0; font-size: 15px; }
+.sp-groups-intro { margin: 0 0 10px; }
+.sp-groups-note { font-size: 12.5px; padding-top: 9px; }
+.sp-group-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
+/* Configuración → Tableros: listas y editor (grilla a la izquierda, buscador a la derecha). */
+.bd-intro { margin-bottom: 14px; }
+.bd-h { margin: 18px 0 8px; font-size: 15px; }
+.bd-note { margin: -4px 0 10px; }
+.bd-sub { font-size: 12px; }
+.bd-url { max-width: 360px; overflow-wrap: anywhere; }
+.bd-aud { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; }
+.field label.bd-radio, .field label.bd-check { display: inline-flex; align-items: center; gap: 6px; margin: 0;
+  font-weight: 400; font-size: 13px; color: var(--text); cursor: pointer; }
+.field .bd-radio input, .field .bd-check input { width: auto; margin: 0; padding: 0; }
+.bd-roles { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.bd-roles.off { opacity: .55; }
+.bd-editor { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; margin-top: 10px; }
+.bd-grid { display: grid; gap: 4px; aspect-ratio: 16 / 9; background: var(--panel-2); border-radius: 8px; padding: 4px; position: relative; }
+.bd-grid.locked { display: block; aspect-ratio: auto; background: none; padding: 0; }
+.bd-cell { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-width: 0; min-height: 0; padding: 4px 6px; border: 1px dashed var(--border); border-radius: 6px; background: var(--panel);
+  color: var(--text); font: inherit; font-size: 12px; cursor: pointer; overflow: hidden; }
+.bd-cell.full { border-style: solid; }
+.bd-cell.sel { outline: 2px solid var(--accent); outline-offset: -1px; }
+.bd-cell-n { position: absolute; top: 3px; left: 5px; font-size: 10.5px; color: var(--muted); }
+.bd-cell-ico { color: var(--accent); font-size: 16px; line-height: 1; }
+.bd-cell-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-cell-x { position: absolute; top: 1px; right: 5px; font-size: 15px; color: var(--muted); }
+.bd-cell-x:hover { color: var(--danger, #d33); }
+.bd-outside { position: absolute; left: 6px; right: 6px; bottom: 6px; margin: 0; }
+.bd-picker { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.bd-pick-hint { padding: 8px 2px; }
+.bd-pick-list { max-height: 300px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.bd-pick-group { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--muted); padding: 6px 6px 2px; }
+.bd-opt { display: flex; align-items: center; gap: 7px; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px;
+  background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.bd-opt:hover { background: var(--panel-2); }
+.bd-opt-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-opt-sub { margin-left: auto; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.bd-pick-url { display: flex; flex-direction: column; gap: 5px; }
+.bd-pick-url-row { display: flex; gap: 6px; }
+.bd-pick-url-row input { flex: 1; }
+@media (max-width: 860px) { .bd-editor { grid-template-columns: 1fr; } }
+/* Campo Ubicación: dónde crear la «Nueva, con el nombre del equipo». */
+.loc-new { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border); }
+.loc-new label { font-size: 12.5px; }
 @media (max-width: 900px) {
   .res-layout { grid-template-columns: 1fr; }
   .res-tree { position: static; max-height: none; }
@@ -2937,3 +2999,9 @@ tr.pt-voided td:last-child, tr.pt-voided td:nth-last-child(2) { opacity: 1; }
 .pt-day:hover { border-color: var(--accent); }
 .pt-day.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .pt-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Partes de un terminal de acceso (cámara, altavoz, entradas y salidas): incluidas con el terminal. */
+.acd-parts { margin: 12px 0 8px; padding: 10px 12px 6px; border: 1px solid var(--border); border-radius: 8px; }
+.acd-parts-title { font-weight: 600; margin-bottom: 4px; }
+.acd-parts .checkbox-row { margin: 6px 0 0; }
+.acd-parts .acd-part-hint { margin: -2px 0 2px 26px; }

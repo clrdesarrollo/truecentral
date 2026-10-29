@@ -61,6 +61,46 @@ public class Device : IIsupEquipment
     /// </summary>
     public bool IsMobile { get; set; }
 
+    /// <summary>
+    /// Cámara propia de un terminal de acceso (facial): el VMS la crea y la
+    /// mantiene a partir del terminal (dirección, credenciales, nombre y
+    /// ubicación son los suyos) y se borra con él. No se edita en Dispositivos
+    /// y sus canales no consumen el cupo de canales de video de la licencia.
+    /// </summary>
+    public int? AccessDeviceId { get; set; }
+    public AccessDevice? AccessDevice { get; set; }
+
+    /// <summary>Puerto HTTP (ISAPI) del equipo: por ahí se le preguntan y se operan sus partes.</summary>
+    public int HttpPort { get; set; } = 80;
+
+    /// <summary>Ya se le preguntó qué partes tiene (altavoz, entradas y salidas de alarma).</summary>
+    public bool PartsChecked { get; set; }
+
+    /// <summary>
+    /// Su altavoz (audio bidireccional de la cámara o del grabador): se ofrece
+    /// como un parlante más (<see cref="Speaker.DeviceId"/>), incluido con el equipo.
+    /// </summary>
+    public bool HasSpeaker { get; set; }
+
+    /// <summary>Ofrecer su altavoz como parlante. Si se quita, no vuelve solo al revalidar.</summary>
+    public bool UseSpeaker { get; set; } = true;
+
+    /// <summary>
+    /// Sus entradas y salidas de alarma (null = no tiene): se ofrecen como un
+    /// módulo de E/S (<see cref="IoModule.DeviceId"/>), incluido con el equipo.
+    /// </summary>
+    public int? IoInputs { get; set; }
+    public int? IoOutputs { get; set; }
+
+    /// <summary>Ofrecer sus entradas y salidas como módulo de E/S. Si se quita, no vuelve solo.</summary>
+    public bool UseIo { get; set; } = true;
+
+    /// <summary>Sus entradas y salidas se leen y operan por el SDK (los DVR Turbo HD no las exponen por ISAPI).</summary>
+    public bool IoViaSdk { get; set; }
+
+    /// <summary>Por qué alguna de sus partes no está en uso aunque la tenga, o null.</summary>
+    public string? PartsNote { get; set; }
+
     public DeviceStatus Status { get; set; } = DeviceStatus.Unknown;
     public DateTime? LastSeenAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

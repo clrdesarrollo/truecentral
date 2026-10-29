@@ -42,8 +42,11 @@ const WF_PATROL_TRIGGER = {
   group: "Control de rondas",
 };
 let wfSpeakersCache = null;
+/** Grupos de parlantes (campo "group" de la acción): se cargan junto con los parlantes. */
+let wfSpeakerGroupsCache = null;
 async function wfSpeakers() {
   wfSpeakersCache ??= await Api.get("/api/workflows/speakers");
+  wfSpeakerGroupsCache ??= await Api.get("/api/workflows/speaker-groups").catch(() => []);
   return wfSpeakersCache;
 }
 
@@ -162,9 +165,9 @@ const WF_FIELDS = {
     // --- Parlantes del inventario ---
     { k: "speakerIds", t: "speakers", label: "Parlantes", when: (c) => (c.mode || "inventory") === "inventory",
       help: "Se marcan uno o varios; si elige varios, los sonidos del servidor suenan sincronizados." },
-    { k: "group", t: "text", label: "O bien todos los parlantes del grupo", placeholder: "Bodega, Perímetro…",
+    { k: "group", t: "speakerGroup", label: "O bien todos los parlantes del grupo",
       when: (c) => (c.mode || "inventory") === "inventory",
-      help: "Nombre de grupo tal como está en el mantenedor de parlantes; se suma a los marcados arriba." },
+      help: "Los grupos se arman en Dispositivos → Parlantes IP; se suma a los marcados arriba. Si el grupo cambia de integrantes, la acción usa los de ese momento." },
     { k: "command", t: "select", label: "Orden", def: "play", rerender: true,
       when: (c) => (c.mode || "inventory") === "inventory",
       options: [["play", "Reproducir"], ["stop", "Detener lo que esté sonando"]],
@@ -948,6 +951,17 @@ function wfFieldHtml(action, field, lists) {
               <input type="checkbox" data-speaker="${s.id}" ${selected.includes(String(s.id)) ? "checked" : ""}>
               ${esc(s.name)}${s.groupName ? ` <span class="muted">· ${esc(s.groupName)}</span>` : ""}</label>`).join("")}
           </div>`}${help}</div>`;
+    }
+    case "speakerGroup": {
+      const groups = wfSpeakerGroupsCache || [];
+      const chosen = String(current ?? "").trim().toLowerCase();
+      const known = !chosen || groups.some((g) => g.name.toLowerCase() === chosen);
+      return `<div class="field"><label>${esc(field.label)}</label>
+        <select ${attributes}>
+          <option value="">(ninguno)</option>
+          ${groups.map((g) => `<option value="${esc(g.name)}" ${g.name.toLowerCase() === chosen ? "selected" : ""}>${esc(g.name)} (${g.speakerIds.length} parlante(s))</option>`).join("")}
+          ${known ? "" : `<option value="${esc(current)}" selected>${esc(current)} (ya no existe)</option>`}
+        </select>${help}</div>`;
     }
     case "screens": {
       const selected = (current || []).map(String);

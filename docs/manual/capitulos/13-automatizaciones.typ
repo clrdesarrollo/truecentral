@@ -1,5 +1,5 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Server/wwwroot/workflows.js, src/TrueCentralVms.Server/wwwroot/workflow-editor.js, src/TrueCentralVms.Server/Api/WorkflowsApi.cs, src/TrueCentralVms.Server/Services/Workflows/WorkflowEngine.cs, src/TrueCentralVms.Server/Services/Workflows/WorkflowGraph.cs, src/TrueCentralVms.Server/Services/Workflows/Actions/
+// Fuentes: src/TrueCentralVms.Server/wwwroot/workflows.js, src/TrueCentralVms.Server/wwwroot/workflow-editor.js, src/TrueCentralVms.Server/Api/WorkflowsApi.cs, src/TrueCentralVms.Server/Services/Workflows/WorkflowEngine.cs, src/TrueCentralVms.Server/Services/Workflows/WorkflowGraph.cs, src/TrueCentralVms.Server/Services/Workflows/Actions/, src/TrueCentralVms.Server/Api/SpeakerGroupsApi.cs
 
 = Automatizaciones <cap-automatizaciones>
 
@@ -592,8 +592,11 @@ Parlantes IP)_:
 
 - *Parlantes*: marque uno o varios. Si elige varios, los sonidos del servidor
   suenan sincronizados.
-- *O bien todos los parlantes del grupo*: el nombre de un grupo tal como está
-  en el mantenedor de parlantes; se suma a los marcados.
+- *O bien todos los parlantes del grupo*: elija un grupo de parlantes de la
+  lista, que muestra cuántos parlantes tiene cada uno; _(ninguno)_ deja solo
+  los marcados. Se suma a los parlantes marcados arriba. Los grupos se arman en
+  #menu("Dispositivos", "Parlantes IP"). Si el grupo cambia de integrantes, la
+  acción usa los que tenga en ese momento.
 - *Orden*: _Reproducir_ o _Detener lo que esté sonando_. «Detener» es la pareja
   de un sonido en bucle.
 - *Qué reproducir*: _Sonido del servidor (Sonidos)_, _Audio de la biblioteca del
@@ -613,6 +616,12 @@ configuran por su dirección: _Hikvision suelto (audio bidireccional ISAPI)_
 (sonido del servidor y *Canal de audio*), _Axis (clip por VAPIX)_ (*Número de
 clip en el parlante* y *Volumen (%)*) y _Otra marca (URL que gatilla el
 mensaje)_ (*URL* y *Método*).
+
+#nota[Si alguien renombra un grupo de parlantes, las automatizaciones que lo
+  usan pasan solas al nombre nuevo. Si lo elimina, dejan de hacer sonar ese
+  grupo: en el editor, la lista lo muestra como _… (ya no existe)_, y si la
+  acción no tenía otros parlantes marcados, su ejecución falla con _El grupo
+  '…' no tiene parlantes activos._]
 
 #modulo("speakers")[Los sonidos del servidor se cargan en la Biblioteca de
   sonidos (botón #boton("Sonidos") del listado), que se explica en
@@ -636,7 +645,7 @@ mensaje)_ (*URL* y *Método*).
 
 - *Cámara PTZ*: solo se ofrecen las cámaras que tienen PTZ.
 - *Preset (1–300)*: el preset debe estar guardado en la propia cámara, desde
-  la vista en vivo del cliente o desde su web.
+  el Centro de mando del cliente o desde la web de la cámara.
 
 === Operar relé
 
@@ -804,7 +813,7 @@ que se configura una sola vez.
   [«Capturar foto»: Elija al menos una cámara para capturar.],
   [Marque una cámara en la acción.],
   [«Sonar parlante IP»: Elija al menos un parlante o un grupo.],
-  [Marque un parlante o escriba el nombre de un grupo.],
+  [Marque un parlante o elija un grupo.],
   [«Operar relé»: Elija al menos un relé.],
   [Marque un relé en la acción.],
   [El bucle hasta detener (0 repeticiones) solo está disponible con un sonido del servidor.],

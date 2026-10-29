@@ -111,9 +111,9 @@ public static class WorkflowResourceScope
                 "io" => scope.CanOperateIoModule(int.Parse(p[1])),
                 "speaker" => scope.CanOperateSpeaker(int.Parse(p[1])),
                 // Un grupo vale solo si alcanza a TODOS sus parlantes (hoy y los que se le agreguen se revisan al editar).
-                "speaker-group" => (await db.Speakers.AsNoTracking()
-                        .Where(s => s.GroupName != null && s.GroupName.ToLower() == p[1].ToLower())
-                        .Select(s => s.Id).ToListAsync(ct))
+                "speaker-group" => (await db.SpeakerGroupMembers.AsNoTracking()
+                        .Where(m => m.Group!.Name.ToLower() == p[1].ToLower())
+                        .Select(m => m.SpeakerId).ToListAsync(ct))
                     .All(scope.CanOperateSpeaker),
                 _ => true,
             };

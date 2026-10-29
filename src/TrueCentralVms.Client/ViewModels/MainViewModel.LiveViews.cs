@@ -8,34 +8,39 @@ using TrueCentralVms.Core.Drivers;
 
 namespace TrueCentralVms.Client.ViewModels;
 
-/// <summary>Una vista guardada, como la muestra la lista del botón "Vistas".</summary>
-/// <param name="CanEdit">El usuario puede actualizarla o eliminarla (es suya, o es administrador).</param>
-public sealed record SavedViewItem(int Id, string Name, string Detail, bool Shared, bool CanEdit);
+/// <summary>Un tablero, como lo muestra la lista del botón "Tableros".</summary>
+/// <param name="CanEdit">El usuario puede actualizarlo o eliminarlo (es suyo y puede
+/// crear tableros propios, o es compartido y administra los compartidos).</param>
+/// <param name="Locked">Compartido y sin permiso para cambiarlo: se usa tal cual.</param>
+public sealed record SavedViewItem(int Id, string Name, string Detail, bool Shared, bool CanEdit, bool Locked,
+    IReadOnlyList<int> RoleIds);
 
 /// <summary>
-/// Vistas guardadas de la Vista en Vivo (las "Custom View" de iVMS-4200): la
-/// división de la grilla y qué canal estaba en cada cuadro. Viven en el
-/// servidor, así que el operador recupera su pantalla de siempre desde
-/// cualquier puesto, y las marcadas como compartidas las ve todo el mundo.
+/// Tableros del Centro de mando (antes "vistas guardadas"): la división de la
+/// grilla y lo que había en cada cuadro (cámara, recurso, tarjeta o página
+/// web). Viven en el servidor, así el operador recupera su pantalla desde
+/// cualquier puesto. Los compartidos los define quien administra los tableros
+/// (desde aquí o desde el panel web, donde se eligen los roles que los ven) y
+/// los demás los usan con candado; los propios necesitan "Crear tableros propios".
 /// </summary>
 public partial class MainViewModel
 {
-    /// <summary>Vistas visibles para este usuario (propias + compartidas).</summary>
+    /// <summary>Tableros visibles para este usuario (compartidos primero, después los propios).</summary>
     public ObservableCollection<SavedViewItem> SavedViews { get; } = [];
 
-    /// <summary>Lista desplegada del botón "Vistas".</summary>
+    /// <summary>Lista desplegada del botón "Tableros".</summary>
     [ObservableProperty] private bool _isViewsPopupOpen;
 
     /// <summary>Nombre escrito en el recuadro "Guardar la grilla actual".</summary>
     [ObservableProperty] private string _newViewName = "";
 
-    /// <summary>La vista nueva queda visible para todos los puestos.</summary>
+    /// <summary>El tablero nuevo es compartido (solo quien administra los compartidos).</summary>
     [ObservableProperty] private bool _newViewShared;
 
     /// <summary>Aviso dentro del desplegable (errores y confirmaciones).</summary>
     [ObservableProperty] private string _savedViewsStatus = "";
 
-    /// <summary>Vista cargada por última vez, para el rótulo del botón.</summary>
+    /// <summary>Tablero cargado por última vez, para el rótulo del botón.</summary>
     [ObservableProperty] private string _activeViewName = "";
 
     /// <summary>Una operación contra el servidor en curso (evita clics dobles).</summary>
@@ -43,12 +48,12 @@ public partial class MainViewModel
 
     partial void OnIsViewsPopupOpenChanged(bool value)
     {
-        // La lista se refresca al desplegarla: otro puesto pudo guardar o
-        // cambiar una vista compartida mientras este estaba abierto.
+        // La lista se refresca al desplegarla: pudieron guardar o cambiar un
+        // tablero compartido mientras este puesto estaba abierto.
         if (value) _ = LoadSavedViewsAsync();
     }
 
-    /// <summary>Trae del servidor las vistas que este usuario puede ver.</summary>
+    /// <summary>Trae del servidor los tableros que este usuario puede ver.</summary>
     [RelayCommand]
     public async Task LoadSavedViewsAsync()
     {
@@ -56,11 +61,11 @@ public partial class MainViewModel
         {
             var views = await _api.GetLiveViewsAsync();
             SavedViews.Clear();
-            foreach (var view in views)
+            foreach (var view in views.OrderBy(v => v.Shared ? 0 : 1).ThenBy(v => v.Name, StringComparer.CurrentCultureIgnoreCase))
                 SavedViews.Add(ToItem(view));
             SavedViewsStatus = SavedViews.Count > 0 ? ""
-                : CanSaveViews ? "Todavía no hay vistas guardadas: arme la grilla y guárdela aquí abajo."
-                : "Todavía no hay vistas guardadas.";
+                : CanSaveViews ? "Todavía no hay tableros: arme la grilla y guárdela aquí abajo."
+                : "Todavía no hay tableros.";
         }
         catch (Exception ex)
         {
@@ -70,26 +75,31 @@ public partial class MainViewModel
 
     private SavedViewItem ToItem(LiveViewDto view)
     {
-        string owner = view.Shared && !string.Equals(view.Owner, _api.Username, StringComparison.OrdinalIgnoreCase)
-            ? $" · compartida por {view.Owner}"
-            : view.Shared ? " · compartida" : "";
-        return new SavedViewItem(view.Id, view.Name,
-            $"{view.Items.Count} cámara(s) · división {VideoLayout.Find(view.LayoutName)?.Label ?? view.LayoutName}{owner}",
-            view.Shared, view.CanEdit && CanSaveViews);
+        int cameras = view.Items.Count(i => DashboardItemKinds.IsCamera(i.Kind));
+        int others = view.Items.Count - cameras;
+        string contents = cameras > 0 && others > 0 ? $"{cameras} cámara(s) y {others} cuadro(s) más"
+            : others > 0 ? $"{others} cuadro(s)" : $"{cameras} cámara(s)";
+        string audience = !view.Shared ? ""
+            : view.Roles is { Count: > 0 } roles ? " · para " + string.Join(", ", roles)
+            : view.RestrictToRoles ? " · sin roles asignados"
+            : " · compartido";
+        string layout = VideoLayout.Find(view.LayoutName)?.Label ?? view.LayoutName;
+        return new SavedViewItem(view.Id, view.Name, $"{contents} · división {layout}{audience}",
+            view.Shared, view.CanEdit, view.Shared && !view.CanEdit, view.RoleIds ?? []);
     }
 
     /// <summary>Foto de la grilla actual en el formato que guarda el servidor.</summary>
-    private LiveViewSaveRequest SnapshotRequest(string name, bool shared) => new(
+    private LiveViewSaveRequest SnapshotRequest(string name, bool shared, IReadOnlyList<int>? roleIds = null) => new(
         name, CurrentLayout.Key, CurrentLayout.Columns, CurrentLayout.Rows, shared,
-        Cells.Select((cell, index) => (cell, index))
-            .Where(x => x.cell.AssignedChannel is not null)
-            .Select(x => new LiveViewItemDto(x.index, x.cell.AssignedChannel!.Channel.Id, (int)x.cell.Profile))
-            .ToList());
+        Cells.Select((cell, index) => DashboardItemOf(cell, index)).OfType<LiveViewItemDto>().ToList(),
+        roleIds?.ToList());
+
+    private bool GridIsEmpty => Cells.All(c => c.AssignedChannel is null && c.Panel?.Content is null);
 
     /// <summary>
-    /// Guarda la grilla actual como vista nueva. Si el nombre ya es de una
-    /// vista propia se ofrece reemplazarla (en vez de devolver un error por
-    /// nombre repetido, que es lo que el operador quiso hacer igual).
+    /// Guarda la grilla actual como tablero nuevo. Si el nombre ya es de uno
+    /// que puede cambiar, se ofrece reemplazarlo (en vez de devolver un error
+    /// por nombre repetido, que es lo que el operador quiso hacer igual).
     /// </summary>
     [RelayCommand]
     private async Task SaveCurrentViewAsync()
@@ -98,21 +108,22 @@ public partial class MainViewModel
         string name = NewViewName.Trim();
         if (name.Length == 0)
         {
-            SavedViewsStatus = "Escriba un nombre para la vista.";
+            SavedViewsStatus = "Escriba un nombre para el tablero.";
             return;
         }
-        if (Cells.All(c => c.AssignedChannel is null))
+        if (GridIsEmpty)
         {
-            SavedViewsStatus = "La grilla está vacía: abra las cámaras que quiere guardar.";
+            SavedViewsStatus = "La grilla está vacía: abra lo que quiere guardar (cámaras, recursos, tarjetas o páginas).";
             return;
         }
 
+        bool shared = NewViewShared && CanShareViews;
         var existing = SavedViews.FirstOrDefault(v =>
-            string.Equals(v.Name, name, StringComparison.CurrentCultureIgnoreCase) && v.CanEdit);
+            string.Equals(v.Name, name, StringComparison.CurrentCultureIgnoreCase) && v.CanEdit && v.Shared == shared);
         if (existing is not null)
         {
-            if (Confirm($"Ya existe la vista \"{existing.Name}\". ¿Reemplazarla con la grilla actual?",
-                    "Reemplazar vista") is false)
+            if (Confirm($"Ya existe el tablero \"{existing.Name}\". ¿Reemplazarlo con la grilla actual?",
+                    "Reemplazar tablero") is false)
                 return;
             await OverwriteViewAsync(existing);
             return;
@@ -120,43 +131,46 @@ public partial class MainViewModel
 
         await RunAsync(async () =>
         {
-            var saved = await _api.CreateLiveViewAsync(SnapshotRequest(name, NewViewShared));
+            var saved = await _api.CreateLiveViewAsync(SnapshotRequest(name, shared));
             NewViewName = "";
             NewViewShared = false;
             ActiveViewName = saved.Name;
             await LoadSavedViewsAsync();
-            SavedViewsStatus = $"Vista \"{saved.Name}\" guardada.";
-            StatusMessage = $"Vista \"{saved.Name}\" guardada con {saved.Items.Count} cámara(s).";
+            SavedViewsStatus = shared
+                ? $"Tablero \"{saved.Name}\" compartido con todos (en el panel web, Tableros, se eligen los roles)."
+                : $"Tablero \"{saved.Name}\" guardado.";
+            StatusMessage = $"Tablero \"{saved.Name}\" guardado con {saved.Items.Count} cuadro(s).";
         });
     }
 
-    /// <summary>Reemplaza el contenido de una vista con la grilla actual.</summary>
+    /// <summary>Reemplaza el contenido de un tablero con la grilla actual.</summary>
     [RelayCommand]
     private async Task UpdateSavedViewAsync(SavedViewItem item)
     {
         if (item is null) return;
-        if (Cells.All(c => c.AssignedChannel is null))
+        if (GridIsEmpty)
         {
-            SavedViewsStatus = "La grilla está vacía: no hay nada que guardar en la vista.";
+            SavedViewsStatus = "La grilla está vacía: no hay nada que guardar en el tablero.";
             return;
         }
-        if (Confirm($"¿Actualizar la vista \"{item.Name}\" con las cámaras que hay ahora en la grilla?",
-                "Actualizar vista") is false)
+        if (Confirm($"¿Actualizar el tablero \"{item.Name}\" con lo que hay ahora en la grilla?" +
+                    (item.Shared ? "\n\nEs compartido: el cambio lo ven todos los que lo usan." : ""),
+                "Actualizar tablero") is false)
             return;
         await OverwriteViewAsync(item);
     }
 
-    /// <summary>Escritura de la vista con la grilla actual, ya confirmada.</summary>
+    /// <summary>Escritura del tablero con la grilla actual, ya confirmada (conserva con quién se comparte).</summary>
     private async Task OverwriteViewAsync(SavedViewItem item)
     {
         await RunAsync(async () =>
         {
-            var saved = await _api.UpdateLiveViewAsync(item.Id, SnapshotRequest(item.Name, item.Shared));
+            var saved = await _api.UpdateLiveViewAsync(item.Id, SnapshotRequest(item.Name, item.Shared, item.RoleIds));
             NewViewName = "";
             ActiveViewName = saved.Name;
             await LoadSavedViewsAsync();
-            SavedViewsStatus = $"Vista \"{saved.Name}\" actualizada.";
-            StatusMessage = $"Vista \"{saved.Name}\" actualizada con {saved.Items.Count} cámara(s).";
+            SavedViewsStatus = $"Tablero \"{saved.Name}\" actualizado.";
+            StatusMessage = $"Tablero \"{saved.Name}\" actualizado con {saved.Items.Count} cuadro(s).";
         });
     }
 
@@ -164,8 +178,10 @@ public partial class MainViewModel
     private async Task DeleteSavedViewAsync(SavedViewItem item)
     {
         if (item is null) return;
-        if (Confirm($"¿Eliminar la vista \"{item.Name}\"? Esta acción no se puede deshacer.",
-                "Eliminar vista") is false)
+        if (Confirm($"¿Eliminar el tablero \"{item.Name}\"?" +
+                    (item.Shared ? " Es compartido: desaparece para todos los que lo usan." : "") +
+                    " Esta acción no se puede deshacer.",
+                "Eliminar tablero") is false)
             return;
 
         await RunAsync(async () =>
@@ -173,11 +189,11 @@ public partial class MainViewModel
             await _api.DeleteLiveViewAsync(item.Id);
             if (ActiveViewName == item.Name) ActiveViewName = "";
             await LoadSavedViewsAsync();
-            SavedViewsStatus = $"Vista \"{item.Name}\" eliminada.";
+            SavedViewsStatus = $"Tablero \"{item.Name}\" eliminado.";
         });
     }
 
-    /// <summary>Carga una vista en la grilla (la lista se cierra sola).</summary>
+    /// <summary>Carga un tablero en la grilla (la lista se cierra sola).</summary>
     [RelayCommand]
     private async Task ApplySavedViewAsync(SavedViewItem item)
     {
@@ -185,33 +201,33 @@ public partial class MainViewModel
         IsViewsPopupOpen = false;
         try
         {
-            // El servidor devuelve la versión vigente (otro puesto pudo
-            // cambiarla) y de paso registra en la bitácora quién la cargó.
+            // El servidor devuelve la versión vigente (pudieron cambiarlo) y de
+            // paso registra en la bitácora quién lo cargó.
             var view = await _api.ApplyLiveViewAsync(item.Id);
             await ApplyLiveViewAsync(view);
         }
         catch (Exception ex)
         {
-            StatusMessage = $"No se pudo cargar la vista \"{item.Name}\": {ex.Message}";
+            StatusMessage = $"No se pudo cargar el tablero \"{item.Name}\": {ex.Message}";
         }
     }
 
     /// <summary>
-    /// Arma la grilla de una vista guardada: primero la división y después las
-    /// cámaras, por tandas y con el mismo aviso bloqueante que la apertura de
-    /// un equipo completo (cada cuadro crea su player y abre un RTSP contra el
-    /// grabador: de golpe, ni la interfaz ni el equipo dan abasto).
+    /// Arma la grilla de un tablero: primero la división, después las cámaras
+    /// por tandas (con el mismo aviso bloqueante que la apertura de un equipo
+    /// completo: cada cuadro crea su player y abre un RTSP contra el grabador)
+    /// y al final los recursos, tarjetas y páginas web.
     /// </summary>
     private async Task ApplyLiveViewAsync(LiveViewDto view)
     {
-        // Canales del inventario por id: los de la vista que ya no existen (o
+        // Canales del inventario por id: los del tablero que ya no existen (o
         // que quedaron deshabilitados) se informan y su cuadro queda libre.
         var byId = Devices.SelectMany(d => d.Channels)
             .GroupBy(c => c.Channel.Id)
             .ToDictionary(g => g.Key, g => g.First());
 
         IsBulkOpening = true;
-        BulkOpeningText = $"Cargando la vista \"{view.Name}\"…";
+        BulkOpeningText = $"Cargando el tablero \"{view.Name}\"…";
         StatusMessage = BulkOpeningText;
         var loading = Application.Current.MainWindow is { IsLoaded: true } owner
             ? Views.LoadingWindow.Open(owner, BulkOpeningText)
@@ -223,7 +239,7 @@ public partial class MainViewModel
 
             var layout = VideoLayout.Restore(view.LayoutName, view.Columns, view.Rows);
             await ApplyLayoutAsync(layout);
-            // Si la vista trae una de las divisiones del selector, esa pasa a
+            // Si el tablero trae una de las divisiones del selector, esa pasa a
             // ser la preferencia local (la próxima sesión abre en ella).
             if (Layouts.Contains(layout) && _settings.LastLayout != layout.Key)
             {
@@ -235,11 +251,13 @@ public partial class MainViewModel
             foreach (var cell in Cells)
                 cell.Clear();
 
-            var targets = view.Items
-                .Where(i => i.CellIndex >= 0 && i.CellIndex < Cells.Count && byId.ContainsKey(i.ChannelId))
+            var inGrid = view.Items.Where(i => i.CellIndex >= 0 && i.CellIndex < Cells.Count).ToList();
+            var targets = inGrid
+                .Where(i => DashboardItemKinds.IsCamera(i.Kind) && byId.ContainsKey(i.ChannelId))
                 .OrderBy(i => i.CellIndex)
                 .ToList();
-            int missing = view.Items.Count - targets.Count;
+            var others = inGrid.Where(i => !DashboardItemKinds.IsCamera(i.Kind)).ToList();
+            int missing = view.Items.Count - targets.Count - others.Count;
 
             for (int i = 0; i < targets.Count; i += OpenBatchSize)
             {
@@ -252,22 +270,34 @@ public partial class MainViewModel
                     wave.Add(Cells[item.CellIndex].OpenAsync(byId[item.ChannelId], profile));
                 }
                 await Task.WhenAll(wave);
-                BulkOpeningText = $"Cargando la vista \"{view.Name}\"… {upTo}/{targets.Count}";
+                BulkOpeningText = $"Cargando el tablero \"{view.Name}\"… {upTo}/{targets.Count}";
                 loading?.Update(BulkOpeningText);
                 await BreatheAsync();
             }
 
+            int panels = 0;
+            foreach (var item in others)
+            {
+                if (PanelFor(item.Kind, item.RefId, item.Ref, item.Title, item.Zoom) is { } panel)
+                {
+                    await Cells[item.CellIndex].ShowPanelAsync(panel);
+                    panels++;
+                }
+                else missing++;
+            }
+
             ActiveViewName = view.Name;
+            string shown = panels > 0 ? $"{targets.Count} cámara(s) y {panels} cuadro(s) más" : $"{targets.Count} cámara(s)";
             StatusMessage = missing == 0
-                ? $"Vista \"{view.Name}\": {targets.Count} cámara(s) en pantalla."
-                : $"Vista \"{view.Name}\": {targets.Count} cámara(s) en pantalla; " +
-                  $"{missing} ya no está(n) en el inventario y su cuadro quedó libre.";
+                ? $"Tablero \"{view.Name}\": {shown} en pantalla."
+                : $"Tablero \"{view.Name}\": {shown} en pantalla; " +
+                  $"{missing} cuadro(s) quedaron libres (ya no existen o no están a su alcance).";
         }
         catch (Exception ex)
         {
             // Abrir video toca driver, GPU y red: una falla ahí no puede
             // llevarse la aplicación (el clic de la lista es async void).
-            StatusMessage = $"No se pudo cargar toda la vista \"{view.Name}\": {ex.Message}";
+            StatusMessage = $"No se pudo cargar todo el tablero \"{view.Name}\": {ex.Message}";
         }
         finally
         {

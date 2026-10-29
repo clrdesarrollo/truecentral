@@ -315,8 +315,66 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
         var kind = ClassifyModel(model) ?? KindOfDoorCount(doors.Count);
         return new AccessDeviceInfo(model, Value("serialNumber"), Value("firmwareVersion"), Value("deviceType"),
-            Value("macAddress"), kind, capabilities, doors, profile);
+            Value("macAddress"), kind, capabilities, doors, profile, await ReadPartsAsync(info, client, ct));
     }
+
+    public Task<DeviceParts?> ReadPartsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+        ReadPartsAsync(info, Client(info), ct);
+
+    /// <summary>Puerto del SDK de los terminales (el de fábrica): por ahí va la voz de los que no la tienen por ISAPI.</summary>
+    private const int SdkPort = 8000;
+
+    /// <summary>
+    /// Cámara, altavoz y entradas/salidas de alarma. Por ISUP no se ofrecen
+    /// (ni el video ni el audio llegan por esa vía todavía).
+    /// </summary>
+    private static async Task<DeviceParts?> ReadPartsAsync(AccessConnectionInfo info, HikvisionIsapiClient client, CancellationToken ct)
+    {
+        if (client.IsIsup) return null;
+        bool speaker = await HikvisionParts.HasSpeakerAsync(client, ct);
+        // Los faciales sin audio bidireccional por ISAPI (DS-K1T321MFWX V3.9) lo tienen por el SDK, como un citófono.
+        bool viaSdk = !speaker && await HikvisionSdkVoice.HasVoiceAsync(info.Host, SdkPort, info.Username, info.Password, ct);
+        var io = await HikvisionParts.ReadIoAsync(client, ct);
+        var sdkIo = io is null
+            ? await HikvisionSdkIoDriver.ReadIoAsync(new IoConnectionInfo(info.Host, SdkPort, info.Username, info.Password), ct)
+            : null;
+        return new DeviceParts(await ReadCameraAsync(client, ct), speaker || viaSdk, io ?? sdkIo, viaSdk, IoViaSdk: sdkIo is not null);
+    }
+
+    /// <summary>
+    /// Cámara del terminal (los faciales tienen una): contesta su stream
+    /// principal, <c>/ISAPI/Streaming/channels/101</c>, igual que una cámara.
+    /// El puerto RTSP sale de <c>/ISAPI/Security/adminAccesses</c> (554 si no
+    /// lo dice). Por ISUP no se ofrece: el video no llega por RTSP directo.
+    /// </summary>
+    private static async Task<AccessCameraInfo?> ReadCameraAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        if (client.IsIsup) return null;
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get, "/ISAPI/Streaming/channels/101", ct: ct) is not { } stream ||
+                !stream.Contains("StreamingChannel", StringComparison.Ordinal))
+                return null;
+        }
+        catch (DriverException) { return null; }   // 403/400: controladora o terminal sin cámara
+
+        int port = 554;
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get, "/ISAPI/Security/adminAccesses", ct: ct) is { } xml)
+            {
+                var rtsp = XDocument.Parse(xml).Descendants().Where(e => e.Name.LocalName == "AdminAccessProtocol")
+                    .FirstOrDefault(p => string.Equals(ChildValue(p, "protocol"), "RTSP", StringComparison.OrdinalIgnoreCase));
+                if (ChildValue(rtsp, "portNo") is { } text && int.TryParse(text, out int value) && value is > 0 and < 65536)
+                    port = value;
+            }
+        }
+        catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { /* se queda el de fábrica */ }
+        return new AccessCameraInfo(port);
+    }
+
+    private static string? ChildValue(XElement? parent, string name) =>
+        parent?.Elements().FirstOrDefault(e => e.Name.LocalName == name)?.Value?.Trim();
 
     public async Task PingAsync(AccessConnectionInfo info, CancellationToken ct = default)
     {

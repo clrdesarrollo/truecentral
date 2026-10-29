@@ -1,0 +1,24 @@
+<!-- Página web en un cuadro del Centro de mando (WebCellPanel). El navegador lo
+     crea el código al cargarse (un WebView2, con ventana propia como el video).
+     El aviso de error queda debajo, a la vista cuando no hay página. -->
+<UserControl x:Class="TrueCentralVms.Client.Views.WebCellView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels">
+    <Grid Background="#15181D">
+        <Border x:Name="Host"/>
+        <TextBlock Text="{Binding Error}" TextWrapping="Wrap" Margin="16" FontSize="12"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
+                   Foreground="{StaticResource MutedBrush}"
+                   Visibility="{Binding Error, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+        <!-- Durante un arrastre o en modo Unir la página se esconde (si no, se tragaría el mouse) -->
+        <StackPanel x:Name="DragHint" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="26" HorizontalAlignment="Center"
+                       Foreground="{StaticResource MutedBrush}"/>
+            <TextBlock Text="{Binding Title}" FontSize="12.5" FontWeight="SemiBold" Margin="0,8,0,0"
+                       HorizontalAlignment="Center" Foreground="{StaticResource TextBrush}"/>
+            <TextBlock x:Name="HintText" FontSize="11.5" Margin="0,4,0,0"
+                       HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}"/>
+        </StackPanel>
+    </Grid>
+</UserControl>

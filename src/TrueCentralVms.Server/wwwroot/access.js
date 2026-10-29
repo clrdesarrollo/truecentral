@@ -318,7 +318,7 @@ async function accessDeviceModal(device, prefill) {
         <input id="ac-name" required maxlength="128" value="${esc(device?.name ?? seed.name ?? "")}" placeholder="Portería principal, Torniquete casino…">
       </div>
       ${locationFieldHtml("ac-location", places, device?.locationId ?? null,
-        "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.")}
+        "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.", { equipment: true, isNew })}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="ac-driver">
@@ -341,6 +341,7 @@ async function accessDeviceModal(device, prefill) {
       <div id="ac-isup-wrap">${isupFieldsHtml("ac", device, isNew, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${device ? (device.enabled ? "checked" : "") : "checked"}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
       <label class="checkbox-row" title="Apáguela si otro sistema (por ejemplo el kiosco del casino) necesita la escucha del equipo: hay terminales que admiten una sola."><input type="checkbox" id="ac-live" ${device ? (device.liveEvents === false ? "" : "checked") : "checked"}> Escuchar sus eventos en vivo (apagado: se lee su historial cada 15 s, sin ocupar la escucha del equipo)</label>
+      ${accessPartsFieldHtml(device)}
       <div class="info-box" style="margin-top:10px">Al guardar se leen del equipo el modelo, el firmware, las capacidades y las puertas que administra.</div>
       <div id="ac-probe-result"></div>
       ${isNew ? "" : maintDeviceSectionHtml()}
@@ -398,6 +399,7 @@ async function accessDeviceModal(device, prefill) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
+      await locationFieldCommit("ac-location", body);
       const saved = isNew ? await Api.post("/api/access/devices", body) : await Api.put(`/api/access/devices/${device.id}`, body);
       closeModal();
       // Por ISUP el equipo puede no haberse conectado todavía: se guarda igual y se completa en su primer contacto.
@@ -427,6 +429,9 @@ function accessReadConnectionForm() {
       host: "", port: 0, useHttps: false, username: "", password: null,
       enabled: $("#ac-enabled").checked,
       liveEvents: $("#ac-live")?.checked ?? true,
+      useCamera: $("#ac-camera")?.checked ?? true,
+      useSpeaker: $("#ac-speaker")?.checked ?? true,
+      useIo: $("#ac-io")?.checked ?? true,
       locationId: locationFieldValue("ac-location"),
       ...readIsupFields("ac"),
     };
@@ -442,8 +447,42 @@ function accessReadConnectionForm() {
     password: $("#ac-password").value || null,
     enabled: $("#ac-enabled").checked,
     liveEvents: $("#ac-live")?.checked ?? true,
+    useCamera: $("#ac-camera")?.checked ?? true,
+    useSpeaker: $("#ac-speaker")?.checked ?? true,
+    useIo: $("#ac-io")?.checked ?? true,
     locationId: locationFieldValue("ac-location"),
   };
+}
+
+/**
+ * Partes del terminal que el VMS ofrece como recursos propios, incluidas con
+ * el terminal (no ocupan licencia): su cámara (en vivo y principal de sus
+ * puertas), su altavoz (un parlante más) y sus entradas y salidas de alarma
+ * (un módulo de E/S). Debajo de cada una, lo que se sabe de ella en este equipo.
+ */
+function accessPartsFieldHtml(device) {
+  const hint = (text) => `<div class="muted field-hint acd-part-hint">${text}</div>`;
+  const known = (has, use, yes, off) => !device ? ""
+    : has && use !== false ? hint(yes) : has ? hint(off) : hint("No se le detectó (se vuelve a mirar al revalidarlo).");
+  const io = device ? (device.ioInputs ?? 0) + (device.ioOutputs ?? 0) : 0;
+  return `
+      <div class="acd-parts">
+        <div class="acd-parts-title">Partes del terminal <span class="muted">(incluidas: no ocupan licencia)</span></div>
+        <label class="checkbox-row" title="Los faciales tienen cámara: se agrega como una cámara más y queda como la cámara principal de sus puertas.">
+          <input type="checkbox" id="ac-camera" ${device?.useCamera === false ? "" : "checked"}> Su cámara, como una cámara más</label>
+        ${known(device?.hasCamera, device?.useCamera,
+          `Se ve como la cámara «${esc(device?.name ?? "")}» en Vista en vivo y en la ficha de sus puertas.`, "Tiene cámara, pero no se está mostrando.")}
+        <label class="checkbox-row" title="El altavoz del terminal: voz en vivo y sonidos desde el Centro de mando, grupos de parlantes y automatizaciones.">
+          <input type="checkbox" id="ac-speaker" ${device?.useSpeaker === false ? "" : "checked"}> Su altavoz, como un parlante más</label>
+        ${known(device?.hasSpeaker, device?.useSpeaker,
+          `Está en Parlantes IP como «${esc(device?.name ?? "")}».`, "Tiene altavoz, pero no se está ofreciendo.")}
+        <label class="checkbox-row" title="Sus entradas y salidas de alarma: estado en vivo, «Operar relé» y disparadores de automatizaciones.">
+          <input type="checkbox" id="ac-io" ${device?.useIo === false ? "" : "checked"}> Sus entradas y salidas de alarma, como un módulo de E/S</label>
+        ${known(io > 0, device?.useIo,
+          `${device?.ioInputs ?? 0} entrada(s) y ${device?.ioOutputs ?? 0} salida(s) en Módulos de E/S como «${esc(device?.name ?? "")}».`,
+          `Tiene ${device?.ioInputs ?? 0} entrada(s) y ${device?.ioOutputs ?? 0} salida(s), pero no se están ofreciendo.`)}
+        ${device?.partsNote ? `<div class="field-hint" style="color:var(--warn-text)">${esc(device.partsNote)}</div>` : ""}
+      </div>`;
 }
 
 function accessProbeResultHtml(r) {
@@ -462,6 +501,10 @@ function accessProbeResultHtml(r) {
         <span>Credenciales</span><b>${[r.supportsCards ? "tarjeta" : null, r.supportsFingerprint ? "huella" : null,
           r.supportsFace ? "rostro" : null].filter(Boolean).join(", ") || "—"}</b>
         <span>Cupos del equipo</span><b>${r.userCapacity ?? "—"} personas · ${r.cardCapacity ?? "—"} tarjetas</b>
+        <span>Cámara</span><b>${r.hasCamera ? "sí (se agrega como cámara, sin ocupar canal de video)" : "no"}</b>
+        <span>Altavoz</span><b>${r.hasSpeaker ? "sí (se agrega como parlante)" : "no"}</b>
+        <span>Entradas y salidas de alarma</span><b>${r.ioInputs + r.ioOutputs > 0
+          ? `${r.ioInputs} entrada(s) y ${r.ioOutputs} salida(s) (se agregan como módulo de E/S)` : "no"}</b>
       </div>
     </div>`;
 }
@@ -679,7 +722,7 @@ async function acdDrawConnection(body) {
           <input id="ac-name" required maxlength="128" value="${esc(d.name)}" placeholder="Portería principal, Torniquete casino…">
         </div>
         ${locationFieldHtml("ac-location", places, d.locationId ?? null,
-          "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.")}
+          "Sus puertas la heredan; las que ubique aparte en Recursos se quedan donde están.", { equipment: true })}
       </div>
       <div class="form-grid">
         <div class="field">
@@ -705,6 +748,7 @@ async function acdDrawConnection(body) {
       <div id="ac-isup-wrap">${isupFieldsHtml("ac", d, false, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${d.enabled ? "checked" : ""}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
       <label class="checkbox-row" title="Apáguela si otro sistema (por ejemplo el kiosco del casino) necesita la escucha del equipo: hay terminales que admiten una sola."><input type="checkbox" id="ac-live" ${d.liveEvents === false ? "" : "checked"}> Escuchar sus eventos en vivo (apagado: se lee su historial cada 15 s, sin ocupar la escucha del equipo)</label>
+      ${accessPartsFieldHtml(d)}
       <div class="info-box">Si cambia la dirección, el puerto, el usuario o la contraseña, al guardar se vuelve a validar contra
         el equipo y se releen su modelo, firmware, capacidades y puertas.</div>
       <div id="ac-probe-result"></div>
@@ -754,7 +798,9 @@ async function acdDrawConnection(body) {
     saveButton.disabled = true;
     saveButton.textContent = "Validando…";
     try {
-      acdState.device = await Api.put(`/api/access/devices/${d.id}`, accessReadConnectionForm());
+      const body = accessReadConnectionForm();
+      await locationFieldCommit("ac-location", body);
+      acdState.device = await Api.put(`/api/access/devices/${d.id}`, body);
       acdState.settings = null;
       toast("Equipo actualizado.");
       acdDrawPage();
@@ -956,7 +1002,14 @@ function acdFieldValue(input) {
   }
 }
 
-function acdBindSection(s) {
+/**
+ * Activa el formulario de un bloque. Por omisión guarda en la página del
+ * equipo; la ficha de una puerta en Recursos pasa su propia dirección y su
+ * lista de bloques (target = { url, sections }).
+ */
+function acdBindSection(s, target = null) {
+  const url = target?.url ?? `/api/access/devices/${acdState.id}/settings/${encodeURIComponent(s.key)}`;
+  const sections = target?.sections ?? acdState.settings.sections;
   const card = $(`#view .acd-card[data-section="${CSS.escape(s.key)}"]`);
   if (!card) return;
   const form = card.querySelector("form");
@@ -988,12 +1041,12 @@ function acdBindSection(s) {
     save.disabled = true;
     save.textContent = "Guardando…";
     try {
-      const fresh = await Api.put(`/api/access/devices/${acdState.id}/settings/${encodeURIComponent(s.key)}`, { values });
+      const fresh = await Api.put(url, { values });
       // Se redibuja el bloque con lo que el equipo DEJÓ (puede acotar o redondear).
-      const index = acdState.settings.sections.findIndex((x) => x.key === s.key);
-      if (index >= 0) acdState.settings.sections[index] = fresh;
+      const index = sections.findIndex((x) => x.key === s.key);
+      if (index >= 0) sections[index] = fresh;
       card.outerHTML = acdSectionHtml(fresh);
-      acdBindSection(fresh);
+      acdBindSection(fresh, target);
       toast(`${fresh.title}: cambios guardados en el equipo.`);
     } catch (err) {
       errorBox.innerHTML = `<div class="error-box">${esc(err.error)}</div>`;

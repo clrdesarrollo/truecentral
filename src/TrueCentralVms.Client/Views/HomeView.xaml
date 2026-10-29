@@ -79,8 +79,8 @@
                             <TextBlock Text="&#xE714;" Foreground="#3B82F6" Style="{StaticResource CardIcon}"/>
                         </Border>
                         <StackPanel Style="{StaticResource CardBody}">
-                            <TextBlock Text="Vista en Vivo" Style="{StaticResource CardTitle}"/>
-                            <TextBlock Text="Monitoreo en tiempo real, control PTZ y grillas de hasta 64 cámaras."
+                            <TextBlock Text="Centro de mando" Style="{StaticResource CardTitle}"/>
+                            <TextBlock Text="Cámaras, puertas, alarmas y reportes en una misma grilla: monitoreo y operación en tiempo real."
                                        Style="{StaticResource CardDescription}"/>
                         </StackPanel>
                     </DockPanel>

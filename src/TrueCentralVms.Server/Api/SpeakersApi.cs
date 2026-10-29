@@ -49,8 +49,6 @@ public static class SpeakersApi
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
             return "El nombre es obligatorio (máximo 128 caracteres).";
-        if (request.GroupName is { Length: > 64 })
-            return "El grupo no puede superar los 64 caracteres.";
         if (drivers.Find(request.DriverKey) is not { } factory)
             return $"Driver desconocido: '{request.DriverKey}'.";
         // Un TrueCentral Speaker se enrola con un código y se conecta él: no hay dirección ni credenciales que pedir.
@@ -111,8 +109,9 @@ public static class SpeakersApi
         catch (Exception ex) { return (null, 0, $"Error inesperado al comunicarse con el parlante: {ex.Message}"); }
     }
 
-    private static string? GroupOf(SpeakerWriteDto request) =>
-        string.IsNullOrWhiteSpace(request.GroupName) ? null : request.GroupName.Trim();
+    private const string TerminalManagedInAccess =
+        "Es el altavoz de un terminal de acceso o de una cámara: se administra desde ese equipo " +
+        "(Control de acceso → Equipos, o Fuentes de video); su dirección y credenciales son las del equipo.";
 
     internal static void ApplyProbe(Speaker speaker, SpeakerInfo info)
     {
@@ -177,7 +176,7 @@ public static class SpeakersApi
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
-            var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.GroupName).ThenBy(s => s.Name).ToListAsync(ct);
+            var speakers = await db.Speakers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
             return Results.Ok(speakers.Where(s => scope.CanViewSpeaker(s.Id)).Select(service.ToDto));
         });
 
@@ -200,7 +199,7 @@ public static class SpeakersApi
             bool viaAgent = UsesAgent(drivers, request.DriverKey);
             if (!viaIsup && !viaAgent && string.IsNullOrEmpty(request.Password)) return Error("La contraseña del parlante es obligatoria.");
             if (license.Deny(LicenseFeatures.ModuleSpeakers, request.Enabled ? LicenseFeatures.SpeakerChannels : null,
-                    await db.Speakers.CountAsync(s => s.Enabled, ct)) is { } denied)
+                    await db.Speakers.CountAsync(s => s.Enabled && s.AccessDeviceId == null && s.DeviceId == null, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "speaker", request.Name?.Trim());
             string host = viaIsup || viaAgent ? "" : request.Host.Trim();
             string? isupId = viaIsup ? request.IsupDeviceId!.Trim() : null;
@@ -228,7 +227,6 @@ public static class SpeakersApi
                 PasswordCiphertext = viaIsup || viaAgent ? [] : protector.Protect(request.Password!),
                 IsupDeviceId = isupId,
                 IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(request.IsupKey, protector) : null,
-                GroupName = GroupOf(request),
                 LocationId = locationId,
                 Enabled = request.Enabled,
             };
@@ -268,10 +266,9 @@ public static class SpeakersApi
                 detail: $"Agregó el parlante '{speaker.Name}' ({speaker.DriverKey}, {WhereOf(speaker)}, " +
                         (viaAgent ? "TrueCentral Speaker"
                             : speaker.Model is null && viaIsup ? "a la espera de que se conecte por ISUP" : speaker.Model ?? "modelo desconocido") +
-                        (speaker.GroupName is null ? "" : $", grupo '{speaker.GroupName}'") +
                         (speaker.LocationId is null ? "" : $", en {EquipmentLocation.Describe(speaker.LocationId)}") +
                         $", biblioteca: {libraryCount} audios).",
-                data: new { speaker.Host, speaker.Port, speaker.UseHttps, speaker.DriverKey, speaker.IsupDeviceId, speaker.Model, speaker.SerialNumber, speaker.GroupName, speaker.LocationId });
+                data: new { speaker.Host, speaker.Port, speaker.UseHttps, speaker.DriverKey, speaker.IsupDeviceId, speaker.Model, speaker.SerialNumber, speaker.LocationId });
             EquipmentLocation.Changed(ctx);
             service.RequestReconcile();
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "speakers", cancellationToken: ct);
@@ -285,6 +282,7 @@ public static class SpeakersApi
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             var speaker = await db.Speakers.FirstOrDefaultAsync(s => s.Id == id, ct);
             if (speaker is null) return Results.NotFound();
+            if (speaker.IsPart) return Error(TerminalManagedInAccess, StatusCodes.Status409Conflict);
             if (ValidateWrite(request, drivers, speaker.IsupKeyCiphertext is { Length: > 0 }) is { } invalid) return Error(invalid);
             bool viaIsup = UsesIsup(drivers, request.DriverKey);
             bool viaAgent = UsesAgent(drivers, request.DriverKey);
@@ -351,7 +349,6 @@ public static class SpeakersApi
             if (!viaIsup && !string.IsNullOrEmpty(request.Password)) changes.Add("contraseña cambiada");
             if (viaIsup && !string.IsNullOrEmpty(request.IsupKey)) changes.Add("clave ISUP cambiada");
             bool isupChanged = speaker.IsupDeviceId != isupId || (viaIsup && !string.IsNullOrEmpty(request.IsupKey));
-            if (speaker.GroupName != GroupOf(request)) changes.Add($"grupo '{speaker.GroupName}' → '{GroupOf(request)}'");
             if (locationId != previousLocation)
                 changes.Add(EquipmentLocation.Change(previousLocation, locationId));
             if (speaker.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
@@ -371,11 +368,10 @@ public static class SpeakersApi
             speaker.PasswordCiphertext = viaIsup ? [] : protector.Protect(password);
             speaker.IsupDeviceId = isupId;
             speaker.IsupKeyCiphertext = viaIsup ? IsupEquipmentRules.ProtectKey(isupKey, protector) : null;
-            speaker.GroupName = GroupOf(request);
             speaker.LocationId = locationId;
             if (!speaker.Enabled && request.Enabled
                 && license.Deny(LicenseFeatures.ModuleSpeakers, LicenseFeatures.SpeakerChannels,
-                    await db.Speakers.CountAsync(s => s.Enabled && s.Id != id, ct)) is { } denied)
+                    await db.Speakers.CountAsync(s => s.Enabled && s.Id != id && s.AccessDeviceId == null && s.DeviceId == null, ct)) is { } denied)
                 return await license.DenyAsync(ctx, denied, "speaker", speaker.Name);
             speaker.Enabled = request.Enabled;
             speaker.UpdatedAt = DateTime.UtcNow;
@@ -398,6 +394,7 @@ public static class SpeakersApi
             if (ApiSecurity.Require(ctx, Permissions.SpeakersConfigure, out _) is { } failure) return failure;
             var speaker = await db.Speakers.FindAsync([id], ct);
             if (speaker is null) return Results.NotFound();
+            if (speaker.IsPart) return Error(TerminalManagedInAccess, StatusCodes.Status409Conflict);
             if (service.BusyOf(id) is { } busy)
                 return Error($"El parlante está en uso ({busy}); deténgalo antes de eliminarlo.", StatusCodes.Status409Conflict);
             HikvisionSpeakerDriver.Forget(service.ConnectionOf(speaker));
@@ -711,7 +708,7 @@ public static class SpeakersApi
         // parlantes elegidos a la vez. Un texto "stop" o el cierre del socket
         // terminan la sesión; también se corta sin audio por 20 s o a los 10 min.
         // ------------------------------------------------------------------
-        app.Map("/api/speakers/talk", async (HttpContext ctx, string? ids, SpeakerService service, AuditService audit, ILoggerFactory loggers) =>
+        app.Map("/api/speakers/talk", async (HttpContext ctx, string? ids, string? group, SpeakerService service, AuditService audit, ILoggerFactory loggers) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.SpeakersPlay, out var session) is { } failure) return failure;
             if (!ctx.WebSockets.IsWebSocketRequest) return Error("Este recurso solo acepta WebSocket.", StatusCodes.Status400BadRequest);
@@ -734,7 +731,8 @@ public static class SpeakersApi
             string targets = string.Join(", ", talk.Speakers.Select(s => $"'{s.Name}'"));
             await audit.LogAsync(ctx, "speakers", "talk-started", targetType: "speaker",
                 targetId: string.Join(",", talk.Speakers.Select(s => s.Id)), targetName: targets,
-                detail: $"Inició voz en vivo hacia {targets}." +
+                detail: (string.IsNullOrWhiteSpace(group) ? $"Inició voz en vivo hacia {targets}."
+                            : $"Inició voz en vivo hacia el grupo '{group.Trim()[..Math.Min(64, group.Trim().Length)]}': {targets}.") +
                         (talk.Rejected.Count > 0 ? " No aceptaron: " + string.Join("; ", talk.Rejected.Select(r => $"{r.SpeakerName} ({r.Message})")) : ""));
             foreach (var rejected in talk.Rejected)
                 await audit.LogAsync(ctx, "speakers", "talk-rejected", targetType: "speaker", targetId: rejected.SpeakerId.ToString(),
@@ -832,7 +830,6 @@ public static class SpeakersApi
 
         var changes = new List<string>();
         if (speaker.Name != request.Name.Trim()) changes.Add($"nombre '{speaker.Name}' → '{request.Name.Trim()}'");
-        if (speaker.GroupName != GroupOf(request)) changes.Add($"grupo '{speaker.GroupName}' → '{GroupOf(request)}'");
         if (locationId != previousLocation) changes.Add(EquipmentLocation.Change(previousLocation, locationId));
         if (speaker.Enabled != request.Enabled) changes.Add(request.Enabled ? "activado" : "desactivado");
 
@@ -841,7 +838,6 @@ public static class SpeakersApi
                 await db.Speakers.CountAsync(s => s.Enabled && s.Id != speaker.Id, ct)) is { } denied)
             return await license.DenyAsync(ctx, denied, "speaker", speaker.Name);
         speaker.Name = request.Name.Trim();
-        speaker.GroupName = GroupOf(request);
         speaker.LocationId = locationId;
         speaker.Enabled = request.Enabled;
         speaker.UpdatedAt = DateTime.UtcNow;

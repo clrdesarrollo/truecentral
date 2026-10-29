@@ -211,6 +211,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Ser
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionIsupSpeakerDriverFactory>();
+builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSdkSpeakerDriverFactory>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.SpeakerAgents.SpeakerAgentHub>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, TrueCentralVms.Server.Services.SpeakerAgents.AgentSpeakerDriverFactory>();
 builder.Services.AddSingleton<SpeakerDriverRegistry>();
@@ -220,6 +221,9 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>())
 // de entradas y órdenes a los relés).
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Adam.AdamIoDriverFactory>();
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.ZkTeco.C3IoDriverFactory>();
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionIoDriverFactory>();
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionSdkIoDriverFactory>();
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionAcsIoDriverFactory>();
 builder.Services.AddSingleton<IoModuleDriverRegistry>();
 builder.Services.AddSingleton<IoModuleService>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Patrol.PatrolService>();
@@ -594,6 +598,7 @@ app.MapAlarmsApi();
 app.MapIsupApi();
 app.MapCercoApi();
 app.MapSpeakersApi();
+app.MapSpeakerGroupsApi();
 app.MapSpeakerAgentsApi();
 app.MapIoModulesApi();
 app.MapFleetApi();

@@ -179,7 +179,7 @@
                 <CheckBox x:Name="RestoreSessionCheck" Style="{StaticResource DarkCheckBox}" Margin="0,4,0,0"
                           Content="Volver a abrir las cámaras de la última sesión"/>
                 <TextBlock Style="{StaticResource SettingHint}"
-                           Text="Reabre la Vista en Vivo como quedó: la división, la cámara y el stream de cada cuadro, y las pantallas auxiliares en su monitor. Se recuerda a medida que cambia, así que también vale si el cliente se cerró de golpe. Es por usuario: otra persona que ingrese en este equipo no hereda sus cámaras."/>
+                           Text="Reabre el Centro de mando como quedó: la división, la cámara y el stream de cada cuadro, y las pantallas auxiliares en su monitor. Se recuerda a medida que cambia, así que también vale si el cliente se cerró de golpe. Es por usuario: otra persona que ingrese en este equipo no hereda sus cámaras."/>
 
                 <TextBlock Text="Carpeta de grabaciones locales" Style="{StaticResource FieldLabel}" Margin="0,18,0,4"/>
                 <DockPanel>
@@ -226,7 +226,7 @@
                             ValueChanged="OnVolumeChanged"/>
                 </DockPanel>
                 <TextBlock Style="{StaticResource SettingHint}"
-                           Text="Se aplica a los cuadros que se creen desde ahora (al cambiar la división o reabrir la Vista en Vivo). El audio de cada cuadro sigue partiendo silenciado; este es el volumen con el que suena al activarlo."/>
+                           Text="Se aplica a los cuadros que se creen desde ahora (al cambiar la división o reabrir el Centro de mando). El audio de cada cuadro sigue partiendo silenciado; este es el volumen con el que suena al activarlo."/>
             </StackPanel>
 
             <!-- ============ JOYSTICK PTZ ============ -->
@@ -252,7 +252,7 @@
                     </StackPanel>
                 </StackPanel>
                 <TextBlock Style="{StaticResource SettingHint}"
-                           Text="Sirve cualquier joystick que Windows reconozca como mando de juego. La palanca mueve la cámara PTZ del cuadro seleccionado y el giro hace zoom, a la vez; al soltar se detiene. Actúa con una ventana del cliente activa, o también detrás de otros programas si marca la última opción (con la Vista en Vivo abierta). Se guarda por modelo de joystick."/>
+                           Text="Sirve cualquier joystick que Windows reconozca como mando de juego. La palanca mueve la cámara PTZ del cuadro seleccionado y el giro hace zoom, a la vez; al soltar se detiene. Actúa con una ventana del cliente activa, o también detrás de otros programas si marca la última opción (con el Centro de mando abierto). Se guarda por modelo de joystick."/>
             </StackPanel>
 
             <!-- ============ RED ============ -->
@@ -327,7 +327,7 @@
                     </RadioButton>
                 </StackPanel>
                 <TextBlock Style="{StaticResource SettingHint}" Margin="0,8,0,0"
-                           Text="Consola: tipografía técnica y cifras en monoespaciada, telemetría bajo cada cuadro de video (códec, resolución, FPS, stream y tiempo en vivo) y la botonera de la Vista en Vivo abajo."/>
+                           Text="Consola: tipografía técnica y cifras en monoespaciada, telemetría bajo cada cuadro de video (códec, resolución, FPS, stream y tiempo en vivo) y la botonera del Centro de mando abajo."/>
 
                 <!-- Paleta: solo aplica a la Consola -->
                 <TextBlock Text="Paleta de la Consola" Style="{StaticResource FieldLabel}" Margin="0,14,0,4"/>

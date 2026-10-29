@@ -98,6 +98,21 @@ public static class ResourceDetails
         if (c is null) return null;
         var d = c.Device;
         var facts = new List<ResourceFactDto>();
+        if (d.AccessDeviceId is { } terminalId &&
+            await db.AccessDevices.AsNoTracking().FirstOrDefaultAsync(a => a.Id == terminalId, ct) is { } terminal)
+        {
+            Add(facts, "Tipo de equipo", "Cámara de un terminal de acceso");
+            Add(facts, "Señal", c.IsOnline && d.Status == DeviceStatus.Online ? "Con señal" : "Sin señal");
+            Add(facts, "Visible para los operadores", c.Enabled ? (terminal.Enabled ? "Sí" : "No (el terminal está desactivado)") : "No");
+            Add(facts, "Licencia", "Incluida con el terminal: no ocupa canal de video");
+            Add(facts, "Puertas", "Es la cámara principal de las puertas del terminal");
+            return new Part(
+                new ResourceSourceDto("access", terminal.Id, terminal.Name, terminal.Model, terminal.SerialNumber,
+                    terminal.FirmwareVersion, Address(terminal.Host, terminal.Port, terminal.UseHttps),
+                    OnlineText(terminal.Status, terminal.Enabled), terminal.LastSeenAt),
+                facts, CanRename: true, RenameNote: null, FixedCameras: [],
+                SnapshotPath: $"/api/devices/{d.Id}/snapshot/{c.ChannelNumber}");
+        }
         Add(facts, "Tipo de equipo", d.DeviceType switch
         {
             DeviceType.Camera => "Cámara IP",
@@ -150,10 +165,14 @@ public static class ResourceDetails
         if (d.SupportsFace) credentials.Add("rostro");
         Add(facts, "Credenciales del equipo", credentials.Count > 0 ? string.Join(", ", credentials) : null);
         Add(facts, "Origen del nombre", door.NameFromDevice ? "Lo informa el equipo" : "Puesto en el VMS");
+        // La cámara del propio terminal es la principal de sus puertas (se quita desde el terminal).
+        var terminalCameras = await db.Channels.AsNoTracking().Include(c => c.Device)
+            .Where(c => c.Device.AccessDeviceId == d.Id && c.Enabled).OrderBy(c => c.ChannelNumber).ToListAsync(ct);
         return new Part(
             new ResourceSourceDto("access", d.Id, d.Name, d.Model, d.SerialNumber, d.FirmwareVersion,
                 Address(d.Host, d.Port, d.UseHttps), OnlineText(d.Status, d.Enabled), d.LastSeenAt),
-            facts, CanRename: true, RenameNote: null, FixedCameras: []);
+            facts, CanRename: true, RenameNote: null,
+            FixedCameras: terminalCameras.Select(c => CameraDto(c, isFixed: true)).ToList());
     }
 
     private static string ArmText(AlarmArmState state) => state switch
@@ -253,16 +272,23 @@ public static class ResourceDetails
     {
         var s = await db.Speakers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (s is null) return null;
+        var groups = await db.SpeakerGroupMembers.AsNoTracking().Where(m => m.SpeakerId == id)
+            .Select(m => m.Group!.Name).OrderBy(n => n).ToListAsync(ct);
         var facts = new List<ResourceFactDto>();
         Add(facts, "Volumen", s.Volume?.ToString() ?? "Sin información todavía");
         Add(facts, "Voz en vivo", YesNo(s.SupportsLiveAudio));
         Add(facts, "Biblioteca de audios propia", YesNo(s.SupportsLibrary));
         Add(facts, "Texto a voz", YesNo(s.SupportsTts));
-        Add(facts, "Grupo", s.GroupName);
+        Add(facts, "Grupos", groups.Count > 0 ? string.Join(", ", groups) : null);
+        bool isPart = s.IsPart;
+        if (isPart) Add(facts, "Licencia", $"Altavoz de {(s.AccessDeviceId is not null ? "un terminal de acceso" : "una cámara o grabador")}: incluido, no ocupa parlante");
         return new Part(
-            new ResourceSourceDto("speakers", s.Id, s.Name, s.Model, s.SerialNumber, s.FirmwareVersion,
+            new ResourceSourceDto(s.AccessDeviceId is not null ? "access" : s.DeviceId is not null ? "devices" : "speakers",
+                s.AccessDeviceId ?? s.DeviceId ?? s.Id, s.Name, s.Model, s.SerialNumber, s.FirmwareVersion,
                 Address(s.Host, s.Port, s.UseHttps), OnlineText(s.Status, s.Enabled), s.LastSeenAt),
-            facts, CanRename: true, RenameNote: null, FixedCameras: []);
+            facts, CanRename: !isPart,
+            RenameNote: isPart ? "Es el altavoz de otro equipo: lleva el nombre de ese equipo (se cambia ahí)." : null,
+            FixedCameras: []);
     }
 
     private static async Task<Part?> IntercomAsync(VmsDbContext db, int id, CancellationToken ct)
@@ -297,9 +323,14 @@ public static class ResourceDetails
         Add(facts, "Salidas (relés)", outputs.Count == 0 ? "Ninguna" : Names(outputs));
         if (m.ReportedModel is { } reported && reported != m.Model)
             Add(facts, "Modelo que informa el equipo", reported);
+        bool isPart = m.IsPart;
+        if (isPart) Add(facts, "Licencia", $"Entradas y salidas de {(m.AccessDeviceId is not null ? "un terminal de acceso" : "una cámara o grabador")}: incluidas, no ocupan módulo");
         return new Part(
-            new ResourceSourceDto("io-modules", m.Id, m.Name, m.Model, null, null,
+            new ResourceSourceDto(m.AccessDeviceId is not null ? "access" : m.DeviceId is not null ? "devices" : "io-modules",
+                m.AccessDeviceId ?? m.DeviceId ?? m.Id, m.Name, m.Model, null, null,
                 Address(m.Host, m.Port), OnlineText(m.Status, m.Enabled), m.LastSeenAt),
-            facts, CanRename: true, RenameNote: null, FixedCameras: []);
+            facts, CanRename: !isPart,
+            RenameNote: isPart ? "Son las entradas y salidas de otro equipo: llevan el nombre de ese equipo (sus entradas y salidas se nombran en Módulos de E/S)." : null,
+            FixedCameras: []);
     }
 }

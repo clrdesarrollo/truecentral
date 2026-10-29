@@ -173,7 +173,7 @@
                     <Button Content="Cerrar" Style="{StaticResource GhostButton}" Click="OnClose"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
-                    <Button x:Name="OpenLiveButton" Content="Abrir en la Vista en vivo" Click="OnOpenLive"
+                    <Button x:Name="OpenLiveButton" Content="Abrir en el Centro de mando" Click="OnOpenLive"
                             Style="{StaticResource PrimaryButton}" Padding="16,8"
                             ToolTip="Lleva estas cámaras a la grilla principal (stream principal según su configuración)"/>
                     <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11.5"

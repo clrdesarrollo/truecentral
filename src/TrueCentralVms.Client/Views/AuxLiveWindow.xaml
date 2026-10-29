@@ -19,6 +19,11 @@
                       UseAeroCaptionButtons="False"/>
     </WindowChrome.WindowChrome>
     <Window.Resources>
+        <ResourceDictionary>
+        <!-- Centro de mando: lista de recursos y cuadros que no son video -->
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="/TrueCentralVms.Client;component/Views/CommandCenterTemplates.xaml"/>
+        </ResourceDictionary.MergedDictionaries>
         <!-- Botón de cada división dentro del popup (miniatura + número).
              Copia del de LiveView con el ancestro ajustado a Window. -->
         <Style x:Key="LayoutPresetButton" TargetType="Button">
@@ -84,6 +89,7 @@
                 </StackPanel>
             </Button>
         </DataTemplate>
+        </ResourceDictionary>
     </Window.Resources>
 
     <Grid x:Name="RootShell">
@@ -152,20 +158,8 @@
                         BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
                         Visibility="{Binding IsTreeCollapsed, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
                     <DockPanel>
-                        <!-- Modo del árbol y buscador: estado compartido con la ventana principal -->
-                        <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8">
-                            <Border DockPanel.Dock="Right" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                                    CornerRadius="6" Padding="2"
-                                    Visibility="{Binding ShowTreeModeToggle, Converter={x:Static vm:BoolToVisibility.Instance}}">
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Style="{StaticResource SegmentButton}" Content="Equipo"
-                                            Tag="{Binding IsTreeByDevice}" Command="{Binding ShowTreeByDeviceCommand}"
-                                            ToolTip="Cámaras agrupadas por equipo (DVR, NVR, cámara)"/>
-                                    <Button Style="{StaticResource SegmentButton}" Content="Ubicación"
-                                            Tag="{Binding IsTreeByLocation}" Command="{Binding ShowTreeByLocationCommand}"
-                                            ToolTip="Cámaras agrupadas por ubicación (sitio, edificio, sector…)"/>
-                                </StackPanel>
-                            </Border>
+                        <!-- Encabezado y buscador: estado compartido con la ventana principal -->
+                        <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8" MinHeight="24">
                             <TextBlock Text="{Binding TreeCaption}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
                                        Foreground="{StaticResource MutedBrush}"/>
                         </DockPanel>
@@ -226,7 +220,7 @@
                                         <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="12"
                                                    Foreground="{StaticResource MutedBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
                                         <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{Binding ChannelCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                        <TextBlock Text="{Binding ItemCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
                                                    Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </HierarchicalDataTemplate>
@@ -469,7 +463,7 @@
                                     <Button DockPanel.Dock="Right" Command="{Binding ToggleRecordingCommand}"
                                             Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"
                                             Focusable="False" Content="&#x25CF;" FontSize="10"
-                                            Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                            Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}">
                                         <Button.Style>
                                             <Style TargetType="Button">
                                                 <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
@@ -489,11 +483,11 @@
                                             FontFamily="Segoe MDL2 Assets" FontSize="11"
                                             Foreground="{StaticResource MutedBrush}"
                                             ToolTip="Guardar una captura de imagen de este cuadro"
-                                            Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                                            Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                     <Button DockPanel.Dock="Right" Command="{Binding SwitchProfileCommand}"
                                             Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"
                                             Focusable="False" FontSize="10" FontWeight="Bold"
-                                            Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                            Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}">
                                         <Button.Style>
                                             <Style TargetType="Button">
                                                 <Setter Property="Content" Value="P"/>
@@ -514,7 +508,7 @@
                                             Focusable="False"
                                             FontFamily="Segoe MDL2 Assets" FontSize="11"
                                             ToolTip="Audio de este cuadro (se silencia el resto, en todas las ventanas)"
-                                            Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                            Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}">
                                         <Button.Style>
                                             <Style TargetType="Button">
                                                 <Setter Property="Content" Value="&#xE74F;"/>
@@ -559,7 +553,11 @@
                                                     KeyBindings="None" OpenOnDrop="None" SwapOnDrop="None"
                                                     ToggleFullScreenOnDoubleClick="None"
                                                     Loaded="OnFlyleafHostLoaded"
-                                                    Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                                                    Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                    <!-- Contenido que no es video (puerta, panel, cerco, tarjeta, página web):
+                                         cada tipo trae su DataTemplate en Views/CellPanelTemplates.xaml. -->
+                                    <ContentControl Content="{Binding Panel}" Focusable="False"
+                                                    Visibility="{Binding HasPanel, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                     <TextBlock Text="Clic para seleccionar este cuadro y doble clic en un canal"
                                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                                Foreground="{StaticResource FaintTextBrush}" FontSize="11.5" TextWrapping="Wrap"

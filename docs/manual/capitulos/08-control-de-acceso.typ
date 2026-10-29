@@ -1,5 +1,5 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Server/wwwroot/access-monitor.js, src/TrueCentralVms.Server/wwwroot/access-catalog.js, src/TrueCentralVms.Server/wwwroot/enroll.js, src/TrueCentralVms.Server/wwwroot/access.js, src/TrueCentralVms.Server/wwwroot/index.html, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.WebControl/MainWindow.xaml, src/TrueCentralVms.WebControl/App.xaml.cs, installer/complemento.iss
+// Fuentes: src/TrueCentralVms.Server/wwwroot/access-monitor.js, src/TrueCentralVms.Server/wwwroot/access-catalog.js, src/TrueCentralVms.Server/wwwroot/enroll.js, src/TrueCentralVms.Server/wwwroot/access.js, src/TrueCentralVms.Server/Services/EquipmentParts.cs, src/TrueCentralVms.Server/Api/AccessApi.cs, src/TrueCentralVms.Server/wwwroot/index.html, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.WebControl/MainWindow.xaml, src/TrueCentralVms.WebControl/App.xaml.cs, installer/complemento.iss
 
 = Control de acceso <cap-control-de-acceso>
 
@@ -183,10 +183,11 @@ mantenida abierta demasiado tiempo_), el cliente de monitoreo de escritorio:
 - abre un aviso flotante *Alarma de puerta · nombre de la puerta* con la
   descripción, el equipo y la hora. Si la misma puerta vuelve a avisar dentro
   del mismo minuto, no se abre otro aviso;
-- si la ficha de la puerta tiene consignas o cámaras asociadas, abre además la
-  ventana *Verificación del aviso*, con las consignas para el operador y las
-  cámaras de la puerta. #boton("Abrir en la Vista en vivo") lleva esas cámaras
-  a la grilla principal.
+- si la ficha de la puerta tiene consignas o cámaras asociadas (la cámara de un
+  terminal facial cuenta como asociada a sus puertas), abre además la ventana
+  *Verificación del aviso*, con las consignas para el operador y las cámaras de
+  la puerta. #boton("Abrir en el Centro de mando") lleva esas cámaras
+  a la grilla del Centro de mando.
 
 Solo se avisan las alarmas recientes: las que el equipo entrega con atraso al
 reconectarse no se repiten. Las consignas y cámaras de cada puerta se
@@ -732,8 +733,9 @@ sistema trabaja con estas marcas:
 )
 
 Solo los equipos Hikvision reciben el padrón (personas, credenciales y
-horarios), leen tarjetas a pedido y se configuran desde las pestañas *Puertas*,
-*Lectores* y *Capacidades* de su página.
+horarios) y leen tarjetas a pedido. Los parámetros de sus puertas se
+configuran desde la página del equipo en los Hikvision y en los ZKTeco
+inBio / C3 / MA (ver _La página del equipo_, más adelante).
 
 === Desde la tabla de equipos en línea
 
@@ -761,7 +763,9 @@ cámaras; ver #capitulo(<cap-fuentes-de-video>).
 
 + Haga clic en #boton("Agregar equipo").
 + Escriba un *Nombre* que lo identifique (por ejemplo, _Portería principal_).
-+ Elija su *Ubicación*. Sus puertas la heredan.
++ Elija su *Ubicación*. Sus puertas la heredan. Si usted tiene el permiso
+  _Recursos y ubicaciones_, viene elegida *Nueva, con el nombre del equipo*
+  (ver #capitulo(<cap-recursos-y-ubicaciones>)).
 + Elija la *Marca / protocolo*.
 + Escriba la *Dirección (IP o hostname)* y revise el puerto (*Puerto HTTP*, o
   *Puerto del equipo* en ZKTeco).
@@ -773,10 +777,14 @@ cámaras; ver #capitulo(<cap-fuentes-de-video>).
     Seguridad (de fábrica, 0).
 + Deje marcado *Activo*: el sistema revisa su estado y sus puertas ocupan cupo
   de la licencia.
++ En *Partes del terminal*, deje marcado lo que quiera usar del terminal: su
+  cámara, su altavoz y sus entradas y salidas de alarma (ver _Cámara, altavoz y
+  entradas y salidas del terminal_, más adelante).
 + Si quiere comprobar los datos antes, haga clic en #boton("Probar conexión"):
   el recuadro *Conexión validada* muestra el modelo, tipo, número de serie,
   firmware, puertas, si acepta apertura remota y eventos, qué credenciales
-  maneja y su cupo de personas y tarjetas.
+  maneja, su cupo de personas y tarjetas y si tiene *Cámara*, *Altavoz* y
+  *Entradas y salidas de alarma* (con cuántas entradas y salidas).
 + Haga clic en #boton("Guardar").
 
 Al guardar, el sistema se conecta con el equipo y lee su modelo, firmware,
@@ -863,17 +871,18 @@ las funciones, la cantidad de puertas y el estado de conexión, con el botón
 
 === Conexión
 
-Tiene los mismos datos del alta, con #boton("Probar conexión") y
-#boton("Guardar cambios"). Deje la contraseña vacía para no cambiarla. Si cambia
+Tiene los mismos datos del alta, incluidas las *Partes del terminal*, con
+#boton("Probar conexión") y #boton("Guardar cambios"). Deje la contraseña
+vacía para no cambiarla. Si cambia
 la dirección, el puerto, el usuario o la contraseña, al guardar el sistema
 vuelve a validar el equipo y relee sus datos y puertas.
 
 Debajo, *Puertas del equipo* lista cada puerta con:
 
 - #boton("Ficha en Recursos"): su ficha, donde se le cambia el nombre, la
-  ubicación, las consignas y las cámaras (ver
-  #capitulo(<cap-recursos-y-ubicaciones>)). Una vez renombrada ahí, revalidar el
-  equipo no le devuelve el nombre de fábrica;
+  ubicación, las consignas y las cámaras, y donde están sus parámetros en el
+  equipo (ver #capitulo(<cap-recursos-y-ubicaciones>)). Una vez renombrada
+  ahí, revalidar el equipo no le devuelve el nombre de fábrica;
 - *Activa*: al desmarcarla y confirmar, la puerta queda pausada. Deja de ocupar
   cupo de la licencia, se la quita de los niveles de acceso en los equipos y en
   el monitoreo aparece como _Puerta pausada_, sin órdenes.
@@ -904,9 +913,24 @@ redondear algún valor. Los campos de contraseña (*Código de coacción*,
 cambiarlos. *Otros parámetros que informa el equipo* despliega, solo para
 consulta, lo demás que entrega el equipo.
 
-#nota[Solo los equipos Hikvision se configuran desde estas pestañas. Con otra
-  marca aparece _Los equipos de esta marca todavía no se configuran desde el
-  VMS: use la página web del equipo._]
+Los parámetros de una sola puerta, con los de sus lectores de entrada y de
+salida, también se cambian desde la pestaña *Parámetros* de su ficha en
+Recursos.
+
+Las controladoras y terminales _ZKTeco inBio / C3 / MA_ tienen además la
+pestaña *Controladora*, con los parámetros de la controladora entera:
+*Antipassback*, *Interbloqueo*, *Horario de verano automático* y, en las de 4
+puertas, *Usar como 2 puertas de doble lector*. El antipassback y el
+interbloqueo los aplica la propia controladora entre sus puertas y lectores,
+aunque se corte la red. En estos equipos, la pestaña *Puertas* trae, por
+ejemplo, *Tiempo de apertura de la cerradura*, *Sensor de puerta* y *Modo de
+verificación*, y *Lectores* indica _El equipo no informó lectores
+configurables._
+
+#nota[Se configuran desde estas pestañas los equipos Hikvision y los ZKTeco
+  inBio / C3 / MA. Con otra marca (Dahua, u otros ZKTeco) aparece _Los equipos
+  de esta marca todavía no se configuran desde el VMS: use la página web del
+  equipo._]
 
 === Capacidades
 
@@ -937,6 +961,81 @@ Muestra la hora del equipo, su zona horaria y su desfase. Con el permiso
 *Mantenimiento de equipos* aparecen #boton("Ajustar hora…") y
 #boton("Reiniciar / restablecer…"). *Ver todos los equipos* lleva a
 #menu("Dispositivos", "Hora y mantenimiento").
+
+== Cámara, altavoz y entradas y salidas del terminal
+
+#requiere("Equipos de acceso")
+
+Además de sus puertas, muchos terminales traen otras partes: los faciales
+tienen cámara, y algunos tienen altavoz y entradas y salidas de alarma. El
+sistema las ofrece como recursos propios, incluidos con el terminal: no ocupan
+cupo de la licencia (ni canal de video, ni parlante, ni módulo de E/S).
+
+En el formulario del equipo (al agregarlo y en la pestaña *Conexión* de su
+página), la sección *Partes del terminal (incluidas: no ocupan licencia)* tiene
+una casilla por parte. Las tres vienen marcadas:
+
+#table(
+  columns: (auto, 1fr),
+  table.header[Casilla][Qué se obtiene],
+  [*Su cámara, como una cámara más*], [La cámara del terminal se ve como cualquier otra en el Centro de mando del cliente y en la Vista en vivo del panel web, y queda como cámara principal de sus puertas.],
+  [*Su altavoz, como un parlante más*], [El altavoz aparece en #menu("Dispositivos", "Parlantes IP"): voz en vivo y sonidos desde el Centro de mando, grupos de parlantes y automatizaciones.],
+  [*Sus entradas y salidas de alarma, como un módulo de E/S*], [Aparecen en #menu("Dispositivos", "Módulos de E/S"): estado en vivo, «Operar relé» y disparadores de automatizaciones.],
+)
+
+#captura-pendiente("Panel web: pestaña Conexión de un terminal facial — sección Partes del terminal (incluidas: no ocupan licencia) con las tres casillas marcadas y, debajo de cada una, su estado: cámara y altavoz en uso, y 1 entrada y 1 salida en Módulos de E/S")
+
+=== Cómo se detectan
+
+Las partes se detectan solas al agregar el terminal y cada vez que se
+revalida. Los terminales que se agregaron antes de que el sistema las supiera
+ver se revisan una sola vez, solos, cuando el sistema los encuentra en línea.
+
+En la página del equipo, debajo de cada casilla se ve qué pasa con esa parte:
+
+#table(
+  columns: (1fr, 1fr),
+  table.header[Texto][Significa],
+  [_Se ve como la cámara «…» en Vista en vivo y en la ficha de sus puertas._], [La cámara está en uso, con ese nombre.],
+  [_Está en Parlantes IP como «…»._], [El altavoz está en uso.],
+  [_… entrada(s) y … salida(s) en Módulos de E/S como «…»._], [Sus entradas y salidas de alarma están en uso.],
+  [_Tiene cámara, pero no se está mostrando._ / _Tiene altavoz, pero no se está ofreciendo._ / _Tiene … entrada(s) y … salida(s), pero no se están ofreciendo._], [El terminal tiene esa parte, pero su casilla está desmarcada.],
+  [_No se le detectó (se vuelve a mirar al revalidarlo)._], [El terminal no informó esa parte.],
+)
+
+Si una parte marcada no se puede usar, debajo de las casillas aparece en
+naranja el motivo. Por ejemplo:
+
+- _Su cámara: por ISUP todavía no se puede usar._ Las partes de un terminal
+  conectado por ISUP todavía no se ofrecen.
+- _Su cámara ya está en Fuentes de video como "…": se usa esa (asóciela a la
+  puerta en su ficha de Recursos)._ Alguien ya había agregado esa cámara a
+  mano: el sistema no la duplica.
+- _Su altavoz ya está en Parlantes IP como "…": se usa ese._
+- _Su dirección ya la usa el módulo de E/S "…"._
+
+=== Qué tienen en común con el terminal
+
+- Su dirección, sus credenciales, su nombre y su ubicación son los del
+  terminal: se copian solos cada vez que se guarda o se revalida, y no se
+  configuran aparte. Al cambiar la ubicación del terminal, sus partes se mueven
+  con él, salvo las que usted ubicó aparte en Recursos.
+- Al pausar el terminal (desmarcar *Activo*) sus partes se apagan con él, y al
+  eliminarlo se borran con él.
+- Para dejar de usar una parte, desmarque su casilla y haga clic en
+  #boton("Guardar cambios"): la parte se quita. No vuelve sola al revalidar el
+  terminal; para recuperarla, marque de nuevo la casilla y guarde.
+- El altavoz y las entradas y salidas llevan siempre el nombre del terminal.
+  La cámara también parte con ese nombre, pero se le puede poner otro en su
+  ficha de Recursos.
+
+=== La cámara del terminal en sus puertas
+
+La cámara del terminal queda como cámara principal de sus puertas, fija: en la
+pestaña *Cámaras asociadas* de la ficha de cada puerta aparece primera y no se
+puede mover ni quitar desde ahí. Por eso es la que muestran la imagen actual de
+la ficha y la ventana *Verificación del aviso* cuando la puerta avisa una
+alarma. Las cámaras que usted asocie a la puerta van después de ella.
 
 == Mensajes frecuentes
 
