@@ -90,9 +90,20 @@ public sealed partial class WebCellPanel : CellPanel
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// El navegador de la página: lo crea la vista la primera vez y es DE LA
+    /// PÁGINA, no del cuadro. Al moverla de cuadro (intercambiar, ampliar,
+    /// unir) o de ventana (viñeta extraída) el cuadro de destino adopta el
+    /// mismo navegador, así la página sigue tal como estaba (no se recarga).
+    /// Se suelta recién al cerrarse la página.
+    /// </summary>
+    internal IDisposable? Browser { get; set; }
+
     /// <summary>Se cerró (cuadro liberado, reemplazado, otro tablero o el cliente se cierra).</summary>
     public override void Dispose()
     {
+        Browser?.Dispose();
+        Browser = null;
         if (_openedAt is not { } openedAt) return;
         _openedAt = null;
         var open = DateTime.UtcNow - openedAt;

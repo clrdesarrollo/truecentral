@@ -393,6 +393,8 @@ public partial class AuxScreenViewModel : ObservableObject
         try { await ApplyLayoutAsync(merge.Layout, target); }
         finally { _layoutBusy = false; }
         SelectedCell = Cells[merge.StripCells[0]];
+        // La herramienta es de un uso: unido, se apaga (antes del aviso, que apagarla reemplaza).
+        IsMergeMode = false;
         StatusMessage = $"{inside.Count} cuadros unidos en uno." +
             (closed.Count > 0 ? $" Se cerró: {string.Join(", ", closed.Select(t => $"\"{t}\""))}." : "");
     }
@@ -411,6 +413,7 @@ public partial class AuxScreenViewModel : ObservableObject
         try { await ApplyLayoutAsync(split.Layout, split.Placement); }
         finally { _layoutBusy = false; }
         SelectedCell = Cells[split.StripCells[0]];
+        IsMergeMode = false; // separar también termina la herramienta
         StatusMessage = $"Cuadro separado: la grilla queda en {split.Layout.CellCount} cuadros.";
     }
 

@@ -15,7 +15,9 @@ namespace TrueCentralVms.Client.Views;
 /// que guarda la sesión del servidor. La página navega dentro del cuadro (solo
 /// http/https); un enlace a otra ventana se abre en el mismo cuadro; las
 /// descargas y los permisos (cámara, micrófono, ubicación) se niegan.
-/// El navegador se crea al cargarse el cuadro y se suelta al descargarse. Es el
+/// El navegador es de la página (WebCellPanel.Browser): lo crea el primer cuadro
+/// que la muestra y, al moverla de cuadro o de ventana, lo adopta el de destino
+/// (la página no se recarga); se destruye al cerrarse la página. Es el
 /// WebView2 de ventana propia (como el video): WebView2CompositionControl pide
 /// las proyecciones WinRT de un TFM con versión de Windows, que el cliente no
 /// usa. Como esa ventana se tragaría el mouse, la página se esconde durante
@@ -126,6 +128,17 @@ public partial class WebCellView : UserControl
         _panel = panel;
         panel.ReloadRequested += OnReload;
         panel.PropertyChanged += OnPanelPropertyChanged;
+        // La página ya tiene navegador (viene de otro cuadro o de otra ventana): se
+        // adopta el mismo, con la página tal como estaba, sin recargarla.
+        if (panel.Browser is WebView2 existing)
+        {
+            if (existing.Parent is Border previous) previous.Child = null;
+            _web = existing;
+            existing.Visibility = PageHidden ? Visibility.Hidden : Visibility.Visible;
+            Host.Child = existing;
+            ApplyZoom();
+            return;
+        }
         var web = _web = new WebView2
         {
             DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x15, 0x18, 0x1D),
@@ -133,11 +146,13 @@ public partial class WebCellView : UserControl
             Visibility = PageHidden ? Visibility.Hidden : Visibility.Visible,
             ZoomFactor = panel.Zoom / 100.0,
         };
+        panel.Browser = web;
         // Ctrl + rueda dentro de la página: el porcentaje de la barra (y lo guardado) lo sigue.
+        // El navegador es siempre de esta página: el aviso no depende del cuadro donde esté.
         web.ZoomFactorChanged += (_, _) =>
         {
             int zoom = (int)Math.Round(web.ZoomFactor * 100);
-            if (_panel == panel && zoom != panel.Zoom) panel.Zoom = zoom;
+            if (zoom != panel.Zoom) panel.Zoom = zoom;
         };
         Host.Child = web;
         try
@@ -147,12 +162,13 @@ public partial class WebCellView : UserControl
         catch (Exception ex)
         {
             // Un cuadro web nunca puede llevarse el cliente (esto corre en un Loaded async).
-            if (_web != web) return;
+            if (panel.Browser != web) return;
             _environment = null; // el próximo cuadro vuelve a intentarlo
             // El navegador es una ventana encima del cuadro: se quita para que el aviso se vea.
-            Host.Child = null;
+            if (web.Parent is Border host) host.Child = null;
+            if (_web == web) _web = null;
+            panel.Browser = null;
             web.Dispose();
-            _web = null;
             panel.Status = "";
             panel.Error = ex is WebView2RuntimeNotFoundException or COMException
                 ? "Este PC no tiene el componente WebView2 de Microsoft, que las páginas web necesitan " +
@@ -160,7 +176,9 @@ public partial class WebCellView : UserControl
                 : "No se pudo abrir el navegador del cuadro: " + ex.Message;
             return;
         }
-        if (_web != web) return; // el cuadro se descargó mientras arrancaba
+        // La página se cerró mientras arrancaba. Si solo se movió de cuadro, el
+        // navegador sigue siendo suyo y termina de prepararse igual.
+        if (panel.Browser != web) return;
 
         var core = web.CoreWebView2;
         core.Settings.AreDevToolsEnabled = false;
@@ -179,7 +197,9 @@ public partial class WebCellView : UserControl
         {
             panel.CurrentUrl = core.Source;
             panel.Status = e.IsSuccess ? "" : "No cargó";
-            ApplyZoom(); // otro sitio puede volver al 100 %
+            // Otro sitio puede volver al 100 %: el zoom de la página manda.
+            double factor = panel.Zoom / 100.0;
+            if (Math.Abs(web.ZoomFactor - factor) > 0.001) web.ZoomFactor = factor;
         };
         core.DownloadStarting += (_, e) => e.Cancel = true;
         core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
@@ -195,7 +215,10 @@ public partial class WebCellView : UserControl
         // El navegador no arrancó: se vuelve a intentar desde cero.
         if (_web?.CoreWebView2 is not { } core)
         {
+            var panel = _panel;
             Stop();
+            panel.Browser?.Dispose();
+            panel.Browser = null;
             _ = SafeStartAsync();
             return;
         }
@@ -217,6 +240,12 @@ public partial class WebCellView : UserControl
         if (Math.Abs(web.ZoomFactor - factor) > 0.001) web.ZoomFactor = factor;
     }
 
+    /// <summary>
+    /// El cuadro deja de mostrar la página (se movió, se cerró o se descargó la
+    /// vista): el navegador se suelta pero NO se destruye, es de la página
+    /// (WebCellPanel.Browser) y lo adopta el cuadro donde vaya; se destruye
+    /// cuando la página se cierra.
+    /// </summary>
     private void Stop()
     {
         if (_panel is not null)
@@ -226,9 +255,7 @@ public partial class WebCellView : UserControl
         }
         _panel = null;
         if (_web is null) return;
-        var web = _web;
+        if (Host.Child == _web) Host.Child = null;
         _web = null;
-        Host.Child = null;
-        web.Dispose();
     }
 }
