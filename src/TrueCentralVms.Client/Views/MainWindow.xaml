@@ -5,7 +5,7 @@
         xmlns:views="clr-namespace:TrueCentralVms.Client.Views"
         xmlns:services="clr-namespace:TrueCentralVms.Client.Services"
         Title="CLR TrueCentral VMS"
-        Width="1280" Height="760" MinWidth="900" MinHeight="560"
+        Width="1280" Height="800" MinWidth="1024" MinHeight="768"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         Icon="/Assets/logo.png"
@@ -20,6 +20,31 @@
                       UseAeroCaptionButtons="False"/>
     </WindowChrome.WindowChrome>
     <Window.Resources>
+        <!-- «+» junto a las viñetas -->
+        <Style x:Key="NewTabButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Width="28" Height="28">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Botones del riel con estado activo según la sección visible -->
         <Style x:Key="RailHomeButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
             <Style.Triggers>
@@ -429,6 +454,7 @@
                 <!-- Viñetas de módulos: se reordenan arrastrándolas (el orden se recuerda) y,
                      arrastradas hacia abajo o fuera de la ventana, se extraen a su propia ventana
                      como las pestañas de un navegador (MainWindow.Tabs). -->
+                <StackPanel Orientation="Horizontal">
                 <StackPanel x:Name="TabStrip" Orientation="Horizontal" Background="Transparent"
                             PreviewMouseLeftButtonDown="OnTabStripMouseDown"
                             PreviewMouseMove="OnTabStripMouseMove"
@@ -585,6 +611,13 @@
                                 Command="{Binding CloseLprCommand}"
                                 ToolTip="Cerrar Reconocimiento de patentes"/>
                     </Grid>
+                </StackPanel>
+                <!-- «+» como la pestaña nueva de un navegador: otro Centro de mando, con su propia
+                     grilla, en su ventana (si no hay ninguno abierto, abre el de esta ventana). -->
+                <Button Style="{StaticResource NewTabButton}" Content="&#xE710;" Margin="4,0,0,0" VerticalAlignment="Center"
+                        Command="{Binding OpenCommandCenterInstanceCommand}"
+                        Visibility="{Binding CanLiveView, Converter={x:Static vm:BoolToVisibility.Instance}}"
+                        ToolTip="Abrir otro Centro de mando (en una ventana nueva, para llevarlo a otro monitor)"/>
                 </StackPanel>
             </DockPanel>
         </Border>

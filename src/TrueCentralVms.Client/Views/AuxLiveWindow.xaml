@@ -5,7 +5,7 @@
         xmlns:vm="clr-namespace:TrueCentralVms.Client.ViewModels"
         xmlns:views="clr-namespace:TrueCentralVms.Client.Views"
         Title="{Binding WindowTitle}"
-        Width="1100" Height="650" MinWidth="700" MinHeight="440"
+        Width="1280" Height="800" MinWidth="1024" MinHeight="768"
         WindowStartupLocation="Manual"
         WindowStyle="None"
         Icon="/TrueCentralVms.Client;component/Assets/logo.png"

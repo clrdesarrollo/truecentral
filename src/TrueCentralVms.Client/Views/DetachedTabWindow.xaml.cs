@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
@@ -15,11 +16,13 @@ namespace TrueCentralVms.Client.Views;
 /// el video no se corta (el host de Flyleaf se reengancha a esta ventana).
 /// Cerrarla cierra el módulo, como la ✕ de su viñeta; para devolverla sin
 /// cerrarla, se arrastra su viñeta sobre las viñetas de la principal o se usa
-/// el botón de devolver.
+/// el botón de devolver. También es la ventana de cada Centro de mando más
+/// abierto con «+» (<see cref="Instance"/>): esos no se devuelven, se cierran.
 /// </summary>
 public partial class DetachedTabWindow : Window
 {
-    private readonly MainViewModel _vm;
+    private readonly INotifyPropertyChanged _source;
+    private readonly Func<bool> _wantsFullscreen;
     private bool _released;
     private bool _fullscreenOn;
 
@@ -38,30 +41,51 @@ public partial class DetachedTabWindow : Window
     /// <summary>Dice si un punto de la pantalla (en unidades de WPF) cae sobre las viñetas de la principal.</summary>
     public Func<Point, bool>? IsOverMainTabs { get; init; }
 
-    public DetachedTabWindow(MainViewModel vm, string section, string title, string glyph, string closeHint,
-        FrameworkElement view)
+    /// <summary>Otro Centro de mando (abierto con «+»), con su propia grilla; null en una viñeta extraída.</summary>
+    public AuxScreenViewModel? Instance { get; init; }
+
+    /// <summary>El «+» junto a la viñeta: abrir otro Centro de mando.</summary>
+    public event Action? NewCommandCenterRequested;
+
+    /// <param name="source">El ViewModel de lo que muestra (su barra de estado y su pantalla completa).</param>
+    /// <param name="placementKey">Dónde anota su lugar en windows.json.</param>
+    /// <param name="wantsFullscreen">La pantalla completa de la grilla pedida es de esta ventana.</param>
+    /// <param name="canReturn">Se puede devolver a la principal (una viñeta extraída; otro Centro de mando, no).</param>
+    public DetachedTabWindow(INotifyPropertyChanged source, string section, string title, string glyph, string closeHint,
+        FrameworkElement view, string placementKey, Func<bool> wantsFullscreen, bool canReturn = true,
+        bool canOpenAnother = false)
     {
-        _vm = vm;
-        DataContext = vm;
+        _source = source;
+        _wantsFullscreen = wantsFullscreen;
+        DataContext = source;
         Section = section;
         View = view;
         InitializeComponent();
+        // 1024×768 como mínimo (acotado al monitor si es más chico).
+        MonitorPlacement.EnforceMinimumSize(this);
         Title = $"{title} — CLR TrueCentral VMS";
         TabTitle.Text = title;
         TabGlyph.Text = glyph;
         CloseButton.ToolTip = closeHint;
         TabCloseButton.ToolTip = closeHint;
+        TabHeader.ToolTip = canReturn
+            ? "Arrastre la viñeta sobre las viñetas de la ventana principal para devolverla"
+            : "Arrastre la viñeta para mover la ventana";
+        ReturnButton.Visibility = canReturn ? Visibility.Visible : Visibility.Collapsed;
+        NewButton.Visibility = canOpenAnother ? Visibility.Visible : Visibility.Collapsed;
         Host.Children.Add(view);
-        // Abre donde quedó la última vez que esta viñeta estuvo afuera.
-        WindowPlacements.Remember(this, $"tab-{section}");
+        // Abre donde quedó la última vez que estuvo afuera.
+        WindowPlacements.Remember(this, placementKey);
         StateChanged += OnWindowStateChanged;
-        vm.PropertyChanged += OnVmPropertyChanged;
+        source.PropertyChanged += OnVmPropertyChanged;
         Closing += (_, _) =>
         {
             if (!_released) CloseRequested?.Invoke(this);
         };
-        Closed += (_, _) => vm.PropertyChanged -= OnVmPropertyChanged;
+        Closed += (_, _) => source.PropertyChanged -= OnVmPropertyChanged;
     }
+
+    private void OnNewClick(object sender, RoutedEventArgs e) => NewCommandCenterRequested?.Invoke();
 
     /// <summary>Saca la vista de esta ventana (la principal la vuelve a poner en su lugar).</summary>
     public FrameworkElement ReleaseView()
@@ -123,8 +147,8 @@ public partial class DetachedTabWindow : Window
     // ------------------------------------------------------------------
     private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(MainViewModel.IsGridFullscreen) || _released) return;
-        bool want = _vm.IsGridFullscreen && _vm.FullscreenSection == Section;
+        if (e.PropertyName != nameof(ICommandCenter.IsGridFullscreen) || _released) return;
+        bool want = _wantsFullscreen();
         if (want == _fullscreenOn) return;
         _fullscreenOn = want;
         ApplyGridFullscreen(want);
@@ -136,6 +160,7 @@ public partial class DetachedTabWindow : Window
     private void ApplyGridFullscreen(bool on)
     {
         TitleBar.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        StatusBar.Visibility = TitleBar.Visibility;
         if (on)
         {
             _fullscreenRestoreState = WindowState;

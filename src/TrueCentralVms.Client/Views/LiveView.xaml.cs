@@ -35,14 +35,15 @@ public partial class LiveView : UserControl
             Vm.LiveWindow = window;
             window.PreviewKeyDown += OnPtzKeyDown;
             window.PreviewKeyUp += OnPtzKeyUp;
-            if (_joystick is not null) return;
+            // El joystick es del Centro de mando de la ventana principal (los abiertos con «+» no lo tienen).
+            if (_joystick is not null || DataContext is not MainViewModel main) return;
             // Joystick PTZ: mueve la cámara seleccionada con la Vista en Vivo a
             // la vista y alguna ventana del cliente activa (también una
             // auxiliar), o con el cliente detrás de otro programa si el
             // joystick está configurado para seguir en segundo plano.
-            _joystick = new JoystickPtzController(Vm, inBackground => IsVisible &&
+            _joystick = new JoystickPtzController(main, inBackground => IsVisible &&
                 (inBackground || Application.Current.Windows.OfType<Window>().Any(w => w.IsActive)));
-            Vm.Joystick = _joystick;
+            main.Joystick = _joystick;
             // El de la ventana principal: la extraída se cierra antes o devuelve la vista.
             window.Closed += (_, _) => _joystick?.Dispose();
         };
@@ -56,7 +57,8 @@ public partial class LiveView : UserControl
     private readonly CellMergeController _merge;
     private VideoLayoutPanel? _gridPanel;
 
-    private MainViewModel Vm => (MainViewModel)DataContext;
+    /// <summary>El Centro de mando de la ventana principal o uno de los abiertos con «+».</summary>
+    private ICommandCenter Vm => (ICommandCenter)DataContext;
 
     // ------------------------------------------------------------------
     // PTZ por teclado: flechas = pan/tilt, + y - = zoom (continuo: la

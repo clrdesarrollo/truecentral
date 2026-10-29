@@ -376,10 +376,11 @@ public sealed partial class AlertsCardPanel : CellPanel
 
     partial void OnSelectedChanged(AlertLine? value) => _ = LoadImageAsync(value);
 
-    /// <summary>La foto que capturó la automatización (la principal).</summary>
+    /// <summary>La PRIMERA foto que capturó la automatización (la 1 de la ventana de alarma;
+    /// ImagePath es la última que se tomó).</summary>
     private async Task LoadImageAsync(AlertLine? line)
     {
-        if (line?.Alert is not { } alert || (alert.ImagePath ?? alert.ImagePaths.FirstOrDefault()) is not { Length: > 0 } path)
+        if (line?.Alert is not { } alert || (alert.ImagePaths.FirstOrDefault() ?? alert.ImagePath) is not { Length: > 0 } path)
         {
             _imageFor = 0;
             SelectedImage = null;

@@ -22,6 +22,9 @@ public sealed record SavedViewItem(int Id, string Name, string Detail, bool Shar
 /// cualquier puesto. Los compartidos los define quien administra los tableros
 /// (desde aquí o desde el panel web, donde se eligen los roles que los ven) y
 /// los demás los usan con candado; los propios necesitan "Crear tableros propios".
+/// Cada Centro de mando (el de la ventana principal y los abiertos con «+»)
+/// tiene su desplegable y carga o guarda SU grilla: los métodos «For» reciben
+/// la grilla (<see cref="ICommandCenter"/>); la lista de tableros es una sola.
 /// </summary>
 public partial class MainViewModel
 {
@@ -55,7 +58,10 @@ public partial class MainViewModel
 
     /// <summary>Trae del servidor los tableros que este usuario puede ver.</summary>
     [RelayCommand]
-    public async Task LoadSavedViewsAsync()
+    public Task LoadSavedViewsAsync() => LoadSavedViewsForAsync(this);
+
+    /// <summary>Lo mismo, con el aviso en el desplegable de esa grilla.</summary>
+    public async Task LoadSavedViewsForAsync(ICommandCenter host)
     {
         try
         {
@@ -63,13 +69,13 @@ public partial class MainViewModel
             SavedViews.Clear();
             foreach (var view in views.OrderBy(v => v.Shared ? 0 : 1).ThenBy(v => v.Name, StringComparer.CurrentCultureIgnoreCase))
                 SavedViews.Add(ToItem(view));
-            SavedViewsStatus = SavedViews.Count > 0 ? ""
+            host.SavedViewsStatus = SavedViews.Count > 0 ? ""
                 : CanSaveViews ? "Todavía no hay tableros: arme la grilla y guárdela aquí abajo."
                 : "Todavía no hay tableros.";
         }
         catch (Exception ex)
         {
-            SavedViewsStatus = ex.Message;
+            host.SavedViewsStatus = ex.Message;
         }
     }
 
@@ -88,13 +94,15 @@ public partial class MainViewModel
             view.Shared, view.CanEdit, view.Shared && !view.CanEdit, view.RoleIds ?? []);
     }
 
-    /// <summary>Foto de la grilla actual en el formato que guarda el servidor.</summary>
-    private LiveViewSaveRequest SnapshotRequest(string name, bool shared, IReadOnlyList<int>? roleIds = null) => new(
-        name, CurrentLayout.Key, CurrentLayout.Columns, CurrentLayout.Rows, shared,
-        Cells.Select((cell, index) => DashboardItemOf(cell, index)).OfType<LiveViewItemDto>().ToList(),
+    /// <summary>Foto de una grilla en el formato que guarda el servidor.</summary>
+    private static LiveViewSaveRequest SnapshotRequest(ICommandCenter host, string name, bool shared,
+        IReadOnlyList<int>? roleIds = null) => new(
+        name, host.CurrentLayout.Key, host.CurrentLayout.Columns, host.CurrentLayout.Rows, shared,
+        host.Cells.Select((cell, index) => DashboardItemOf(cell, index)).OfType<LiveViewItemDto>().ToList(),
         roleIds?.ToList());
 
-    private bool GridIsEmpty => Cells.All(c => c.AssignedChannel is null && c.Panel?.Content is null);
+    private static bool GridIsEmpty(ICommandCenter host) =>
+        host.Cells.All(c => c.AssignedChannel is null && c.Panel?.Content is null);
 
     /// <summary>
     /// Guarda la grilla actual como tablero nuevo. Si el nombre ya es de uno
@@ -102,113 +110,122 @@ public partial class MainViewModel
     /// por nombre repetido, que es lo que el operador quiso hacer igual).
     /// </summary>
     [RelayCommand]
-    private async Task SaveCurrentViewAsync()
+    private Task SaveCurrentViewAsync() => SaveCurrentViewForAsync(this);
+
+    [RelayCommand]
+    private Task UpdateSavedViewAsync(SavedViewItem item) => UpdateSavedViewForAsync(this, item);
+
+    [RelayCommand]
+    private Task DeleteSavedViewAsync(SavedViewItem item) => DeleteSavedViewForAsync(this, item);
+
+    [RelayCommand]
+    private Task ApplySavedViewAsync(SavedViewItem item) => ApplySavedViewForAsync(this, item);
+
+    /// <summary>Guarda la grilla de <paramref name="host"/> como tablero nuevo (o reemplaza el del mismo nombre).</summary>
+    public async Task SaveCurrentViewForAsync(ICommandCenter host)
     {
         if (!CanSaveViews) return;
-        string name = NewViewName.Trim();
+        string name = host.NewViewName.Trim();
         if (name.Length == 0)
         {
-            SavedViewsStatus = "Escriba un nombre para el tablero.";
+            host.SavedViewsStatus = "Escriba un nombre para el tablero.";
             return;
         }
-        if (GridIsEmpty)
+        if (GridIsEmpty(host))
         {
-            SavedViewsStatus = "La grilla está vacía: abra lo que quiere guardar (cámaras, recursos, tarjetas o páginas).";
+            host.SavedViewsStatus = "La grilla está vacía: abra lo que quiere guardar (cámaras, recursos, tarjetas o páginas).";
             return;
         }
 
-        bool shared = NewViewShared && CanShareViews;
+        bool shared = host.NewViewShared && CanShareViews;
         var existing = SavedViews.FirstOrDefault(v =>
             string.Equals(v.Name, name, StringComparison.CurrentCultureIgnoreCase) && v.CanEdit && v.Shared == shared);
         if (existing is not null)
         {
-            if (Confirm($"Ya existe el tablero \"{existing.Name}\". ¿Reemplazarlo con la grilla actual?",
+            if (Confirm(host, $"Ya existe el tablero \"{existing.Name}\". ¿Reemplazarlo con la grilla actual?",
                     "Reemplazar tablero") is false)
                 return;
-            await OverwriteViewAsync(existing);
+            await OverwriteViewAsync(host, existing);
             return;
         }
 
-        await RunAsync(async () =>
+        await RunAsync(host, async () =>
         {
-            var saved = await _api.CreateLiveViewAsync(SnapshotRequest(name, shared));
-            NewViewName = "";
-            NewViewShared = false;
-            ActiveViewName = saved.Name;
-            await LoadSavedViewsAsync();
-            SavedViewsStatus = shared
+            var saved = await _api.CreateLiveViewAsync(SnapshotRequest(host, name, shared));
+            host.NewViewName = "";
+            host.NewViewShared = false;
+            host.ActiveViewName = saved.Name;
+            await LoadSavedViewsForAsync(host);
+            host.SavedViewsStatus = shared
                 ? $"Tablero \"{saved.Name}\" compartido con todos (en el panel web, Tableros, se eligen los roles)."
                 : $"Tablero \"{saved.Name}\" guardado.";
-            StatusMessage = $"Tablero \"{saved.Name}\" guardado con {saved.Items.Count} cuadro(s).";
+            host.StatusMessage = $"Tablero \"{saved.Name}\" guardado con {saved.Items.Count} cuadro(s).";
         });
     }
 
-    /// <summary>Reemplaza el contenido de un tablero con la grilla actual.</summary>
-    [RelayCommand]
-    private async Task UpdateSavedViewAsync(SavedViewItem item)
+    /// <summary>Reemplaza el contenido de un tablero con la grilla de <paramref name="host"/>.</summary>
+    public async Task UpdateSavedViewForAsync(ICommandCenter host, SavedViewItem item)
     {
         if (item is null) return;
-        if (GridIsEmpty)
+        if (GridIsEmpty(host))
         {
-            SavedViewsStatus = "La grilla está vacía: no hay nada que guardar en el tablero.";
+            host.SavedViewsStatus = "La grilla está vacía: no hay nada que guardar en el tablero.";
             return;
         }
-        if (Confirm($"¿Actualizar el tablero \"{item.Name}\" con lo que hay ahora en la grilla?" +
+        if (Confirm(host, $"¿Actualizar el tablero \"{item.Name}\" con lo que hay ahora en la grilla?" +
                     (item.Shared ? "\n\nEs compartido: el cambio lo ven todos los que lo usan." : ""),
                 "Actualizar tablero") is false)
             return;
-        await OverwriteViewAsync(item);
+        await OverwriteViewAsync(host, item);
     }
 
-    /// <summary>Escritura del tablero con la grilla actual, ya confirmada (conserva con quién se comparte).</summary>
-    private async Task OverwriteViewAsync(SavedViewItem item)
+    /// <summary>Escritura del tablero con la grilla, ya confirmada (conserva con quién se comparte).</summary>
+    private async Task OverwriteViewAsync(ICommandCenter host, SavedViewItem item)
     {
-        await RunAsync(async () =>
+        await RunAsync(host, async () =>
         {
-            var saved = await _api.UpdateLiveViewAsync(item.Id, SnapshotRequest(item.Name, item.Shared, item.RoleIds));
-            NewViewName = "";
-            ActiveViewName = saved.Name;
-            await LoadSavedViewsAsync();
-            SavedViewsStatus = $"Tablero \"{saved.Name}\" actualizado.";
-            StatusMessage = $"Tablero \"{saved.Name}\" actualizado con {saved.Items.Count} cuadro(s).";
+            var saved = await _api.UpdateLiveViewAsync(item.Id, SnapshotRequest(host, item.Name, item.Shared, item.RoleIds));
+            host.NewViewName = "";
+            host.ActiveViewName = saved.Name;
+            await LoadSavedViewsForAsync(host);
+            host.SavedViewsStatus = $"Tablero \"{saved.Name}\" actualizado.";
+            host.StatusMessage = $"Tablero \"{saved.Name}\" actualizado con {saved.Items.Count} cuadro(s).";
         });
     }
 
-    [RelayCommand]
-    private async Task DeleteSavedViewAsync(SavedViewItem item)
+    public async Task DeleteSavedViewForAsync(ICommandCenter host, SavedViewItem item)
     {
         if (item is null) return;
-        if (Confirm($"¿Eliminar el tablero \"{item.Name}\"?" +
+        if (Confirm(host, $"¿Eliminar el tablero \"{item.Name}\"?" +
                     (item.Shared ? " Es compartido: desaparece para todos los que lo usan." : "") +
                     " Esta acción no se puede deshacer.",
                 "Eliminar tablero") is false)
             return;
 
-        await RunAsync(async () =>
+        await RunAsync(host, async () =>
         {
             await _api.DeleteLiveViewAsync(item.Id);
-            if (ActiveViewName == item.Name) ActiveViewName = "";
-            await LoadSavedViewsAsync();
-            SavedViewsStatus = $"Tablero \"{item.Name}\" eliminado.";
+            if (host.ActiveViewName == item.Name) host.ActiveViewName = "";
+            await LoadSavedViewsForAsync(host);
+            host.SavedViewsStatus = $"Tablero \"{item.Name}\" eliminado.";
         });
     }
 
-    /// <summary>Carga un tablero en la grilla (la lista se cierra sola).</summary>
-    [RelayCommand]
-    private async Task ApplySavedViewAsync(SavedViewItem item)
+    /// <summary>Carga un tablero en la grilla de <paramref name="host"/> (la lista se cierra sola).</summary>
+    public async Task ApplySavedViewForAsync(ICommandCenter host, SavedViewItem item)
     {
         if (item is null) return;
-        IsViewsPopupOpen = false;
+        host.IsViewsPopupOpen = false;
         try
         {
             // El servidor devuelve la versión vigente (pudieron cambiarlo) y de
             // paso registra en la bitácora quién lo cargó.
             var view = await _api.ApplyLiveViewAsync(item.Id);
-            await ApplyLiveViewAsync(view);
+            await ApplyLiveViewAsync(host, view);
         }
         catch (Exception ex)
         {
-            StatusMessage = $"No se pudo cargar el tablero \"{item.Name}\": {ex.Message}";
+            host.StatusMessage = $"No se pudo cargar el tablero \"{item.Name}\": {ex.Message}";
         }
     }
 
@@ -218,7 +235,7 @@ public partial class MainViewModel
     /// completo: cada cuadro crea su player y abre un RTSP contra el grabador)
     /// y al final los recursos, tarjetas y páginas web.
     /// </summary>
-    private async Task ApplyLiveViewAsync(LiveViewDto view)
+    private async Task ApplyLiveViewAsync(ICommandCenter host, LiveViewDto view)
     {
         // Canales del inventario por id: los del tablero que ya no existen (o
         // que quedaron deshabilitados) se informan y su cuadro queda libre.
@@ -226,11 +243,11 @@ public partial class MainViewModel
             .GroupBy(c => c.Channel.Id)
             .ToDictionary(g => g.Key, g => g.First());
 
-        IsBulkOpening = true;
-        BulkOpeningText = $"Cargando el tablero \"{view.Name}\"…";
-        StatusMessage = BulkOpeningText;
-        var loading = (LiveWindow ?? Application.Current.MainWindow) is { IsLoaded: true } owner
-            ? Views.LoadingWindow.Open(owner, BulkOpeningText)
+        host.IsBulkOpening = true;
+        host.BulkOpeningText = $"Cargando el tablero \"{view.Name}\"…";
+        host.StatusMessage = host.BulkOpeningText;
+        var loading = (host.LiveWindow ?? Application.Current.MainWindow) is { IsLoaded: true } owner
+            ? Views.LoadingWindow.Open(owner, host.BulkOpeningText)
             : null;
         System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
         try
@@ -238,20 +255,21 @@ public partial class MainViewModel
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Render);
 
             var layout = VideoLayout.Restore(view.LayoutName, view.Columns, view.Rows);
-            await ApplyLayoutAsync(layout);
+            await host.ApplyLayoutAsync(layout);
             // Si el tablero trae una de las divisiones del selector, esa pasa a
             // ser la preferencia local (la próxima sesión abre en ella).
-            if (Layouts.Contains(layout) && _settings.LastLayout != layout.Key)
+            if (host == this && Layouts.Contains(layout) && _settings.LastLayout != layout.Key)
             {
                 _settings.LastLayout = layout.Key;
                 _settings.Save();
             }
 
-            SelectedCell = null;
-            foreach (var cell in Cells)
+            var cells = host.Cells;
+            host.SelectedCell = null;
+            foreach (var cell in cells)
                 cell.Clear();
 
-            var inGrid = view.Items.Where(i => i.CellIndex >= 0 && i.CellIndex < Cells.Count).ToList();
+            var inGrid = view.Items.Where(i => i.CellIndex >= 0 && i.CellIndex < cells.Count).ToList();
             var targets = inGrid
                 .Where(i => DashboardItemKinds.IsCamera(i.Kind) && byId.ContainsKey(i.ChannelId))
                 .OrderBy(i => i.CellIndex)
@@ -267,11 +285,11 @@ public partial class MainViewModel
                 {
                     var item = targets[j];
                     var profile = item.StreamType == (int)StreamProfile.Main ? StreamProfile.Main : StreamProfile.Sub;
-                    wave.Add(Cells[item.CellIndex].OpenAsync(byId[item.ChannelId], profile));
+                    wave.Add(cells[item.CellIndex].OpenAsync(byId[item.ChannelId], profile));
                 }
                 await Task.WhenAll(wave);
-                BulkOpeningText = $"Cargando el tablero \"{view.Name}\"… {upTo}/{targets.Count}";
-                loading?.Update(BulkOpeningText);
+                host.BulkOpeningText = $"Cargando el tablero \"{view.Name}\"… {upTo}/{targets.Count}";
+                loading?.Update(host.BulkOpeningText);
                 await BreatheAsync();
             }
 
@@ -280,15 +298,15 @@ public partial class MainViewModel
             {
                 if (PanelFor(item.Kind, item.RefId, item.Ref, item.Title, item.Zoom) is { } panel)
                 {
-                    await Cells[item.CellIndex].ShowPanelAsync(panel);
+                    await cells[item.CellIndex].ShowPanelAsync(panel);
                     panels++;
                 }
                 else missing++;
             }
 
-            ActiveViewName = view.Name;
+            host.ActiveViewName = view.Name;
             string shown = panels > 0 ? $"{targets.Count} cámara(s) y {panels} cuadro(s) más" : $"{targets.Count} cámara(s)";
-            StatusMessage = missing == 0
+            host.StatusMessage = missing == 0
                 ? $"Tablero \"{view.Name}\": {shown} en pantalla."
                 : $"Tablero \"{view.Name}\": {shown} en pantalla; " +
                   $"{missing} cuadro(s) quedaron libres (ya no existen o no están a su alcance).";
@@ -297,19 +315,19 @@ public partial class MainViewModel
         {
             // Abrir video toca driver, GPU y red: una falla ahí no puede
             // llevarse la aplicación (el clic de la lista es async void).
-            StatusMessage = $"No se pudo cargar todo el tablero \"{view.Name}\": {ex.Message}";
+            host.StatusMessage = $"No se pudo cargar todo el tablero \"{view.Name}\": {ex.Message}";
         }
         finally
         {
             System.Windows.Input.Mouse.OverrideCursor = null;
             loading?.Finish();
-            IsBulkOpening = false;
+            host.IsBulkOpening = false;
         }
     }
 
     /// <summary>Ejecuta una operación de la lista mostrando su error dentro del
     /// desplegable (y sin dejar que dos clics la disparen dos veces).</summary>
-    private async Task RunAsync(Func<Task> operation)
+    private async Task RunAsync(ICommandCenter host, Func<Task> operation)
     {
         if (SavedViewsBusy) return;
         SavedViewsBusy = true;
@@ -319,7 +337,7 @@ public partial class MainViewModel
         }
         catch (Exception ex)
         {
-            SavedViewsStatus = ex.Message;
+            host.SavedViewsStatus = ex.Message;
         }
         finally
         {
@@ -327,8 +345,8 @@ public partial class MainViewModel
         }
     }
 
-    /// <summary>Confirmación sí/no sobre la ventana principal.</summary>
-    private static bool Confirm(string message, string title) =>
-        AppMessageBox.Show(Application.Current.MainWindow, message, title,
+    /// <summary>Confirmación sí/no sobre la ventana de esa grilla.</summary>
+    private static bool Confirm(ICommandCenter host, string message, string title) =>
+        AppMessageBox.Show(host.LiveWindow ?? Application.Current.MainWindow, message, title,
             MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 }
