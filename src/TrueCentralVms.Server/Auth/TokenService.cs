@@ -125,6 +125,19 @@ public sealed class TokenService : IDisposable
     public sealed record DesktopSeat(string Seat, string? Version, string Username, string Role,
         DateTime StartedAt, DateTime ExpiresAt, bool Connected);
 
+    /// <summary>
+    /// Clientes conectados ahora (con el canal en tiempo real abierto, no solo
+    /// con la sesión vigente): puestos de escritorio distintos y sesiones del
+    /// panel web. Lo muestra la tarjeta del servidor del Centro de mando.
+    /// </summary>
+    public (int Desktop, int Web) ConnectedClients()
+    {
+        var now = DateTime.UtcNow;
+        var live = _sessions.Where(p => p.Value.ExpiresAt >= now && _connections.HasToken(p.Key)).ToList();
+        return (live.Where(p => p.Value.ClientId is not null).Select(p => SeatOf(p.Value.ClientId)).Distinct().Count(),
+                live.Count(p => p.Value.ClientId is null));
+    }
+
     /// <summary>Puestos de cliente de escritorio en uso, con la sesión más reciente de cada uno.</summary>
     public IReadOnlyList<DesktopSeat> DesktopSeats()
     {

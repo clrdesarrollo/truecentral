@@ -144,7 +144,8 @@ function lvLayoutLabel(layout) { return layout.key.startsWith("m") ? `a medida $
 const LV_GROW_DWELL_MS = 1200;
 const LV_GROW_MAX_COLUMNS = 8, LV_GROW_MAX_ROWS = 8, LV_GROW_MAX_CELLS = 64;
 const LV_CUSTOM_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-const LV_MAX_BIG_CELLS = 14;
+// 30: las divisiones con un card subdividido en el cliente (clave de hasta 64 caracteres).
+const LV_MAX_BIG_CELLS = 30;
 
 /** La división de esos cuadros: la del selector si coincide, "C×R" si es uniforme o una a medida (null si no cabe en la clave). */
 function lvFromCells(columns, rows, cells) {

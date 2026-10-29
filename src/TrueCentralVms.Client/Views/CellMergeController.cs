@@ -133,6 +133,8 @@ internal sealed class CellMergeController(
                 SetWindowLong(hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
             };
         }
+        // La grilla puede haberse mudado de ventana (viñeta extraída): el recuadro va con ella.
+        if (Window.GetWindow(grid) is { } host && _band.Owner != host) _band.Owner = host;
         _band.Left = origin.X;
         _band.Top = origin.Y;
         _band.Width = grid.ActualWidth;

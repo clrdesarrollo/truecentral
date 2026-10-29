@@ -28,6 +28,23 @@ public static class CardKinds
     public const string WebCustom = "web-custom";
     /// <summary>Grupo de parlantes (Id = el del grupo).</summary>
     public const string SpeakerGroup = "speaker-group";
+
+    /// <summary>«Últimas patentes» con las cámaras ANPR elegidas en su engranaje: "card-plates?devices=3,7"
+    /// (sin cámaras = todas, la clave sola). Así lo guardan los tableros y la última sesión.</summary>
+    public static string PlatesRef(IEnumerable<int> devices)
+    {
+        var ids = devices.Distinct().Order().ToList();
+        return ids.Count == 0 ? Plates : $"{Plates}?devices={string.Join(',', ids)}";
+    }
+
+    /// <summary>Las cámaras ANPR de una clave de «Últimas patentes» (vacío = todas).</summary>
+    public static IReadOnlyCollection<int> PlatesDevices(string? reference)
+    {
+        int q = reference?.IndexOf("?devices=", StringComparison.Ordinal) ?? -1;
+        if (q < 0) return [];
+        return reference![(q + "?devices=".Length)..].Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => int.TryParse(s, out int id) ? id : 0).Where(id => id > 0).ToHashSet();
+    }
 }
 
 /// <summary>Base de las tarjetas que se releen solas cada cierto tiempo.</summary>
@@ -83,8 +100,17 @@ public sealed class OfflineLine(DashboardOfflineItem item)
 }
 
 /// <summary>Estado de los equipos: en línea por tipo y los que están caídos.</summary>
-public sealed partial class EquipmentCardPanel(ApiClient api) : PollingCardPanel(TimeSpan.FromSeconds(15))
+public sealed partial class EquipmentCardPanel : PollingCardPanel
 {
+    private readonly ApiClient api;
+
+    public EquipmentCardPanel(ApiClient api) : base(TimeSpan.FromSeconds(15))
+    {
+        this.api = api;
+        // Desde el principio: la barra del cuadro lo toma al recibir la tarjeta.
+        Title = "Estado de los equipos";
+    }
+
     public override string Glyph => "\uE9D9";
     public override string Kind => CardKinds.Equipment;
 
@@ -95,7 +121,6 @@ public sealed partial class EquipmentCardPanel(ApiClient api) : PollingCardPanel
 
     protected override async Task RefreshAsync()
     {
-        Title = "Estado de los equipos";
         var snapshot = await api.GetDashboardAsync();
         var e = snapshot.Equipment;
         var lines = new List<EquipmentLine>();
@@ -152,8 +177,16 @@ public static class NetRate
 }
 
 /// <summary>Salud del servidor: throughput de red, CPU, memoria, disco, servicios y tiempo encendido.</summary>
-public sealed partial class ServerCardPanel(ApiClient api) : PollingCardPanel(TimeSpan.FromSeconds(5))
+public sealed partial class ServerCardPanel : PollingCardPanel
 {
+    private readonly ApiClient api;
+
+    public ServerCardPanel(ApiClient api) : base(TimeSpan.FromSeconds(5))
+    {
+        this.api = api;
+        Title = "Estado del servidor";
+    }
+
     public override string Glyph => "\uE977";
     public override string Kind => CardKinds.Server;
 
@@ -177,10 +210,13 @@ public sealed partial class ServerCardPanel(ApiClient api) : PollingCardPanel(Ti
     [ObservableProperty] private string _servicesLevel = "Unknown";
     [ObservableProperty] private string _problems = "";
     [ObservableProperty] private string _uptimeText = "";
+    // Clientes conectados: puestos de escritorio y sesiones del panel web con el canal en vivo abierto.
+    [ObservableProperty] private bool _hasClients;
+    [ObservableProperty] private string _clientsText = "";
+    [ObservableProperty] private string _clientsDetail = "";
 
     protected override async Task RefreshAsync()
     {
-        Title = "Servidor";
         var s = (await api.GetDashboardAsync()).Server;
         if (s is null) return;
         Cpu = s.Cpu ?? double.NaN;
@@ -211,29 +247,88 @@ public sealed partial class ServerCardPanel(ApiClient api) : PollingCardPanel(Ti
             s.ServicesFailed.Count > 0 ? "Detenidos: " + string.Join(", ", s.ServicesFailed) : null,
             s.ServicesWarning.Count > 0 ? "Con problemas: " + string.Join(", ", s.ServicesWarning) : null,
         }.Where(p => p is not null));
+        // Un servidor anterior no los informa: la fila no se muestra.
+        HasClients = s.ClientsDesktop is not null;
+        if (s.ClientsDesktop is { } desktop)
+        {
+            int web = s.ClientsWeb ?? 0;
+            ClientsText = (desktop + web).ToString();
+            ClientsDetail = $"{desktop} de escritorio" +
+                            (s.ClientsLimit is > 0 and { } limit ? $" (de {limit} puesto{(limit == 1 ? "" : "s")})" : "") +
+                            $" · {web} en el panel web";
+        }
         var up = TimeSpan.FromSeconds(s.UptimeSeconds);
         UptimeText = $"Versión {s.Version} · encendido hace " +
                      (up.TotalDays >= 1 ? $"{(int)up.TotalDays} d {up.Hours} h" : $"{up.Hours} h {up.Minutes} min");
     }
 }
 
-/// <summary>Una alerta de automatización en la tarjeta.</summary>
+/// <summary>
+/// Una alerta de automatización en la tarjeta, como una tarjeta de la lista de
+/// la pantalla de alarma de las casetas: la barra de color de la prioridad, el
+/// título, de dónde viene y si sigue sin confirmar.
+/// </summary>
 public sealed class AlertLine(WorkflowAlertDto alert)
 {
+    private static readonly System.Windows.Media.SolidColorBrush CriticalBrush = Frozen(0xD3, 0x2F, 0x2F),
+        WarningBrush = Frozen(0xF5, 0x7C, 0x00), InfoBrush = Frozen(0xFB, 0xC0, 0x2D);
+
+    private static System.Windows.Media.SolidColorBrush Frozen(byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
     public WorkflowAlertDto Alert { get; } = alert;
-    public string Time { get; } = alert.RaisedAt.ToLocalTime().ToString("dd-MM HH:mm");
+    public string Time { get; } = alert.RaisedAt.ToLocalTime().ToString("HH:mm:ss");
+    public string DateText { get; } = alert.RaisedAt.ToLocalTime().ToString("dd-MM-yyyy HH:mm:ss");
     public string Title { get; } = alert.Title;
-    public string Detail { get; } = alert.LocationPath ?? alert.Message ?? "";
-    public string State { get; } = alert.Pending ? "Pendiente" : "Confirmada";
-    public string Level { get; } = alert.Pending ? (alert.Severity == AlarmSeverity.Critical ? "Alarm" : "Warning") : "Unknown";
+    /// <summary>De dónde viene: la ubicación del recurso o, si no tiene, la automatización.</summary>
+    public string Source { get; } = !string.IsNullOrWhiteSpace(alert.LocationPath) ? alert.LocationPath! : alert.WorkflowName;
+    public string Message { get; } = alert.Message ?? "";
+    public bool HasMessage => Message.Length > 0;
+    public string Origin { get; } = string.IsNullOrWhiteSpace(alert.WorkflowName) ? "" : $"Automatización: {alert.WorkflowName}";
+    /// <summary>Consignas de la ficha del recurso: qué tiene que hacer el operador.</summary>
+    public string Instructions { get; } = alert.Instructions ?? "";
+    public bool HasInstructions => !string.IsNullOrWhiteSpace(Instructions);
+    public bool IsPending { get; } = alert.Pending;
+    public bool Acknowledged { get; } = alert.AcknowledgedAt is not null;
+    public string AckText { get; } = alert.AcknowledgedAt is { } at
+        ? alert.AcknowledgedFrom == "screen"
+            ? $"Vista en la pantalla «{alert.AcknowledgedBy}» a las {at.ToLocalTime():HH:mm:ss}"
+            : $"Confirmada por {alert.AcknowledgedBy} a las {at.ToLocalTime():HH:mm:ss}"
+        : alert.RequiresAck ? "Sin confirmar" : "Aviso informativo: no pide confirmación";
+    public string PriorityText { get; } = alert.Severity switch
+    {
+        AlarmSeverity.Critical => "CRÍTICA",
+        AlarmSeverity.Warning => "ADVERTENCIA",
+        _ => "INFORMATIVA",
+    };
+    public System.Windows.Media.Brush PriorityBrush { get; } = alert.Severity switch
+    {
+        AlarmSeverity.Critical => CriticalBrush,
+        AlarmSeverity.Warning => WarningBrush,
+        _ => InfoBrush,
+    };
+    /// <summary>Lo atendido se apaga: de un vistazo se ve qué falta.</summary>
+    public double CardOpacity => IsPending ? 1 : 0.6;
 }
 
-/// <summary>Últimas alertas de las automatizaciones (con las pendientes marcadas).</summary>
+/// <summary>
+/// Últimas alertas de las automatizaciones con el diseño de la pantalla de
+/// alarma de las casetas (Raspberry): arriba el detalle de la elegida con su
+/// imagen y el botón para confirmarla; abajo la lista. Elige sola la pendiente
+/// más nueva (o la más nueva) y sigue a la que llega, salvo que el operador
+/// esté mirando otra más vieja.
+/// </summary>
 public sealed partial class AlertsCardPanel : CellPanel
 {
+    private const int Size = 12;
     private readonly ApiClient _api;
     private readonly VmsHubClient _hub;
     private readonly Action<WorkflowAlertDto> _open;
+    private long _imageFor;
 
     public AlertsCardPanel(ApiClient api, VmsHubClient hub, Action<WorkflowAlertDto> open)
     {
@@ -249,31 +344,83 @@ public sealed partial class AlertsCardPanel : CellPanel
     public override string Kind => CardKinds.Alerts;
 
     public ObservableCollection<AlertLine> Items { get; } = [];
-    [ObservableProperty] private string _summary = "";
+    [ObservableProperty] private AlertLine? _selected;
+    [ObservableProperty] private System.Windows.Media.ImageSource? _selectedImage;
+    [ObservableProperty] private int _pendingCount;
+    [ObservableProperty] private string _pendingText = "";
+    [ObservableProperty] private bool _isEmpty;
 
-    public override Task LoadAsync() => ReloadAsync();
+    public override Task LoadAsync() => ReloadAsync(null);
 
-    private async Task ReloadAsync()
+    /// <param name="arrived">Alerta recién llegada: queda elegida si el operador miraba la más nueva.</param>
+    private async Task ReloadAsync(long? arrived)
     {
         try
         {
-            var list = await _api.GetAlertsAsync(pendingOnly: false, take: 12);
+            var list = await _api.GetAlertsAsync(pendingOnly: false, take: Size);
+            long? keep = Selected?.Alert.Id;
+            bool followNewest = Selected is null || Selected == Items.FirstOrDefault();
             Items.Clear();
             foreach (var alert in list?.Items ?? []) Items.Add(new AlertLine(alert));
-            Summary = list is null ? "" : list.Pending == 0 ? "Sin alertas pendientes" : $"{list.Pending} pendiente(s) de confirmar";
+            PendingCount = list?.Pending ?? 0;
+            PendingText = PendingCount == 1 ? "1 SIN CONFIRMAR" : $"{PendingCount} SIN CONFIRMAR";
+            IsEmpty = Items.Count == 0;
+            Selected = (arrived is { } id && followNewest ? Items.FirstOrDefault(l => l.Alert.Id == id) : null)
+                       ?? Items.FirstOrDefault(l => l.Alert.Id == keep)
+                       ?? Items.FirstOrDefault(l => l.IsPending)
+                       ?? Items.FirstOrDefault();
             Status = "";
         }
         catch (ApiException ex) { Status = ex.Message; }
     }
 
-    private void OnNotification(WorkflowNotificationDto dto)
+    partial void OnSelectedChanged(AlertLine? value) => _ = LoadImageAsync(value);
+
+    /// <summary>La foto que capturó la automatización (la principal).</summary>
+    private async Task LoadImageAsync(AlertLine? line)
     {
-        if (dto.AlertId > 0) Ui.Run(() => _ = ReloadAsync());
+        if (line?.Alert is not { } alert || (alert.ImagePath ?? alert.ImagePaths.FirstOrDefault()) is not { Length: > 0 } path)
+        {
+            _imageFor = 0;
+            SelectedImage = null;
+            return;
+        }
+        // La misma alerta tras recargar la lista: la foto no cambia.
+        if (_imageFor == alert.Id && SelectedImage is not null) return;
+        _imageFor = alert.Id;
+        SelectedImage = null;
+        byte[]? bytes;
+        try { bytes = await _api.GetWorkflowImageAsync(path); }
+        catch (ApiException) { bytes = null; }
+        if (_imageFor == alert.Id) SelectedImage = PlatesCardPanel.Decode(bytes, 1280);
     }
 
-    private void OnAcknowledged(WorkflowAlertDto dto) => Ui.Run(() => _ = ReloadAsync());
+    private void OnNotification(WorkflowNotificationDto dto)
+    {
+        if (dto.AlertId > 0) Ui.Run(() => _ = ReloadAsync(dto.AlertId));
+    }
 
-    [RelayCommand] private void Open(AlertLine line) => _open(line.Alert);
+    private void OnAcknowledged(WorkflowAlertDto dto) => Ui.Run(() => _ = ReloadAsync(null));
+
+    /// <summary>«Ver la alarma»: la ventana de alarma de siempre, con sus cámaras en vivo.</summary>
+    [RelayCommand]
+    private void Open(AlertLine? line)
+    {
+        if ((line ?? Selected) is { } target) _open(target.Alert);
+    }
+
+    /// <summary>Se da por enterado desde la tarjeta (como «Marcar como vista» en la caseta).</summary>
+    [RelayCommand]
+    private async Task AcknowledgeAsync(AlertLine? line)
+    {
+        if ((line ?? Selected) is not { IsPending: true } target) return;
+        try
+        {
+            await _api.AcknowledgeAlertAsync(target.Alert.Id);
+            await ReloadAsync(null);
+        }
+        catch (ApiException ex) { Status = ex.Message; }
+    }
 
     public override void Dispose()
     {
@@ -286,7 +433,8 @@ public sealed partial class AlertsCardPanel : CellPanel
 public sealed class PlateLine(PlateEventDto e)
 {
     public PlateEventDto Event { get; } = e;
-    public string Time { get; } = e.CapturedAt.ToLocalTime().ToString("HH:mm:ss");
+    // CapturedAt ya es la hora local del equipo (como en la página ANPR): convertirla la corría el desfase de UTC.
+    public string Time { get; } = e.CapturedAt.ToString("HH:mm:ss");
     public string Plate { get; } = e.PlateNumber;
     public string Where { get; } = string.Join(" · ", new[] { e.ChannelName, e.Direction }.Where(s => !string.IsNullOrWhiteSpace(s)));
     /// <summary>No pasa como PPU chilena: la patente grande va en rojo, como en la página ANPR.</summary>
@@ -299,21 +447,67 @@ public sealed class PlateLine(PlateEventDto e)
 /// <summary>
 /// Últimos reconocimientos de patente, en vivo: a un lado la escena y el
 /// recorte de la patente de la lectura elegida (la más nueva, salvo que el
-/// operador elija otra) y al otro la lista.
+/// operador elija otra) y al otro la lista. El engranaje de la barra elige de
+/// qué cámaras ANPR se muestran las lecturas (por omisión, de todas).
 /// </summary>
 public sealed partial class PlatesCardPanel : CellPanel
 {
     private const int Size = 12;
+    /// <summary>Lecturas que se piden al abrir con cámaras elegidas: las de esas cámaras
+    /// salen de las últimas de todas (pedirlas por equipo dejaría una búsqueda en la
+    /// bitácora por cada uno, cada vez que se abre la tarjeta).</summary>
+    private const int FilteredTake = 200;
     private readonly ApiClient _api;
     private readonly VmsHubClient _hub;
     private long _imagesFor;
+    /// <summary>Cámaras ANPR (equipos) elegidas; vacío = todas.</summary>
+    private IReadOnlyCollection<int> _devices;
 
-    public PlatesCardPanel(ApiClient api, VmsHubClient hub)
+    public PlatesCardPanel(ApiClient api, VmsHubClient hub, IReadOnlyCollection<int>? devices = null)
     {
         _api = api;
         _hub = hub;
-        Title = "Últimas patentes";
+        _devices = devices ?? [];
+        Title = TitleFor(_devices);
         _hub.PlateRecognized += OnPlate;
+    }
+
+    private static string TitleFor(IReadOnlyCollection<int> devices) =>
+        devices.Count == 0 ? "Últimas patentes"
+        : devices.Count == 1 ? "Últimas patentes · 1 cámara" : $"Últimas patentes · {devices.Count} cámaras";
+
+    private bool Accepts(PlateEventDto e) => _devices.Count == 0 || _devices.Contains(e.DeviceId);
+
+    public override bool CanConfigure => true;
+    public override string ConfigureHint => "Elegir de qué cámaras ANPR se reciben los reconocimientos";
+
+    /// <summary>
+    /// El engranaje: la lista de cámaras ANPR que ve esta sesión (su alcance),
+    /// para marcar de cuáles mostrar las lecturas. Lo elegido viaja en la
+    /// clave de la tarjeta (tableros y última sesión).
+    /// </summary>
+    protected override async Task ConfigureAsync()
+    {
+        List<AnprSourceDto> sources;
+        try { sources = await _api.GetAnprSourcesAsync(); }
+        catch (ApiException ex)
+        {
+            Status = ex.Message;
+            return;
+        }
+        var owner = System.Windows.Application.Current.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive)
+                    ?? System.Windows.Application.Current.MainWindow;
+        if (Views.PlateSourcesWindow.Ask(owner, sources, _devices) is not { } chosen) return;
+        _devices = chosen;
+        Title = TitleFor(_devices);
+        if (Content is { } content)
+        {
+            // El cuadro avisa y se guarda la sesión con las cámaras elegidas.
+            Content = content with { Ref = CardKinds.PlatesRef(_devices) };
+            OnPropertyChanged(nameof(Content));
+        }
+        try { await LoadAsync(); }
+        catch (ApiException ex) { Status = ex.Message; }
     }
 
     public override string Glyph => "\uE804";
@@ -328,14 +522,17 @@ public sealed partial class PlatesCardPanel : CellPanel
 
     public override async Task LoadAsync()
     {
-        var events = await _api.GetPlateEventsAsync(take: Size);
+        var events = await _api.GetPlateEventsAsync(take: _devices.Count == 0 ? Size : FilteredTake);
         Items.Clear();
-        foreach (var e in events) Items.Add(new PlateLine(e));
+        foreach (var e in events.Where(Accepts).Take(Size)) Items.Add(new PlateLine(e));
         Selected = Items.FirstOrDefault();
+        Status = Items.Count == 0 && _devices.Count > 0 ? "Sin lecturas recientes de las cámaras elegidas." : "";
     }
 
     private void OnPlate(PlateEventDto e) => Ui.Run(() =>
     {
+        if (!Accepts(e)) return;
+        Status = "";
         // Si el operador estaba mirando la más nueva, sigue a la que llega.
         bool followNewest = Selected is null || Selected == Items.FirstOrDefault();
         var line = new PlateLine(e);
@@ -356,7 +553,7 @@ public sealed partial class PlatesCardPanel : CellPanel
         }
         var e = line.Event;
         _imagesFor = e.Id;
-        SelectedText = $"{e.CapturedAt.ToLocalTime():dd-MM-yyyy HH:mm:ss} · {line.Where}";
+        SelectedText = $"{e.CapturedAt:dd-MM-yyyy HH:mm:ss} · {line.Where}";
         var scene = e.HasSceneImage ? await _api.GetPlateImageAsync(e.Id, "scene") : null;
         var plate = e.HasPlateImage ? await _api.GetPlateImageAsync(e.Id, "plate") : null;
         if (_imagesFor != e.Id) return; // ya eligió otra mientras descargaba
@@ -364,8 +561,8 @@ public sealed partial class PlatesCardPanel : CellPanel
         PlateImage = Decode(plate);
     }
 
-    /// <summary>JPEG → imagen congelada (como en el módulo de patentes).</summary>
-    private static System.Windows.Media.ImageSource? Decode(byte[]? bytes, int maxWidth = 0)
+    /// <summary>JPEG → imagen congelada (como en el módulo de patentes; también la foto de las alertas).</summary>
+    internal static System.Windows.Media.ImageSource? Decode(byte[]? bytes, int maxWidth = 0)
     {
         if (bytes is null || bytes.Length == 0) return null;
         try

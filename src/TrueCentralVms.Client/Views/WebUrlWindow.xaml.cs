@@ -17,13 +17,13 @@ public partial class WebUrlWindow : Window
     /// <summary>Rótulo del cuadro: el escrito o, si no, el nombre del sitio.</summary>
     public string PageTitle { get; private set; } = "";
 
-    /// <summary>Muestra el diálogo; null si se canceló.</summary>
-    public static (string Url, string Title)? Ask(Window? owner)
+    /// <summary>Muestra el diálogo; null si se canceló. Save = dejarla en «Mis páginas».</summary>
+    public static (string Url, string Title, bool Save)? Ask(Window? owner)
     {
         var dialog = new WebUrlWindow();
         if (owner is { IsLoaded: true }) dialog.Owner = owner;
         else dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        return dialog.ShowDialog() == true ? (dialog.Url, dialog.PageTitle) : null;
+        return dialog.ShowDialog() == true ? (dialog.Url, dialog.PageTitle, dialog.SaveBox.IsChecked == true) : null;
     }
 
     private void OnOpenClick(object sender, RoutedEventArgs e)

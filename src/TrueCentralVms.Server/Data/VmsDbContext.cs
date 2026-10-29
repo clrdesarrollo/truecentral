@@ -1224,7 +1224,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         {
             e.Property(v => v.Name).HasMaxLength(128);
             e.Property(v => v.OwnerName).HasMaxLength(64);
-            e.Property(v => v.LayoutName).HasMaxLength(32);
+            // 64: las divisiones con un card subdividido llevan hasta 30 cuadros de distinto tamaño en la clave.
+            e.Property(v => v.LayoutName).HasMaxLength(64);
             // La vista sobrevive a la cuenta que la creó (queda el nombre
             // congelado en OwnerName): borrar un usuario no puede llevarse las
             // vistas compartidas del turno.
@@ -1272,7 +1273,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(l => l.Name).HasMaxLength(128);
             e.Property(l => l.Url).HasMaxLength(2048);
             e.Property(l => l.Description).HasMaxLength(500);
-            e.HasIndex(l => l.Name).IsUnique();
+            // Nombre único en la lista compartida y, aparte, dentro de las páginas de cada usuario.
+            e.HasIndex(l => l.Name).IsUnique().HasFilter("\"OwnerUserId\" IS NULL");
+            e.HasIndex(l => new { l.OwnerUserId, l.Name }).IsUnique().HasFilter("\"OwnerUserId\" IS NOT NULL");
+            e.HasOne<User>().WithMany().HasForeignKey(l => l.OwnerUserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         // -------------------------------------------------------------------

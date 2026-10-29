@@ -42,6 +42,29 @@
         <Setter Property="Margin" Value="0,10,0,4"/>
     </Style>
 
+    <!-- Ícono de la barra de un cuadro (subdividir, configurar la tarjeta) -->
+    <Style x:Key="CellBarIconButton" TargetType="Button">
+        <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="Transparent" Padding="6,2">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
     <!-- ============ Lista de recursos ============ -->
 
     <HierarchicalDataTemplate DataType="{x:Type vm:ResourceGroupNode}" ItemsSource="{Binding Children}">
@@ -54,6 +77,22 @@
 
     <DataTemplate DataType="{x:Type vm:ResourceNode}">
         <StackPanel Orientation="Horizontal" Margin="0,1" ToolTip="{Binding TreeToolTip}">
+            <!-- Las de «Mis páginas» se quitan de la lista con el clic derecho -->
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsPersonalWeb}" Value="True">
+                            <Setter Property="ContextMenu">
+                                <Setter.Value>
+                                    <ContextMenu Style="{StaticResource DarkContextMenu}">
+                                        <MenuItem Header="Quitar de Mis páginas" Command="{Binding RemoveFromListCommand}"/>
+                                    </ContextMenu>
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </StackPanel.Style>
             <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="11"
                        Width="14" Margin="0,0,5,0" VerticalAlignment="Center" TextAlignment="Center">
                 <TextBlock.Style>
@@ -380,12 +419,11 @@
     <!-- Salida de red: el violeta del panel web -->
     <SolidColorBrush x:Key="NetOutBrush" Color="#A48BFF"/>
 
-    <!-- Estado de los equipos -->
+    <!-- Estado de los equipos: primero la lista de tipos, después cuántos están sin
+         conexión, la hora de la lectura y al final el detalle de los caídos. -->
     <DataTemplate DataType="{x:Type vm:EquipmentCardPanel}">
         <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
             <StackPanel Margin="14,12">
-                <TextBlock Text="{Binding Summary}" FontSize="17" FontWeight="SemiBold" Style="{StaticResource LevelText}"/>
-                <TextBlock Text="{Binding UpdatedText}" Style="{StaticResource PanelHint}" Margin="0,2,0,8"/>
                 <ItemsControl ItemsSource="{Binding Lines}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
@@ -399,6 +437,12 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,10,0,0" Padding="0,10,0,0">
+                    <StackPanel>
+                        <TextBlock Text="{Binding Summary}" FontSize="17" FontWeight="SemiBold" Style="{StaticResource LevelText}"/>
+                        <TextBlock Text="{Binding UpdatedText}" Style="{StaticResource PanelHint}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Border>
                 <TextBlock Text="SIN CONEXIÓN" Style="{StaticResource PanelSection}"
                            Visibility="{Binding Offline.Count, Converter={x:Static vm:CountToVisibility.Instance}}"/>
                 <ItemsControl ItemsSource="{Binding Offline}">
@@ -481,6 +525,20 @@
                     </StackPanel>
                 </UniformGrid>
                 <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,0,0,10"/>
+                <!-- Clientes conectados ahora: escritorio (con el cupo de la licencia) y panel web -->
+                <DockPanel Margin="0,0,0,10" Visibility="{Binding HasClients, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                    <Grid DockPanel.Dock="Left" Width="30" Height="30" Margin="0,0,10,0" VerticalAlignment="Center">
+                        <Border CornerRadius="7" Background="{StaticResource AccentBrush}" Opacity="0.15"/>
+                        <TextBlock Text="&#xE7F4;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="{StaticResource AccentBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding ClientsText}" FontSize="22" FontWeight="SemiBold"
+                               FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="CLIENTES CONECTADOS" Style="{StaticResource GaugeLabel}" HorizontalAlignment="Left"/>
+                        <TextBlock Text="{Binding ClientsDetail}" Style="{StaticResource PanelHint}"/>
+                    </StackPanel>
+                </DockPanel>
                 <TextBlock Text="{Binding ServicesText}" FontWeight="SemiBold" Margin="0,4,0,0">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
@@ -500,38 +558,170 @@
         </ScrollViewer>
     </DataTemplate>
 
-    <!-- Últimas alertas -->
+    <!-- Últimas alertas, con el diseño de la pantalla de alarma de las casetas (la
+         Raspberry, monitor en pie): arriba el detalle de la elegida —prioridad, qué
+         pasó, de dónde, la foto y el botón para confirmarla—; abajo la lista, cada
+         alerta con la barra de color de su prioridad y si sigue sin confirmar. -->
     <DataTemplate DataType="{x:Type vm:AlertsCardPanel}">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
-            <StackPanel Margin="14,12">
-                <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,8"/>
-                <ItemsControl ItemsSource="{Binding Items}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,5">
-                                <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="Ver" Style="{StaticResource PanelButton}" Margin="6,0,0,0"
-                                            VerticalAlignment="Center"
-                                            Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                            CommandParameter="{Binding}"/>
-                                    <StackPanel>
-                                        <DockPanel>
-                                            <TextBlock DockPanel.Dock="Right" Text="{Binding State}" FontSize="11.5" Style="{StaticResource LevelText}"/>
-                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
-                                                       TextTrimming="CharacterEllipsis"/>
-                                        </DockPanel>
-                                        <TextBlock Style="{StaticResource PanelHint}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap">
-                                            <Run Text="{Binding Time, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Detail, Mode=OneWay}"/>
-                                        </TextBlock>
-                                    </StackPanel>
-                                </DockPanel>
+        <Grid Background="{StaticResource CellBgBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="3*" MinHeight="150"/>
+                <RowDefinition Height="2*" MinHeight="80"/>
+            </Grid.RowDefinitions>
+            <!-- Detalle de la alerta elegida -->
+            <Border Margin="8,8,8,4" Background="{StaticResource Panel2Brush}" CornerRadius="6" Padding="12,10,12,8">
+                <Grid>
+                    <!-- Sin alertas: en espera, se lee de un vistazo -->
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                Visibility="{Binding IsEmpty, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <TextBlock Text="✓" FontSize="40" Foreground="{StaticResource OkBrush}" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Sin alarmas pendientes" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Esperando nuevos eventos" Style="{StaticResource PanelHint}" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <!-- Compacto, para que en un card chico igual queden a la vista la foto y el botón:
+                         una línea por dato y lo que no cabe se corta con puntos suspensivos. -->
+                    <Grid Visibility="{Binding Selected, Converter={x:Static vm:NotNullToVisibility.Instance}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <DockPanel>
+                            <!-- Cuántas faltan, como la píldora roja del encabezado de la caseta -->
+                            <Border DockPanel.Dock="Right" Background="#B71C1C" CornerRadius="10" Padding="9,1"
+                                    VerticalAlignment="Center" Margin="8,0,0,0"
+                                    Visibility="{Binding PendingCount, Converter={x:Static vm:CountToVisibility.Instance}}">
+                                <TextBlock Text="{Binding PendingText}" Foreground="White" FontWeight="Bold" FontSize="10.5"/>
                             </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <TextBlock Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="0,6,0,0"/>
-            </StackPanel>
-        </ScrollViewer>
+                            <Border DockPanel.Dock="Left" Background="{Binding Selected.PriorityBrush}" CornerRadius="3" Padding="7,1"
+                                    VerticalAlignment="Center" Margin="0,0,8,0">
+                                <TextBlock Text="{Binding Selected.PriorityText}" Foreground="White" FontWeight="Bold" FontSize="10.5"/>
+                            </Border>
+                            <TextBlock Text="{Binding Selected.Title}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip="{Binding Selected.Title}"/>
+                        </DockPanel>
+                        <TextBlock Grid.Row="1" Style="{StaticResource PanelHint}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"
+                                   TextWrapping="NoWrap" ToolTip="{Binding Selected.Origin}">
+                            <Run Text="{Binding Selected.Source, Mode=OneWay}" Foreground="{StaticResource TextBrush}"/><Run Text="  ·  "/><Run Text="{Binding Selected.DateText, Mode=OneWay}"/>
+                        </TextBlock>
+                        <StackPanel Grid.Row="2">
+                            <TextBlock Text="{Binding Selected.Message}" Style="{StaticResource PanelHint}" Margin="0,2,0,0"
+                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding Selected.Message}"
+                                       Visibility="{Binding Selected.HasMessage, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                            <!-- Consignas de la ficha del recurso: qué tiene que hacer el operador -->
+                            <Border BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" CornerRadius="4"
+                                    Padding="8,3" Margin="0,5,0,0"
+                                    Visibility="{Binding Selected.HasInstructions, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                <TextBlock FontSize="11.5" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" MaxHeight="34"
+                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding Selected.Instructions}">
+                                    <Run Text="QUÉ HACER  " FontWeight="Bold" Foreground="{StaticResource AccentBrush}"/><Run Text="{Binding Selected.Instructions, Mode=OneWay}"/>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
+                        <!-- La foto de la alarma: lo que se mira de lejos -->
+                        <Border Grid.Row="3" Margin="0,6" Background="#000000" CornerRadius="4" MinHeight="30" ClipToBounds="True">
+                            <Grid>
+                                <TextBlock Text="Esta alarma no trae imagen" Style="{StaticResource PanelHint}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <TextBlock.Visibility>
+                                        <Binding Path="SelectedImage" Converter="{x:Static vm:NullToVisibility.Instance}"/>
+                                    </TextBlock.Visibility>
+                                </TextBlock>
+                                <Image Source="{Binding SelectedImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            </Grid>
+                        </Border>
+                        <!-- Pendiente: CONFIRMAR (como «Marcar como vista» en la caseta). Atendida: quién y cuándo.
+                             Siempre, la ventana de alarma con sus cámaras en vivo. -->
+                        <Grid Grid.Row="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Style="{StaticResource PrimaryButton}" Padding="10,5" FontWeight="SemiBold"
+                                    Content="CONFIRMAR" Command="{Binding AcknowledgeCommand}" CommandParameter="{Binding Selected}"
+                                    Visibility="{Binding Selected.IsPending, Converter={x:Static vm:BoolToVisibility.Instance}}"
+                                    ToolTip="Darse por enterado de la alerta (queda a su nombre en el Centro de eventos)"/>
+                            <TextBlock Text="{Binding Selected.AckText}" FontSize="11.5" VerticalAlignment="Center"
+                                       Foreground="{StaticResource OkBrush}" TextTrimming="CharacterEllipsis"
+                                       ToolTip="{Binding Selected.AckText}"
+                                       Visibility="{Binding Selected.IsPending, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                            <Button Grid.Column="1" Style="{StaticResource GhostButton}" Padding="12,5" Margin="6,0,0,0"
+                                    Content="Ver alarma" Command="{Binding OpenCommand}" CommandParameter="{Binding Selected}"
+                                    ToolTip="Abrir la ventana de alarma con las cámaras vinculadas en vivo"/>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Border>
+            <!-- La lista: la elegida se marca con el filo de acento -->
+            <ListBox Grid.Row="1" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected, Mode=TwoWay}"
+                     Background="Transparent" BorderThickness="0" Padding="6,2,6,6"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Margin" Value="0,2"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Row" CornerRadius="5" BorderThickness="1" BorderBrush="Transparent" Padding="1">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border CornerRadius="4" ClipToBounds="True">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="Transparent"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsPending}" Value="True">
+                                            <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <DockPanel Opacity="{Binding CardOpacity}">
+                                <Rectangle DockPanel.Dock="Left" Width="4" Fill="{Binding PriorityBrush}"/>
+                                <StackPanel Margin="9,5,6,5">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding Source}" Style="{StaticResource PanelHint}" TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                        <TextBlock Text="{Binding Time}" FontSize="11" FontFamily="{StaticResource MonoFont}"
+                                                   Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding PriorityText}" FontSize="10.5" FontWeight="Bold" Margin="8,0,0,0"
+                                                   Foreground="{Binding PriorityBrush}" VerticalAlignment="Center"/>
+                                        <Border Background="#B71C1C" CornerRadius="7" Padding="6,0" Margin="8,0,0,0"
+                                                Visibility="{Binding IsPending, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                            <TextBlock Text="SIN CONFIRMAR" FontSize="9.5" FontWeight="Bold" Foreground="White"/>
+                                        </Border>
+                                        <TextBlock Text="✓ confirmada" FontSize="11" Foreground="{StaticResource OkBrush}" Margin="8,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Visibility="{Binding Acknowledged, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Grid.Row="1" Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="10,0,10,6"
+                       VerticalAlignment="Bottom"
+                       Visibility="{Binding Status, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+        </Grid>
     </DataTemplate>
 
     <!-- Últimas patentes: escena y recorte de la lectura elegida a la izquierda, la lista (angosta) a la derecha.

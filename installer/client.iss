@@ -95,6 +95,9 @@ Name: "{autodesktop}\CLR TrueCentral VMS Client"; Filename: "{app}\{#ClientExe}"
 
 [Run]
 Filename: "{app}\{#ClientExe}"; Description: "Abrir CLR TrueCentral VMS Client"; Flags: postinstall nowait skipifsilent
+; Actualización pedida desde el propio cliente (ícono de la barra de título, /AUTOUPDATE):
+; al terminar se vuelve a abrir solo, con el usuario del puesto (no como administrador).
+Filename: "{app}\{#ClientExe}"; Flags: nowait runasoriginaluser; Check: IsAutoUpdate
 
 [Dirs]
 ; Servidor de confianza y su dirección (los deja RememberServerFromFileName): solo
@@ -102,6 +105,17 @@ Filename: "{app}\{#ClientExe}"; Description: "Abrir CLR TrueCentral VMS Client";
 Name: "{commonappdata}\CLRTrueCentralVMS-Client"; Permissions: admins-full system-full users-readexec
 
 [Code]
+// El cliente lanzó este instalador para actualizarse (/AUTOUPDATE): espera a que
+// se cierre solo y lo vuelve a abrir al terminar.
+function IsAutoUpdate(): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/AUTOUPDATE') = 0 then Result := True;
+end;
+
 function RunHidden(const FileName, Params: string): Integer;
 var
   ResultCode: Integer;
@@ -138,6 +152,11 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
   WizardForm.PreparingLabel.Caption := 'Cerrando el cliente de escritorio si está abierto...';
+  // Al actualizarse desde el cliente, este se cierra solo (guarda su sesión y libera
+  // el puesto): se le dan hasta 30 s antes de cerrarlo a la fuerza.
+  if IsAutoUpdate() then
+    RunHidden(SysTool('WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -Command "Wait-Process -Name TrueCentralVms.Client -Timeout 30 -ErrorAction SilentlyContinue"');
   KillClientTools();
 end;
 

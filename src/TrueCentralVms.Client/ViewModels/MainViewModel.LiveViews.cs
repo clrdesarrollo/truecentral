@@ -229,7 +229,7 @@ public partial class MainViewModel
         IsBulkOpening = true;
         BulkOpeningText = $"Cargando el tablero \"{view.Name}\"…";
         StatusMessage = BulkOpeningText;
-        var loading = Application.Current.MainWindow is { IsLoaded: true } owner
+        var loading = (LiveWindow ?? Application.Current.MainWindow) is { IsLoaded: true } owner
             ? Views.LoadingWindow.Open(owner, BulkOpeningText)
             : null;
         System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;

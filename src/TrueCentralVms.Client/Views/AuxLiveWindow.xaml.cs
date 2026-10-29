@@ -409,11 +409,34 @@ public partial class AuxLiveWindow : Window
         }
         if (e.ClickCount == 2)
         {
-            Vm.ToggleMaximize(cell);
+            ToggleMaximize(cell);
             return;
         }
         ArmCellDrag(cell, element, e.GetPosition(element));
         SelectCell(cell);
+    }
+
+    /// <summary>Maximizar o restaurar desarma el arrastre del primer clic del doble
+    /// clic: si no, al restaurar el botón apretado quedaba sobre otro cuadro y las
+    /// cámaras se intercambiaban (ver LiveView).</summary>
+    private void ToggleMaximize(VideoCellViewModel cell)
+    {
+        _cellDragCandidate = null;
+        Vm.ToggleMaximize(cell);
+    }
+
+    /// <summary>Cualquier clic dentro del cuadro (también en una tarjeta o sus botones) lo selecciona.</summary>
+    private void OnCellPreviewDown(object sender, MouseButtonEventArgs e)
+    {
+        if (Vm.IsMergeMode || sender is not FrameworkElement { DataContext: VideoCellViewModel cell }) return;
+        Vm.SelectedCell = cell;
+    }
+
+    /// <summary>El foco entró al cuadro (una página web, un control de la tarjeta): queda seleccionado.</summary>
+    private void OnCellFocused(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (Vm.IsMergeMode || sender is not FrameworkElement { DataContext: VideoCellViewModel cell }) return;
+        Vm.SelectedCell = cell;
     }
 
     private void OnCellMouseMove(object sender, MouseEventArgs e)
@@ -547,7 +570,7 @@ public partial class AuxLiveWindow : Window
             }
             if (e.ClickCount == 2)
             {
-                Vm.ToggleMaximize(cell);
+                ToggleMaximize(cell);
                 return;
             }
             ArmCellDrag(cell, window, e.GetPosition(window));
@@ -587,5 +610,6 @@ public partial class AuxLiveWindow : Window
         }), handledEventsToo: true);
     }
 
-    private void SelectCell(VideoCellViewModel cell) => Vm.SelectedCell = Vm.SelectedCell == cell ? null : cell;
+    /// <summary>Un clic selecciona (antes un segundo clic deseleccionaba).</summary>
+    private void SelectCell(VideoCellViewModel cell) => Vm.SelectedCell = cell;
 }

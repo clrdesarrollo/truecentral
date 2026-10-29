@@ -206,6 +206,17 @@ public sealed class ClientSettings
     /// arrastrándolas (claves de sección: Home, Live, Playback…). Las que no
     /// están en la lista van al final, en su orden de siempre.</summary>
     public List<string> TabOrder { get; set; } = [];
+    /// <summary>Viñetas que estaban extraídas a su propia ventana al salir (como
+    /// en un navegador): al volver a abrir el cliente se extraen otra vez, cada
+    /// una donde quedó su ventana (windows.json, clave "tab-{sección}").</summary>
+    public List<string> DetachedTabs { get; set; } = [];
+
+    // ---------- Vista en vivo ----------
+
+    /// <summary>El selector de divisiones muestra las de monitor vertical
+    /// (interruptor del selector); null = nunca se eligió y el selector la
+    /// toma de la forma de la ventana.</summary>
+    public bool? VerticalLayouts { get; set; }
 
     // ---------- Lugar de las ventanas ----------
 

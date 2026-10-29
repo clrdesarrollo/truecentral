@@ -389,6 +389,8 @@
                         <!-- El video de FlyleafLib vive en ventanas nativas superpuestas:
                              los clics sobre el video no llegan a WPF (ver code-behind). -->
                         <Border Margin="0.5" Background="{StaticResource CellBgBrush}" CornerRadius="2"
+                                PreviewMouseLeftButtonDown="OnCellPreviewDown"
+                                Keyboard.GotKeyboardFocus="OnCellFocused"
                                 MouseLeftButtonDown="OnCellClick"
                                 MouseMove="OnCellMouseMove"
                                 AllowDrop="True" Drop="OnCellDrop"
@@ -407,6 +409,7 @@
                                                 </MultiBinding>
                                             </DataTrigger.Binding>
                                             <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            <Setter Property="BorderThickness" Value="2"/>
                                         </DataTrigger>
                                         <DataTrigger Value="True">
                                             <DataTrigger.Binding>

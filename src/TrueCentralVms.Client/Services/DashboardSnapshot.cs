@@ -34,6 +34,12 @@ public sealed class DashboardServer
     public int ServicesRunning { get; set; }
     public List<string> ServicesFailed { get; set; } = [];
     public List<string> ServicesWarning { get; set; } = [];
+    /// <summary>Puestos de cliente de escritorio conectados ahora (null = servidor anterior que no lo informa).</summary>
+    public int? ClientsDesktop { get; set; }
+    /// <summary>Sesiones del panel web con el canal en vivo abierto.</summary>
+    public int? ClientsWeb { get; set; }
+    /// <summary>Puestos de escritorio que permite la licencia.</summary>
+    public int? ClientsLimit { get; set; }
 }
 
 public sealed class DashboardCount

@@ -31,7 +31,8 @@ public static class DashboardApi
     public static void MapDashboardApi(this WebApplication app)
     {
         app.MapGet("/api/dashboard", async (HttpContext ctx, VmsDbContext db, SystemMetrics metrics,
-            ServiceSupervisor supervisor, CercoConnectionManager cercoConns, CancellationToken ct) =>
+            ServiceSupervisor supervisor, CercoConnectionManager cercoConns, TokenService tokens,
+            Services.Licensing.LicenseService license, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
@@ -45,8 +46,13 @@ public static class DashboardApi
             var overview = supervisor.Snapshot();
             var supervised = overview.Services.Where(s => s.State != ManagedServiceState.Disabled).ToList();
             var m = metrics.Read();
+            var clients = tokens.ConnectedClients();
             var server = new
             {
+                // Clientes conectados ahora: puestos de escritorio (y los que permite la licencia) y panel web.
+                clientsDesktop = clients.Desktop,
+                clientsWeb = clients.Web,
+                clientsLimit = license.Quota(LicenseFeatures.MaxClientSessions),
                 version = overview.Server.Version,
                 startedAt = overview.Server.StartedAtUtc,
                 uptimeSeconds = overview.Server.UptimeSeconds,

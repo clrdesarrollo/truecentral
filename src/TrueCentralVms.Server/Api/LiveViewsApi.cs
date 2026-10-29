@@ -33,7 +33,7 @@ public static class LiveViewsApi
 
     private static async Task<Lookup> LookupAsync(VmsDbContext db, CancellationToken ct) => new(
         await db.Roles.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Name, ct),
-        await db.WebLinks.AsNoTracking().ToDictionaryAsync(l => l.Id, ct),
+        await db.WebLinks.AsNoTracking().Where(l => l.OwnerUserId == null).ToDictionaryAsync(l => l.Id, ct),
         await db.SpeakerGroups.AsNoTracking().ToDictionaryAsync(g => g.Id, g => g.Name, ct));
 
     private static Task<List<int>> MyRolesAsync(VmsDbContext db, SessionInfo session, CancellationToken ct) =>
@@ -106,7 +106,7 @@ public static class LiveViewsApi
     private static string LayoutNameOf(LiveViewSaveRequest request)
     {
         string name = (request.LayoutName ?? "").Trim();
-        return name.Length is > 0 and <= 32 ? name : "4";
+        return name.Length is > 0 and <= 64 ? name : "4";
     }
 
     /// <summary>Dirección web aceptable para un cuadro: absoluta, http o https.</summary>
@@ -146,7 +146,9 @@ public static class LiveViewsApi
         var channelIds = wanted.Where(i => DashboardItemKinds.IsCamera(i.Kind)).Select(i => i.ChannelId).Distinct().ToList();
         var knownChannels = await db.Channels.Where(c => channelIds.Contains(c.Id)).Select(c => c.Id).ToListAsync(ct);
         var linkIds = wanted.Where(i => i.Kind == DashboardItemKinds.Web && i.RefId is not null).Select(i => i.RefId!.Value).ToList();
-        var knownLinks = await db.WebLinks.Where(l => linkIds.Contains(l.Id)).ToDictionaryAsync(l => l.Id, l => l.Name, ct);
+        // Solo las de la lista compartida: las de «Mis páginas» el cliente las guarda como dirección.
+        var knownLinks = await db.WebLinks.Where(l => linkIds.Contains(l.Id) && l.OwnerUserId == null)
+            .ToDictionaryAsync(l => l.Id, l => l.Name, ct);
 
         var items = new List<LiveViewItem>();
         foreach (var i in wanted)
@@ -173,8 +175,9 @@ public static class LiveViewsApi
                     });
                     break;
                 case DashboardItemKinds.Card:
-                    if (DashboardItemKinds.Cards.Contains(i.Ref ?? ""))
-                        items.Add(new LiveViewItem { CellIndex = i.CellIndex, Kind = DashboardItemKinds.Card, Ref = i.Ref });
+                    // La clave puede traer opciones de la tarjeta ("card-plates?devices=3,7").
+                    if (DashboardItemKinds.IsKnownCard(i.Ref))
+                        items.Add(new LiveViewItem { CellIndex = i.CellIndex, Kind = DashboardItemKinds.Card, Ref = Clip(i.Ref, 512) });
                     break;
                 case DashboardItemKinds.SpeakerGroup when i.RefId is { } groupId:
                     if (await db.SpeakerGroups.Where(g => g.Id == groupId).Select(g => g.Name).FirstOrDefaultAsync(ct) is { } groupName)
@@ -420,11 +423,35 @@ public static class LiveViewsApi
         MapWebLinks(app);
     }
 
+    /// <summary>
+    /// «Mis páginas»: la dirección que el operador escribió en un cuadro queda
+    /// guardada para él (pide "Abrir cualquier página web", lo mismo que
+    /// abrirla). Guardar una dirección que ya tiene no la duplica.
+    /// </summary>
+    private static async Task<IResult> CreatePersonalAsync(HttpContext ctx, WebLinkSaveRequest request, VmsDbContext db,
+        AuditService audit, CancellationToken ct)
+    {
+        if (ApiSecurity.Require(ctx, Permissions.DashboardsWebUrl, out var session) is { } failure) return failure;
+        if (Validate(request, out var name, out var url) is { } invalid) return invalid;
+        if (await db.WebLinks.FirstOrDefaultAsync(l => l.OwnerUserId == session.UserId && l.Url == url, ct) is { } same)
+            return Results.Ok(ToDto(same));
+        if (await db.WebLinks.AnyAsync(l => l.OwnerUserId == session.UserId && l.Name == name, ct))
+            return Error("Ya tiene guardada una página con ese nombre.", StatusCodes.Status409Conflict);
+        var link = new WebLink { Name = name, Url = url, Description = Clip(request.Description, 500), OwnerUserId = session.UserId };
+        db.WebLinks.Add(link);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync(ctx, "live", "web-link-created",
+            targetType: "web-link", targetId: link.Id.ToString(), targetName: link.Name,
+            detail: $"Guardó la página web \"{link.Name}\" ({link.Url}) en sus páginas.");
+        return Results.Ok(ToDto(link));
+    }
+
     // -----------------------------------------------------------------------
     // Páginas web de la lista del servidor
     // -----------------------------------------------------------------------
 
-    private static WebLinkDto ToDto(WebLink link) => new(link.Id, link.Name, link.Url, link.Description);
+    private static WebLinkDto ToDto(WebLink link) =>
+        new(link.Id, link.Name, link.Url, link.Description, Personal: link.OwnerUserId is not null);
 
     private static IResult? Validate(WebLinkSaveRequest request, out string name, out string url)
     {
@@ -441,17 +468,22 @@ public static class LiveViewsApi
     {
         app.MapGet("/api/web-links", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
-            if (ApiSecurity.RequireAny(ctx, out _, Permissions.LiveView, Permissions.DashboardsManage) is { } failure) return failure;
-            var links = await db.WebLinks.AsNoTracking().OrderBy(l => l.Name).ToListAsync(ct);
+            if (ApiSecurity.RequireAny(ctx, out var session, Permissions.LiveView, Permissions.DashboardsManage) is { } failure) return failure;
+            // La lista compartida y, después, las de «Mis páginas» de quien consulta.
+            var links = await db.WebLinks.AsNoTracking()
+                .Where(l => l.OwnerUserId == null || l.OwnerUserId == session.UserId)
+                .OrderBy(l => l.OwnerUserId != null).ThenBy(l => l.Name).ToListAsync(ct);
             return Results.Ok(links.Select(ToDto));
         });
 
         app.MapPost("/api/web-links", async (HttpContext ctx, WebLinkSaveRequest request, VmsDbContext db,
             AuditService audit, CancellationToken ct) =>
         {
+            if (request.Personal)
+                return await CreatePersonalAsync(ctx, request, db, audit, ct);
             if (ApiSecurity.Require(ctx, Permissions.DashboardsManage, out _) is { } failure) return failure;
             if (Validate(request, out var name, out var url) is { } invalid) return invalid;
-            if (await db.WebLinks.AnyAsync(l => l.Name == name, ct))
+            if (await db.WebLinks.AnyAsync(l => l.OwnerUserId == null && l.Name == name, ct))
                 return Error("Ya hay una página con ese nombre.", StatusCodes.Status409Conflict);
             var link = new WebLink { Name = name, Url = url, Description = Clip(request.Description, 500) };
             db.WebLinks.Add(link);
@@ -468,9 +500,9 @@ public static class LiveViewsApi
         {
             if (ApiSecurity.Require(ctx, Permissions.DashboardsManage, out _) is { } failure) return failure;
             if (Validate(request, out var name, out var url) is { } invalid) return invalid;
-            var link = await db.WebLinks.FirstOrDefaultAsync(l => l.Id == id, ct);
+            var link = await db.WebLinks.FirstOrDefaultAsync(l => l.Id == id && l.OwnerUserId == null, ct);
             if (link is null) return Results.NotFound();
-            if (await db.WebLinks.AnyAsync(l => l.Id != id && l.Name == name, ct))
+            if (await db.WebLinks.AnyAsync(l => l.Id != id && l.OwnerUserId == null && l.Name == name, ct))
                 return Error("Ya hay una página con ese nombre.", StatusCodes.Status409Conflict);
             string before = link.Url;
             link.Name = name;
@@ -490,9 +522,21 @@ public static class LiveViewsApi
         app.MapDelete("/api/web-links/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             AuditService audit, CancellationToken ct) =>
         {
-            if (ApiSecurity.Require(ctx, Permissions.DashboardsManage, out _) is { } failure) return failure;
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } unauthorized) return unauthorized;
             var link = await db.WebLinks.FirstOrDefaultAsync(l => l.Id == id, ct);
             if (link is null) return Results.NotFound();
+            // Una de «Mis páginas» la quita solo su dueño; las compartidas, quien administra los tableros.
+            if (link.OwnerUserId is { } owner)
+            {
+                if (owner != session.UserId) return Results.NotFound();
+                db.WebLinks.Remove(link);
+                await db.SaveChangesAsync(ct);
+                await audit.LogAsync(ctx, "live", "web-link-deleted",
+                    targetType: "web-link", targetId: id.ToString(), targetName: link.Name,
+                    detail: $"Quitó la página web \"{link.Name}\" de sus páginas guardadas.");
+                return Results.Ok();
+            }
+            if (ApiSecurity.Require(ctx, Permissions.DashboardsManage, out _) is { } failure) return failure;
             var cells = await db.LiveViewItems.Where(i => i.Kind == DashboardItemKinds.Web && i.RefId == id).ToListAsync(ct);
             db.LiveViewItems.RemoveRange(cells);
             db.WebLinks.Remove(link);

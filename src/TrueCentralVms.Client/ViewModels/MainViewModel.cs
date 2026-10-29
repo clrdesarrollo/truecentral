@@ -1060,8 +1060,60 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Divisiones disponibles en el selector.</summary>
     public IReadOnlyList<VideoLayout> Layouts => VideoLayout.Standard;
 
-    /// <summary>Las mismas divisiones agrupadas por familia (así las muestra el selector).</summary>
-    public IReadOnlyList<VideoLayoutGroup> LayoutGroups => VideoLayout.Groups;
+    /// <summary>Las mismas divisiones agrupadas por familia (así las muestra el
+    /// selector): las de monitor horizontal o las de monitor vertical.</summary>
+    public IReadOnlyList<VideoLayoutGroup> LayoutGroups => VideoLayout.GroupsFor(IsVerticalLayouts);
+
+    /// <summary>El selector muestra las divisiones para monitor vertical (el
+    /// interruptor de arriba a la derecha del selector; se recuerda).</summary>
+    public bool IsVerticalLayouts
+    {
+        get => _settings.VerticalLayouts ?? false;
+        set
+        {
+            if (_settings.VerticalLayouts == value) return;
+            _settings.VerticalLayouts = value;
+            _settings.Save();
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(LayoutGroups));
+        }
+    }
+
+    /// <summary>Nunca se eligió la orientación: el selector la toma de la forma de la ventana al abrirse.</summary>
+    public bool LayoutOrientationUnset => _settings.VerticalLayouts is null;
+
+    /// <summary>
+    /// Subdivide un card en <paramref name="across"/>×<paramref name="down"/>
+    /// cuadros para poner más cámaras donde había una. Lo que mostraba queda
+    /// en el primer pedazo (arriba a la izquierda) y la selección pasa al
+    /// siguiente, así el próximo doble clic del árbol lo llena.
+    /// </summary>
+    public async Task SubdivideCellAsync(VideoCellViewModel cell, int across, int down)
+    {
+        if (_layoutBusy) return;
+        if (MaximizedIndex >= 0)
+        {
+            StatusMessage = "Restaure el cuadro maximizado para subdividir.";
+            return;
+        }
+        int index = Cells.IndexOf(cell);
+        if (index < 0 || index >= CurrentLayout.CellCount) return;
+        if (CurrentLayout.Subdivide(index, across, down, out var reason) is not { } split)
+        {
+            StatusMessage = reason ?? "";
+            return;
+        }
+        _layoutBusy = true;
+        try { await ApplyLayoutAsync(split.Layout, split.Placement); }
+        finally { _layoutBusy = false; }
+        SelectedCell = Cells[split.StripCells.Count > 1 ? split.StripCells[1] : split.StripCells[0]];
+        StatusMessage = $"Card subdividido en {across * down}: la grilla queda en {split.Layout.CellCount} cuadros. " +
+                        "Arrastre o haga doble clic en las cámaras para llenarlos.";
+    }
+
+    /// <summary>Ventana donde está hoy el Centro de mando (la principal o la
+    /// suya, si se extrajo la pestaña): los avisos de apertura masiva van ahí.</summary>
+    public Window? LiveWindow { get; set; }
 
     /// <summary>Cuadro maximizado con doble clic (−1 = grilla normal). Los
     /// demás cuadros quedan ocultos pero vivos: sus streams no se cortan.</summary>
@@ -1082,6 +1134,7 @@ public partial class MainViewModel : ObservableObject
         // La barra de herramientas se oculta: su desplegable de vistas no
         // puede quedar flotando sobre el video.
         IsViewsPopupOpen = false;
+        FullscreenSection = "Live";
         IsGridFullscreen = true;
     }
 
@@ -1449,7 +1502,7 @@ public partial class MainViewModel : ObservableObject
         StatusMessage = BulkOpeningText;
         // Bloquea la interfaz mientras dura: aviso centrado (ventana propia y
         // Topmost, sobre el video) y la ventana principal deshabilitada.
-        var loading = Application.Current.MainWindow is { IsLoaded: true } owner
+        var loading = (LiveWindow ?? Application.Current.MainWindow) is { IsLoaded: true } owner
             ? Views.LoadingWindow.Open(owner, BulkOpeningText)
             : null;
         System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
@@ -1583,32 +1636,15 @@ public partial class MainViewModel : ObservableObject
     }
 
     // ---------- Pantallas auxiliares (estilo iVMS-4200, máximo 3) ----------
+    // Ya no se abren desde la barra (el botón «Pantalla auxiliar» se reemplazó por
+    // extraer la viñeta del Centro de mando a su propia ventana, MainWindow.Tabs):
+    // quedan para reabrir las que guardó una sesión anterior.
 
     /// <summary>Pantallas auxiliares abiertas: ventanas independientes con su
     /// propia grilla, para ver cámaras en más de un monitor.</summary>
     private readonly List<Views.AuxLiveWindow> _auxWindows = [];
 
     private const int MaxAuxScreens = 3;
-
-    [RelayCommand]
-    private void OpenAuxScreen()
-    {
-        if (_auxWindows.Count >= MaxAuxScreens)
-        {
-            StatusMessage = $"Ya hay {MaxAuxScreens} pantallas auxiliares abiertas (el máximo).";
-            return;
-        }
-        // El número más bajo libre: cerrar la 2 y abrir otra vuelve a dar la 2.
-        int slot = Enumerable.Range(1, MaxAuxScreens).First(n => _auxWindows.All(w => w.Vm.SlotNumber != n));
-        var window = CreateAuxWindow(slot);
-
-        // Parte en el primer monitor sin ventanas de la aplicación (si lo hay).
-        var occupied = new List<Window>();
-        if (Application.Current.MainWindow is { } main) occupied.Add(main);
-        occupied.AddRange(_auxWindows.Where(w => w != window && w.IsLoaded));
-        window.ShowOnFreeMonitor(occupied);
-        StatusMessage = $"Pantalla auxiliar {slot} abierta: arrástrela al monitor que quiera si no partió ahí.";
-    }
 
     /// <summary>Crea (sin mostrar) la ventana de una pantalla auxiliar y la registra.</summary>
     private Views.AuxLiveWindow CreateAuxWindow(int slot)
@@ -1685,6 +1721,7 @@ public partial class MainViewModel : ObservableObject
 
     public void Shutdown()
     {
+        StopUpdateChecks();
         // La última sesión se toma ANTES de cerrar ventanas y liberar cuadros:
         // si no, lo que quedaría guardado es una grilla vacía.
         _sessionSaveTimer?.Stop();

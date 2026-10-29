@@ -53,6 +53,47 @@
             </Style.Triggers>
         </Style>
 
+        <!-- Interruptor Horizontal | Vertical del selector de divisiones: el
+             monitorcito acostado o parado a cada lado y la perilla que corre. -->
+        <Style x:Key="OrientationSwitch" TargetType="ToggleButton">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                            <Border x:Name="Landscape" Width="16" Height="11" BorderThickness="1.5" CornerRadius="1.5"
+                                    BorderBrush="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="LandscapeText" Text="Horizontal" FontSize="10.5" Margin="5,0,8,0"
+                                       Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                            <Grid Width="32" Height="17" VerticalAlignment="Center">
+                                <Border x:Name="Track" CornerRadius="8.5" Background="{StaticResource Panel2Brush}"
+                                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                                <Ellipse x:Name="Knob" Width="11" Height="11" Margin="3,0" HorizontalAlignment="Left"
+                                         Fill="{StaticResource MutedBrush}"/>
+                            </Grid>
+                            <TextBlock x:Name="PortraitText" Text="Vertical" FontSize="10.5" Margin="8,0,5,0"
+                                       Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                            <Border x:Name="Portrait" Width="11" Height="16" BorderThickness="1.5" CornerRadius="1.5"
+                                    BorderBrush="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="Knob" Property="Fill" Value="White"/>
+                                <Setter TargetName="Landscape" Property="BorderBrush" Value="{StaticResource MutedBrush}"/>
+                                <Setter TargetName="LandscapeText" Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                <Setter TargetName="Portrait" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="PortraitText" Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Miniatura de una división (rectángulos proporcionales) -->
         <DataTemplate x:Key="LayoutPreview">
             <Border BorderBrush="{StaticResource MutedBrush}" BorderThickness="0.8" Margin="0.8"/>
@@ -60,14 +101,28 @@
 
         <!-- Una división dentro del popup: miniatura + cantidad de cuadros -->
         <DataTemplate x:Key="LayoutPresetItem">
-            <Button Style="{StaticResource LayoutPresetButton}" Click="OnLayoutPicked" ToolTip="{Binding Key}"
+            <Button Style="{StaticResource LayoutPresetButton}" Click="OnLayoutPicked" ToolTip="{Binding Label}"
                     Command="{Binding DataContext.SelectLayoutCommand,
                               RelativeSource={RelativeSource AncestorType=UserControl}}"
                     CommandParameter="{Binding}">
                 <StackPanel>
-                    <ItemsControl ItemsSource="{Binding Cells}" Width="36" Height="26"
+                    <ItemsControl ItemsSource="{Binding Cells}"
                                   IsHitTestVisible="False" HorizontalAlignment="Center"
                                   ItemTemplate="{StaticResource LayoutPreview}">
+                        <!-- Con las divisiones para monitor vertical, la miniatura va parada -->
+                        <ItemsControl.Style>
+                            <Style TargetType="ItemsControl">
+                                <Setter Property="Width" Value="36"/>
+                                <Setter Property="Height" Value="26"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DataContext.IsVerticalLayouts,
+                                                           RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                                        <Setter Property="Width" Value="22"/>
+                                        <Setter Property="Height" Value="32"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ItemsControl.Style>
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <views:VideoLayoutPanel Layout="{Binding}"/>
@@ -699,19 +754,10 @@
                  el de la derecha se anclan a su borde y "Vistas" queda centrado
                  respecto de la barra completa, sobre la grilla de cámaras. -->
             <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
-            <!-- Pantalla auxiliar (estilo iVMS-4200): otra ventana de vista en
-                 vivo, con grilla propia, para llevar a otro monitor (hasta 3) -->
-            <Button Style="{StaticResource GhostButton}" Padding="10,5"
-                    Command="{Binding OpenAuxScreenCommand}"
-                    ToolTip="Abrir una pantalla auxiliar (hasta 3): otra ventana de vista en vivo para ver cámaras en otro monitor">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE8A7;" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                               VerticalAlignment="Center" Margin="0,0,7,0"/>
-                    <TextBlock Text="Pantalla auxiliar" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Button>
+            <!-- (El botón «Pantalla auxiliar» se reemplazó por extraer la viñeta del
+                 Centro de mando a su propia ventana, como en un navegador: MainWindow.Tabs.) -->
             <!-- Pantalla completa del área de la grilla (Esc para salir) -->
-            <Button Style="{StaticResource GhostButton}" Padding="10,5" Margin="6,0,0,0"
+            <Button Style="{StaticResource GhostButton}" Padding="10,5"
                     Command="{Binding EnterGridFullscreenCommand}"
                     ToolTip="Pantalla completa de la grilla — presione Esc para salir">
                 <StackPanel Orientation="Horizontal">
@@ -727,7 +773,7 @@
                 <!-- Selector de división estilo iVMS-4200: botón con la
                      miniatura actual; el popup lista todas las divisiones. -->
                 <ToggleButton x:Name="LayoutPickerToggle" Style="{StaticResource GhostToggle}" Margin="0,0,6,0"
-                              ToolTip="{Binding CurrentLayout.Label}">
+                              ToolTip="{Binding CurrentLayout.Label}" Checked="OnLayoutPickerOpened">
                     <StackPanel Orientation="Horizontal">
                         <ItemsControl ItemsSource="{Binding CurrentLayout.Cells}" Width="24" Height="17"
                                       IsHitTestVisible="False" ItemTemplate="{StaticResource LayoutPreview}"
@@ -749,8 +795,14 @@
                     <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
                             BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4,8,8">
                         <StackPanel>
-                            <TextBlock Text="División de pantalla" FontSize="11" FontWeight="SemiBold"
-                                       Foreground="{StaticResource MutedBrush}" Margin="2,0,0,8"/>
+                            <!-- Arriba a la derecha: divisiones para monitor horizontal o vertical -->
+                            <DockPanel Margin="2,0,2,8">
+                                <ToggleButton DockPanel.Dock="Right" Style="{StaticResource OrientationSwitch}"
+                                              IsChecked="{Binding IsVerticalLayouts, Mode=TwoWay}"
+                                              ToolTip="Divisiones para monitor horizontal (apagado) o vertical (encendido)"/>
+                                <TextBlock Text="División de pantalla" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                            </DockPanel>
                             <!-- Una fila por familia; 7 columnas fijas para que las
                                  miniaturas queden alineadas entre familias. -->
                             <ItemsControl ItemsSource="{Binding LayoutGroups}">
@@ -959,7 +1011,12 @@
                          los clics sobre el video NO llegan a WPF. Por eso cada cuadro
                          tiene su propia barra (siempre WPF y clickeable) para
                          seleccionarlo, y el cuerpo solo es clickeable cuando está vacío. -->
+                    <!-- Selección: cualquier clic adentro (barra, video, tarjeta, página web) o el
+                         foco del teclado en algo del cuadro lo deja seleccionado (OnCellPreviewDown,
+                         OnCellFocused); el clic ya no lo deselecciona (Esc sí). -->
                     <Border Margin="0.5" Background="{StaticResource CellBgBrush}" CornerRadius="2"
+                            PreviewMouseLeftButtonDown="OnCellPreviewDown"
+                            Keyboard.GotKeyboardFocus="OnCellFocused"
                             MouseLeftButtonDown="OnCellClick"
                             MouseMove="OnCellMouseMove"
                             AllowDrop="True" Drop="OnCellDrop"
@@ -967,24 +1024,27 @@
                         <Border.Style>
                             <Style TargetType="Border">
                                 <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-                                <!-- En el estilo y no en el elemento: la selección de «Unir» lo engruesa -->
+                                <!-- En el estilo y no en el elemento: la selección y «Unir» lo engruesan -->
                                 <Setter Property="BorderThickness" Value="1"/>
                                 <Style.Triggers>
+                                    <!-- El DataContext de la ventana es el del Centro de mando también
+                                         cuando la pestaña se extrajo a su propia ventana -->
                                     <DataTrigger Value="True">
                                         <DataTrigger.Binding>
                                             <MultiBinding Converter="{x:Static vm:SelectedCellComparer.Instance}">
                                                 <Binding/>
-                                                <Binding Path="DataContext.SelectedCell" RelativeSource="{RelativeSource AncestorType=Window}"/>
+                                                <Binding Path="DataContext.SelectedCell" RelativeSource="{RelativeSource AncestorType=UserControl}"/>
                                             </MultiBinding>
                                         </DataTrigger.Binding>
                                         <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                        <Setter Property="BorderThickness" Value="2"/>
                                     </DataTrigger>
                                     <!-- Destino del arrastre en curso: dónde va a caer la cámara -->
                                     <DataTrigger Value="True">
                                         <DataTrigger.Binding>
                                             <MultiBinding Converter="{x:Static vm:SelectedCellComparer.Instance}">
                                                 <Binding/>
-                                                <Binding Path="DataContext.DropTargetCell" RelativeSource="{RelativeSource AncestorType=Window}"/>
+                                                <Binding Path="DataContext.DropTargetCell" RelativeSource="{RelativeSource AncestorType=UserControl}"/>
                                             </MultiBinding>
                                         </DataTrigger.Binding>
                                         <Setter Property="BorderBrush" Value="#FCD34D"/>
@@ -1027,7 +1087,7 @@
                                                FontSize="10.5" FontWeight="Bold"/>
                                 </Border>
                                 <!-- Consola: rótulo del cuadro en mayúsculas y acento -->
-                                <TextBlock DockPanel.Dock="Left" Text="{Binding Index, StringFormat=CAM {0:00}}"
+                                <TextBlock DockPanel.Dock="Left" Text="{Binding Index, StringFormat=CARD {0:00}}"
                                            Foreground="{StaticResource AccentBrush}" FontSize="11.5" FontWeight="SemiBold"
                                            FontStretch="SemiCondensed" VerticalAlignment="Center" Margin="8,3,6,3"
                                            Visibility="{x:Static services:ClientTheme.ConsoleOnly}"/>
@@ -1035,6 +1095,27 @@
                                         Background="Transparent" Foreground="{StaticResource MutedBrush}"
                                         BorderThickness="0" Padding="9,2" Cursor="Hand" FontSize="11"
                                         Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                                <!-- Subdividir el card: pasa a ser 2, 4 o 9 cuadros para poner más cámaras -->
+                                <Button DockPanel.Dock="Right" Style="{StaticResource CellBarIconButton}" Content="&#xE71D;"
+                                        Click="OnSubdivideClick"
+                                        ToolTip="Subdividir este card para poner más de una cámara">
+                                    <Button.ContextMenu>
+                                        <ContextMenu Style="{StaticResource DarkContextMenu}">
+                                            <MenuItem Header="En 2, lado a lado" Tag="2x1" Click="OnSubdividePicked"/>
+                                            <MenuItem Header="En 2, uno sobre otro" Tag="1x2" Click="OnSubdividePicked"/>
+                                            <MenuItem Header="En 3, lado a lado" Tag="3x1" Click="OnSubdividePicked"/>
+                                            <MenuItem Header="En 4 (2 × 2)" Tag="2x2" Click="OnSubdividePicked"/>
+                                            <MenuItem Header="En 6 (3 × 2)" Tag="3x2" Click="OnSubdividePicked"/>
+                                            <MenuItem Header="En 9 (3 × 3)" Tag="3x3" Click="OnSubdividePicked"/>
+                                        </ContextMenu>
+                                    </Button.ContextMenu>
+                                </Button>
+                                <!-- Configurar la tarjeta (las cámaras de «Últimas patentes», por ejemplo) -->
+                                <Button DockPanel.Dock="Right" Style="{StaticResource CellBarIconButton}" Content="&#xE713;"
+                                        Command="{Binding Panel.ConfigureCommand}"
+                                        ToolTip="{Binding Panel.ConfigureHint}"
+                                        Visibility="{Binding Panel.CanConfigure, Converter={x:Static vm:BoolToVisibility.Instance},
+                                                     FallbackValue=Collapsed}"/>
                                 <!-- Contador de la cápsula en curso (00:12) -->
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding RecordingElapsed}"
                                            Foreground="{StaticResource DangerBrush}" FontSize="10.5"

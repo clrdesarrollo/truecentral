@@ -20,13 +20,22 @@ public partial class LiveView : UserControl
         _merge = new CellMergeController(() => _gridPanel, (from, to) => Vm.PreviewMerge(from, to),
             (from, to) => Vm.MergeCellsAsync(from, to), cell => Vm.SplitCellAsync(cell));
         // El teclado PTZ se captura a nivel de ventana: el foco puede estar en
-        // el árbol, en la grilla o en cualquier control del shell.
+        // el árbol, en la grilla o en cualquier control del shell. La pestaña
+        // se puede extraer a su propia ventana (y volver): el enganche sigue a
+        // la ventana donde esté.
         Loaded += (_, _) =>
         {
-            if (_hostWindow is not null || Window.GetWindow(this) is not { } window) return;
+            if (Window.GetWindow(this) is not { } window || window == _hostWindow) return;
+            if (_hostWindow is { } previous)
+            {
+                previous.PreviewKeyDown -= OnPtzKeyDown;
+                previous.PreviewKeyUp -= OnPtzKeyUp;
+            }
             _hostWindow = window;
+            Vm.LiveWindow = window;
             window.PreviewKeyDown += OnPtzKeyDown;
             window.PreviewKeyUp += OnPtzKeyUp;
+            if (_joystick is not null) return;
             // Joystick PTZ: mueve la cámara seleccionada con la Vista en Vivo a
             // la vista y alguna ventana del cliente activa (también una
             // auxiliar), o con el cliente detrás de otro programa si el
@@ -34,6 +43,7 @@ public partial class LiveView : UserControl
             _joystick = new JoystickPtzController(Vm, inBackground => IsVisible &&
                 (inBackground || Application.Current.Windows.OfType<Window>().Any(w => w.IsActive)));
             Vm.Joystick = _joystick;
+            // El de la ventana principal: la extraída se cierra antes o devuelve la vista.
             window.Closed += (_, _) => _joystick?.Dispose();
         };
     }
@@ -87,6 +97,13 @@ public partial class LiveView : UserControl
         if (e.Key == Key.Escape && Vm.IsGridFullscreen)
         {
             Vm.IsGridFullscreen = false;
+            e.Handled = true;
+            return;
+        }
+        // Esc suelta la selección: el próximo doble clic del árbol va al primer cuadro libre.
+        if (e.Key == Key.Escape && Vm.SelectedCell is not null && !IsTypingTarget(e.OriginalSource))
+        {
+            Vm.SelectedCell = null;
             e.Handled = true;
             return;
         }
@@ -246,6 +263,14 @@ public partial class LiveView : UserControl
     /// <summary>Elegir una división cierra el popup (el comando ya la aplicó).</summary>
     private void OnLayoutPicked(object sender, RoutedEventArgs e) => LayoutPickerToggle.IsChecked = false;
 
+    /// <summary>La primera vez el selector se abre con las divisiones que calzan con la
+    /// forma de la ventana (más alta que ancha = monitor vertical); después, lo elegido.</summary>
+    private void OnLayoutPickerOpened(object sender, RoutedEventArgs e)
+    {
+        if (Vm.LayoutOrientationUnset && Window.GetWindow(this) is { } window)
+            Vm.IsVerticalLayouts = window.ActualHeight > window.ActualWidth;
+    }
+
     /// <summary>Soltar sobre un cuadro (barra o cuerpo vacío): abrir ahí.</summary>
     private async void OnCellDrop(object sender, DragEventArgs e)
     {
@@ -279,13 +304,66 @@ public partial class LiveView : UserControl
         // Doble clic: alternar entre el cuadro maximizado y la grilla.
         if (e.ClickCount == 2)
         {
-            Vm.ToggleMaximize(cell);
+            ToggleMaximize(cell);
             return;
         }
         // El mismo clic puede terminar en arrastre: queda armado por si el
         // puntero se mueve antes de soltar el botón.
         ArmCellDrag(cell, element, e.GetPosition(element));
         SelectCell(cell);
+    }
+
+    /// <summary>
+    /// Maximizar o restaurar desarma el arrastre que dejó el primer clic del
+    /// doble clic. Si no, al restaurar la grilla el botón todavía apretado
+    /// quedaba encima de OTRO cuadro: el movimiento ahí se tomaba como
+    /// arrastre y al soltar las cámaras se intercambiaban.
+    /// </summary>
+    private void ToggleMaximize(VideoCellViewModel cell)
+    {
+        _cellDragCandidate = null;
+        Vm.ToggleMaximize(cell);
+    }
+
+    /// <summary>
+    /// Cualquier clic dentro del cuadro lo selecciona: también sobre una
+    /// tarjeta, una puerta o un botón suyo, que se quedan con el clic y no lo
+    /// dejan llegar a <see cref="OnCellClick"/>. En modo «Unir» el clic marca
+    /// la unión, no la selección.
+    /// </summary>
+    private void OnCellPreviewDown(object sender, MouseButtonEventArgs e)
+    {
+        if (Vm.IsMergeMode || sender is not FrameworkElement { DataContext: VideoCellViewModel cell }) return;
+        Vm.SelectedCell = cell;
+    }
+
+    /// <summary>
+    /// El foco del teclado entró al cuadro: una página web (su navegador es
+    /// una ventana propia y el clic no pasa por WPF, pero el foco sí avisa) o
+    /// un control de la tarjeta.
+    /// </summary>
+    private void OnCellFocused(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (Vm.IsMergeMode || sender is not FrameworkElement { DataContext: VideoCellViewModel cell }) return;
+        Vm.SelectedCell = cell;
+    }
+
+    /// <summary>El ícono de subdividir abre su menú con el clic izquierdo.</summary>
+    private void OnSubdivideClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { ContextMenu: { } menu } button) return;
+        menu.PlacementTarget = button;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.DataContext = button.DataContext;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>Subdivide el card en columnas×filas («2x2»).</summary>
+    private async void OnSubdividePicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string shape, DataContext: VideoCellViewModel cell }) return;
+        var parts = shape.Split('x');
+        await Vm.SubdivideCellAsync(cell, int.Parse(parts[0]), int.Parse(parts[1]));
     }
 
     /// <summary>Movimiento con el botón apretado sobre la barra o el hueco
@@ -455,7 +533,7 @@ public partial class LiveView : UserControl
             // (el fullscreen propio de Flyleaf está deshabilitado).
             if (e.ClickCount == 2)
             {
-                Vm.ToggleMaximize(cell);
+                ToggleMaximize(cell);
                 return;
             }
             ArmCellDrag(cell, window, e.GetPosition(window));
@@ -505,7 +583,9 @@ public partial class LiveView : UserControl
         }), handledEventsToo: true);
     }
 
-    private void SelectCell(VideoCellViewModel cell) => Vm.SelectedCell = Vm.SelectedCell == cell ? null : cell;
+    /// <summary>Un clic selecciona el cuadro (antes, un segundo clic lo deseleccionaba y
+    /// el borde «no respondía»; ahora se suelta con Esc).</summary>
+    private void SelectCell(VideoCellViewModel cell) => Vm.SelectedCell = cell;
 
     // ------------------------------------------------------------------
     // PTZ: movimiento continuo — presionar inicia, soltar (o salir del
