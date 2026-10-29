@@ -234,6 +234,11 @@ public sealed class PlateLine(PlateEventDto e)
     public string Time { get; } = e.CapturedAt.ToLocalTime().ToString("HH:mm:ss");
     public string Plate { get; } = e.PlateNumber;
     public string Where { get; } = string.Join(" · ", new[] { e.ChannelName, e.Direction }.Where(s => !string.IsNullOrWhiteSpace(s)));
+    /// <summary>No pasa como PPU chilena: la patente grande va en rojo, como en la página ANPR.</summary>
+    public bool InvalidChile { get; } = e.Chile is { Valid: false };
+    public string PlateHint => InvalidChile
+        ? "Patente leída por el equipo (no es una patente chilena válida)"
+        : "Patente leída por el equipo";
 }
 
 /// <summary>
@@ -296,7 +301,7 @@ public sealed partial class PlatesCardPanel : CellPanel
         }
         var e = line.Event;
         _imagesFor = e.Id;
-        SelectedText = $"{e.PlateNumber} · {e.CapturedAt.ToLocalTime():dd-MM-yyyy HH:mm:ss} · {line.Where}";
+        SelectedText = $"{e.CapturedAt.ToLocalTime():dd-MM-yyyy HH:mm:ss} · {line.Where}";
         var scene = e.HasSceneImage ? await _api.GetPlateImageAsync(e.Id, "scene") : null;
         var plate = e.HasPlateImage ? await _api.GetPlateImageAsync(e.Id, "plate") : null;
         if (_imagesFor != e.Id) return; // ya eligió otra mientras descargaba

@@ -510,8 +510,27 @@
                         </TextBlock>
                     </Grid>
                 </Border>
-                <Image Grid.Row="1" Source="{Binding PlateImage}" Height="64" Stretch="Uniform" HorizontalAlignment="Left"
-                       Margin="0,8,0,0" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <StackPanel Grid.Row="1" HorizontalAlignment="Left" Margin="0,8,0,0">
+                    <Image Source="{Binding PlateImage}" Height="64" Stretch="Uniform" HorizontalAlignment="Center"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <!-- La patente leída bajo el recorte, como en la página ANPR: verde sobre negro, roja si no es una PPU chilena válida -->
+                    <Border Background="#000000" CornerRadius="4" Padding="14,2" Margin="0,6,0,0" HorizontalAlignment="Center"
+                            ToolTip="{Binding Selected.PlateHint}"
+                            Visibility="{Binding Selected, Converter={x:Static vm:NotNullToVisibility.Instance}}">
+                        <TextBlock Text="{Binding Selected.Plate}" FontSize="24" FontWeight="Bold" FontFamily="{StaticResource MonoFont}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#39FF14"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Selected.InvalidChile}" Value="True">
+                                            <Setter Property="Foreground" Value="#FF3B30"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
                 <TextBlock Grid.Row="2" Text="{Binding SelectedText}" Style="{StaticResource PanelHint}" Margin="0,6,0,0"
                            TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
             </Grid>
