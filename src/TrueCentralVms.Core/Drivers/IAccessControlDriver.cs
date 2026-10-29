@@ -5,9 +5,11 @@ namespace TrueCentralVms.Core.Drivers;
 
 /// <summary>
 /// Datos de conexión a un equipo de control de acceso (API HTTP del fabricante). Con <paramref name="IsupId"/> el equipo se
-/// conecta al servidor por ISUP y no se lo alcanza por IP (Host, puerto y credenciales no se usan).
+/// conecta al servidor por ISUP y no se lo alcanza por IP (Host, puerto y credenciales no se usan). Con
+/// <paramref name="ReadParts"/> en false no se le pregunta al equipo por su cámara, su altavoz ni sus entradas y salidas.
 /// </summary>
-public sealed record AccessConnectionInfo(string Host, int Port, bool UseHttps, string Username, string Password, string? IsupId = null);
+public sealed record AccessConnectionInfo(string Host, int Port, bool UseHttps, string Username, string Password, string? IsupId = null,
+    bool ReadParts = true);
 
 /// <summary>Puerta que declara el equipo. <paramref name="Number"/> es el número con el que la nombran sus propias órdenes.</summary>
 public sealed record AccessDoorInfo(int Number, string Name);
