@@ -128,3 +128,18 @@ public sealed class GreaterThan : IValueConverter
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }
+
+/// <summary>El número menos ConverterParameter, sin bajar de cero (alto disponible descontando lo que va fijo debajo).</summary>
+public sealed class Minus : IValueConverter
+{
+    public static readonly Minus Instance = new();
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        double amount = parameter is string s && double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out double t) ? t : 0;
+        double number = value is int i ? i : value is double d ? d : 0;
+        return Math.Max(0, number - amount);
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
+}

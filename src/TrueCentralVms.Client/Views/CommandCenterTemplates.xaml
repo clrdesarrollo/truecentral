@@ -534,23 +534,26 @@
         </ScrollViewer>
     </DataTemplate>
 
-    <!-- Últimas patentes: escena y recorte de la lectura elegida a la izquierda, la lista a la derecha -->
+    <!-- Últimas patentes: escena y recorte de la lectura elegida a la izquierda, la lista (angosta) a la derecha.
+         La escena va a su tamaño natural, con tope para que debajo siempre quepan el recorte, la patente y el pie (150);
+         el alto que sobra es para el recorte y la patente, centrados. -->
     <DataTemplate DataType="{x:Type vm:PlatesCardPanel}">
         <Grid Background="{StaticResource CellBgBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto" MinWidth="250"/>
+                <ColumnDefinition Width="190"/>
             </Grid.ColumnDefinitions>
-            <Grid Margin="10,10,6,10">
+            <Grid x:Name="PlatesLeft" Margin="10,10,6,10">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <Border Background="#000000" CornerRadius="3">
+                <Border Background="#000000" CornerRadius="3"
+                        MaxHeight="{Binding ActualHeight, ElementName=PlatesLeft, Converter={x:Static vm:Minus.Instance}, ConverterParameter=150}">
                     <Grid>
                         <Image Source="{Binding SceneImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
-                        <TextBlock Text="Sin imagen de la escena" Style="{StaticResource PanelHint}"
+                        <TextBlock Text="Sin imagen de la escena" Style="{StaticResource PanelHint}" Margin="0,50"
                                    HorizontalAlignment="Center" VerticalAlignment="Center">
                             <TextBlock.Visibility>
                                 <Binding Path="SceneImage" Converter="{x:Static vm:NullToVisibility.Instance}"/>
@@ -558,7 +561,7 @@
                         </TextBlock>
                     </Grid>
                 </Border>
-                <StackPanel Grid.Row="1" HorizontalAlignment="Left" Margin="0,8,0,0">
+                <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,8">
                     <Image Source="{Binding PlateImage}" Height="64" Stretch="Uniform" HorizontalAlignment="Center"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     <!-- La patente leída bajo el recorte, como en la página ANPR: verde sobre negro, roja si no es una PPU chilena válida -->
