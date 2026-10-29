@@ -121,18 +121,58 @@ public sealed partial class EquipmentCardPanel(ApiClient api) : PollingCardPanel
     }
 }
 
-/// <summary>Salud del servidor: CPU, memoria, disco, servicios y tiempo encendido.</summary>
+/// <summary>Tasas de red en texto y escala del medidor, como en el panel de inicio del web.</summary>
+public static class NetRate
+{
+    /// <summary>Número y unidad: hasta 2 decimales bajo 10 Mbps, 1 bajo 100, ninguno más arriba y en Gbps desde 1000.</summary>
+    public static (string Number, string Unit) Split(double mbps) =>
+        mbps >= 1000 ? ((mbps / 1000).ToString("0.##"), "Gbps")
+                     : (mbps.ToString(mbps < 10 ? "0.##" : mbps < 100 ? "0.#" : "0"), "Mbps");
+
+    public static string Format(double mbps)
+    {
+        var (number, unit) = Split(mbps);
+        return $"{number} {unit}";
+    }
+
+    /// <summary>Escala del medidor: redonda y con aire sobre el pico reciente, sin pasar la capacidad del enlace.</summary>
+    public static double Scale(NetworkThroughputDto net)
+    {
+        double want = NiceMax(Math.Max(10, Math.Max(net.PeakMbps, net.RxMbps + net.TxMbps) * 1.25));
+        return net.LinkMbps > 0 ? Math.Min(want, NiceMax(net.LinkMbps)) : want;
+    }
+
+    // 1, 2, 5 o 10 por la potencia de diez que corresponda.
+    private static double NiceMax(double v)
+    {
+        double p = Math.Pow(10, Math.Floor(Math.Log10(v)));
+        double n = v / p;
+        return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+    }
+}
+
+/// <summary>Salud del servidor: throughput de red, CPU, memoria, disco, servicios y tiempo encendido.</summary>
 public sealed partial class ServerCardPanel(ApiClient api) : PollingCardPanel(TimeSpan.FromSeconds(5))
 {
     public override string Glyph => "\uE977";
     public override string Kind => CardKinds.Server;
 
-    [ObservableProperty] private double _cpu;
-    [ObservableProperty] private double _ram;
-    [ObservableProperty] private double _disk;
-    [ObservableProperty] private string _cpuText = "—";
-    [ObservableProperty] private string _ramText = "—";
-    [ObservableProperty] private string _diskText = "—";
+    // Porcentajes de los medidores (NaN = el servidor no lo informó).
+    [ObservableProperty] private double _cpu = double.NaN;
+    [ObservableProperty] private double _ram = double.NaN;
+    [ObservableProperty] private double _disk = double.NaN;
+    [ObservableProperty] private string _ramText = "";
+    [ObservableProperty] private string _diskText = "";
+    // Throughput (Mbit/s): el medidor de aguja con su escala, entrada / salida y la curva de los últimos minutos.
+    [ObservableProperty] private bool _hasNetwork;
+    [ObservableProperty] private double _netMbps;
+    [ObservableProperty] private double _netScale = 10;
+    [ObservableProperty] private string _netLevel = "Ok";
+    [ObservableProperty] private string _rxText = "—";
+    [ObservableProperty] private string _txText = "—";
+    [ObservableProperty] private IReadOnlyList<double> _netHistory = [];
+    [ObservableProperty] private string _peakText = "";
+    [ObservableProperty] private string _linkText = "";
     [ObservableProperty] private string _servicesText = "—";
     [ObservableProperty] private string _servicesLevel = "Unknown";
     [ObservableProperty] private string _problems = "";
@@ -143,12 +183,27 @@ public sealed partial class ServerCardPanel(ApiClient api) : PollingCardPanel(Ti
         Title = "Servidor";
         var s = (await api.GetDashboardAsync()).Server;
         if (s is null) return;
-        Cpu = s.Cpu ?? 0;
-        Ram = s.Ram ?? 0;
-        Disk = s.Disk ?? 0;
-        CpuText = s.Cpu is { } cpu ? $"{cpu:0} %" : "—";
-        RamText = s.Ram is { } ram ? $"{ram:0} %  ({s.RamUsedGb:0.0} de {s.RamTotalGb:0.0} GB)" : "—";
-        DiskText = s.Disk is { } disk ? $"{disk:0} %  ({s.DiskUsedGb:0} de {s.DiskTotalGb:0} GB{(string.IsNullOrEmpty(s.DiskName) ? "" : $", {s.DiskName}")})" : "—";
+        Cpu = s.Cpu ?? double.NaN;
+        Ram = s.Ram ?? double.NaN;
+        Disk = s.Disk ?? double.NaN;
+        RamText = s.Ram is null ? "" : $"{s.RamUsedGb:0.0} de {s.RamTotalGb:0} GB";
+        DiskText = s.Disk is null ? "" : $"{s.DiskName} {s.DiskUsedGb:0} de {s.DiskTotalGb:0} GB".Trim();
+        if (s.Network is { } net)
+        {
+            double total = net.RxMbps + net.TxMbps;
+            NetScale = NetRate.Scale(net);
+            NetMbps = total;
+            RxText = NetRate.Format(net.RxMbps);
+            TxText = NetRate.Format(net.TxMbps);
+            NetHistory = net.History.Count > 1 ? net.History : [0, 0];
+            PeakText = $"Pico 5 min  {NetRate.Format(net.PeakMbps)}";
+            double? use = net.LinkMbps > 0 ? total / net.LinkMbps * 100 : null;
+            LinkText = use is { } u
+                ? $"Enlace {NetRate.Format(net.LinkMbps)} · {(u < 0.1 && total > 0 ? $"<{0.1:0.0}" : u.ToString("0.#"))} % en uso"
+                : "";
+            NetLevel = use >= 85 ? "Alarm" : use >= 60 ? "Warning" : "Ok";
+        }
+        HasNetwork = s.Network is not null;
         ServicesText = $"{s.ServicesRunning} de {s.ServicesTotal} servicios funcionando";
         ServicesLevel = s.ServicesFailed.Count > 0 ? "Alarm" : s.ServicesWarning.Count > 0 ? "Warning" : "Ok";
         Problems = string.Join("   ", new[]

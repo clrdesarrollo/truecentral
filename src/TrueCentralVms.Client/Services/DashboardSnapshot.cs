@@ -1,3 +1,5 @@
+using TrueCentralVms.Core.Contracts;
+
 namespace TrueCentralVms.Client.Services;
 
 // ---------------------------------------------------------------------------
@@ -27,6 +29,7 @@ public sealed class DashboardServer
     public double? DiskUsedGb { get; set; }
     public double? DiskTotalGb { get; set; }
     public string? DiskName { get; set; }
+    public NetworkThroughputDto? Network { get; set; }
     public int ServicesTotal { get; set; }
     public int ServicesRunning { get; set; }
     public List<string> ServicesFailed { get; set; } = [];

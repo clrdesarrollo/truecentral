@@ -366,14 +366,19 @@
 
     <!-- ============ Tarjetas de reporte ============ -->
 
-    <Style x:Key="CardBar" TargetType="ProgressBar">
-        <Setter Property="Height" Value="6"/>
-        <Setter Property="Maximum" Value="100"/>
-        <Setter Property="Margin" Value="0,3,0,8"/>
-        <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
-        <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
-        <Setter Property="BorderThickness" Value="0"/>
+    <!-- Rótulos de los medidores de la tarjeta Servidor -->
+    <Style x:Key="GaugeLabel" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
     </Style>
+    <Style x:Key="GaugeSub" TargetType="TextBlock" BasedOn="{StaticResource PanelHint}">
+        <Setter Property="TextAlignment" Value="Center"/>
+        <Setter Property="Margin" Value="2,1,2,0"/>
+    </Style>
+    <!-- Salida de red: el violeta del panel web -->
+    <SolidColorBrush x:Key="NetOutBrush" Color="#A48BFF"/>
 
     <!-- Estado de los equipos -->
     <DataTemplate DataType="{x:Type vm:EquipmentCardPanel}">
@@ -418,21 +423,64 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
             <StackPanel Margin="14,12">
                 <TextBlock Text="{Binding UptimeText}" Style="{StaticResource PanelHint}" Margin="0,0,0,10"/>
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Right" Text="{Binding CpuText}" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextBrush}"/>
-                    <TextBlock Text="CPU" Foreground="{StaticResource MutedBrush}"/>
-                </DockPanel>
-                <ProgressBar Value="{Binding Cpu, Mode=OneWay}" Style="{StaticResource CardBar}"/>
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Right" Text="{Binding RamText}" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextBrush}"/>
-                    <TextBlock Text="Memoria" Foreground="{StaticResource MutedBrush}"/>
-                </DockPanel>
-                <ProgressBar Value="{Binding Ram, Mode=OneWay}" Style="{StaticResource CardBar}"/>
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Right" Text="{Binding DiskText}" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextBrush}"/>
-                    <TextBlock Text="Disco" Foreground="{StaticResource MutedBrush}"/>
-                </DockPanel>
-                <ProgressBar Value="{Binding Disk, Mode=OneWay}" Style="{StaticResource CardBar}"/>
+                <!-- Throughput: medidor de aguja + entrada / salida y la curva de los últimos minutos -->
+                <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,12"
+                        Visibility="{Binding HasNetwork, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MaxWidth="190"/>
+                            <ColumnDefinition Width="1.4*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <views:ThroughputGauge Value="{Binding NetMbps}" Maximum="{Binding NetScale}" Level="{Binding NetLevel}"/>
+                            <TextBlock Text="THROUGHPUT" Style="{StaticResource GaugeLabel}" Margin="0,-4,0,0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0,0,0">
+                            <DockPanel Margin="0,0,0,6">
+                                <Grid DockPanel.Dock="Left" Width="22" Height="22">
+                                    <Border CornerRadius="6" Background="{StaticResource AccentBrush}" Opacity="0.15"/>
+                                    <TextBlock Text="&#xE74B;" FontFamily="Segoe MDL2 Assets" FontSize="11" Foreground="{StaticResource AccentBrush}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding RxText}" FontSize="13.5" FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                                <TextBlock Text="Entrada" Foreground="{StaticResource MutedBrush}" Margin="8,0" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <DockPanel>
+                                <Grid DockPanel.Dock="Left" Width="22" Height="22">
+                                    <Border CornerRadius="6" Background="{StaticResource NetOutBrush}" Opacity="0.15"/>
+                                    <TextBlock Text="&#xE74A;" FontFamily="Segoe MDL2 Assets" FontSize="11" Foreground="{StaticResource NetOutBrush}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding TxText}" FontSize="13.5" FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                                <TextBlock Text="Salida" Foreground="{StaticResource MutedBrush}" Margin="8,0" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <views:Sparkline Values="{Binding NetHistory}" Height="38" Margin="0,8,0,6"/>
+                            <TextBlock Text="{Binding PeakText}" Style="{StaticResource PanelHint}"/>
+                            <TextBlock Text="{Binding LinkText}" Style="{StaticResource PanelHint}"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <!-- CPU, memoria y disco -->
+                <UniformGrid Columns="3" Margin="0,0,0,12">
+                    <StackPanel>
+                        <views:PercentGauge Value="{Binding Cpu}" MaxWidth="128"/>
+                        <TextBlock Text="CPU" Style="{StaticResource GaugeLabel}" Margin="0,4,0,0"/>
+                        <TextBlock Text="procesador" Style="{StaticResource GaugeSub}"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <views:PercentGauge Value="{Binding Ram}" MaxWidth="128"/>
+                        <TextBlock Text="MEMORIA" Style="{StaticResource GaugeLabel}" Margin="0,4,0,0"/>
+                        <TextBlock Text="{Binding RamText}" Style="{StaticResource GaugeSub}"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <views:PercentGauge Value="{Binding Disk}" MaxWidth="128"/>
+                        <TextBlock Text="DISCO" Style="{StaticResource GaugeLabel}" Margin="0,4,0,0"/>
+                        <TextBlock Text="{Binding DiskText}" Style="{StaticResource GaugeSub}"/>
+                    </StackPanel>
+                </UniformGrid>
+                <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,0,0,10"/>
                 <TextBlock Text="{Binding ServicesText}" FontWeight="SemiBold" Margin="0,4,0,0">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
