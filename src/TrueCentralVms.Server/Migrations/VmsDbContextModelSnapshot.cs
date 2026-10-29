@@ -112,6 +112,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("IoOutputs")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("IoViaSdk")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("IsupDeviceId")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
@@ -1875,6 +1878,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Property<int?>("IoOutputs")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("IoViaSdk")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsMobile")
                         .HasColumnType("boolean");

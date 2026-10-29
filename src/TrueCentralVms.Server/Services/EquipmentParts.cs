@@ -62,12 +62,19 @@ public static class EquipmentParts
     /// </summary>
     private sealed record Owner(int? AccessDeviceId, int? DeviceId, string Name, string Host, int Port, bool UseHttps,
         string Username, byte[] PasswordCiphertext, int? LocationId, bool Enabled, string? Model, string? SerialNumber,
-        bool Reachable, string? WhyNot, string DriverKey, bool SpeakerViaSdk = false)
+        bool Reachable, string? WhyNot, string DriverKey, bool SpeakerViaSdk = false, bool IoViaSdk = false,
+        int DeviceSdkPort = SdkPort)
     {
         /// <summary>Driver y puerto del altavoz: ISAPI por el puerto HTTP, o la voz del SDK por el 8000.</summary>
         public string SpeakerDriver => SpeakerViaSdk ? HikvisionSdkSpeakerDriver.DriverKey : PartDriversOf[DriverKey].Speaker;
-        public int SpeakerPort => SpeakerViaSdk ? SdkPort : Port;
+        public int SpeakerPort => SpeakerViaSdk ? DeviceSdkPort : Port;
         public bool SpeakerHttps => !SpeakerViaSdk && UseHttps;
+
+        /// <summary>Driver, puerto y lectura de las entradas y salidas: ISAPI por HTTP, o el SDK (más espaciado: el estado de un grabador pesa).</summary>
+        public string IoDriver => IoViaSdk ? HikvisionSdkIoDriver.DriverKey : PartDriversOf[DriverKey].Io;
+        public int IoPort => IoViaSdk ? DeviceSdkPort : Port;
+        public bool IoHttps => !IoViaSdk && UseHttps;
+        public int IoPoll => IoViaSdk ? 3000 : IoPollMs;
     }
 
     // ------------------------------------------------------------------
@@ -94,7 +101,7 @@ public static class EquipmentParts
             : !Supports(terminal.DriverKey) ? "su marca todavía no lo permite" : null;
         var owner = new Owner(terminal.Id, null, terminal.Name, terminal.Host, terminal.Port, terminal.UseHttps, terminal.Username,
             terminal.PasswordCiphertext, terminal.LocationId, terminal.Enabled, terminal.Model, terminal.SerialNumber,
-            reachable, whyNot, terminal.DriverKey, terminal.SpeakerViaSdk);
+            reachable, whyNot, terminal.DriverKey, terminal.SpeakerViaSdk, terminal.IoViaSdk);
 
         if (await SyncCameraAsync(db, terminal, reachable, whyNot, notes, ct) is { } camera) changes.Add(camera);
         if (await SyncSpeakerAsync(db, owner, terminal.HasSpeaker && terminal.UseSpeaker,
@@ -133,6 +140,7 @@ public static class EquipmentParts
         {
             device.IoInputs = parts.Io?.Inputs;
             device.IoOutputs = parts.Io?.Outputs;
+            device.IoViaSdk = parts.IoViaSdk;
         }
         device.PartsChecked = true;
     }
@@ -160,7 +168,8 @@ public static class EquipmentParts
         int? location = device.LocationId ?? device.Channels.OrderBy(c => c.ChannelNumber).FirstOrDefault()?.LocationId;
         var owner = new Owner(null, device.Id, device.Name, device.Host, device.HttpPort, false, device.Username,
             device.PasswordCiphertext, location, true, device.Model, device.SerialNumber,
-            applies, applies ? null : "este equipo no lo permite", device.DriverKey);
+            applies, applies ? null : "este equipo no lo permite", device.DriverKey, IoViaSdk: device.IoViaSdk,
+            DeviceSdkPort: device.SdkPort > 0 ? device.SdkPort : SdkPort);
         if (await SyncSpeakerAsync(db, owner, applies && device.HasSpeaker && device.UseSpeaker,
                 previousLocationId, notes, services, ct) is { } speaker) changes.Add(speaker);
         if (await SyncIoAsync(db, owner, applies ? device.IoInputs ?? 0 : 0, applies ? device.IoOutputs ?? 0 : 0, device.UseIo,
@@ -363,7 +372,8 @@ public static class EquipmentParts
         string model = HikvisionIoDriver.ModelKeyFor(inputs, outputs);
         if (module is null)
         {
-            if (await db.IoModules.AsNoTracking().FirstOrDefaultAsync(m => m.Host == owner.Host && m.Port == owner.Port, ct) is { } manual)
+            int ioPort = owner.IoPort;
+            if (await db.IoModules.AsNoTracking().FirstOrDefaultAsync(m => m.Host == owner.Host && m.Port == ioPort, ct) is { } manual)
             {
                 notes.Add($"Su dirección ya la usa el módulo de E/S \"{manual.Name}\".");
                 return null;
@@ -372,9 +382,9 @@ public static class EquipmentParts
             {
                 AccessDeviceId = aid,
                 DeviceId = did,
-                DriverKey = PartDriversOf[owner.DriverKey].Io,
+                DriverKey = owner.IoDriver,
                 Name = owner.Name,
-                PollIntervalMs = IoPollMs,
+                PollIntervalMs = owner.IoPoll,
                 LocationId = owner.LocationId,
                 Enabled = owner.Enabled,
             };
@@ -393,9 +403,11 @@ public static class EquipmentParts
     private static void ApplyIo(IoModule module, Owner owner, string model, int inputs, int outputs)
     {
         Set(module.Name, owner.Name, v => module.Name = v);
+        Set(module.DriverKey, owner.IoDriver, v => module.DriverKey = v);
         Set(module.Host, owner.Host, v => module.Host = v);
-        Set(module.Port, owner.Port, v => module.Port = v);
-        Set(module.UseHttps, owner.UseHttps, v => module.UseHttps = v);
+        Set(module.Port, owner.IoPort, v => module.Port = v);
+        Set(module.UseHttps, owner.IoHttps, v => module.UseHttps = v);
+        Set(module.PollIntervalMs, owner.IoPoll, v => module.PollIntervalMs = v);
         Set(module.Username, owner.Username, v => module.Username = v);
         CopyPassword(module.PasswordCiphertext, owner.PasswordCiphertext, v => module.PasswordCiphertext = v);
         Set(module.ModelKey, model, v => module.ModelKey = v);

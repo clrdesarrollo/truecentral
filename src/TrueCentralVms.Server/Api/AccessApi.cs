@@ -144,6 +144,7 @@ public static class AccessApi
         {
             device.IoInputs = parts.Io?.Inputs;
             device.IoOutputs = parts.Io?.Outputs;
+            device.IoViaSdk = parts.IoViaSdk;
         }
         device.PartsChecked = true;
     }

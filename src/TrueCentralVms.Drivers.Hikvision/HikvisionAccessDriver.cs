@@ -334,7 +334,11 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         bool speaker = await HikvisionParts.HasSpeakerAsync(client, ct);
         // Los faciales sin audio bidireccional por ISAPI (DS-K1T321MFWX V3.9) lo tienen por el SDK, como un citófono.
         bool viaSdk = !speaker && await HikvisionSdkVoice.HasVoiceAsync(info.Host, SdkPort, info.Username, info.Password, ct);
-        return new DeviceParts(await ReadCameraAsync(client, ct), speaker || viaSdk, await HikvisionParts.ReadIoAsync(client, ct), viaSdk);
+        var io = await HikvisionParts.ReadIoAsync(client, ct);
+        var sdkIo = io is null
+            ? await HikvisionSdkIoDriver.ReadIoAsync(new IoConnectionInfo(info.Host, SdkPort, info.Username, info.Password), ct)
+            : null;
+        return new DeviceParts(await ReadCameraAsync(client, ct), speaker || viaSdk, io ?? sdkIo, viaSdk, IoViaSdk: sdkIo is not null);
     }
 
     /// <summary>

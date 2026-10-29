@@ -45,7 +45,9 @@ public sealed record DeviceIoInfo(int Inputs, int Outputs);
 /// su altavoz y sus entradas y salidas de alarma. Null en cada uno = no tiene.
 /// </summary>
 /// <param name="SpeakerViaSdk">El altavoz no está por ISAPI sino por el audio bidireccional del SDK (puerto 8000).</param>
-public sealed record DeviceParts(AccessCameraInfo? Camera, bool HasSpeaker, DeviceIoInfo? Io, bool SpeakerViaSdk = false);
+/// <param name="IoViaSdk">Las entradas y salidas no están por ISAPI sino por el SDK (los DVR Turbo HD).</param>
+public sealed record DeviceParts(AccessCameraInfo? Camera, bool HasSpeaker, DeviceIoInfo? Io, bool SpeakerViaSdk = false,
+    bool IoViaSdk = false);
 
 /// <summary>Identificación del equipo obtenida al validar las credenciales.</summary>
 public sealed record AccessDeviceInfo(

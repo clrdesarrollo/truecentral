@@ -96,7 +96,12 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
         if (info.IsupId is { Length: > 0 } || httpPort <= 0) return null;
         var client = new HikvisionIsapiClient(new AlarmConnectionInfo(info.Host, httpPort, false, info.Username, info.Password),
             digestOnly: true, deviceNoun: "equipo");
-        return new DeviceParts(null, await HikvisionParts.HasSpeakerAsync(client, ct), await HikvisionParts.ReadIoAsync(client, ct));
+        var io = await HikvisionParts.ReadIoAsync(client, ct);
+        // Los DVR Turbo HD no las exponen por ISAPI: el SDK sí dice cuántas tienen y las opera.
+        var sdkIo = io is null
+            ? await HikvisionSdkIoDriver.ReadIoAsync(new IoConnectionInfo(info.Host, info.Port, info.Username, info.Password), ct)
+            : null;
+        return new DeviceParts(null, await HikvisionParts.HasSpeakerAsync(client, ct), io ?? sdkIo, IoViaSdk: sdkIo is not null);
     }
 
     public string BuildRtspUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel, StreamProfile profile)

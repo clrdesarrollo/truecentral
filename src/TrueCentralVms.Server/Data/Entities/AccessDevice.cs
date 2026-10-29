@@ -157,6 +157,9 @@ public class AccessDevice : IIsupEquipment
     /// <summary>Ofrecer sus entradas y salidas como módulo de E/S. Si se quita, no vuelve solo.</summary>
     public bool UseIo { get; set; } = true;
 
+    /// <summary>Sus entradas y salidas se leen y operan por el SDK (puerto 8000), no por ISAPI.</summary>
+    public bool IoViaSdk { get; set; }
+
     /// <summary>Por qué alguna de sus partes no está en uso aunque la tenga, o null.</summary>
     public string? PartsNote { get; set; }
 
