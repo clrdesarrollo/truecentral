@@ -74,7 +74,9 @@ sistema*.
 
 El sistema registra su usuario, la hora y si confirmó desde el cliente o desde
 el panel web. La ventana pasa a la siguiente alerta pendiente y se cierra cuando
-no queda ninguna.
+no queda ninguna.#modulo("video")[ También puede confirmar una alerta con
+#boton("CONFIRMAR") en la tarjeta *Últimas alertas* del Centro de mando, sin
+abrir esta ventana (ver #capitulo(<cap-vista-en-vivo>)).]
 
 #modulo("alarm_screens")[Si la alerta también se mostró en las pantallas de
   alarma de las casetas (#capitulo(<cap-pantallas-de-alarma>)) y un guardia la
@@ -176,7 +178,9 @@ hora · la automatización · qué la disparó, y la línea *Acuse de recibo*.
 
 === Llevar el Centro de eventos a otro monitor
 
-+ Haga clic en #boton("Ventana aparte").
++ Haga clic en #boton("Ventana aparte"). También puede arrastrar la viñeta
+  *Centro de eventos* fuera de la barra superior, o hacer clic derecho en ella
+  y elegir *Llevar a una ventana nueva*.
 + Arrastre la ventana *Centro de eventos* al monitor que prefiera.
 
 Es la misma lista, no una copia. Mientras está afuera, el botón del riel la trae

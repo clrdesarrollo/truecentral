@@ -1,6 +1,6 @@
 # Capturas pendientes
 
-Las 37 capturas que faltan en el manual. Cada una está en su capítulo como
+Las 40 capturas que faltan en el manual. Cada una está en su capítulo como
 `#captura-pendiente("…")`. Al tomarla, se reemplaza por
 `#captura("archivo.png", marcas: (…), pie: […])` y se borra de esta lista.
 
@@ -20,6 +20,18 @@ Reglas:
 | `cliente-centro-de-mando-tableros.png` | Desplegable TABLEROS con un tablero propio y uno compartido con candado (reemplaza a `cliente-vista-en-vivo-vistas.png`) | Candado · detalle «N cámara(s) y M cuadro(s) más · división · para …» · lápiz · basurero · Nombre del tablero… y Guardar · Compartir con todos |
 | `web-tableros-editor.png` | Configuración › Tableros, Nuevo tablero compartido con división 4, «Solo estos roles:» con un rol, dos cuadros llenos y el cuadro 3 elegido | Nombre · División · Lo ven · grilla con un cuadro lleno y su × · Buscar cámara, puerta, tarjeta, página… · Otra dirección con Rótulo y Poner · Guardar |
 | `cliente-vista-en-vivo-ptz.png` | Panel PTZ de una cámara PTZ, con Shift apretado si se puede | Encabezado · flechas · Zoom/Foco/Iris · Preset con Ir/Guardar/Borrar · Velocidad · píldora PRECISIÓN |
+| `cliente-centro-de-mando-alertas.png` | Cuadro con la tarjeta Últimas alertas: una alerta CRÍTICA pendiente elegida, con foto y consignas; en la lista, pendientes y confirmadas | Prioridad y «N SIN CONFIRMAR» · título, origen y hora · QUÉ HACER · foto · CONFIRMAR · Ver alarma · lista con franja de color · «✓ confirmada» |
+| `cliente-centro-de-mando-subdividir.png` | Grilla de 4 con el menú del ícono Subdividir abierto sobre el cuadro 2 | Ícono Subdividir en la barra · opciones En 2 … En 9 (3 × 3) |
+| `cliente-centro-de-mando-ventana.png` | El Centro de mando en su propia ventana, en otro monitor o sobre la principal, que ya no muestra esa viñeta | Viñeta de la ventana · Devolver a la ventana principal · barra de viñetas de la ventana principal |
+
+Para volver a tomar (la captura existe pero quedó vieja):
+
+| Archivo | Pantalla y estado | Marcas |
+|---|---|---|
+| `cliente-vista-en-vivo-cuadro.png` | Barra de un cuadro con video mientras graba, con la apariencia Consola: rótulo «CARD 04», ícono Subdividir y ✕ | — |
+| `cliente-vista-en-vivo-ampliar.png` | Igual que la actual (franja nueva a la derecha de una grilla de 2×2), con rótulos «CARD 01»… y la botonera sin «Pantalla auxiliar» | — |
+| `cliente-vista-en-vivo-unir.png` | Igual que la actual (selección de cuatro cuadros), con rótulos «CARD» y la botonera sin «Pantalla auxiliar» | — |
+| `cliente-vista-en-vivo-unir-corta.png` | Igual que la actual (la selección corta el cuadro grande), con rótulos «CARD» y la botonera sin «Pantalla auxiliar» | — |
 
 ## 4 · Reproducción
 
