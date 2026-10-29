@@ -42,7 +42,7 @@ Lo que puede hacer depende de los módulos que incluye su licencia. Este manual
 describe solo los de su edición:
 
 #let catalogo = (
-  ("video", "Centro de mando", "Cámaras en vivo junto a puertas, alarmas, parlantes, tarjetas de reporte y páginas web en una misma grilla; tableros, control PTZ y pantallas auxiliares.", <cap-vista-en-vivo>),
+  ("video", "Centro de mando", "Cámaras en vivo junto a puertas, alarmas, parlantes, tarjetas de reporte y páginas web en una misma grilla; tableros, control PTZ y una ventana propia para otro monitor.", <cap-vista-en-vivo>),
   ("playback", "Reproducción", "Búsqueda y reproducción de las grabaciones de los equipos, y exportación de tramos.", <cap-reproduccion>),
   ("alarms", "Paneles de alarma", "Monitoreo y control de paneles de alarma.", <cap-paneles-de-alarma>),
   ("access", "Control de acceso", "Puertas, personas y credenciales en terminales de acceso.", <cap-control-de-acceso>),

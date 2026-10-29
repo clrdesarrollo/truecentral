@@ -1,5 +1,5 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Client/Views/LoginWindow.xaml, src/TrueCentralVms.Client/Views/MainWindow.xaml, src/TrueCentralVms.Client/Views/MainWindow.xaml.cs, src/TrueCentralVms.Client/Views/HomeView.xaml, src/TrueCentralVms.Client/Views/SettingsWindow.xaml, src/TrueCentralVms.Client/Views/SettingsWindow.xaml.cs, src/TrueCentralVms.Client/Views/ToastWindow.xaml, src/TrueCentralVms.Client/ViewModels/MainViewModel.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Permissions.cs, src/TrueCentralVms.Client/Services/ApiClient.cs, src/TrueCentralVms.Server/wwwroot/index.html, src/TrueCentralVms.Server/wwwroot/app.js, src/TrueCentralVms.Server/wwwroot/license.js
+// Fuentes: src/TrueCentralVms.Client/Views/LoginWindow.xaml, src/TrueCentralVms.Client/Views/MainWindow.xaml, src/TrueCentralVms.Client/Views/MainWindow.xaml.cs, src/TrueCentralVms.Client/Views/HomeView.xaml, src/TrueCentralVms.Client/Views/SettingsWindow.xaml, src/TrueCentralVms.Client/Views/SettingsWindow.xaml.cs, src/TrueCentralVms.Client/Views/ToastWindow.xaml, src/TrueCentralVms.Client/ViewModels/MainViewModel.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Permissions.cs, src/TrueCentralVms.Client/Services/ApiClient.cs, src/TrueCentralVms.Server/wwwroot/index.html, src/TrueCentralVms.Server/wwwroot/app.js, src/TrueCentralVms.Server/wwwroot/license.js, src/TrueCentralVms.Client/Views/MainWindow.Tabs.cs, src/TrueCentralVms.Client/Views/DetachedTabWindow.xaml, src/TrueCentralVms.Client/ViewModels/MainViewModel.Tabs.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Update.cs, src/TrueCentralVms.Client/Services/ClientUpdater.cs, installer/client.iss
 
 = Primeros pasos <cap-primeros-pasos>
 
@@ -85,7 +85,41 @@ instalarlo en un puesto:
 #nota[En el propio servidor, el instalador queda además en
   #menu("Inicio", "CLR TrueCentral VMS", "Instalador del cliente (para otros puestos)").
   Al actualizar el servidor, el instalador publicado pasa a ser el de la
-  versión nueva: descárguelo otra vez para actualizar los puestos.]
+  versión nueva, y cada puesto avisa que puede actualizarse (ver la sección
+  siguiente).]
+
+== Actualizar el cliente de monitoreo
+
+Cuando el servidor se actualiza, el cliente de cada puesto lo nota solo, al
+ingresar y cada 10 minutos. En la barra superior, a la izquierda de los
+indicadores del servidor, aparece un ícono de descarga que late, con un punto
+verde. Pase el puntero sobre él para ver la versión nueva, por ejemplo
+«Versión 0.5.32 disponible».
+
++ Haga clic en el ícono. Se despliega *ACTUALIZACIÓN DISPONIBLE*, con la
+  versión que tiene el puesto y el tamaño de la descarga.
++ Haga clic en #boton("Actualizar ahora"). El cliente descarga la
+  actualización desde el servidor y muestra el avance.
++ Windows pide permiso de administrador para instalarla: acéptelo. Si su
+  usuario de Windows no es administrador del equipo, debe aceptarlo alguien
+  que lo sea.
+
+El cliente se cierra solo, sin preguntar, se instala la versión nueva y el
+cliente vuelve a abrirse solo (en la ventana de ingreso, si el puesto no tiene
+*Inicio de sesión automático*). Con *Volver a abrir las cámaras de la última
+sesión* encendida, al ingresar vuelve con lo que tenía en pantalla, incluidas
+las viñetas que estaban en su propia ventana.
+
+- Si hay descargas de grabaciones en curso, el cliente pregunta antes de
+  actualizar: si continúa, se cancelan.
+- Si no da el permiso de administrador, el aviso dice «No se dio el permiso de
+  administrador: la actualización quedó sin instalar.» y el cliente sigue
+  abierto. Puede volver a intentarlo cuando quiera.
+- Cada actualización queda en la bitácora de auditoría del servidor, con la
+  versión desde la que se actualizó el puesto.
+
+Si prefiere no actualizar en ese momento, no haga nada: el ícono sigue ahí
+hasta que actualice.
 
 == Ingresar desde el cliente de monitoreo
 
@@ -179,6 +213,42 @@ cerrarlo depende del módulo:
 A la derecha de la barra están los botones *Minimizar*, *Maximizar* y
 *Cerrar* de la ventana. La barra también sirve para arrastrar la ventana.
 
+=== Llevar una viñeta a otra ventana
+
+Cualquier viñeta, salvo #boton("Inicio"), se puede sacar a su propia ventana,
+como una pestaña que se arrastra fuera de un navegador, para llevar ese módulo
+a otro monitor. El módulo se muda entero, con lo que estaba haciendo: por
+ejemplo, el video del Centro de mando no se corta.
+
++ Arrastre la viñeta hacia abajo, fuera de la barra. Sale en una ventana nueva
+  que sigue al puntero.
++ Suelte el botón donde quiera la ventana, por ejemplo en otro monitor.
+
+También puede hacer clic derecho en la viñeta y elegir *Llevar a una ventana
+nueva*: la ventana aparece donde estuvo la última vez que esa viñeta estuvo
+afuera.
+
+Mientras está afuera, la viñeta no se ve en la ventana principal; el botón
+del módulo en el riel y su tarjeta de la página Inicio traen su ventana al
+frente. La ventana lleva arriba la viñeta del módulo (arrástrela para mover la
+ventana; doble clic sobre ella la maximiza) y, a la derecha, los botones
+*Devolver a la ventana principal*, *Minimizar*, *Maximizar* y *Cerrar*.
+
+- Para devolverla, suelte su viñeta sobre la barra de viñetas de la ventana
+  principal o haga clic en *Devolver a la ventana principal*. Vuelve activa y
+  con todo lo que tenía.
+- Cerrar la ventana, con su #boton("✕") o con la de su viñeta, cierra el
+  módulo, igual que la #boton("✕") de su viñeta en la ventana principal (ver
+  la tabla anterior).
+- Al salir del cliente se recuerda qué viñetas estaban afuera: con *Volver a
+  abrir las cámaras de la última sesión* encendida (apartado *Video* de la
+  configuración), al ingresar vuelven a sus ventanas, donde quedaron.
+
+La viñeta *Centro de eventos* es distinta: al sacarla se abre su ventana
+aparte de siempre#modulo("automation")[ (ver
+#capitulo(<cap-centro-de-eventos>))].#modulo("video")[ El caso más común es
+llevar el Centro de mando a otro monitor: ver #capitulo(<cap-vista-en-vivo>).]
+
 === Indicadores del servidor y conexión
 
 Junto al nombre de usuario hay tres íconos con el uso de procesador, memoria y
@@ -194,7 +264,9 @@ disco del servidor. Se actualizan cada 5 segundos:
 
 Pase el puntero sobre un ícono para ver el detalle, por ejemplo «CPU del
 servidor: 35%» o «RAM del servidor: 9,5 de 16 GB (59%)». Si el servidor no
-responde, los íconos se ocultan.
+responde, los íconos se ocultan. A su izquierda aparece un ícono de descarga
+que late cuando hay una versión nueva del cliente en el servidor (ver
+_Actualizar el cliente de monitoreo_).
 
 El punto de color indica la conexión en tiempo real con el servidor: verde
 con «Conectado», o rojo con «Reconectando…» mientras se recupera. El cliente
@@ -374,8 +446,9 @@ tiempo de espera de la API debe ser un número entre 5 y 120.»
     en qué servidor ingresa. Apagarla rige desde la próxima vez que se abra el
     cliente.],
   [*Abrir cada ventana donde quedó la última vez*],
-  [Viene encendida. La ventana principal, las pantallas auxiliares y las
-    ventanas de alarma, de citofonía y de verificación, entre otras, vuelven a
+  [Viene encendida. La ventana principal, las de las viñetas llevadas a su
+    propia ventana y las ventanas de alarma, de citofonía y de verificación,
+    entre otras, vuelven a
     abrirse en el monitor, la posición y el tamaño en que se cerraron (y
     maximizadas, si lo estaban). Si ese monitor ya no está conectado, la
     ventana aparece en su lugar de siempre. Apagada, cada ventana abre
@@ -514,9 +587,10 @@ Haga clic en su nombre, arriba a la derecha:
 + Haga clic en su nombre, a la derecha de la barra superior.
 + Haga clic en #boton("Cerrar sesión").
 
-El cliente detiene el video, cierra las pantallas auxiliares y vuelve a la
-ventana de ingreso. Aunque tenga *Inicio de sesión automático*, no vuelve a
-entrar solo hasta la próxima vez que se abra el cliente.
+El cliente detiene el video, cierra las ventanas de las viñetas que estaban
+afuera y vuelve a la ventana de ingreso. Aunque tenga *Inicio de sesión
+automático*, no vuelve a entrar solo hasta la próxima vez que se abra el
+cliente.
 
 Para salir del todo, haga clic en *Cerrar* (la #boton("✕") de la barra
 superior) y responda #boton("Sí") a «¿Cerrar CLR TrueCentral VMS?». Salir

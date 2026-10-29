@@ -14,6 +14,11 @@ más detalle en su capítulo.
   columns: (auto, 1fr),
   table.header[Tecla o gesto][Acción],
   [#tecla("Enter")], [En la ventana de ingreso del cliente: ingresar.],
+  [Arrastrar una viñeta a lo largo de la barra], [Cambiarla de lugar.],
+  [Arrastrar una viñeta fuera de la barra], [Llevar ese módulo a su propia
+    ventana.],
+  [Soltar la viñeta de esa ventana sobre la barra principal], [Devolver el
+    módulo a la ventana principal.],
   [#tecla("Esc")], [En el panel web: cerrar el menú del usuario.],
 )
 
@@ -41,8 +46,9 @@ más detalle en su capítulo.
       teclado numérico).],
     [#tecla("Shift") sostenido], [Modo precisión: la cámara PTZ se mueve a la
       velocidad mínima.],
-    [#tecla("Esc")], [Salir de la pantalla completa (también en las pantallas
-      auxiliares) o cerrar el aviso de apertura masiva.],
+    [Clic en un cuadro], [Seleccionarlo.],
+    [#tecla("Esc")], [Salir de la pantalla completa, cerrar el aviso de
+      apertura masiva o, si no, dejar la grilla sin cuadro seleccionado.],
   )
 
   == Vista en vivo (panel web)

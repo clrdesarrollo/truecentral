@@ -1,5 +1,5 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Client/Views/LiveView.xaml, src/TrueCentralVms.Client/Views/LiveView.xaml.cs, src/TrueCentralVms.Client/Views/AuxLiveWindow.xaml, src/TrueCentralVms.Client/Views/AuxLiveWindow.xaml.cs, src/TrueCentralVms.Client/Views/LoadingWindow.xaml, src/TrueCentralVms.Client/Views/ZoomDragController.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.LiveViews.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Session.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.Client/ViewModels/VideoCellViewModel.cs, src/TrueCentralVms.Client/ViewModels/VideoLayouts.cs, src/TrueCentralVms.Client/ViewModels/DigitalZoom.cs, src/TrueCentralVms.Client/ViewModels/AuxScreenViewModel.cs, src/TrueCentralVms.Client/ViewModels/DeviceTreeNodes.cs, src/TrueCentralVms.Client/ViewModels/LocationTreeNodes.cs, src/TrueCentralVms.Server/wwwroot/live.js, src/TrueCentralVms.Server/Api/LiveViewsApi.cs, src/TrueCentralVms.Server/Api/StreamsApi.cs, src/TrueCentralVms.Client/Views/CommandCenterTemplates.xaml, src/TrueCentralVms.Client/Views/WebCellView.xaml, src/TrueCentralVms.Client/Views/WebUrlWindow.xaml, src/TrueCentralVms.Client/ViewModels/MainViewModel.Resources.cs, src/TrueCentralVms.Client/ViewModels/ResourceNodes.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Resources.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Cards.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Web.cs, src/TrueCentralVms.Server/wwwroot/boards.js
+// Fuentes: src/TrueCentralVms.Client/Views/LiveView.xaml, src/TrueCentralVms.Client/Views/LiveView.xaml.cs, src/TrueCentralVms.Client/Views/AuxLiveWindow.xaml, src/TrueCentralVms.Client/Views/AuxLiveWindow.xaml.cs, src/TrueCentralVms.Client/Views/LoadingWindow.xaml, src/TrueCentralVms.Client/Views/ZoomDragController.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.LiveViews.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Session.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.Client/ViewModels/VideoCellViewModel.cs, src/TrueCentralVms.Client/ViewModels/VideoLayouts.cs, src/TrueCentralVms.Client/ViewModels/DigitalZoom.cs, src/TrueCentralVms.Client/ViewModels/AuxScreenViewModel.cs, src/TrueCentralVms.Client/ViewModels/DeviceTreeNodes.cs, src/TrueCentralVms.Client/ViewModels/LocationTreeNodes.cs, src/TrueCentralVms.Server/wwwroot/live.js, src/TrueCentralVms.Server/Api/LiveViewsApi.cs, src/TrueCentralVms.Server/Api/StreamsApi.cs, src/TrueCentralVms.Client/Views/CommandCenterTemplates.xaml, src/TrueCentralVms.Client/Views/WebCellView.xaml, src/TrueCentralVms.Client/Views/WebUrlWindow.xaml, src/TrueCentralVms.Client/ViewModels/MainViewModel.Resources.cs, src/TrueCentralVms.Client/ViewModels/ResourceNodes.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Resources.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Cards.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Web.cs, src/TrueCentralVms.Server/wwwroot/boards.js, src/TrueCentralVms.Client/Views/MainWindow.Tabs.cs, src/TrueCentralVms.Client/Views/DetachedTabWindow.xaml, src/TrueCentralVms.Client/Views/DetachedTabWindow.xaml.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Tabs.cs, src/TrueCentralVms.Client/Views/PlateSourcesWindow.xaml, src/TrueCentralVms.Client/Views/PlateSourcesWindow.xaml.cs, src/TrueCentralVms.Server/Api/LiveViewsApi.cs
 
 = Centro de mando <cap-vista-en-vivo>
 
@@ -7,10 +7,11 @@ El Centro de mando reúne en una misma grilla de cuadros las cámaras en tiempo
 real y los demás recursos del sistema: puertas, alarmas, cercos, citófonos,
 parlantes y módulos de E/S, además de tarjetas de reporte y páginas web. A la
 izquierda está la lista de recursos y, debajo de ella, el panel PTZ; arriba,
-la barra de herramientas con la división de la grilla, los tableros, las
-pantallas auxiliares y la pantalla completa. Este capítulo describe el Centro
-de mando del cliente de monitoreo y, al final, la Vista en vivo del panel web,
-que muestra solo cámaras.
+la barra de herramientas con la división de la grilla, los tableros y la
+pantalla completa. El Centro de mando completo se puede llevar a su propia
+ventana, por ejemplo en otro monitor. Este capítulo describe el Centro de mando
+del cliente de monitoreo y, al final, la Vista en vivo del panel web, que
+muestra solo cámaras.
 
 #captura-pendiente("Cliente de monitoreo: Centro de mando con un tablero cargado que mezcla cámaras, una puerta, un panel de alarma, la tarjeta Estado de los equipos y una página web; la lista RECURSOS abierta en una ubicación con cámaras y recursos")
 
@@ -24,7 +25,9 @@ superior y la grilla parte con la última división que usó en este equipo.
 
 Si pasa a otro módulo, los videos y los cuadros siguen andando por detrás. La
 #boton("✕") de la viñeta (*Cerrar el Centro de mando (detiene los streams)*)
-cierra el módulo y detiene todos los videos.
+cierra el módulo y detiene todos los videos. Para verlo en otro monitor, saque
+su viñeta de la barra: ver _Llevar el Centro de mando a otro monitor_, más
+abajo.
 
 == La lista de recursos
 
@@ -46,8 +49,9 @@ Al final de la lista van tres grupos que no son de una ubicación:
 - *Grupos de parlantes*: los que armó el administrador#modulo("speakers")[ (ver
   #capitulo(<cap-parlantes-ip>))]. Aparece si hay alguno y sus roles incluyen
   *Usar parlantes*.
-- *Páginas web*: las de la lista del servidor y, con el permiso *Abrir
-  cualquier página web*, *Otra dirección…*.
+- *Páginas web*: las de la lista del servidor, las suyas de _Mis páginas_ (con
+  una estrella) y, con el permiso *Abrir cualquier página web*, *Otra
+  dirección…*.
 
 La lista muestra solo lo habilitado, lo que su alcance le permite ver y los
 tipos de recurso que sus roles le dejan ver u operar: por ejemplo, las puertas
@@ -67,8 +71,7 @@ su estado.
   [◉ gris junto a una cámara], [La cámara no tiene señal, o su equipo no
     responde.],
   [▶ y nombre en negrita], [La cámara está en algún cuadro. Pase el puntero
-    para ver en cuál, por ejemplo «En vivo en cuadro 2, cuadro 5 (pantalla
-    auxiliar 1)».],
+    para ver en cuál, por ejemplo «En vivo en cuadro 2, cuadro 5».],
   [Ícono verde junto a un recurso], [El recurso está en línea y en estado
     normal.],
   [Ícono naranja o rojo junto a un recurso], [El recurso pide atención (por
@@ -189,26 +192,102 @@ lo que esté sonando en los parlantes del grupo.
 === Tarjetas de reporte
 
 Las tarjetas están en el grupo *Tarjetas*, al final de la lista. Muestran un
-resumen en vivo:
+resumen en vivo, y la barra del cuadro lleva el nombre de la tarjeta desde que
+se abre:
 
 #table(
   columns: (1fr, 2fr),
   table.header[Tarjeta][Qué muestra],
-  [*Estado de los equipos*], [Cuántos equipos de cada tipo están en línea
+  [*Estado de los equipos*], [Primero, la lista de tipos de equipo con cuántos
+    están en línea de cuántos hay, por ejemplo «12 / 14» junto a *Cámaras*
     (cámaras, grabadores y cámaras IP, control de acceso, paneles de alarma,
-    cercos, citófonos, parlantes y módulos de E/S) y, bajo *SIN CONEXIÓN*,
-    cuáles no responden y desde cuándo.],
-  [*Servidor*], [El uso de CPU, memoria y disco, cuántos servicios están
-    funcionando, la versión y hace cuánto está encendido.],
-  [*Últimas alertas*], [Las alertas de las automatizaciones, con las pendientes
-    de confirmar. #boton("Ver") abre la ventana de la alerta. Pide el permiso
-    *Atender alertas*.],
+    cercos, citófonos, parlantes y módulos de E/S; solo los tipos que hay).
+    Debajo, el resumen: «Todos los equipos en línea» o «2 equipo(s) sin
+    conexión», y la hora de la última lectura, por ejemplo «Actualizado
+    14:32:05». Bajo *SIN CONEXIÓN*, cada equipo que no responde con su tipo,
+    su detalle y desde cuándo («desde 29-10 08:15»). Se actualiza cada 15
+    segundos.],
+  [*Servidor* (en el cuadro, «Estado del servidor»)], [La versión y hace
+    cuánto está encendido; el tráfico de red (*THROUGHPUT*: entrada, salida,
+    el pico de los últimos 5 minutos y cuánto del enlace se usa); el uso de
+    *CPU*, *MEMORIA* y *DISCO*; *CLIENTES CONECTADOS*: cuántos hay ahora, los
+    de escritorio (con los puestos que permite la licencia) y los del panel
+    web, por ejemplo «3 de escritorio (de 5 puestos) · 1 en el panel web»; y
+    cuántos servicios están funcionando, con los detenidos o con problemas. Se
+    actualiza cada 5 segundos.],
+  [*Últimas alertas*], [Las alertas de las automatizaciones, con la elegida
+    arriba (su foto y el botón para confirmarla) y la lista abajo. Ver _La
+    tarjeta Últimas alertas_. Pide el permiso *Atender alertas*.],
   [*Últimas patentes*], [Los reconocimientos de patente en vivo; al elegir uno
-    se ven la escena y el recorte de la patente. Pide el permiso *Ver
-    patentes*.],
+    se ven la escena y el recorte de la patente. Con el engranaje de la barra
+    del cuadro se eligen las cámaras (ver _Elegir las cámaras de Últimas
+    patentes_). Pide el permiso *Ver patentes*.],
   [*Últimos accesos*], [Los pasos por todas las puertas, en vivo. Pide *Ver
     control de acceso*.],
 )
+
+=== La tarjeta Últimas alertas
+
+#requiere("Atender alertas")
+
+La tarjeta muestra las últimas 12 alertas de las
+automatizaciones#modulo("alarm_screens")[, con el mismo diseño de las
+pantallas de alarma de las casetas (ver #capitulo(<cap-pantallas-de-alarma>))].
+
+#captura-pendiente("Cliente de monitoreo: cuadro con la tarjeta Últimas alertas, una alerta CRÍTICA pendiente elegida con foto, QUÉ HACER, CONFIRMAR y Ver alarma, y la lista con alertas pendientes y confirmadas")
+
+Arriba está la alerta elegida:
+
+- su prioridad (*CRÍTICA*, *ADVERTENCIA* o *INFORMATIVA*) y, en rojo, cuántas
+  quedan por confirmar, por ejemplo «2 SIN CONFIRMAR»;
+- el título; de dónde viene (la ubicación del recurso o, si no tiene, la
+  automatización), con la fecha y la hora; y el mensaje;
+- *QUÉ HACER*: las consignas de la ficha del recurso, si las tiene;
+- la foto que tomó la automatización, o «Esta alarma no trae imagen»;
+- #boton("CONFIRMAR"), mientras está pendiente. Si ya se atendió, en su lugar
+  dice quién y cuándo, por ejemplo «Confirmada por operador1 a las 14:32:10»;
+- #boton("Ver alarma"), que abre la ventana de alarma con las cámaras
+  vinculadas en vivo#modulo("automation")[ (ver
+  #capitulo(<cap-centro-de-eventos>))].
+
+Abajo está la lista. Cada alerta lleva una franja de color según su prioridad
+(roja la crítica, naranja la advertencia y amarilla la informativa), el
+título, de dónde viene, la hora y la marca *SIN CONFIRMAR* o «✓ confirmada».
+Las ya atendidas se ven más tenues. Haga clic en una para verla arriba.
+
+Al abrirse, la tarjeta elige la pendiente más reciente (o la más reciente, si
+no hay pendientes) y, cuando llega una alerta nueva, pasa a ella, salvo que
+usted esté mirando una más antigua. Sin alertas, muestra «Sin alarmas
+pendientes» y «Esperando nuevos eventos».
+
+#boton("CONFIRMAR") vale lo mismo que darse por enterado en la ventana de
+alarma: la alerta queda confirmada a su nombre en el Centro de eventos y deja
+de estar pendiente en todos los puestos.
+
+=== Elegir las cámaras de Últimas patentes
+
+Por omisión, la tarjeta *Últimas patentes* muestra las lecturas de todas las
+cámaras con reconocimiento de patentes que usted puede ver. Para que muestre
+solo algunas, por ejemplo las del acceso que vigila ese puesto:
+
++ Haga clic en el engranaje de la barra del cuadro (*Elegir de qué cámaras
+  ANPR se reciben los reconocimientos*). Se abre *Cámaras de «Últimas
+  patentes»*.
++ Elija *Solo de las cámaras marcadas* y marque las cámaras. Bajo cada una se
+  indica su última lectura, «Sin lecturas todavía» o «Apagada como fuente de
+  patentes».
++ Haga clic en #boton("Aplicar").
+
+La barra del cuadro lo indica, por ejemplo «Últimas patentes · 2 cámaras». Si
+entre las lecturas más recientes no hay ninguna de esas cámaras, la tarjeta
+dice «Sin lecturas recientes de las cámaras elegidas.». Para volver a verlas todas,
+elija *De todas las cámaras ANPR*. Lo elegido queda con el cuadro: se guarda en
+la última sesión y en los tableros.
+
+Si la lista dice «No hay cámaras ANPR a su alcance: se configuran en el panel
+web (Fuentes de video → ANPR).», no hay cámaras con esa función o ninguna está
+dentro de su alcance#modulo("anpr")[ (ver
+#capitulo(<cap-reconocimiento-de-patentes>))].
 
 === Páginas web en un cuadro
 
@@ -235,9 +314,27 @@ Sobre una página se puede soltar una cámara (la reemplaza) y usar
 #boton("Unir") como en cualquier cuadro. Abrir y cerrar una página queda en la
 bitácora de auditoría con su dirección y el tiempo que estuvo abierta.
 
-#nota[Algunos sitios no se dejan mostrar dentro de otra aplicación. Las páginas
-  que se usan siempre conviene pedirlas al administrador para la lista del
-  servidor.]
+#nota[Algunos sitios no se dejan mostrar dentro de otra aplicación.]
+
+=== Mis páginas
+
+Una página abierta con *Otra dirección…* queda guardada para abrirla otra vez
+sin escribirla: en la ventana *Otra página web* viene marcada *Guardar en «Mis
+páginas» para abrirla otra vez desde la lista*. La página aparece en el grupo
+*Páginas web*, después de las de la lista del servidor, con una estrella, y la
+barra de estado lo confirma, por ejemplo «"Mapa de tránsito" quedó en la lista
+de páginas web (Mis páginas).». Si no quiere guardarla, desmarque la casilla
+antes de hacer clic en #boton("Abrir").
+
+- _Mis páginas_ son de su usuario: no las ve nadie más, pero lo siguen a
+  cualquier puesto donde ingrese.
+- Para quitar una, haga clic derecho sobre ella en la lista y elija *Quitar de
+  Mis páginas*. Los cuadros que la estén mostrando siguen abiertos.
+- Guardar y quitar páginas queda en la bitácora de auditoría.
+
+Para que una página la vean todos los puestos, pídale al administrador que la
+agregue a la lista del servidor (ver _Tableros compartidos y páginas web_, al
+final de este capítulo).
 
 == Los cuadros de video
 
@@ -249,7 +346,8 @@ dice «Cuadro libre».
 #table(
   columns: (1fr, 2fr),
   table.header[En la barra][Para qué sirve],
-  [Número], [La posición del cuadro en la grilla.],
+  [Rótulo], [La posición del cuadro en la grilla: «CARD 01», «CARD 02»… Con la
+    apariencia _Clásica_ del cliente se ve solo el número.],
   [Nombre], [El equipo y la cámara, por ejemplo «NVR Bodega · Acceso».],
   [Círculo que gira], [Se está conectando con la cámara.],
   [Texto amarillo], [El estado o el resultado de la última acción (ver la
@@ -260,6 +358,11 @@ dice «Cuadro libre».
   [Cámara fotográfica], [Guarda una captura de imagen.],
   [●], [Inicia o detiene una grabación local. Mientras graba se pone rojo y
     muestra el tiempo transcurrido.],
+  [Engranaje], [Solo en las tarjetas con opciones, como *Últimas patentes*:
+    las configura.],
+  [Ícono *Subdividir este card para poner más de una cámara*], [Parte el
+    cuadro en varios (ver _Subdividir un cuadro_). Está también en los cuadros
+    libres.],
   [#boton("✕")], [Cierra el video de este cuadro y lo deja libre.],
 )
 
@@ -308,6 +411,27 @@ Pase el puntero sobre una miniatura para ver su nombre completo, por ejemplo
 Al cambiar de división, las cámaras de los primeros cuadros se mantienen y las
 de los cuadros que sobran se cierran. La división elegida se recuerda para la
 próxima vez.
+
+=== Divisiones para un monitor vertical
+
+Arriba a la derecha de *División de pantalla* está el interruptor
+*Horizontal* | *Vertical*. Encendido en *Vertical*, el selector ofrece
+divisiones más altas que anchas, para un monitor parado:
+
+#table(
+  columns: (auto, 1fr),
+  table.header[Familia][Divisiones],
+  [Uniformes], [De 1 a 48 cuadros iguales, con tantas filas como columnas o
+    más.],
+  [Con cuadro principal arriba], [De 3 a 17 cuadros, con uno grande arriba.],
+  [En filas], [Cuadros ordenados uno sobre otro.],
+  [Combinadas], [Las combinadas de siempre, giradas.],
+)
+
+La primera vez que abre el selector, el interruptor parte según la forma de la
+ventana: en *Vertical* si es más alta que ancha. Después queda como usted lo
+dejó. Una división vertical se guarda en los tableros y en la última sesión
+como cualquier otra.
 
 === Ampliar la grilla
 
@@ -376,11 +500,43 @@ Una grilla ampliada o con cuadros unidos se guarda en los tableros y en la
 principal»), el selector la marca. Si no, el botón de la división la muestra
 como «a medida», con sus columnas y filas.
 
+=== Subdividir un cuadro
+
+Para poner varias cámaras donde había una, sin cambiar el resto de la grilla,
+subdivida ese cuadro (un _card_, como lo llama la barra):
+
++ Haga clic en el ícono *Subdividir este card para poner más de una cámara*,
+  en la barra del cuadro.
++ Elija en cuántos: *En 2, lado a lado*, *En 2, uno sobre otro*, *En 3, lado
+  a lado*, *En 4 (2 × 2)*, *En 6 (3 × 2)* o *En 9 (3 × 3)*.
+
+#captura-pendiente("Cliente de monitoreo: grilla de 4 con el menú del ícono Subdividir abierto sobre el cuadro 2")
+
+Lo que mostraba el cuadro queda en el primer pedazo, arriba a la izquierda, y
+la selección pasa al segundo, así que los doble clic siguientes en la lista
+llenan los pedazos en orden. La barra de estado lo confirma, por ejemplo «Card
+subdividido en 4: la grilla queda en 7 cuadros. Arrastre o haga doble clic en
+las cámaras para llenarlos.»
+
+Los demás cuadros conservan su forma, su lugar y su video. Los pedazos son
+cuadros normales: se pueden volver a subdividir o juntar con #boton("Unir"), y
+la grilla subdividida se guarda en los tableros y en la última sesión como
+cualquier división a medida.
+
+La grilla tiene los mismos topes que al ampliarla: si no cabe, la barra de
+estado lo explica, por ejemplo «La grilla quedaría de 12×12 celdas y el máximo
+es 8×8: subdivida un cuadro más grande o use una división con menos
+cuadros.». Con un cuadro maximizado no se puede subdividir: restáurelo
+primero.
+
 === Seleccionar un cuadro
 
-Haga clic en la barra de un cuadro o sobre su video: queda con borde azul.
-Otro clic en el mismo cuadro lo deja sin seleccionar. El cuadro seleccionado
-es donde se abre la próxima cámara y el que maneja el panel PTZ.
+Haga clic en cualquier parte de un cuadro: su barra, su video, una tarjeta,
+una página web o uno de sus botones. Queda con un borde azul más grueso. Un
+clic en un cuadro ya seleccionado no lo suelta; para dejar la grilla sin cuadro
+seleccionado, presione #tecla("Esc"). El cuadro seleccionado es donde se abre
+la próxima cámara y el que maneja el panel PTZ; sin cuadro seleccionado, la
+próxima cámara va al primer cuadro libre.
 
 === Mover o intercambiar cámaras
 
@@ -393,8 +549,7 @@ el destino se ilumina en amarillo.
 El video no se corta: la grabación en curso, el zoom digital y el audio viajan
 con la cámara. Los números de los cuadros no cambian, porque indican la
 posición. La barra de estado confirma el cambio, por ejemplo «Cuadros 1 y 3
-intercambiados: …». También puede arrastrar cuadros entre la ventana principal
-y las pantallas auxiliares.
+intercambiados: …».
 
 === Maximizar un cuadro
 
@@ -411,7 +566,9 @@ Cambiar de división también devuelve la grilla a la normalidad.
 El botón #boton("Pantalla completa"), a la derecha de la barra de
 herramientas, deja la grilla ocupando todo el monitor: se ocultan la barra
 superior, el riel, la lista de cámaras, la barra de herramientas y la barra
-de estado. Presione #tecla("Esc") para volver.
+de estado. Presione #tecla("Esc") para volver. Si el Centro de mando está en
+su propia ventana, la pantalla completa cubre el monitor de esa ventana y la
+ventana principal queda como estaba.
 
 === Limpiar la grilla
 
@@ -437,8 +594,8 @@ cuadro se queda con el actual y avisa «El stream destino no entregó imagen
 == Audio
 
 El botón del parlante de cada cuadro activa su audio. Suena un solo cuadro a
-la vez en toda la aplicación, incluidas las pantallas auxiliares: al activar
-uno se silencia el que estaba sonando. Los cuadros parten silenciados, con el
+la vez en toda la aplicación: al activar uno se silencia el que estaba
+sonando. Los cuadros parten silenciados, con el
 volumen que indica la configuración del cliente (apartado *Sonido*).
 
 == Zoom digital
@@ -531,7 +688,8 @@ del cuadro seleccionado, sin instalar nada:
 
 Con el joystick conectado y una cámara PTZ seleccionada, el panel muestra la
 marca *JOYSTICK*. Actúa mientras alguna ventana del cliente está activa,
-también una pantalla auxiliar; si cambia a otro programa, la cámara se
+también la del Centro de mando si lo llevó a su propia ventana; si cambia a
+otro programa, la cámara se
 detiene, salvo que marque *Mover la cámara aunque el cliente no esté en primer
 plano*: así el joystick sigue moviendo la cámara seleccionada mientras trabaja
 en otro programa, con la Vista en vivo abierta. Si se corta la red mientras se
@@ -591,8 +749,9 @@ o «No se pudo iniciar la grabación: …».
 #requiere("Ver video en vivo", "Crear tableros propios")
 
 Un tablero guarda la división de la grilla y lo que hay en cada cuadro: la
-cámara con su stream, el recurso, la tarjeta, el grupo de parlantes o la página
-web (con su zoom). Los tableros quedan en el servidor: puede cargarlos desde
+cámara con su stream, el recurso, la tarjeta (con sus opciones, como las
+cámaras de *Últimas patentes*), el grupo de parlantes o la página web (con su
+zoom; una de _Mis páginas_ se guarda con su dirección). Los tableros quedan en el servidor: puede cargarlos desde
 cualquier puesto. Para cargar un tablero basta *Ver video en vivo*; para
 guardarlos, cambiarlos o borrarlos hace falta además *Crear tableros propios*.
 
@@ -672,47 +831,75 @@ Mensajes del desplegable:
 Con la opción *Volver a abrir las cámaras de la última sesión* encendida
 (configuración del cliente, apartado *Video*), al ingresar el cliente abre
 solo el Centro de mando tal como quedó: la división, lo que había en cada
-cuadro (la cámara con su stream, el recurso, la tarjeta o la página web) y las
-pantallas auxiliares en su monitor.
+cuadro (la cámara con su stream, el recurso, la tarjeta con sus opciones o la
+página web) y, si estaba en su propia ventana, esa ventana donde quedó.
 
 - Lo que hay en pantalla se recuerda a medida que cambia, así que también
   sirve si el cliente se cerró de golpe.
 - Es por usuario y por servidor: otra persona que ingrese en este equipo no
   hereda sus cámaras.
-- Si el monitor de una pantalla auxiliar ya no está conectado, esa pantalla
-  se abre en el primer monitor libre.
+- Si el monitor donde estaba la ventana ya no está conectado, la ventana
+  aparece en su lugar de siempre.
 
 Mientras se abre, la barra de estado dice «Volviendo a abrir la última
 sesión…» y al terminar, por ejemplo, «Última sesión restaurada: 8 cuadro(s) en
 pantalla.». Si algo ya no está disponible, se agrega cuántos cuadros y esos
 cuadros quedan libres.
 
-== Pantallas auxiliares
+== Llevar el Centro de mando a otro monitor
 
-Una pantalla auxiliar es otra ventana del Centro de mando, con su propia
-grilla, para llevar a otro monitor. Puede abrir hasta tres.
+El Centro de mando completo puede salir de la ventana principal a una ventana
+propia, como una pestaña que se arrastra fuera de un navegador. Se lleva todo:
+la grilla con su video, la lista de recursos, el panel PTZ, los tableros y la
+barra de herramientas. El video no se corta al mudarse.
 
-+ Haga clic en #boton("Pantalla auxiliar") en la barra de herramientas. Se
-  abre la ventana *Pantalla auxiliar 1*, maximizada en el primer monitor que
-  no tenga ventanas del cliente.
-+ Si no partió en el monitor que quería, arrástrela hasta él.
-+ Abra cámaras y recursos con doble clic en la lista de esa ventana o
-  arrastrándolos a sus cuadros.
+#captura-pendiente("Cliente de monitoreo: el Centro de mando en su propia ventana, con su viñeta arriba, el botón Devolver a la ventana principal y la grilla con cámaras; detrás, la ventana principal sin esa viñeta")
 
-Cada pantalla auxiliar tiene su lista de recursos (con el mismo filtro del
-buscador de la ventana principal), su división,
-#boton("Zoom"), #boton("Limpiar todo") y #boton("Pantalla completa"), que
-cubre su monitor (#tecla("Esc") para salir). Sus cuadros tienen la misma barra
-que los de la ventana principal, y doble clic en una ubicación abre todas sus
-cámaras en esa pantalla. Puede arrastrar un cuadro de una ventana a otra sin
-que se corte el video.
++ Apriete el botón del mouse sobre la viñeta *Centro de mando*, en la barra
+  superior.
++ Arrástrela hacia abajo, fuera de la barra. La viñeta sale en una ventana
+  nueva que sigue al puntero.
++ Suelte el botón donde quiera la ventana, por ejemplo en otro monitor, y
+  maximícela si quiere.
 
-#nota[Las pantallas auxiliares no tienen panel PTZ, tableros ni buscador. Para mover una cámara PTZ, ábrala en la ventana principal.]
+También puede hacer clic derecho en la viñeta y elegir *Llevar a una ventana
+nueva*: la ventana aparece donde estuvo la última vez.
 
-Para cerrar una pantalla auxiliar, use la #boton("✕") de su ventana (*Cerrar
-esta pantalla (detiene sus streams)*). Al cerrar el cliente o la sesión se
-cierran todas. Con tres abiertas, el botón avisa «Ya hay 3 pantallas
-auxiliares abiertas (el máximo).»
+Mientras está afuera, la viñeta deja de verse en la ventana principal, que
+sigue con los demás módulos. El botón *Centro de mando* del riel y su tarjeta
+de la página Inicio traen esa ventana al frente.
+
+La ventana tiene arriba su propia viñeta *Centro de mando*: arrastrándola se
+mueve la ventana, y doble clic sobre ella la maximiza o la restaura. A la
+derecha están el botón para devolverla (*Devolver a la ventana principal*),
+*Minimizar*, *Maximizar* y *Cerrar*. #boton("Pantalla completa") cubre el
+monitor de esta ventana; #tecla("Esc") vuelve.
+
+=== Devolverlo a la ventana principal
+
+- Arrastre la viñeta de la ventana y suéltela sobre la barra de viñetas de la
+  ventana principal, o
+- haga clic en el botón *Devolver a la ventana principal*, a la derecha de la
+  barra de la ventana.
+
+El Centro de mando vuelve a la ventana principal con todo lo que tenía, sin
+cortar el video, y su viñeta queda activa.
+
+=== Cerrar la ventana
+
+Cerrar la ventana, con su #boton("✕") o con la de su viñeta, cierra el Centro
+de mando y detiene todos los videos, igual que la #boton("✕") de la viñeta en
+la ventana principal. Para guardarlo sin cerrarlo, devuélvalo a la ventana
+principal.
+
+Al salir del cliente, el Centro de mando que estaba en su propia ventana se
+recuerda: con *Volver a abrir las cámaras de la última sesión* encendida,
+vuelve a abrirse en esa ventana, en el monitor y la posición donde quedó.
+
+#nota[Las demás viñetas también se pueden llevar a su propia ventana (ver
+  #capitulo(<cap-primeros-pasos>)). Esta ventana reemplaza a las _pantallas
+  auxiliares_ de versiones anteriores: si al actualizar había alguna abierta,
+  vuelve con la última sesión hasta que la cierre, pero ya no se abren nuevas.]
 
 == Órdenes sobre una ubicación
 
@@ -764,8 +951,8 @@ voz alta por los parlantes. Su uso se explica en #capitulo(<cap-parlantes-ip>).
     solo cuadro.],
   [Con #boton("Unir"): clic en un cuadro unido], [Lo separa en cuadros
     simples.],
-  [Clic en la barra o el video de un cuadro], [Lo selecciona o lo deja sin
-    seleccionar.],
+  [Clic en un cuadro (barra, video, tarjeta o página web)], [Lo
+    selecciona.],
   [Doble clic en la barra de un cuadro o en su video], [Lo maximiza o lo
     devuelve a la grilla.],
   [#tecla("Ctrl") + rueda del mouse sobre una página web], [Acerca o aleja la
@@ -778,9 +965,13 @@ voz alta por los parlantes. Su uso se explica en #capitulo(<cap-parlantes-ip>).
   [#tecla("+") #tecla("−")], [Acercan o alejan la cámara PTZ.],
   [#tecla("Shift") sostenido], [Modo precisión: el PTZ por teclado se mueve a
     la velocidad mínima.],
+  [Arrastrar la viñeta *Centro de mando* fuera de la barra], [Lo lleva a su
+    propia ventana.],
+  [Soltar la viñeta de esa ventana sobre la barra principal], [Lo devuelve a
+    la ventana principal.],
   [#tecla("Esc")], [Termina el modo #boton("Unir"); sale de la pantalla
-    completa. Durante la apertura de un equipo completo, cierra el aviso y
-    devuelve el control.],
+    completa; si no, deja la grilla sin cuadro seleccionado. Durante la
+    apertura de un equipo completo, cierra el aviso y devuelve el control.],
 )
 
 == Vista en vivo desde el navegador
@@ -810,7 +1001,7 @@ muchas cámaras a la vez, use el cliente.
 - La barra de cada cuadro: audio, P/S, captura, grabación y
   #boton("✕") (*Cerrar el video de este cuadro*).
 - Doble clic en el video para maximizar, #boton("Limpiar todo"),
-  #boton("Tableros"), #boton("Pantalla auxiliar") y #boton("Pantalla completa").
+  #boton("Tableros") y #boton("Pantalla completa").
 - El panel PTZ, con sus atajos de teclado y el modo precisión con
   #tecla("Shift").#modulo("speakers")[ También el panel de parlantes, con el
   permiso *Usar parlantes*.]
@@ -836,10 +1027,15 @@ muchas cámaras a la vez, use el cliente.
   [Audio], [Si la cámara no envía audio, el botón lo indica: «Esta cámara no
     envía audio».],
   [Pantalla completa], [Es la del navegador: #tecla("Esc") sale.],
+  [Otro monitor], [#boton("Pantalla auxiliar") abre otra ventana del navegador
+    con su propia grilla (ver _Pantallas auxiliares en el navegador_). En el
+    cliente, en cambio, se lleva el Centro de mando entero a otra ventana.],
+  [Subdividir un cuadro y divisiones verticales], [No están: se usan en el
+    cliente.],
   [Ajustes], [Se cambian con el engranaje de la barra y quedan guardados en
     ese navegador.],
   [Joystick PTZ], [Solo con la ventana principal activa (en el cliente vale
-    también una pantalla auxiliar). Sus opciones están en *Ajustes de este
+    cualquier ventana del cliente). Sus opciones están en *Ajustes de este
     navegador*: ver _Joystick PTZ_ más abajo.],
 )
 
@@ -1066,7 +1262,9 @@ La × de un cuadro (*Dejar libre*) lo vacía. Si cambia a una división más chi
 el editor avisa cuántos cuadros quedan fuera y no se guardarán. Un tablero
 guardado desde el cliente con una división que el panel web no dibuja (más de
 16 cuadros o a medida) muestra «(del cliente)»: en el panel web se le cambian
-el nombre y con quién se comparte, y sus cuadros se conservan.
+el nombre y con quién se comparte, y sus cuadros se conservan. Una tarjeta
+*Últimas patentes* con cámaras elegidas en el cliente aparece como, por
+ejemplo, «Tarjeta · 2 cámaras».
 
 La tabla *Tableros compartidos* muestra, para cada uno, quiénes lo ven
 (*Todos*, los roles, o *Sin roles* si sus roles se borraron), la división, el
@@ -1079,7 +1277,8 @@ poner en un cuadro. #boton("Agregar página web") pide *Nombre*, *Dirección* y
 *Descripción (opcional)*. La columna *En tableros* dice en cuántos tableros
 compartidos está cada página; al quitar una que se usa, el panel advierte que
 esos cuadros quedarán libres. Si cambia la dirección de una página, los
-tableros que la tienen abren la nueva.
+tableros que la tienen abren la nueva. Las páginas que cada operador guarda en
+_Mis páginas_ no aparecen en esta lista: son solo suyas.
 
 #consejo[Algunos sitios no se dejan mostrar dentro de otra aplicación: pruebe la
   página en un cuadro del cliente antes de ponerla en un tablero.]
