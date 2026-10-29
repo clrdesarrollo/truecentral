@@ -67,32 +67,35 @@ Haga clic en una lectura de la lista para ver su ficha:
   La patente sale en rojo si no es una patente chilena válida;
 - debajo, los datos que envió la cámara.
 
-La ficha muestra solo los datos que la cámara envió, en este orden:
+La ficha muestra solo los datos que la cámara envió, en este orden. Los
+nombres van abreviados para dejarle más ancho a la escena; al pasar el mouse
+sobre uno se ve su nombre completo, el mismo de la página ANPR del panel web:
 
 #table(
   columns: (2fr, 3fr),
   table.header[Dato][Qué indica],
-  [Fecha y hora del equipo], [Momento de la lectura, según el reloj de la
+  [Hora del equipo], [Fecha y hora de la lectura, según el reloj de la
     cámara.],
   [Equipo, Canal], [Cámara que hizo la lectura.],
-  [Confianza de lectura], [Seguridad de la cámara sobre la patente leída, en
-    porcentaje. Un guion indica que no la informó.],
-  [Patente chilena], [Si la patente leída es válida en Chile: su formato y el
-    dígito verificador, o, en rojo, por qué no lo es.],
-  [Confianza por carácter], [La misma seguridad, letra por letra.],
-  [Tipo de vehículo, Color del vehículo, Marca reconocida, Observado en el
-    vehículo], [Lo que la cámara reconoció del vehículo.],
-  [Velocidad, Largo del vehículo, Carril, Sentido], [Datos de tránsito, si la
-    cámara los mide.],
-  [Disparo de la captura, Infracción], [Qué provocó la captura y, si
-    corresponde, la infracción detectada.],
-  [Color de la placa, Tipo de placa], [Características de la placa.],
-  [Recibido por el servidor], [Hora en que la lectura llegó al servidor.],
+  [Confianza], [Seguridad de la cámara sobre la patente leída, en porcentaje.
+    Un guion indica que no la informó.],
+  [Patente chilena], [Si la patente leída es válida en Chile: el dígito
+    verificador (DV) y su formato, o, en rojo, por qué no lo es.],
+  [Por carácter], [La misma seguridad, letra por letra: cada carácter de la
+    patente con su porcentaje debajo.],
+  [Vehículo, Color, Marca, Observado], [Lo que la cámara reconoció del
+    vehículo.],
+  [Velocidad, Largo, Carril, Sentido], [Datos de tránsito, si la cámara los
+    mide.],
+  [Disparo, Infracción], [Qué provocó la captura y, si corresponde, la
+    infracción detectada.],
+  [Color de placa, Tipo de placa], [Características de la placa.],
+  [Recibido], [Hora en que la lectura llegó al servidor.],
 )
 
 #nota[Las horas de la lista y de la ficha son las del reloj de la cámara. Si
-  _Fecha y hora del equipo_ difiere mucho de _Recibido por el servidor_, el
-  reloj de la cámara está desajustado.]
+  _Hora del equipo_ difiere mucho de _Recibido_, el reloj de la cámara está
+  desajustado.]
 
 Si la cámara no envió la escena, la ficha muestra _El equipo no envió la foto
 de la escena._; si no envió el recorte de la placa, _Sin primer plano de la

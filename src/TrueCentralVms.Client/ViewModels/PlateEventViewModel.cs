@@ -85,6 +85,10 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
     /// Todo lo que informó la cámara, en el orden en que le sirve al operador.
     /// Solo se listan los campos que el equipo realmente entregó: una ficha
     /// llena de "—" esconde lo que sí hay.
+    ///
+    /// Los nombres van cortos para que la columna de la ficha sea angosta y la
+    /// escena se vea más grande; el nombre completo (el de la página web) queda
+    /// en el tooltip de cada uno.
     /// </summary>
     public IReadOnlyList<PlateDetailRow> Details
     {
@@ -92,53 +96,57 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
         {
             var rows = new List<PlateDetailRow>
             {
-                new("Fecha y hora del equipo", Event.CapturedAt.ToString("dddd dd-MM-yyyy HH:mm:ss.fff")),
+                new("Hora del equipo", $"{Event.CapturedAt:dddd dd-MM-yyyy}\n{Event.CapturedAt:HH:mm:ss.fff}",
+                    Hint: "Fecha y hora del equipo"),
                 new("Equipo", Event.DeviceName),
                 new("Canal", $"{Event.ChannelName} (n.º {Event.ChannelNumber})"),
-                new("Confianza de lectura", ConfidenceText),
+                new("Confianza", ConfidenceText, Hint: "Confianza de lectura"),
             };
             // Validación como patente chilena (formato, serie y dígito verificador según el Registro Civil).
             if (Event.Chile is { } chile)
                 rows.Add(chile.Valid
-                    ? new PlateDetailRow("Patente chilena", $"Válida · {chile.Format} · dígito verificador {chile.CheckDigit}")
+                    ? new PlateDetailRow("Patente chilena", $"Válida · DV {chile.CheckDigit}\n{chile.Format}",
+                        Hint: "Patente chilena: dígito verificador (DV) y formato")
                     : new PlateDetailRow("Patente chilena", $"No válida: {chile.Problem}", Bad: true));
-            Add(rows, "Confianza por carácter", CharConfidenceText);
-            Add(rows, "Tipo de vehículo", Event.VehicleType);
-            Add(rows, "Color del vehículo", Event.VehicleColor);
-            Add(rows, "Marca reconocida", Event.VehicleBrand);
-            Add(rows, "Observado en el vehículo", Event.VehicleAttributes);
+            if (CharConfidences is { } chars)
+                rows.Add(new PlateDetailRow("Por carácter", "", Hint: "Confianza por carácter, en %", Chars: chars));
+            Add(rows, "Vehículo", Event.VehicleType, "Tipo de vehículo");
+            Add(rows, "Color", Event.VehicleColor, "Color del vehículo");
+            Add(rows, "Marca", Event.VehicleBrand, "Marca reconocida");
+            Add(rows, "Observado", Event.VehicleAttributes, "Observado en el vehículo");
             Add(rows, "Velocidad", Event.SpeedKmh is { } s ? $"{s} km/h" : null);
-            Add(rows, "Largo del vehículo", Event.VehicleLengthCm is { } cm ? $"{cm / 100.0:0.##} m" : null);
+            Add(rows, "Largo", Event.VehicleLengthCm is { } cm ? $"{cm / 100.0:0.##} m" : null, "Largo del vehículo");
             Add(rows, "Carril", Event.Lane?.ToString());
             Add(rows, "Sentido", Event.Direction);
-            Add(rows, "Disparo de la captura", Event.DetectionMethod);
+            Add(rows, "Disparo", Event.DetectionMethod, "Disparo de la captura");
             Add(rows, "Infracción", Event.Violation);
-            Add(rows, "Color de la placa", Event.PlateColor);
+            Add(rows, "Color de placa", Event.PlateColor, "Color de la placa");
             Add(rows, "Tipo de placa", Event.PlateType);
-            rows.Add(new PlateDetailRow("Recibido por el servidor", Event.ReceivedAt.ToLocalTime().ToString("HH:mm:ss")));
+            rows.Add(new PlateDetailRow("Recibido", Event.ReceivedAt.ToLocalTime().ToString("HH:mm:ss"),
+                Hint: "Recibido por el servidor"));
             return rows;
 
-            static void Add(List<PlateDetailRow> target, string label, string? value)
+            static void Add(List<PlateDetailRow> target, string label, string? value, string? hint = null)
             {
                 if (!string.IsNullOrWhiteSpace(value))
-                    target.Add(new PlateDetailRow(label, value));
+                    target.Add(new PlateDetailRow(label, value, Hint: hint));
             }
         }
     }
 
-    /// <summary>Confianza por carácter alineada con la patente ("B 92 · B 88 · …").</summary>
-    private string? CharConfidenceText
+    /// <summary>Confianza por carácter alineada con la patente: cada letra con su porcentaje debajo.</summary>
+    private IReadOnlyList<PlateCharConfidence>? CharConfidences
     {
         get
         {
             if (Event.CharConfidences.Count == 0) return null;
-            var parts = new List<string>(Event.CharConfidences.Count);
+            var cells = new List<PlateCharConfidence>(Event.CharConfidences.Count);
             for (int i = 0; i < Event.CharConfidences.Count; i++)
             {
                 char letter = i < Event.PlateNumber.Length ? Event.PlateNumber[i] : '?';
-                parts.Add($"{letter} {Event.CharConfidences[i]}%");
+                cells.Add(new PlateCharConfidence(letter.ToString(), Event.CharConfidences[i]));
             }
-            return string.Join("  ·  ", parts);
+            return cells;
         }
     }
 
@@ -237,5 +245,13 @@ public sealed partial class PlateEventViewModel(ApiClient api, PlateEventDto dto
     }
 }
 
-/// <summary>Fila etiqueta/valor de la ficha de detalle (<paramref name="Bad"/>: el valor va en rojo).</summary>
-public sealed record PlateDetailRow(string Label, string Value, bool Bad = false);
+/// <summary>
+/// Fila etiqueta/valor de la ficha de detalle. <paramref name="Bad"/>: el valor
+/// va en rojo; <paramref name="Hint"/>: nombre completo del dato (tooltip);
+/// <paramref name="Chars"/>: en vez del texto, cada carácter con su confianza.
+/// </summary>
+public sealed record PlateDetailRow(string Label, string Value, bool Bad = false, string? Hint = null,
+    IReadOnlyList<PlateCharConfidence>? Chars = null);
+
+/// <summary>Un carácter de la patente y la confianza con que lo leyó el equipo (%).</summary>
+public sealed record PlateCharConfidence(string Char, int Percent);

@@ -13,11 +13,11 @@
 
         <!-- Etiqueta y valor de la ficha de detalle (en dos columnas, como en la web) -->
         <Style x:Key="DetailLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
         </Style>
         <Style x:Key="DetailValue" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Style.Triggers>
@@ -444,7 +444,7 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="14"/>
-                            <ColumnDefinition Width="300"/>
+                            <ColumnDefinition Width="250"/>
                         </Grid.ColumnDefinitions>
 
                         <!-- Escena capturada, con el recuadro que marcó la cámara -->
@@ -494,11 +494,36 @@
                                             <Grid Margin="0,0,0,6">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" SharedSizeGroup="FactLabel"/>
-                                                    <ColumnDefinition Width="12"/>
+                                                    <ColumnDefinition Width="10"/>
                                                     <ColumnDefinition Width="*"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Label}" Style="{StaticResource DetailLabel}"/>
-                                                <TextBlock Grid.Column="2" Text="{Binding Value}" Style="{StaticResource DetailValue}"/>
+                                                <TextBlock Text="{Binding Label}" Style="{StaticResource DetailLabel}"
+                                                           ToolTip="{Binding Hint}"/>
+                                                <TextBlock Grid.Column="2" Text="{Binding Value}" Style="{StaticResource DetailValue}"
+                                                           Visibility="{Binding Chars, Converter={x:Static vm:NullToVisibility.Instance}}"/>
+                                                <!-- Confianza por carácter: cada letra con su % debajo
+                                                     (en una línea, en vez de tres de texto). -->
+                                                <ItemsControl Grid.Column="2" ItemsSource="{Binding Chars}" ToolTip="{Binding Hint}"
+                                                              Visibility="{Binding Chars, Converter={x:Static vm:NotNullToVisibility.Instance}}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <WrapPanel/>
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel MinWidth="19" Margin="0,0,3,2">
+                                                                <TextBlock Text="{Binding Char}" FontSize="13" FontWeight="Bold"
+                                                                           FontFamily="{StaticResource PlateFont}"
+                                                                           HorizontalAlignment="Center"
+                                                                           Foreground="{StaticResource TextBrush}"/>
+                                                                <TextBlock Text="{Binding Percent}" FontSize="10"
+                                                                           HorizontalAlignment="Center"
+                                                                           Foreground="{StaticResource MutedBrush}"/>
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
                                             </Grid>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
