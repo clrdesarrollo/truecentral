@@ -608,7 +608,7 @@ public partial class MainViewModel : ObservableObject
         if (saved)
         {
             // El ajuste de imagen rige de inmediato en los cuadros existentes.
-            foreach (var cell in Cells)
+            foreach (var cell in AllCommandCenterCells)
                 cell.ApplyStretch(_settings.StretchVideo);
             StatusMessage = "Configuración guardada.";
         }
@@ -1593,7 +1593,7 @@ public partial class MainViewModel : ObservableObject
     /// eso lo comparten sus grillas: una sola cámara suena a la vez).</summary>
     internal void OnCellAudioActivated(VideoCellViewModel active)
     {
-        foreach (var cell in Cells.Concat(_auxWindows.SelectMany(w => w.Vm.Cells)))
+        foreach (var cell in Cells.Concat(_auxWindows.SelectMany(w => w.Instance!.Cells)))
             if (cell != active && cell.IsAudioOn)
                 cell.IsAudioOn = false;
     }
@@ -1620,7 +1620,7 @@ public partial class MainViewModel : ObservableObject
         }
         Collect(Cells, "");
         foreach (var window in _auxWindows)
-            Collect(window.Vm.Cells, $" (pantalla auxiliar {window.Vm.SlotNumber})");
+            Collect(window.Instance!.Cells, $" ({window.Instance.WindowTitle})");
 
         foreach (var channel in Devices.SelectMany(d => d.Channels))
         {
@@ -1635,24 +1635,76 @@ public partial class MainViewModel : ObservableObject
         ScheduleSessionSave();
     }
 
-    // ---------- Pantallas auxiliares (estilo iVMS-4200, máximo 3) ----------
-    // Ya no se abren desde la barra (el botón «Pantalla auxiliar» se reemplazó por
-    // extraer la viñeta del Centro de mando a su propia ventana, MainWindow.Tabs):
-    // quedan para reabrir las que guardó una sesión anterior.
+    // ---------- Otros Centros de mando (máximo 3 más) ----------
+    // Con «+» junto a las viñetas (o el menú de la viñeta del Centro de mando)
+    // se abre otro Centro de mando en su propia ventana: la misma vista
+    // completa, con su propia grilla, para llevarlo a otro monitor. Reemplazan
+    // a las pantallas auxiliares (y reabren las que guardó una sesión anterior).
 
-    /// <summary>Pantallas auxiliares abiertas: ventanas independientes con su
-    /// propia grilla, para ver cámaras en más de un monitor.</summary>
-    private readonly List<Views.AuxLiveWindow> _auxWindows = [];
+    /// <summary>Los otros Centros de mando abiertos (el 2, el 3 y el 4).</summary>
+    private readonly List<Views.DetachedTabWindow> _auxWindows = [];
+
+    /// <summary>Los cuadros de todos los Centros de mando (la telemetría de la Consola los refresca juntos).</summary>
+    internal IEnumerable<VideoCellViewModel> AllCommandCenterCells => Cells.Concat(_auxWindows.SelectMany(w => w.Instance!.Cells));
 
     private const int MaxAuxScreens = 3;
 
-    /// <summary>Crea (sin mostrar) la ventana de una pantalla auxiliar y la registra.</summary>
-    private Views.AuxLiveWindow CreateAuxWindow(int slot)
+    /// <summary>
+    /// «+»: otro Centro de mando. Si el de la ventana principal no está
+    /// abierto, se abre ese (como la primera pestaña de un navegador).
+    /// </summary>
+    [RelayCommand]
+    private void OpenCommandCenterInstance()
     {
-        var window = new Views.AuxLiveWindow(new AuxScreenViewModel(this, slot));
+        if (!CanLiveView) return;
+        if (!IsLiveViewOpen)
+        {
+            OpenLiveView();
+            return;
+        }
+        if (_auxWindows.Count >= MaxAuxScreens)
+        {
+            StatusMessage = $"Ya hay {MaxAuxScreens + 1} Centros de mando abiertos (el máximo).";
+            return;
+        }
+        // El número más bajo libre: cerrar el 3 y abrir otro vuelve a dar el 3.
+        int slot = Enumerable.Range(1, MaxAuxScreens).First(n => _auxWindows.All(w => w.Instance!.SlotNumber != n));
+        var window = CreateAuxWindow(slot);
+        // Parte donde quedó la última vez o en el primer monitor sin ventanas de la aplicación.
+        Views.MonitorPlacement.ShowOnFreeMonitor(window, OccupiedWindows(window), $"aux{slot}", slot);
+        StatusMessage = $"{window.Instance!.WindowTitle} abierto en su propia ventana: arrástrelo al monitor que quiera.";
+    }
+
+    /// <summary>Las ventanas de la aplicación ya abiertas (para buscar un monitor libre).</summary>
+    private List<Window> OccupiedWindows(Window except)
+    {
+        var occupied = new List<Window>();
+        if (Application.Current.MainWindow is { } main) occupied.Add(main);
+        occupied.AddRange(Application.Current.Windows.OfType<Views.DetachedTabWindow>().Where(w => w != except && w.IsLoaded));
+        return occupied;
+    }
+
+    /// <summary>Crea (sin mostrar) la ventana de otro Centro de mando y la registra.</summary>
+    private Views.DetachedTabWindow CreateAuxWindow(int slot)
+    {
+        var vm = new AuxScreenViewModel(this, slot);
+        var view = new Views.LiveView { DataContext = vm };
+        var window = new Views.DetachedTabWindow(vm, $"aux{slot}", vm.WindowTitle, "",
+            "Cerrar este Centro de mando (detiene sus streams)", view, $"aux{slot}",
+            () => vm.IsGridFullscreen, canReturn: false, canOpenAnother: true)
+        {
+            Instance = vm,
+        };
+        window.NewCommandCenterRequested += OpenCommandCenterInstance;
+        // Las capturas y cápsulas hechas aquí avisan en ESTE monitor.
+        vm.MediaSaved += (title, glyph, path) =>
+        {
+            if (window.IsLoaded) Views.ToastWindow.ShowSaved(window, title, glyph, path);
+        };
         window.Closed += (_, _) =>
         {
             _auxWindows.Remove(window);
+            vm.Dispose(); // cerrarlo detiene y libera sus streams
             RefreshLiveChannels(); // lo que mostraba deja de estar en vivo
         };
         // Moverla de monitor o maximizarla también es parte de la última sesión.

@@ -81,8 +81,9 @@ public partial class MainViewModel
         Fill(session.Main, CurrentLayout, Cells);
         foreach (var window in _auxWindows.Where(w => w.IsLoaded))
         {
-            var screen = new LiveSessionScreen { Slot = window.Vm.SlotNumber };
-            Fill(screen, window.Vm.CurrentLayout, window.Vm.Cells);
+            var instance = window.Instance!;
+            var screen = new LiveSessionScreen { Slot = instance.SlotNumber };
+            Fill(screen, instance.CurrentLayout, instance.Cells);
             // Maximizada: sus límites "normales" dicen en qué monitor estaba. En
             // pantalla completa la ventana está Normal con los límites del
             // monitor, que también sirven. RestoreBounds vacío trae infinitos,
@@ -96,7 +97,7 @@ public partial class MainViewModel
             screen.Top = bounds.Top;
             screen.Width = bounds.Width;
             screen.Height = bounds.Height;
-            screen.Maximized = window.WindowState == WindowState.Maximized || window.Vm.IsGridFullscreen;
+            screen.Maximized = window.WindowState == WindowState.Maximized || instance.IsGridFullscreen;
             session.AuxScreens.Add(screen);
         }
         return session;
@@ -180,16 +181,15 @@ public partial class MainViewModel
                          .GroupBy(s => s.Slot).Select(g => g.First())
                          .OrderBy(s => s.Slot))
             {
-                if (_auxWindows.Any(w => w.Vm.SlotNumber == saved.Slot)) continue;
+                if (_auxWindows.Any(w => w.Instance!.SlotNumber == saved.Slot)) continue;
                 var window = CreateAuxWindow(saved.Slot);
-                var occupied = new List<Window>();
-                if (Application.Current.MainWindow is { } main) occupied.Add(main);
-                occupied.AddRange(_auxWindows.Where(w => w != window && w.IsLoaded));
-                window.ShowAt(new Rect(saved.Left, saved.Top, saved.Width, saved.Height), saved.Maximized, occupied);
+                var instance = window.Instance!;
+                Views.MonitorPlacement.ShowAt(window, new Rect(saved.Left, saved.Top, saved.Width, saved.Height),
+                    saved.Maximized, OccupiedWindows(window), saved.Slot);
 
-                await window.Vm.InitialLayout;
-                await window.Vm.ApplyLayoutAsync(VideoLayout.Restore(saved.LayoutName, saved.Columns, saved.Rows));
-                (o, m) = await OpenSessionCellsAsync(window.Vm.Cells, saved.Cells, byId, n => { done += n; Progress(); });
+                await instance.InitialLayout;
+                await instance.ApplyLayoutAsync(VideoLayout.Restore(saved.LayoutName, saved.Columns, saved.Rows));
+                (o, m) = await OpenSessionCellsAsync(instance.Cells, saved.Cells, byId, n => { done += n; Progress(); });
                 opened += o;
                 missing += m;
             }

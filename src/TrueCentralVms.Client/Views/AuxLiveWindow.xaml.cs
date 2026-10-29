@@ -31,6 +31,7 @@ public partial class AuxLiveWindow : Window
         Vm = vm;
         DataContext = vm;
         InitializeComponent();
+        MonitorPlacement.EnforceMinimumSize(this);
         _grow = new GridGrowController(GridHost, GridGrowOverlay,
             edge => Vm.GrowBlockedReason(edge), message => Vm.StatusMessage = message);
         _merge = new CellMergeController(() => _gridPanel, (from, to) => Vm.PreviewMerge(from, to),
@@ -58,109 +59,10 @@ public partial class AuxLiveWindow : Window
     private string PlacementKey => Vm.IsFleet ? "fleet-live" : $"aux{Vm.SlotNumber}";
 
     // ------------------------------------------------------------------
-    // Apertura: la pantalla vuelve donde quedó la última vez que se cerró
-    // (con la opción de Configuración encendida). Si no hay lugar anotado,
-    // parte maximizada en el primer monitor que no tenga ventanas de la
-    // aplicación (para eso existe: más monitores). Si todos están ocupados,
-    // cae en cascada sobre la ventana ancla.
+    // Apertura: donde quedó la última vez o en un monitor libre (MonitorPlacement).
     // ------------------------------------------------------------------
-    public void ShowOnFreeMonitor(IReadOnlyList<Window> occupied)
-    {
-        if (ClientSettings.Load().RememberWindowPlacement && WindowPlacements.Get(PlacementKey) is { } saved)
-        {
-            ShowAt(new Rect(saved.Left, saved.Top, saved.Width, saved.Height), saved.Maximized, occupied);
-            return;
-        }
-        ShowOnFirstFreeMonitor(occupied);
-    }
-
-    private void ShowOnFirstFreeMonitor(IReadOnlyList<Window> occupied)
-    {
-        var used = new HashSet<IntPtr>();
-        foreach (var window in occupied)
-        {
-            var hwnd = new WindowInteropHelper(window).Handle;
-            if (hwnd != IntPtr.Zero) used.Add(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
-        }
-        var free = ListMonitors().FirstOrDefault(m => !used.Contains(m.Handle));
-        if (free.Handle != IntPtr.Zero && occupied.Count > 0)
-        {
-            // La aplicación es system-DPI-aware: una sola escala para todos
-            // los monitores desde el punto de vista de WPF.
-            var dpi = VisualTreeHelper.GetDpi(occupied[0]);
-            double left = free.Work.Left / dpi.DpiScaleX;
-            double top = free.Work.Top / dpi.DpiScaleY;
-            double width = (free.Work.Right - free.Work.Left) / dpi.DpiScaleX;
-            double height = (free.Work.Bottom - free.Work.Top) / dpi.DpiScaleY;
-            // Límites de restauración con margen, dentro del monitor elegido;
-            // el maximizado (acotado por WM_GETMINMAXINFO) hace el resto.
-            Left = left + 40;
-            Top = top + 40;
-            Width = Math.Max(MinWidth, width - 80);
-            Height = Math.Max(MinHeight, height - 80);
-            Show();
-            WindowState = WindowState.Maximized;
-            return;
-        }
-        if (occupied.Count > 0)
-        {
-            var anchor = occupied[0];
-            Left = anchor.Left + 50 * Vm.SlotNumber;
-            Top = anchor.Top + 50 * Vm.SlotNumber;
-        }
-        Show();
-    }
-
-    /// <summary>
-    /// Reabre la pantalla donde estaba (última sesión). Si ese lugar ya no cae
-    /// en ningún monitor —se desconectó uno, cambió la disposición—, parte como
-    /// una pantalla nueva: en el primer monitor libre.
-    /// </summary>
-    public void ShowAt(Rect bounds, bool maximized, IReadOnlyList<Window> occupied)
-    {
-        bool usable = bounds.Width >= MinWidth && bounds.Height >= MinHeight &&
-                      !double.IsNaN(bounds.Left) && !double.IsInfinity(bounds.Left);
-        if (usable && occupied.Count > 0)
-        {
-            // Mismo criterio de escala que ShowOnFreeMonitor: una sola para todos.
-            var dpi = VisualTreeHelper.GetDpi(occupied[0]);
-            var center = new Point((bounds.Left + bounds.Width / 2) * dpi.DpiScaleX,
-                (bounds.Top + bounds.Height / 2) * dpi.DpiScaleY);
-            usable = ListMonitors().Any(m => center.X >= m.Bounds.Left && center.X < m.Bounds.Right &&
-                                              center.Y >= m.Bounds.Top && center.Y < m.Bounds.Bottom);
-        }
-        if (!usable)
-        {
-            ShowOnFirstFreeMonitor(occupied);
-            return;
-        }
-        Left = bounds.Left;
-        Top = bounds.Top;
-        Width = bounds.Width;
-        Height = bounds.Height;
-        Show();
-        if (maximized) WindowState = WindowState.Maximized;
-    }
-
-    private struct MonitorRect
-    {
-        public IntPtr Handle;
-        public RECT Work;
-        public RECT Bounds;
-    }
-
-    private static List<MonitorRect> ListMonitors()
-    {
-        var monitors = new List<MonitorRect>();
-        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr handle, IntPtr hdc, ref RECT rect, IntPtr data) =>
-        {
-            var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-            if (GetMonitorInfo(handle, ref info))
-                monitors.Add(new MonitorRect { Handle = handle, Work = info.rcWork, Bounds = info.rcMonitor });
-            return true;
-        }, IntPtr.Zero);
-        return monitors;
-    }
+    public void ShowOnFreeMonitor(IReadOnlyList<Window> occupied) =>
+        MonitorPlacement.ShowOnFreeMonitor(this, occupied, PlacementKey, Vm.SlotNumber);
 
     // ------------------------------------------------------------------
     // Pantalla completa de la grilla EN ESTE MONITOR (mismo mecanismo que la
@@ -275,16 +177,12 @@ public partial class AuxLiveWindow : Window
         public uint dwFlags;
     }
 
-    private delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdc, ref RECT rect, IntPtr data);
-
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
-    [DllImport("user32.dll")]
-    private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc proc, IntPtr data);
 
     // ------------------------------------------------------------------
     // Controles de la barra de título propia (WindowChrome).

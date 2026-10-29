@@ -4,7 +4,7 @@ namespace TrueCentralVms.Client.ViewModels;
 
 /// <summary>
 /// Apariencia Consola: refresca una vez por segundo la franja de telemetría
-/// de cada cuadro de la grilla principal (códec, FPS, stream y tiempo en
+/// de cada cuadro de todos los Centros de mando (códec, FPS, stream y tiempo en
 /// vivo). Solo lee el estado de los players que ya están abiertos: no
 /// consulta al servidor. Con la apariencia clásica no se crea.
 /// </summary>
@@ -30,6 +30,6 @@ internal sealed class CellTelemetryTicker : IDisposable
 
     private void Refresh()
     {
-        foreach (var cell in _shell.Cells) cell.RefreshTelemetry();
+        foreach (var cell in _shell.AllCommandCenterCells) cell.RefreshTelemetry();
     }
 }

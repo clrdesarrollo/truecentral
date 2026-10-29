@@ -733,11 +733,15 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="190"/>
             </Grid.ColumnDefinitions>
-            <Grid x:Name="PlatesLeft" Margin="10,10,6,10">
+            <!-- Abajo, de lado a lado (también bajo la lista), cuándo y dónde se leyó la elegida -->
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid x:Name="PlatesLeft" Margin="10,10,6,8">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Border Background="#000000" CornerRadius="3"
                         MaxHeight="{Binding ActualHeight, ElementName=PlatesLeft, Converter={x:Static vm:Minus.Instance}, ConverterParameter=150}">
@@ -751,14 +755,20 @@
                         </TextBlock>
                     </Grid>
                 </Border>
-                <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,8">
-                    <Image Source="{Binding PlateImage}" Height="64" Stretch="Uniform" HorizontalAlignment="Center"
+                <!-- El recorte crece con el alto que deja la escena (de 72 a 130) y la patente leída va debajo -->
+                <Grid Grid.Row="1" Margin="0,8,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Image Source="{Binding PlateImage}" MinHeight="72" MaxHeight="130" Stretch="Uniform"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     <!-- La patente leída bajo el recorte, como en la página ANPR: verde sobre negro, roja si no es una PPU chilena válida -->
-                    <Border Background="#000000" CornerRadius="4" Padding="14,2" Margin="0,6,0,0" HorizontalAlignment="Center"
+                    <Border Grid.Row="1" Background="#000000" CornerRadius="4" Padding="16,2" Margin="0,6,0,0" HorizontalAlignment="Center"
                             ToolTip="{Binding Selected.PlateHint}"
                             Visibility="{Binding Selected, Converter={x:Static vm:NotNullToVisibility.Instance}}">
-                        <TextBlock Text="{Binding Selected.Plate}" FontSize="24" FontWeight="Bold" FontFamily="{StaticResource MonoFont}">
+                        <TextBlock Text="{Binding Selected.Plate}" FontSize="28" FontWeight="Bold" FontFamily="{StaticResource MonoFont}">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <Setter Property="Foreground" Value="#39FF14"/>
@@ -771,10 +781,13 @@
                             </TextBlock.Style>
                         </TextBlock>
                     </Border>
-                </StackPanel>
-                <TextBlock Grid.Row="2" Text="{Binding SelectedText}" Style="{StaticResource PanelHint}" Margin="0,6,0,0"
-                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                </Grid>
             </Grid>
+            <Border Grid.Row="1" Grid.ColumnSpan="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
+                    Padding="10,4">
+                <TextBlock Text="{Binding SelectedText}" Style="{StaticResource PanelHint}"
+                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+            </Border>
             <ListBox Grid.Column="1" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected, Mode=TwoWay}"
                      Background="Transparent" BorderThickness="1,0,0,0" BorderBrush="{StaticResource BorderBrush}"
                      Padding="6,8" ScrollViewer.HorizontalScrollBarVisibility="Disabled">

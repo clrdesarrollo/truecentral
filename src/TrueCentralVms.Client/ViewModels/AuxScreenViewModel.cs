@@ -31,7 +31,8 @@ public partial class AuxScreenViewModel : ObservableObject
     /// </summary>
     public bool IsFleet { get; }
 
-    public string WindowTitle => IsFleet ? "Flota en vivo" : $"Pantalla auxiliar {SlotNumber}";
+    /// <summary>La principal es el Centro de mando 1: los que se abren con «+» son el 2, el 3 y el 4.</summary>
+    public string WindowTitle => IsFleet ? "Flota en vivo" : $"Centro de mando {SlotNumber + 1}";
     public string TreeCaption => IsFleet ? "VEHÍCULOS" : "RECURSOS";
     public string SearchHint => IsFleet ? "Buscar vehículo o cámara…" : "Buscar…";
 
@@ -62,7 +63,8 @@ public partial class AuxScreenViewModel : ObservableObject
 
     public ObservableCollection<VideoCellViewModel> Cells { get; } = [];
 
-    public IReadOnlyList<VideoLayoutGroup> LayoutGroups => VideoLayout.Groups;
+    /// <summary>Divisiones para monitor horizontal o vertical (cada ventana la suya: puede estar en un monitor parado).</summary>
+    public IReadOnlyList<VideoLayoutGroup> LayoutGroups => VideoLayout.GroupsFor(IsVerticalLayouts);
 
     [ObservableProperty] private VideoLayout _currentLayout = VideoLayout.Default;
     [ObservableProperty] private int _maximizedIndex = -1;
@@ -252,6 +254,13 @@ public partial class AuxScreenViewModel : ObservableObject
         switch (e.PropertyName)
         {
             case nameof(MainViewModel.SearchText): OnPropertyChanged(nameof(SearchText)); break;
+            // Cambiaron los permisos de la sesión: los botones de esta ventana también.
+            case nameof(MainViewModel.CanPtz):
+                OnPropertyChanged(nameof(CanPtz));
+                UpdatePtzPanel();
+                break;
+            case nameof(MainViewModel.CanSaveViews): OnPropertyChanged(nameof(CanSaveViews)); break;
+            case nameof(MainViewModel.CanShareViews): OnPropertyChanged(nameof(CanShareViews)); break;
         }
     }
 

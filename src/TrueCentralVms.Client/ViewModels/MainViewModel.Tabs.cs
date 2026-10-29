@@ -8,7 +8,7 @@ namespace TrueCentralVms.Client.ViewModels;
 /// órdenes que abren un módulo traigan al frente su ventana en vez de
 /// mostrarlo en la principal. Reemplaza al botón «Pantalla auxiliar».
 /// </summary>
-public partial class MainViewModel
+public partial class MainViewModel : ICommandCenter
 {
     private readonly HashSet<string> _detachedSections = [];
 

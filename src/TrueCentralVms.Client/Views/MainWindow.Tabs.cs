@@ -221,6 +221,13 @@ public partial class MainWindow
             var item = new MenuItem { Header = "Llevar a una ventana nueva" };
             item.Click += (_, _) => TearOff(key, null, new Vector(60, 16));
             var menu = new ContextMenu { Items = { item } };
+            // Como «+»: otro Centro de mando, con su propia grilla, en su ventana.
+            if (key == "Live")
+            {
+                var another = new MenuItem { Header = "Abrir otro Centro de mando" };
+                another.Click += (_, _) => _vm.OpenCommandCenterInstanceCommand.Execute(null);
+                menu.Items.Add(another);
+            }
             if (TryFindResource("DarkContextMenu") is Style style) menu.Style = style;
             tab.ContextMenu = menu;
         }
@@ -276,10 +283,12 @@ public partial class MainWindow
 
         var close = TabCloseOf(tab);
         var window = new DetachedTabWindow(_vm, key, TabTitleOf(key), TabGlyphOf(key),
-            close?.ToolTip as string ?? "Cerrar", view)
+            close?.ToolTip as string ?? "Cerrar", view, $"tab-{key}",
+            () => _vm.IsGridFullscreen && _vm.FullscreenSection == key, canReturn: true, canOpenAnother: key == "Live")
         {
             IsOverMainTabs = IsOverTabStrip,
         };
+        window.NewCommandCenterRequested += () => _vm.OpenCommandCenterInstanceCommand.Execute(null);
         if (size is { Width: > 300, Height: > 200 } s && WindowPlacements.Get($"tab-{key}") is null)
         {
             window.Width = s.Width;

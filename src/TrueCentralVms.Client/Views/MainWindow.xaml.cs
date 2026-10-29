@@ -20,6 +20,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         // Abre donde quedó la última vez (ver WindowPlacements).
         WindowPlacements.Remember(this, "main");
+        // 1024×768 como mínimo (acotado al monitor si es más chico).
+        MonitorPlacement.EnforceMinimumSize(this);
         ApplyTabOrder();
         SetUpTearOff();
         // El menú del usuario cuelga alineado a la DERECHA de su botón: es lo
