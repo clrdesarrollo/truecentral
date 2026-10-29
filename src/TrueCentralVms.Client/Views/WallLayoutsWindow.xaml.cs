@@ -26,6 +26,8 @@ public partial class WallLayoutsWindow : Window
         _api = api;
         _wall = wall;
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "wall-layouts");
         DarkChrome.Apply(this);
         TitleText.Text = $"Layouts de \"{wall.Name}\"";
         SaveRow.Visibility = CanManage ? Visibility.Visible : Visibility.Collapsed;

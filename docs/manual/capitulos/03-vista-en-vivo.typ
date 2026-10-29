@@ -167,6 +167,73 @@ Al cambiar de división, las cámaras de los primeros cuadros se mantienen y las
 de los cuadros que sobran se cierran. La división elegida se recuerda para la
 próxima vez.
 
+=== Ampliar la grilla
+
+Para sumar una fila o una columna sin cambiar de división, lleve una cámara
+de la lista hasta un borde de la grilla (arriba, abajo, a la izquierda o a la
+derecha) y déjela ahí un momento, sin soltar el botón:
+
++ Arrastre la cámara desde la lista hasta el borde de la grilla.
++ Mantenga el puntero en el borde alrededor de un segundo. La grilla se aleja
+  un poco y aparece la *franja nueva*, punteada, con sus cuadros; el cuadro
+  donde caerá la cámara se resalta con un «+» y el cambio, por ejemplo
+  «Columna nueva · 2×2 → 3×2».
++ Mueva el puntero a lo largo de la franja para elegir el cuadro y suelte.
+
+#captura("cliente-vista-en-vivo-ampliar.png", ancho: 85%, pie: [Franja nueva a la derecha de una grilla de 2×2.])
+
+La fila o columna se agrega con la cámara en el cuadro elegido; las demás
+cámaras siguen con su video, en el mismo lugar relativo. La barra de estado lo
+confirma, por ejemplo «Columna nueva a la derecha: la grilla pasa a 3×2 (6
+cuadros).»
+
+La franja aparece solo si el puntero se queda en el borde: si pasa por él
+camino a un cuadro, el arrastre sigue siendo hacia ese cuadro, que se ilumina
+en amarillo como siempre. Para no agregar nada, saque el puntero del borde
+antes de soltar.
+
+La grilla llega hasta 8 columnas, 8 filas y 64 cuadros, y no pasa de la
+cantidad de cámaras disponibles en la lista. Al llegar a un tope, la barra de
+estado lo explica, por ejemplo «La grilla ya tiene 8 columnas, el máximo.» Con
+un cuadro maximizado no se puede ampliar: restáurelo primero.
+
+=== Unir y separar cuadros
+
+El botón #boton("Unir"), en la barra de herramientas, junta varios cuadros en
+uno solo, para darle más espacio a una cámara.
+
++ Haga clic en #boton("Unir").
++ Apriete el botón del mouse sobre un cuadro y arrástrelo hasta otro. Se
+  dibuja un recuadro con lo que quedaría unido: todo el rectángulo entre los
+  dos cuadros, con el aviso «Unir N cuadros».
++ Suelte el botón: los cuadros del recuadro pasan a ser uno.
++ Haga clic otra vez en #boton("Unir") o presione #tecla("Esc") para
+  terminar.
+
+#captura("cliente-vista-en-vivo-unir.png", ancho: 85%, pie: [Selección de cuatro cuadros para unirlos.])
+
+El cuadro unido conserva la cámara del cuadro donde empezó la selección o, si
+estaba libre, la primera que haya en el recuadro. Las demás cámaras del
+recuadro se cierran y la barra de estado dice cuáles, por ejemplo «4 cuadros
+unidos en uno. Se cerró: "Bodega".»
+
+Solo se unen rectángulos completos. Si el recuadro corta un cuadro por la
+mitad (un cuadro grande que asoma afuera, o una selección en forma de L), se
+marca en rojo con «Corta un cuadro: no se puede unir» y al soltar no cambia
+nada.
+
+#captura("cliente-vista-en-vivo-unir-corta.png", ancho: 85%, pie: [La selección corta el cuadro grande: no se puede unir.])
+
+Para *separar* un cuadro unido, con #boton("Unir") encendido haga un clic en
+él, sin arrastrar: vuelve a dividirse en cuadros simples y la cámara queda en
+el de arriba a la izquierda.
+
+Una grilla ampliada o con cuadros unidos se guarda en las vistas guardadas y
+en la última sesión como cualquier división; si coincide con una del selector
+(por ejemplo, cuatro cuadros unidos en una grilla de 9 dan «6 con cuadro
+principal»), el selector la marca. Si no, el botón de la división la muestra
+como «a medida», con sus columnas y filas.
+
 === Seleccionar un cuadro
 
 Haga clic en la barra de un cuadro o sobre su video: queda con borde azul.
@@ -530,7 +597,13 @@ voz alta por los parlantes. Su uso se explica en #capitulo(<cap-parlantes-ip>).
     en el primero libre.],
   [Doble clic en un equipo o una ubicación], [Abre todas sus cámaras.],
   [Arrastrar una cámara de la lista a un cuadro], [La abre en ese cuadro.],
+  [Arrastrar una cámara a un borde de la grilla y esperar], [Muestra la franja
+    nueva; al soltar agrega esa fila o columna con la cámara.],
   [Arrastrar un cuadro sobre otro], [Intercambia o muda la cámara.],
+  [Con #boton("Unir"): arrastrar de un cuadro a otro], [Une el rectángulo en un
+    solo cuadro.],
+  [Con #boton("Unir"): clic en un cuadro unido], [Lo separa en cuadros
+    simples.],
   [Clic en la barra o el video de un cuadro], [Lo selecciona o lo deja sin
     seleccionar.],
   [Doble clic en un cuadro], [Lo maximiza o lo devuelve a la grilla.],
@@ -542,8 +615,9 @@ voz alta por los parlantes. Su uso se explica en #capitulo(<cap-parlantes-ip>).
   [#tecla("+") #tecla("−")], [Acercan o alejan la cámara PTZ.],
   [#tecla("Shift") sostenido], [Modo precisión: el PTZ por teclado se mueve a
     la velocidad mínima.],
-  [#tecla("Esc")], [Sale de la pantalla completa. Durante la apertura de un
-    equipo completo, cierra el aviso y devuelve el control.],
+  [#tecla("Esc")], [Termina el modo #boton("Unir"); sale de la pantalla
+    completa. Durante la apertura de un equipo completo, cierra el aviso y
+    devuelve el control.],
 )
 
 == Vista en vivo desde el navegador
@@ -566,6 +640,9 @@ use el cliente.
   ubicación, con *Abrir sus cámaras* y las órdenes a sus áreas de alarma.
 - Arrastrar una cámara a un cuadro, y un cuadro sobre otro (tómelo de su
   barra).
+- Ampliar la grilla dejando una cámara un momento en un borde, y
+  #boton("Unir") para unir y separar cuadros, con el mismo recuadro. En el
+  navegador la grilla ampliada llega hasta 16 cuadros.
 - La barra de cada cuadro: audio, P/S, captura, grabación y
   #boton("✕") (*Cerrar el video de este cuadro*).
 - Doble clic en el video para maximizar, #boton("Limpiar todo"),

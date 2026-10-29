@@ -374,8 +374,12 @@
                     </Grid>
                 </StackPanel>
 
-                <!-- Viñetas de módulos -->
-                <StackPanel Orientation="Horizontal">
+                <!-- Viñetas de módulos: se reordenan arrastrándolas (el orden se recuerda) -->
+                <StackPanel x:Name="TabStrip" Orientation="Horizontal" Background="Transparent"
+                            PreviewMouseLeftButtonDown="OnTabStripMouseDown"
+                            PreviewMouseMove="OnTabStripMouseMove"
+                            PreviewMouseLeftButtonUp="OnTabStripMouseUp"
+                            LostMouseCapture="OnTabStripLostCapture">
                     <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
                                  IsChecked="{Binding ActiveSection, Mode=TwoWay,
                                              Converter={x:Static vm:SectionEquals.Instance}, ConverterParameter=Home}">
