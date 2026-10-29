@@ -341,7 +341,7 @@ async function accessDeviceModal(device, prefill) {
       <div id="ac-isup-wrap">${isupFieldsHtml("ac", device, isNew, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${device ? (device.enabled ? "checked" : "") : "checked"}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
       <label class="checkbox-row" title="Apáguela si otro sistema (por ejemplo el kiosco del casino) necesita la escucha del equipo: hay terminales que admiten una sola."><input type="checkbox" id="ac-live" ${device ? (device.liveEvents === false ? "" : "checked") : "checked"}> Escuchar sus eventos en vivo (apagado: se lee su historial cada 15 s, sin ocupar la escucha del equipo)</label>
-      ${accessCameraFieldHtml(device)}
+      ${accessPartsFieldHtml(device)}
       <div class="info-box" style="margin-top:10px">Al guardar se leen del equipo el modelo, el firmware, las capacidades y las puertas que administra.</div>
       <div id="ac-probe-result"></div>
       ${isNew ? "" : maintDeviceSectionHtml()}
@@ -430,6 +430,8 @@ function accessReadConnectionForm() {
       enabled: $("#ac-enabled").checked,
       liveEvents: $("#ac-live")?.checked ?? true,
       useCamera: $("#ac-camera")?.checked ?? true,
+      useSpeaker: $("#ac-speaker")?.checked ?? true,
+      useIo: $("#ac-io")?.checked ?? true,
       locationId: locationFieldValue("ac-location"),
       ...readIsupFields("ac"),
     };
@@ -446,27 +448,41 @@ function accessReadConnectionForm() {
     enabled: $("#ac-enabled").checked,
     liveEvents: $("#ac-live")?.checked ?? true,
     useCamera: $("#ac-camera")?.checked ?? true,
+    useSpeaker: $("#ac-speaker")?.checked ?? true,
+    useIo: $("#ac-io")?.checked ?? true,
     locationId: locationFieldValue("ac-location"),
   };
 }
 
 /**
- * Cámara propia del terminal (faciales): se muestra como una cámara más,
- * incluida con el terminal (no ocupa canal de video), y es la principal de
- * sus puertas. Debajo, lo que se sabe de ella en este equipo.
+ * Partes del terminal que el VMS ofrece como recursos propios, incluidas con
+ * el terminal (no ocupan licencia): su cámara (en vivo y principal de sus
+ * puertas), su altavoz (un parlante más) y sus entradas y salidas de alarma
+ * (un módulo de E/S). Debajo de cada una, lo que se sabe de ella en este equipo.
  */
-function accessCameraFieldHtml(device) {
-  let state = "";
-  if (device?.cameraNote) state = `<div class="field-hint" style="color:var(--warn-text)">${esc(device.cameraNote)}</div>`;
-  else if (device?.hasCamera && device.useCamera !== false)
-    state = `<div class="muted field-hint">Tiene cámara: se ve como la cámara «${esc(device.name)}» en Vista en vivo y en la ficha de sus puertas.</div>`;
-  else if (device?.hasCamera) state = `<div class="muted field-hint">Tiene cámara, pero no se está mostrando.</div>`;
-  else if (device) state = `<div class="muted field-hint">No se le detectó cámara (se vuelve a mirar al revalidarlo).</div>`;
+function accessPartsFieldHtml(device) {
+  const hint = (text) => `<div class="muted field-hint acd-part-hint">${text}</div>`;
+  const known = (has, use, yes, off) => !device ? ""
+    : has && use !== false ? hint(yes) : has ? hint(off) : hint("No se le detectó (se vuelve a mirar al revalidarlo).");
+  const io = device ? (device.ioInputs ?? 0) + (device.ioOutputs ?? 0) : 0;
   return `
-      <label class="checkbox-row" title="Los terminales faciales tienen cámara: se agrega como una cámara más, sin ocupar canal de video de la licencia, y queda como la cámara principal de sus puertas.">
-        <input type="checkbox" id="ac-camera" ${device?.useCamera === false ? "" : "checked"}>
-        Mostrar su cámara como una cámara más (terminales faciales; incluida, no ocupa canal de video)</label>
-      ${state}`;
+      <div class="acd-parts">
+        <div class="acd-parts-title">Partes del terminal <span class="muted">(incluidas: no ocupan licencia)</span></div>
+        <label class="checkbox-row" title="Los faciales tienen cámara: se agrega como una cámara más y queda como la cámara principal de sus puertas.">
+          <input type="checkbox" id="ac-camera" ${device?.useCamera === false ? "" : "checked"}> Su cámara, como una cámara más</label>
+        ${known(device?.hasCamera, device?.useCamera,
+          `Se ve como la cámara «${esc(device?.name ?? "")}» en Vista en vivo y en la ficha de sus puertas.`, "Tiene cámara, pero no se está mostrando.")}
+        <label class="checkbox-row" title="El altavoz del terminal: voz en vivo y sonidos desde el Centro de mando, grupos de parlantes y automatizaciones.">
+          <input type="checkbox" id="ac-speaker" ${device?.useSpeaker === false ? "" : "checked"}> Su altavoz, como un parlante más</label>
+        ${known(device?.hasSpeaker, device?.useSpeaker,
+          `Está en Parlantes IP como «${esc(device?.name ?? "")}».`, "Tiene altavoz, pero no se está ofreciendo.")}
+        <label class="checkbox-row" title="Sus entradas y salidas de alarma: estado en vivo, «Operar relé» y disparadores de automatizaciones.">
+          <input type="checkbox" id="ac-io" ${device?.useIo === false ? "" : "checked"}> Sus entradas y salidas de alarma, como un módulo de E/S</label>
+        ${known(io > 0, device?.useIo,
+          `${device?.ioInputs ?? 0} entrada(s) y ${device?.ioOutputs ?? 0} salida(s) en Módulos de E/S como «${esc(device?.name ?? "")}».`,
+          `Tiene ${device?.ioInputs ?? 0} entrada(s) y ${device?.ioOutputs ?? 0} salida(s), pero no se están ofreciendo.`)}
+        ${device?.partsNote ? `<div class="field-hint" style="color:var(--warn-text)">${esc(device.partsNote)}</div>` : ""}
+      </div>`;
 }
 
 function accessProbeResultHtml(r) {
@@ -486,6 +502,9 @@ function accessProbeResultHtml(r) {
           r.supportsFace ? "rostro" : null].filter(Boolean).join(", ") || "—"}</b>
         <span>Cupos del equipo</span><b>${r.userCapacity ?? "—"} personas · ${r.cardCapacity ?? "—"} tarjetas</b>
         <span>Cámara</span><b>${r.hasCamera ? "sí (se agrega como cámara, sin ocupar canal de video)" : "no"}</b>
+        <span>Altavoz</span><b>${r.hasSpeaker ? "sí (se agrega como parlante)" : "no"}</b>
+        <span>Entradas y salidas de alarma</span><b>${r.ioInputs + r.ioOutputs > 0
+          ? `${r.ioInputs} entrada(s) y ${r.ioOutputs} salida(s) (se agregan como módulo de E/S)` : "no"}</b>
       </div>
     </div>`;
 }
@@ -729,7 +748,7 @@ async function acdDrawConnection(body) {
       <div id="ac-isup-wrap">${isupFieldsHtml("ac", d, false, "equipo")}</div>
       <label class="checkbox-row"><input type="checkbox" id="ac-enabled" ${d.enabled ? "checked" : ""}> Activo (sondeo de estado; sus puertas ocupan cupo de la licencia)</label>
       <label class="checkbox-row" title="Apáguela si otro sistema (por ejemplo el kiosco del casino) necesita la escucha del equipo: hay terminales que admiten una sola."><input type="checkbox" id="ac-live" ${d.liveEvents === false ? "" : "checked"}> Escuchar sus eventos en vivo (apagado: se lee su historial cada 15 s, sin ocupar la escucha del equipo)</label>
-      ${accessCameraFieldHtml(d)}
+      ${accessPartsFieldHtml(d)}
       <div class="info-box">Si cambia la dirección, el puerto, el usuario o la contraseña, al guardar se vuelve a validar contra
         el equipo y se releen su modelo, firmware, capacidades y puertas.</div>
       <div id="ac-probe-result"></div>

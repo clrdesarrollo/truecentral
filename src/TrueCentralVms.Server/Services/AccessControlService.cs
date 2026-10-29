@@ -73,7 +73,9 @@ public sealed class AccessControlService(
         SupportsCardCapture(d.DriverKey),
         d.IsupDeviceId,
         d.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: d.DisabledByLicense, HolidayNote: d.HolidayNote,
-        LiveEvents: d.LiveEvents, HasCamera: d.CameraRtspPort is not null, UseCamera: d.UseCamera, CameraNote: d.CameraNote);
+        LiveEvents: d.LiveEvents, HasCamera: d.CameraRtspPort is not null, UseCamera: d.UseCamera,
+        HasSpeaker: d.HasSpeaker, UseSpeaker: d.UseSpeaker, IoInputs: d.IoInputs ?? 0, IoOutputs: d.IoOutputs ?? 0, UseIo: d.UseIo,
+        PartsNote: d.PartsNote);
 
     /// <summary>Puerta con su equipo, para el monitoreo en vivo y los niveles de acceso.</summary>
     public AccessDoorStateDto ToDoorDto(AccessDoor door)
@@ -273,7 +275,7 @@ public sealed class AccessControlService(
 
         using var writeScope = scopeFactory.CreateScope();
         var writeDb = writeScope.ServiceProvider.GetRequiredService<VmsDbContext>();
-        bool camerasChanged = false;
+        bool partsChanged = false;
         foreach (var (snapshot, result) in results)
         {
             var device = await writeDb.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == snapshot.Id, ct);
@@ -283,8 +285,8 @@ public sealed class AccessControlService(
             device.LastError = result.Error;
             if (result.Status == AccessDeviceStatus.Online) device.LastSeenAt = DateTime.UtcNow;
             await ApplyDoorStatusAsync(writeDb, device, result.Doors, ct);
-            if (result.CameraRead && !device.CameraChecked)
-                camerasChanged |= await ApplyCameraAsync(writeDb, device, result.Camera, ct);
+            if (result.PartsRead && !device.PartsChecked)
+                partsChanged |= await ApplyPartsAsync(writeDb, writeScope.ServiceProvider, device, result.Parts, ct);
             if (previous == result.Status) continue;
             await writeDb.SaveChangesAsync(ct);
 
@@ -307,36 +309,38 @@ public sealed class AccessControlService(
                         result.Status.ToString(), result.Error));
         }
         await writeDb.SaveChangesAsync(ct);
-        if (camerasChanged)
+        if (partsChanged)
         {
             writeScope.ServiceProvider.GetRequiredService<Auth.UserScopeService>().Invalidate();
-            await writeScope.ServiceProvider.GetRequiredService<MediaMtxManager>().RefreshPathsAsync(ct);
-            await writeScope.ServiceProvider.GetRequiredService<IHubContext<VmsHub>>()
-                .Clients.All.SendAsync(VmsHubContract.ConfigChanged, "devices", ct);
+            await Api.AccessApi.PartsChangedAsync(writeScope.ServiceProvider, ct);
         }
     }
 
     /// <summary>
-    /// Primera lectura de la cámara de un terminal agregado antes de que el VMS
-    /// la supiera ver: si tiene, se agrega como una cámara más (lo mismo que al
-    /// darlo de alta hoy). Devuelve true si apareció una cámara.
+    /// Primera lectura de las partes (cámara, altavoz, entradas y salidas) de un
+    /// terminal agregado antes de que el VMS las supiera ver: las que tenga se
+    /// agregan como recursos, igual que al darlo de alta hoy. Devuelve true si
+    /// cambió alguna.
     /// </summary>
-    private async Task<bool> ApplyCameraAsync(VmsDbContext db, AccessDevice device, AccessCameraInfo? camera, CancellationToken ct)
+    private async Task<bool> ApplyPartsAsync(VmsDbContext db, IServiceProvider services, AccessDevice device,
+        AccessDeviceParts? parts, CancellationToken ct)
     {
-        device.CameraChecked = true;
-        device.CameraRtspPort = camera?.RtspPort;
-        string? change = await AccessTerminalCameras.SyncAsync(db, device, ct);
+        Api.AccessApi.ApplyParts(device, device.Model, parts);
+        var changes = await AccessTerminalParts.SyncAsync(db, device, device.LocationId, services, ct);
+        bool any = db.ChangeTracker.HasChanges();
         await db.SaveChangesAsync(ct);
-        if (change is null) return false;
-        logger.LogInformation("Terminal '{Device}' ({Host}): {Change}.", device.Name, device.Host, change);
-        await audit.LogSystemAsync("access", "device-camera-added",
-            targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
-            detail: $"El terminal de acceso '{device.Name}' tiene cámara propia: el servidor {change}.");
-        return true;
+        foreach (var change in changes)
+        {
+            logger.LogInformation("Terminal '{Device}' ({Host}): {Change}.", device.Name, device.Host, change);
+            await audit.LogSystemAsync("access", "device-parts-added",
+                targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
+                detail: $"El terminal de acceso '{device.Name}': el servidor {change}.");
+        }
+        return any;
     }
 
     private sealed record PollResult(AccessDeviceStatus Status, string? Error, IReadOnlyList<AccessDoorStatus> Doors,
-        bool CameraRead = false, AccessCameraInfo? Camera = null);
+        bool PartsRead = false, AccessDeviceParts? Parts = null);
 
     private async Task<PollResult> PollOneAsync(AccessDevice device, CancellationToken ct)
     {
@@ -361,11 +365,15 @@ public sealed class AccessControlService(
                 catch (DriverException ex) { logger.LogDebug(ex, "El equipo {Device} no entregó el estado de sus puertas.", device.Name); }
             }
 
-            // Los agregados antes de que el VMS supiera ver su cámara: se le pregunta una sola vez.
-            if (!device.CameraChecked && device.IsupDeviceId is null && AccessTerminalCameras.Supports(device.DriverKey))
+            // Los agregados antes de que el VMS supiera ver sus partes: se le pregunta una sola vez.
+            if (!device.PartsChecked && device.IsupDeviceId is null && AccessTerminalParts.Supports(device.DriverKey))
             {
-                try { return new(AccessDeviceStatus.Online, null, doors, true, await driver.ReadCameraAsync(connection, ct)); }
-                catch (DriverException ex) { logger.LogDebug(ex, "El equipo {Device} no dijo si tiene cámara.", device.Name); }
+                try
+                {
+                    if (await driver.ReadPartsAsync(connection, ct) is { } parts)
+                        return new(AccessDeviceStatus.Online, null, doors, true, parts);
+                }
+                catch (DriverException ex) { logger.LogDebug(ex, "El equipo {Device} no dijo qué partes tiene.", device.Name); }
             }
             return new(AccessDeviceStatus.Online, null, doors);
         }

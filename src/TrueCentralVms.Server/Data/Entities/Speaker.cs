@@ -42,6 +42,15 @@ public class Speaker : ILocatable, IIsupEquipment
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
 
+    /// <summary>
+    /// Altavoz de un terminal de acceso (facial): el VMS lo crea y lo mantiene a
+    /// partir del terminal (dirección, credenciales, nombre y ubicación son los
+    /// suyos) y se borra con él. No se edita en Parlantes IP y no ocupa parlante
+    /// de la licencia.
+    /// </summary>
+    public int? AccessDeviceId { get; set; }
+    public AccessDevice? AccessDevice { get; set; }
+
     // Datos obtenidos del parlante al validar credenciales.
     public string? Model { get; set; }
     public string? SerialNumber { get; set; }

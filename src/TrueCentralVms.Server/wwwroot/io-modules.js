@@ -98,12 +98,15 @@ function ioOutputsHtml(m, canOperate) {
 }
 
 function ioCardHtml(m, canOperate, canConfigure) {
-  const model = m.model ? `${esc(m.model)}${m.modelKey ? ` <span class="muted" title="Elegido a mano">(a mano)</span>` : ""}` : "—";
+  // Las de un terminal no tienen modelo propio: se dice cuántas son.
+  const model = m.accessDeviceId ? `${m.inputs.length} entrada(s) · ${m.outputs.length} salida(s)`
+    : m.model ? `${esc(m.model)}${m.modelKey ? ` <span class="muted" title="Elegido a mano">(a mano)</span>` : ""}` : "—";
   return `
     <div class="io-card" data-id="${m.id}">
       <div class="io-card-head">
         <div class="io-card-title">
           <b>${esc(m.name)}</b>
+          ${m.accessDeviceId ? `<div class="muted field-hint">Entradas y salidas de alarma de un terminal de acceso · incluidas, no ocupan licencia</div>` : ""}
           ${locationLineHtml(m.location)}
         </div>
         <div class="io-card-meta">
@@ -111,7 +114,10 @@ function ioCardHtml(m, canOperate, canConfigure) {
           <span>${model}</span>
           <span class="io-status">${ioStatusCell(m)}</span>
         </div>
-        ${canConfigure ? `<div class="row-actions">
+        ${canConfigure && m.accessDeviceId ? `<div class="row-actions">
+          <button class="btn ghost io-names" title="Nombrar sus entradas y salidas (la conexión es la del terminal)">Nombres</button>
+          <a class="btn ghost" href="#/access/device?id=${m.accessDeviceId}" title="Se administra en Control de acceso">Ver terminal</a>
+        </div>` : canConfigure ? `<div class="row-actions">
           <button class="btn ghost io-edit">Editar</button>
           <button class="btn danger io-delete">Eliminar</button>
         </div>` : ""}
@@ -177,6 +183,7 @@ async function renderIoModules() {
   const byCard = (e) => modules.find((m) => m.id === Number(e.target.closest(".io-card").dataset.id));
   $("#btn-io-new")?.addEventListener("click", () => ioModuleModal(null));
   $$("#view .io-edit").forEach((b) => b.addEventListener("click", (e) => ioModuleModal(byCard(e))));
+  $$("#view .io-names").forEach((b) => b.addEventListener("click", (e) => ioTerminalNamesModal(byCard(e))));
   $$("#view .io-delete").forEach((b) => b.addEventListener("click", async (e) => {
     const m = byCard(e);
     if (!confirm(`¿Eliminar el módulo "${m.name}"? Las automatizaciones que usan sus relés o entradas dejarán de funcionar.`)) return;
@@ -223,12 +230,64 @@ async function renderIoModules() {
   VmsHub.on("ConfigChanged", ioHubBound.config);
 }
 
+/**
+ * Entradas y salidas de un terminal de acceso: la conexión, el modelo y la
+ * ubicación los pone el terminal; acá solo se nombran sus entradas y salidas
+ * («Sensor de humo», «Sirena»).
+ */
+function ioTerminalNamesModal(module) {
+  const row = (p) => `
+    <div class="io-point-row">
+      <span class="io-code">${esc(p.code)}</span>
+      <input data-name="${p.kind}:${p.number}" maxlength="64" placeholder="${p.kind === "Input" ? "Entrada" : "Salida"} de alarma ${p.number + 1}" value="${esc(p.name)}">
+      <span></span>
+    </div>`;
+  openModal(`
+    <h3>Entradas y salidas de «${esc(module.name)}»</h3>
+    <div id="io-modal-error"></div>
+    <p class="muted">Son las del terminal de acceso: su conexión se administra en Control de acceso. Póngales el nombre de lo
+      que tienen cableado; así aparecen en el Centro de mando, en las automatizaciones y en la bitácora.</p>
+    <form id="io-names-form">
+      <div class="io-points">
+        ${module.inputs.length ? `<div class="io-points-title">Entradas de alarma (${module.inputs.length})</div>${module.inputs.map(row).join("")}` : ""}
+        ${module.outputs.length ? `<div class="io-points-title">Salidas de alarma (${module.outputs.length})</div>${module.outputs.map(row).join("")}` : ""}
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" id="io-cancel">Cancelar</button>
+        <button class="btn" type="submit" id="io-save">Guardar</button>
+      </div>
+    </form>`);
+  $("#io-cancel").addEventListener("click", closeModal);
+  $("#io-names-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const points = [...module.inputs, ...module.outputs].map((p) => ({
+      kind: p.kind, number: p.number, inverted: p.inverted,
+      name: $(`#io-names-form [data-name="${p.kind}:${p.number}"]`).value.trim() || null,
+    }));
+    $("#io-save").disabled = true;
+    try {
+      await Api.put(`/api/io/modules/${module.id}`, {
+        name: module.name, driverKey: module.driverKey, host: module.host, port: module.port, modelKey: module.modelKey,
+        pollIntervalMs: module.pollIntervalMs, enabled: module.enabled, locationId: module.locationId, points,
+      });
+      closeModal();
+      toast("Nombres guardados.");
+      renderIoModules();
+    } catch (err) {
+      $("#io-modal-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+      $("#io-save").disabled = false;
+    }
+  });
+}
+
 /** Alta / edición de un módulo, con los nombres de sus entradas y salidas. */
 async function ioModuleModal(module) {
   const isNew = !module;
   let drivers, places;
   try { [drivers, places] = await Promise.all([getIoDrivers(), loadLocationChoices()]); }
   catch (err) { toast(err.error, true); return; }
+  // Los drivers internos (E/S de los terminales de acceso) no se eligen a mano.
+  drivers = drivers.filter((d) => !d.internal || d.key === module?.driverKey);
   const driver0 = drivers.find((d) => d.key === module?.driverKey) ?? drivers[0];
   if (!driver0) { toast("El servidor no tiene drivers de módulos de E/S.", true); return; }
 

@@ -280,10 +280,14 @@ public static class ResourceDetails
         Add(facts, "Biblioteca de audios propia", YesNo(s.SupportsLibrary));
         Add(facts, "Texto a voz", YesNo(s.SupportsTts));
         Add(facts, "Grupos", groups.Count > 0 ? string.Join(", ", groups) : null);
+        bool ofTerminal = s.AccessDeviceId is not null;
+        if (ofTerminal) Add(facts, "Licencia", "Altavoz de un terminal de acceso: incluido, no ocupa parlante");
         return new Part(
-            new ResourceSourceDto("speakers", s.Id, s.Name, s.Model, s.SerialNumber, s.FirmwareVersion,
+            new ResourceSourceDto(ofTerminal ? "access" : "speakers", s.AccessDeviceId ?? s.Id, s.Name, s.Model, s.SerialNumber, s.FirmwareVersion,
                 Address(s.Host, s.Port, s.UseHttps), OnlineText(s.Status, s.Enabled), s.LastSeenAt),
-            facts, CanRename: true, RenameNote: null, FixedCameras: []);
+            facts, CanRename: !ofTerminal,
+            RenameNote: ofTerminal ? "Es el altavoz de un terminal de acceso: lleva el nombre del terminal (se cambia en Control de acceso)." : null,
+            FixedCameras: []);
     }
 
     private static async Task<Part?> IntercomAsync(VmsDbContext db, int id, CancellationToken ct)
@@ -318,9 +322,13 @@ public static class ResourceDetails
         Add(facts, "Salidas (relés)", outputs.Count == 0 ? "Ninguna" : Names(outputs));
         if (m.ReportedModel is { } reported && reported != m.Model)
             Add(facts, "Modelo que informa el equipo", reported);
+        bool ofTerminal = m.AccessDeviceId is not null;
+        if (ofTerminal) Add(facts, "Licencia", "Entradas y salidas de un terminal de acceso: incluidas, no ocupan módulo");
         return new Part(
-            new ResourceSourceDto("io-modules", m.Id, m.Name, m.Model, null, null,
+            new ResourceSourceDto(ofTerminal ? "access" : "io-modules", m.AccessDeviceId ?? m.Id, m.Name, m.Model, null, null,
                 Address(m.Host, m.Port), OnlineText(m.Status, m.Enabled), m.LastSeenAt),
-            facts, CanRename: true, RenameNote: null, FixedCameras: []);
+            facts, CanRename: !ofTerminal,
+            RenameNote: ofTerminal ? "Son las entradas y salidas de un terminal de acceso: llevan el nombre del terminal (sus entradas y salidas se nombran en Módulos de E/S)." : null,
+            FixedCameras: []);
     }
 }

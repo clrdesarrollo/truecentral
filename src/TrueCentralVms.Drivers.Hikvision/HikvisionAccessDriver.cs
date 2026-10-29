@@ -315,11 +315,52 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
         var kind = ClassifyModel(model) ?? KindOfDoorCount(doors.Count);
         return new AccessDeviceInfo(model, Value("serialNumber"), Value("firmwareVersion"), Value("deviceType"),
-            Value("macAddress"), kind, capabilities, doors, profile, await ReadCameraAsync(client, ct));
+            Value("macAddress"), kind, capabilities, doors, profile, await ReadPartsAsync(client, ct));
     }
 
-    public Task<AccessCameraInfo?> ReadCameraAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
-        ReadCameraAsync(Client(info), ct);
+    public Task<AccessDeviceParts?> ReadPartsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+        ReadPartsAsync(Client(info), ct);
+
+    /// <summary>
+    /// Cámara, altavoz y entradas/salidas de alarma. Por ISUP no se ofrecen
+    /// (ni el video ni el audio llegan por esa vía todavía).
+    /// </summary>
+    private static async Task<AccessDeviceParts?> ReadPartsAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        if (client.IsIsup) return null;
+        return new AccessDeviceParts(await ReadCameraAsync(client, ct), await HasSpeakerAsync(client, ct), await ReadIoAsync(client, ct));
+    }
+
+    /// <summary>
+    /// Altavoz: el canal de audio bidireccional de los faciales (el mismo con
+    /// que los parlantes IP Hikvision reciben la voz en vivo y los sonidos).
+    /// </summary>
+    private static async Task<bool> HasSpeakerAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        try
+        {
+            return await client.RequestAsync(HttpMethod.Get, "/ISAPI/System/TwoWayAudio/channels/capabilities", ct: ct) is { } xml &&
+                   xml.Contains("TwoWayAudioChannel", StringComparison.Ordinal);
+        }
+        catch (DriverException) { return false; }
+    }
+
+    /// <summary>
+    /// Entradas y salidas de alarma: <c>/ISAPI/System/IO</c> las lista (las de
+    /// puerta —contacto, botón, cerradura— no van ahí). Null si no tiene.
+    /// </summary>
+    private static async Task<AccessIoInfo?> ReadIoAsync(HikvisionIsapiClient client, CancellationToken ct)
+    {
+        try
+        {
+            if (await client.RequestAsync(HttpMethod.Get, "/ISAPI/System/IO", ct: ct) is not { } xml) return null;
+            var all = XDocument.Parse(xml).Descendants().ToList();
+            int inputs = all.Count(e => e.Name.LocalName == "IOInputPort");
+            int outputs = all.Count(e => e.Name.LocalName == "IOOutputPort");
+            return inputs + outputs == 0 ? null : new AccessIoInfo(inputs, outputs);
+        }
+        catch (Exception ex) when (ex is DriverException or System.Xml.XmlException) { return null; }
+    }
 
     /// <summary>
     /// Cámara del terminal (los faciales tienen una): contesta su stream

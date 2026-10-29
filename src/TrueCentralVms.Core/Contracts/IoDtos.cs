@@ -65,7 +65,9 @@ public sealed record IoModuleDto(
     /// <summary>Ruta legible de esa ubicación ("Casa matriz › Acceso vehicular").</summary>
     string? Location = null,
     /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
-    bool DisabledByLicense = false);
+    bool DisabledByLicense = false,
+    /// <summary>Son las entradas y salidas de un terminal de acceso: su conexión la pone el terminal y no ocupa módulo de la licencia.</summary>
+    int? AccessDeviceId = null);
 
 /// <summary>Nombre (y lógica, en las entradas) de una entrada o salida al guardar el módulo.</summary>
 public sealed record IoPointWriteDto(IoPointKind Kind, int Number, string? Name, bool Inverted = true);
@@ -93,7 +95,9 @@ public sealed record IoProbeResultDto(bool Success, string? Error, string? Repor
 public sealed record IoModelDto(string Key, string Name, int Inputs, int Outputs, string Description);
 
 public sealed record IoDriverDto(string Key, string DisplayName, int DefaultPort, IReadOnlyList<IoModelDto> Models,
-    int MinBlinkIntervalMs);
+    int MinBlinkIntervalMs,
+    /// <summary>Lo usa el servidor para las partes de otros equipos: no se ofrece al agregar un módulo.</summary>
+    bool Internal = false);
 
 /// <summary>
 /// Orden a una salida desde el panel. <paramref name="Seconds"/>: duración del

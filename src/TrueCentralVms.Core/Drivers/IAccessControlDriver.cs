@@ -36,6 +36,16 @@ public sealed record AccessCapabilities(
 /// <param name="RtspPort">Puerto RTSP del equipo (554 de fábrica).</param>
 public sealed record AccessCameraInfo(int RtspPort);
 
+/// <summary>Entradas y salidas de alarma del equipo (las que no son de una puerta).</summary>
+public sealed record AccessIoInfo(int Inputs, int Outputs);
+
+/// <summary>
+/// Lo que el equipo trae además de sus puertas y que el VMS ofrece como
+/// recursos propios, incluidos con el equipo (no ocupan licencia): su cámara,
+/// su altavoz y sus entradas y salidas de alarma. Null en cada uno = no tiene.
+/// </summary>
+public sealed record AccessDeviceParts(AccessCameraInfo? Camera, bool HasSpeaker, AccessIoInfo? Io);
+
 /// <summary>Identificación del equipo obtenida al validar las credenciales.</summary>
 public sealed record AccessDeviceInfo(
     string? Model,
@@ -48,8 +58,8 @@ public sealed record AccessDeviceInfo(
     IReadOnlyList<AccessDoorInfo> Doors,
     /// <summary>Ficha de capacidades declaradas por el equipo; null si el driver no la sabe leer.</summary>
     AccessCapabilityProfile? Profile = null,
-    /// <summary>Su cámara propia; null si no tiene (o el driver no sabe verla).</summary>
-    AccessCameraInfo? Camera = null);
+    /// <summary>Su cámara, su altavoz y sus entradas y salidas; null si el driver no sabe verlos.</summary>
+    AccessDeviceParts? Parts = null);
 
 /// <summary>Lo que el equipo informa de una puerta en el monitoreo en vivo.</summary>
 public sealed record AccessDoorStatus(
@@ -232,12 +242,12 @@ public interface IAccessControlDriver
     Task PingAsync(AccessConnectionInfo info, CancellationToken ct = default);
 
     /// <summary>
-    /// ¿Tiene el equipo una cámara propia? (la misma lectura que hace
-    /// <see cref="ProbeAsync"/>, para los equipos agregados antes de que el VMS
-    /// la supiera ver). Null = sin cámara. Por omisión, ninguna.
+    /// Su cámara, su altavoz y sus entradas y salidas de alarma (la misma
+    /// lectura que hace <see cref="ProbeAsync"/>, para los equipos agregados
+    /// antes de que el VMS los supiera ver). Null = el driver no sabe verlos.
     /// </summary>
-    Task<AccessCameraInfo?> ReadCameraAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
-        Task.FromResult<AccessCameraInfo?>(null);
+    Task<AccessDeviceParts?> ReadPartsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
+        Task.FromResult<AccessDeviceParts?>(null);
 
     /// <summary>
     /// Olvida lo que el driver tenga cacheado de ese equipo (credenciales

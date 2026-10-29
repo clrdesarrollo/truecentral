@@ -387,6 +387,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         // -------------------------------------------------------------------
         modelBuilder.Entity<Speaker>(e =>
         {
+            // Altavoz de un terminal de acceso: uno por terminal, y se va con él.
+            e.HasOne(s => s.AccessDevice).WithOne()
+                .HasForeignKey<Speaker>(s => s.AccessDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
             e.Property(s => s.Name).HasMaxLength(128);
             e.Property(s => s.DriverKey).HasMaxLength(32);
             e.Property(s => s.Host).HasMaxLength(255);
@@ -438,6 +442,11 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(m => m.LastError).HasMaxLength(512);
             e.Property(m => m.Status).HasConversion<string>().HasMaxLength(16);
             e.HasIndex(m => new { m.Host, m.Port }).IsUnique();
+            e.Property(m => m.Username).HasMaxLength(64);
+            // Entradas y salidas de un terminal de acceso: un módulo por terminal, y se va con él.
+            e.HasOne(m => m.AccessDevice).WithOne()
+                .HasForeignKey<IoModule>(m => m.AccessDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
             e.HasMany(m => m.Points).WithOne(p => p.IoModule)
                 .HasForeignKey(p => p.IoModuleId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -641,7 +650,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(a => a.FirmwareVersion).HasMaxLength(64);
             e.Property(a => a.MacAddress).HasMaxLength(32);
             e.Property(a => a.LastError).HasMaxLength(512);
-            e.Property(a => a.CameraNote).HasMaxLength(256);
+            e.Property(a => a.PartsNote).HasMaxLength(256);
             e.Property(a => a.Kind).HasConversion<string>().HasMaxLength(16);
             e.Property(a => a.Status).HasConversion<string>().HasMaxLength(16);
             e.HasIndex(a => new { a.Host, a.Port }).IsUnique().HasFilter("\"IsupDeviceId\" IS NULL");

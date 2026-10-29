@@ -121,7 +121,7 @@ public sealed class SpeakerService(
         s.LocationId, Auth.LocationPaths.Of(s.LocationId), s.IsupDeviceId, s.IsupKeyCiphertext is { Length: > 0 }, DisabledByLicense: s.DisabledByLicense,
         AgentId: s.AgentId,
         EnrollmentExpiresAt: s.EnrollmentCodeHash is not null && s.EnrollmentExpiresAt > DateTime.UtcNow ? s.EnrollmentExpiresAt : null,
-        AgentConnected: agents.IsOnline(s.AgentId));
+        AgentConnected: agents.IsOnline(s.AgentId), AccessDeviceId: s.AccessDeviceId);
 
     // ------------------------------------------------------------------
     // Sondeo de estado

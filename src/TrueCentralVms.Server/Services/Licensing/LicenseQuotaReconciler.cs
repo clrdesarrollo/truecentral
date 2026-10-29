@@ -108,7 +108,8 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
 
         await RunAsync(db, sp, f, new Spec<Speaker>(
             "parlantes IP", LicenseFeatures.ModuleSpeakers, LicenseFeatures.SpeakerChannels,
-            d => d.Speakers, x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
+            // El altavoz de un terminal de acceso viene con el terminal: no cuenta ni se apaga por cupo.
+            d => d.Speakers.Where(s => s.AccessDeviceId == null), x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
             (x, on) => { x.Enabled = on; x.DisabledByLicense = !on; }, x => x.Name,
             async (s, _, _, _) =>
             {
@@ -130,7 +131,8 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
 
         await RunAsync(db, sp, f, new Spec<IoModule>(
             "módulos de E/S", LicenseFeatures.ModuleIo, LicenseFeatures.IoModules,
-            d => d.IoModules, x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
+            // Las entradas y salidas de un terminal de acceso vienen con el terminal.
+            d => d.IoModules.Where(m => m.AccessDeviceId == null), x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
             (x, on) => { x.Enabled = on; x.DisabledByLicense = !on; }, x => x.Name,
             async (s, off, _, _) =>
             {
@@ -265,8 +267,13 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
             await ReportAsync(label + " (cupo de puertas)", LicenseFeatures.ModuleAccess, allowed,
                 off.Select(d => d.Name).ToList(), on.Select(d => d.Name).ToList());
             sp.GetService<AccessControlService>()?.RequestReconcile();
-            // La cámara de un terminal apagado deja de servirse (y vuelve con él).
+            // Sus partes (cámara, altavoz, entradas y salidas) se apagan y vuelven con él.
+            foreach (var device in off.Concat(on))
+                await AccessTerminalParts.FollowEnabledAsync(db, device, ct);
+            await db.SaveChangesAsync(ct);
             if (sp.GetService<MediaMtxManager>() is { } mtx) await mtx.RefreshPathsAsync(ct);
+            sp.GetService<SpeakerService>()?.RequestReconcile();
+            sp.GetService<IoModuleService>()?.RequestReconcile();
             await Changed("access-devices");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

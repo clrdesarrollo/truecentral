@@ -65,13 +65,6 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<string>("AppliedHolidayHash")
                         .HasColumnType("text");
 
-                    b.Property<bool>("CameraChecked")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("CameraNote")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
                     b.Property<int?>("CameraRtspPort")
                         .HasColumnType("integer");
 
@@ -102,6 +95,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<bool>("HasSpeaker")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("HolidayNote")
                         .HasColumnType("text");
 
@@ -109,6 +105,12 @@ namespace TrueCentralVms.Server.Migrations
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<int?>("IoInputs")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("IoOutputs")
+                        .HasColumnType("integer");
 
                     b.Property<string>("IsupDeviceId")
                         .HasMaxLength(32)
@@ -154,6 +156,13 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<bool>("PartsChecked")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("PartsNote")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<byte[]>("PasswordCiphertext")
                         .IsRequired()
                         .HasColumnType("bytea");
@@ -192,6 +201,12 @@ namespace TrueCentralVms.Server.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<bool>("UseHttps")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("UseIo")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("UseSpeaker")
                         .HasColumnType("boolean");
 
                     b.Property<int?>("UserCapacity")
@@ -2274,6 +2289,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AccessDeviceId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2316,6 +2334,10 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<byte[]>("PasswordCiphertext")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
                     b.Property<int>("PollIntervalMs")
                         .HasColumnType("integer");
 
@@ -2334,7 +2356,18 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("UseHttps")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("AccessDeviceId")
+                        .IsUnique();
 
                     b.HasIndex("LocationId");
 
@@ -3757,6 +3790,9 @@ namespace TrueCentralVms.Server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AccessDeviceId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("AgentId")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
@@ -3861,6 +3897,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AccessDeviceId")
+                        .IsUnique();
 
                     b.HasIndex("AgentId")
                         .IsUnique()
@@ -5123,10 +5162,17 @@ namespace TrueCentralVms.Server.Migrations
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.IoModule", b =>
                 {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessDevice", "AccessDevice")
+                        .WithOne()
+                        .HasForeignKey("TrueCentralVms.Server.Data.Entities.IoModule", "AccessDeviceId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("TrueCentralVms.Server.Data.Entities.Location", null)
                         .WithMany()
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AccessDevice");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.IoPoint", b =>
@@ -5548,10 +5594,17 @@ namespace TrueCentralVms.Server.Migrations
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.Speaker", b =>
                 {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessDevice", "AccessDevice")
+                        .WithOne()
+                        .HasForeignKey("TrueCentralVms.Server.Data.Entities.Speaker", "AccessDeviceId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("TrueCentralVms.Server.Data.Entities.Location", null)
                         .WithMany()
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AccessDevice");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.SpeakerGroupMember", b =>

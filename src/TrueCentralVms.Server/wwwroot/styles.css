@@ -2999,3 +2999,9 @@ tr.pt-voided td:last-child, tr.pt-voided td:nth-last-child(2) { opacity: 1; }
 .pt-day:hover { border-color: var(--accent); }
 .pt-day.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .pt-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Partes de un terminal de acceso (cámara, altavoz, entradas y salidas): incluidas con el terminal. */
+.acd-parts { margin: 12px 0 8px; padding: 10px 12px 6px; border: 1px solid var(--border); border-radius: 8px; }
+.acd-parts-title { font-weight: 600; margin-bottom: 4px; }
+.acd-parts .checkbox-row { margin: 6px 0 0; }
+.acd-parts .acd-part-hint { margin: -2px 0 2px 26px; }

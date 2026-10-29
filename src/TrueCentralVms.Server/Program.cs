@@ -220,6 +220,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerService>())
 // de entradas y órdenes a los relés).
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Adam.AdamIoDriverFactory>();
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.ZkTeco.C3IoDriverFactory>();
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionIoDriverFactory>();
 builder.Services.AddSingleton<IoModuleDriverRegistry>();
 builder.Services.AddSingleton<IoModuleService>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Patrol.PatrolService>();

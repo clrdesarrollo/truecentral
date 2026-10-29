@@ -30,6 +30,7 @@ namespace TrueCentralVms.Server.Services;
 public sealed class IoModuleService(
     IServiceScopeFactory scopeFactory,
     IoModuleDriverRegistry drivers,
+    CredentialProtector credentials,
     ScopedHub hub,
     AuditService audit,
     ILogger<IoModuleService> logger) : SupervisedBackgroundService
@@ -101,7 +102,8 @@ public sealed class IoModuleService(
             state?.TimestampUtc ?? m.LastSeenAt,
             Enumerable.Range(0, inputCount).Select(n => Point(IoPointKind.Input, n, state?.Inputs)).ToList(),
             Enumerable.Range(0, outputCount).Select(n => Point(IoPointKind.Output, n, state?.Outputs)).ToList(),
-            m.CreatedAt, m.UpdatedAt, m.LocationId, Auth.LocationPaths.Of(m.LocationId), DisabledByLicense: m.DisabledByLicense);
+            m.CreatedAt, m.UpdatedAt, m.LocationId, Auth.LocationPaths.Of(m.LocationId), DisabledByLicense: m.DisabledByLicense,
+            AccessDeviceId: m.AccessDeviceId);
     }
 
     // ------------------------------------------------------------------
@@ -222,7 +224,9 @@ public sealed class IoModuleService(
         }
     }
 
-    private static string SignatureOf(IoModule m) => $"{m.DriverKey}|{m.Host}|{m.Port}|{m.Model}|{m.PollIntervalMs}";
+    // Las credenciales entran en la firma: si cambian (las del terminal), se reconecta.
+    private static string SignatureOf(IoModule m) =>
+        $"{m.DriverKey}|{m.Host}|{m.Port}|{m.Model}|{m.PollIntervalMs}|{m.UseHttps}|{m.Username}|{Convert.ToBase64String(m.PasswordCiphertext)}";
 
     private async Task ReconcileAsync(CancellationToken ct)
     {
@@ -253,6 +257,10 @@ public sealed class IoModuleService(
         }
     }
 
+    private IoConnectionInfo ConnectionOf(IoModule module) =>
+        new(module.Host, module.Port, module.Username,
+            module.PasswordCiphertext.Length == 0 ? "" : credentials.Unprotect(module.PasswordCiphertext), module.UseHttps);
+
     private async Task OpenAsync(IoModule module, string signature, CancellationToken ct)
     {
         string? problem = null;
@@ -262,7 +270,7 @@ public sealed class IoModuleService(
         else if (ModelOf(module.DriverKey, module.Model) is not { } model)
             problem = "No se sabe qué modelo es: pruebe la conexión o elíjalo a mano en el mantenedor.";
         else
-            session = factory.Create().Open(new IoConnectionInfo(module.Host, module.Port), model,
+            session = factory.Create().Open(ConnectionOf(module), model,
                 TimeSpan.FromMilliseconds(Math.Clamp(module.PollIntervalMs, MinPollMs, MaxPollMs)));
 
         if (session is null)
