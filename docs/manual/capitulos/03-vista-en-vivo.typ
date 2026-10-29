@@ -311,8 +311,12 @@ Al pie del cuadro hay una franja con:
 - la dirección que está mostrando.
 
 Sobre una página se puede soltar una cámara (la reemplaza) y usar
-#boton("Unir") como en cualquier cuadro. Abrir y cerrar una página queda en la
-bitácora de auditoría con su dirección y el tiempo que estuvo abierta.
+#boton("Unir") como en cualquier cuadro. La página sigue tal como estaba
+—donde navegó, lo que se escribió en ella, su desplazamiento— al moverla o
+intercambiarla con otro cuadro, al ampliar, unir o separar la grilla y al
+sacar la viñeta del Centro de mando a otra ventana: no se vuelve a cargar.
+Abrir y cerrar una página queda en la bitácora de auditoría con su dirección
+y el tiempo que estuvo abierta.
 
 #nota[Algunos sitios no se dejan mostrar dentro de otra aplicación.]
 
@@ -472,9 +476,11 @@ uno solo, para darle más espacio a una cámara.
 + Apriete el botón del mouse sobre un cuadro y arrástrelo hasta otro. Se
   dibuja un recuadro con lo que quedaría unido: todo el rectángulo entre los
   dos cuadros, con el aviso «Unir N cuadros».
-+ Suelte el botón: los cuadros del recuadro pasan a ser uno.
-+ Haga clic otra vez en #boton("Unir") o presione #tecla("Esc") para
-  terminar.
++ Suelte el botón: los cuadros del recuadro pasan a ser uno y
+  #boton("Unir") se apaga solo. Para unir otros cuadros, vuelva a encenderlo.
+
+Para salir sin unir nada, haga clic otra vez en #boton("Unir") o presione
+#tecla("Esc").
 
 #captura("cliente-vista-en-vivo-unir.png", ancho: 85%, pie: [Selección de cuatro cuadros para unirlos.])
 
@@ -491,8 +497,8 @@ nada.
 #captura("cliente-vista-en-vivo-unir-corta.png", ancho: 85%, pie: [La selección corta el cuadro grande: no se puede unir.])
 
 Para *separar* un cuadro unido, con #boton("Unir") encendido haga un clic en
-él, sin arrastrar: vuelve a dividirse en cuadros simples y la cámara queda en
-el de arriba a la izquierda.
+él, sin arrastrar: vuelve a dividirse en cuadros simples, la cámara queda en
+el de arriba a la izquierda y #boton("Unir") se apaga.
 
 Una grilla ampliada o con cuadros unidos se guarda en los tableros y en la
 última sesión como cualquier división; si coincide con una del selector
