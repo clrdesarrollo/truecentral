@@ -22,6 +22,15 @@ public sealed class InverseBoolToVisibility : IValueConverter
     public object ConvertBack(object value, Type t, object p, CultureInfo c) => throw new NotSupportedException();
 }
 
+/// <summary>Un número mayor que cero → Visible; cero → Collapsed (títulos de listas que pueden quedar vacías).</summary>
+public sealed class CountToVisibility : IValueConverter
+{
+    public static readonly CountToVisibility Instance = new();
+    public object Convert(object value, Type t, object p, CultureInfo c) =>
+        value is int n && n > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public object ConvertBack(object value, Type t, object p, CultureInfo c) => throw new NotSupportedException();
+}
+
 /// <summary>Visible si la sección activa coincide con el parámetro (conmutador de páginas).</summary>
 public sealed class SectionToVisibility : IValueConverter
 {

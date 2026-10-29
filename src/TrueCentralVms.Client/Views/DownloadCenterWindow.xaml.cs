@@ -1,5 +1,6 @@
 using System.Windows;
 using TrueCentralVms.Client.ViewModels;
+using TrueCentralVms.Client.Services;
 
 namespace TrueCentralVms.Client.Views;
 
@@ -13,6 +14,8 @@ public partial class DownloadCenterWindow : Window
     public DownloadCenterWindow(DownloadCenterViewModel downloads)
     {
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "downloads");
         DataContext = downloads;
     }
 

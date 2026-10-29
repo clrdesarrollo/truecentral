@@ -17,6 +17,8 @@ public partial class SettingsWindow : Window
     public SettingsWindow(ClientSettings settings, ApiClient? api = null)
     {
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "settings");
         _settings = settings;
         if (api is not null) _ = LoadLicenseAsync(api);
 
@@ -50,7 +52,7 @@ public partial class SettingsWindow : Window
         PaletteList.ItemsSource = _palettes;
 
         AutoLoginCheck.IsChecked = settings.AutoLogin;
-        AlertPlacementCheck.IsChecked = settings.AlertWindowRememberPlacement;
+        WindowPlacementCheck.IsChecked = settings.RememberWindowPlacement;
         AutoLoginAccountText.Text = settings.Username is { Length: > 0 } user
             ? $"Cuenta del inicio automático: {user} en {settings.ServerUrl}"
             : "";
@@ -203,7 +205,7 @@ public partial class SettingsWindow : Window
         // Apagar el inicio automático rige desde el próximo arranque del
         // cliente; la contraseña recordada se administra en el propio login.
         _settings.AutoLogin = AutoLoginCheck.IsChecked == true;
-        _settings.AlertWindowRememberPlacement = AlertPlacementCheck.IsChecked == true;
+        _settings.RememberWindowPlacement = WindowPlacementCheck.IsChecked == true;
         if (_joystick is { } joystick)
         {
             var config = _settings.JoystickFor(joystick.Id);

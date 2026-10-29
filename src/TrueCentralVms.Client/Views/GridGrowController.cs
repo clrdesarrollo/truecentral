@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using TrueCentralVms.Client.ViewModels;
 
 namespace TrueCentralVms.Client.Views;
@@ -31,8 +32,38 @@ internal sealed class GridGrowController(
     private VideoLayoutPanel? _panel;
     private GridEdge _edge = GridEdge.None;
     private int _slot = -1;
-    /// <summary>Borde cuyo aviso de tope ya se mostró (no repetirlo en cada DragOver).</summary>
-    private GridEdge _blockedShown = GridEdge.None;
+
+    /// <summary>Tiempo que el puntero tiene que quedarse en el borde para que
+    /// aparezca la franja (antes, el arrastre sigue siendo hacia el cuadro).</summary>
+    private static readonly TimeSpan DwellTime = TimeSpan.FromMilliseconds(1200);
+    /// <summary>Borde donde está esperando el puntero (None = en ninguno).</summary>
+    private GridEdge _pending = GridEdge.None;
+    private DispatcherTimer? _dwell;
+
+    private void StartDwell(GridEdge edge)
+    {
+        _pending = edge;
+        _dwell ??= new DispatcherTimer(DispatcherPriority.Input) { Interval = DwellTime };
+        _dwell.Stop();
+        _dwell.Tick -= OnDwellElapsed;
+        _dwell.Tick += OnDwellElapsed;
+        _dwell.Start();
+    }
+
+    /// <summary>El puntero se quedó en el borde: la franja aparece (o el aviso de tope, una vez).</summary>
+    private void OnDwellElapsed(object? sender, EventArgs e)
+    {
+        _dwell?.Stop();
+        if (_pending == GridEdge.None || _panel is not { IsVisible: true } panel) return;
+        if (blockedReason(_pending) is { } reason) showStatus(reason);
+        else Show(panel, _pending);
+    }
+
+    private void StopDwell()
+    {
+        _dwell?.Stop();
+        _pending = GridEdge.None;
+    }
 
     /// <summary>El panel de la grilla nace de la plantilla del ItemsControl.</summary>
     public void Attach(VideoLayoutPanel panel)
@@ -60,21 +91,29 @@ internal sealed class GridGrowController(
         if (_panel is not { IsVisible: true } panel || !IsChannelDrag(e)) return false;
         var point = panel.PointFromScreen(ScreenPoint(e, source));
         var edge = Detect(panel, point);
-        if (edge != GridEdge.None && blockedReason(edge) is { } reason)
-        {
-            if (_blockedShown != edge) showStatus(reason);
-            _blockedShown = edge;
-            edge = GridEdge.None;
-        }
-        else if (edge == GridEdge.None)
-            _blockedShown = GridEdge.None;
-
         if (edge == GridEdge.None)
         {
             Cancel();
             return false;
         }
-        if (edge != _edge) Show(panel, edge);
+        if (_edge == GridEdge.None)
+        {
+            // Pasar por el borde camino a un cuadro no abre nada: la franja
+            // aparece recién si el puntero se queda en el borde un momento.
+            if (_pending != edge) StartDwell(edge);
+            return false;
+        }
+        if (edge != _edge)
+        {
+            // Con la franja abierta, pasar a otro borde (una esquina) es inmediato.
+            if (blockedReason(edge) is { } reason)
+            {
+                showStatus(reason);
+                Cancel();
+                return false;
+            }
+            Show(panel, edge);
+        }
         int slot = SlotAt(panel, point);
         if (slot != _slot)
         {
@@ -152,6 +191,7 @@ internal sealed class GridGrowController(
     /// <summary>El arrastre salió del borde (o terminó sin soltar ahí): la franja se recoge.</summary>
     public void Cancel()
     {
+        StopDwell();
         if (_panel is not { } panel || _edge == GridEdge.None) return;
         _edge = GridEdge.None;
         _slot = -1;
@@ -166,7 +206,7 @@ internal sealed class GridGrowController(
     /// quedó fuera de toda la grilla, la franja se recoge.</summary>
     public void Leave(DragEventArgs e, Visual source)
     {
-        if (_edge == GridEdge.None) return;
+        if (_edge == GridEdge.None && _pending == GridEdge.None) return;
         var point = host.PointFromScreen(ScreenPoint(e, source));
         if (point.X < 0 || point.Y < 0 || point.X > host.ActualWidth || point.Y > host.ActualHeight)
             Cancel();
@@ -178,6 +218,8 @@ internal sealed class GridGrowController(
     /// </summary>
     public async Task<bool> TryDropAsync(DragEventArgs e, Func<GridEdge, int, ChannelNode, Task> grow)
     {
+        // Soltar sobre un cuadro mientras se esperaba en el borde: ya no hay franja que abrir.
+        StopDwell();
         if (_edge == GridEdge.None || _panel is not { } panel ||
             e.Data.GetData(typeof(ChannelNode)) is not ChannelNode node) return false;
         e.Handled = true;

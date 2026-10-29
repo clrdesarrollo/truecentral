@@ -140,6 +140,8 @@ function lvLayoutLabel(layout) { return layout.key.startsWith("m") ? `a medida $
 // caracteres por cada cuadro de más de una celda (columna, fila, ancho-1 y
 // alto-1 en 3 bits cada uno); las celdas libres son cuadros simples.
 // ---------------------------------------------------------------------------
+/** Tiempo que el puntero tiene que quedarse en el borde para que aparezca la franja. */
+const LV_GROW_DWELL_MS = 1200;
 const LV_GROW_MAX_COLUMNS = 8, LV_GROW_MAX_ROWS = 8, LV_GROW_MAX_CELLS = 64;
 const LV_CUSTOM_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const LV_MAX_BIG_CELLS = 14;
@@ -412,7 +414,7 @@ const lv = {
   selChannelId: null,
   dropCell: null,
   grow: null,              // franja nueva a la vista al arrastrar al borde: { edge, slot, el, slots }
-  growBlockedShown: null,  // borde cuyo aviso de tope ya se mostró
+  growPending: null,       // borde donde espera el puntero antes de abrir la franja: { edge, since, told }
   growWired: false,
   bulk: null,             // texto de la apertura masiva en curso
   views: [],
@@ -1531,7 +1533,7 @@ async function renderLiveView(fleet = false) {
           </div>
           <div class="lv-tb-center">
             <span class="lv-pop-anchor">
-              <button type="button" class="btn ghost lv-tb" id="lv-views-btn" title="Vistas guardadas: deje la grilla como la armó y vuelva a ella con un clic">${lvSvg(LV_ICO.views, 14)}<span>Vistas</span><b class="lv-active-view" id="lv-active-view"></b><span class="lv-caret-down">▾</span></button>
+              <button type="button" class="btn ghost lv-tb" id="lv-views-btn" title="Tableros: deje la grilla como la armó y vuelva a ella con un clic">${lvSvg(LV_ICO.views, 14)}<span>Tableros</span><b class="lv-active-view" id="lv-active-view"></b><span class="lv-caret-down">▾</span></button>
               <div class="lv-pop lv-views-pop" id="lv-views-pop" hidden></div>
             </span>
           </div>
@@ -1932,15 +1934,25 @@ function lvGrowEdgeAt(e) {
 /** Arrastre sobre la grilla: true si quedó (o sigue) la franja a la vista; el arrastre es de ella. */
 function lvGrowTrack(e) {
   if (!lvIsChannelDrag(e) || !lv.layout) return false;
-  let edge = lvGrowEdgeAt(e);
-  const blocked = edge && lvGrowBlocked(lv.layout, edge, lvGrowLimit());
-  if (blocked) {
-    if (lv.growBlockedShown !== edge) lvStatus(blocked, true);
-    lv.growBlockedShown = edge;
-    edge = null;
-  } else if (!edge) lv.growBlockedShown = null;
-  if (!edge) { lvGrowEnd(); return false; }
-  if (lv.grow?.edge !== edge) lvGrowShow(edge);
+  const edge = lvGrowEdgeAt(e);
+  if (!edge) { lv.growPending = null; lvGrowEnd(); return false; }
+  if (!lv.grow) {
+    // Pasar por el borde camino a un cuadro no abre nada: la franja aparece
+    // recién si el puntero se queda en el borde un momento (el navegador
+    // repite dragover mientras el puntero sigue encima).
+    if (lv.growPending?.edge !== edge) lv.growPending = { edge, since: performance.now(), told: false };
+    if (performance.now() - lv.growPending.since < LV_GROW_DWELL_MS) return false;
+  }
+  if (lv.grow?.edge !== edge) {
+    const blocked = lvGrowBlocked(lv.layout, edge, lvGrowLimit());
+    if (blocked) {
+      // El aviso de tope, una sola vez por espera en el borde.
+      if (lv.growPending && !lv.growPending.told) { lvStatus(blocked, true); lv.growPending.told = true; }
+      lvGrowEnd();
+      return false;
+    }
+    lvGrowShow(edge);
+  }
   const strip = lv.grow.el.getBoundingClientRect();
   const count = lv.grow.slots.length;
   const along = lvSideways(edge) ? (e.clientY - strip.top) / strip.height : (e.clientX - strip.left) / strip.width;
@@ -1993,6 +2005,7 @@ function lvGrowEnd() {
 
 /** Soltar con la franja abierta: se agrega la franja y la cámara abre en el cuadro marcado. */
 function lvGrowDrop(e) {
+  lv.growPending = null;
   if (!lv.grow) return false;
   e.preventDefault();
   const { edge } = lv.grow, slot = Math.max(lv.grow.slot, 0);
@@ -2215,9 +2228,9 @@ function lvWireGrid() {
   const wrap = $("#lv-gridwrap");
   wrap.addEventListener("dragover", (e) => { if (lvGrowTrack(e)) e.stopPropagation(); }, true);
   wrap.addEventListener("drop", (e) => { if (lvGrowDrop(e)) e.stopPropagation(); }, true);
-  wrap.addEventListener("dragleave", (e) => { if (!wrap.contains(e.relatedTarget)) lvGrowEnd(); });
+  wrap.addEventListener("dragleave", (e) => { if (!wrap.contains(e.relatedTarget)) { lv.growPending = null; lvGrowEnd(); } });
   // Arrastre terminado en cualquier lado (soltado fuera, Esc): la franja se recoge.
-  if (!lv.growWired) { document.addEventListener("dragend", () => lvGrowEnd()); lv.growWired = true; }
+  if (!lv.growWired) { document.addEventListener("dragend", () => { lv.growPending = null; lvGrowEnd(); }); lv.growWired = true; }
 
   // Arrastre de un cuadro sobre otro.
   grid.addEventListener("dragstart", (e) => {
@@ -2720,7 +2733,9 @@ function lvOnConfigChanged(topic) {
 }
 
 // ---------------------------------------------------------------------------
-// Vistas guardadas (las mismas del cliente de escritorio: viven en el servidor)
+// Tableros (los mismos del cliente de escritorio: viven en el servidor). El
+// panel web muestra sus cámaras; los recursos, tarjetas y páginas web de un
+// tablero se ven en el cliente de escritorio.
 // ---------------------------------------------------------------------------
 function lvRenderViewsButton() {
   const el = $("#lv-active-view");
@@ -2730,16 +2745,17 @@ function lvRenderViewsButton() {
 async function lvRenderViewsPop() {
   const pop = $("#lv-views-pop");
   const canSave = Perms.can("live.views");
+  const canShare = Perms.can("dashboards.manage");
   pop.innerHTML = `
-    <div class="lv-pop-title">VISTAS GUARDADAS</div>
+    <div class="lv-pop-title">TABLEROS</div>
     <div class="lv-views-list" id="lv-views-list"><div class="muted lv-small">Cargando…</div></div>
     ${canSave ? `
     <hr>
     <div class="lv-views-save">
-      <input type="text" id="lv-view-name" maxlength="80" placeholder="Nombre de la vista…">
+      <input type="text" id="lv-view-name" maxlength="80" placeholder="Nombre del tablero…">
       <button type="button" class="btn small" id="lv-view-save" title="Guarda la división y las cámaras que hay ahora en la grilla">Guardar</button>
     </div>
-    <label class="lv-set-check"><input type="checkbox" id="lv-view-shared"><span>Compartir con todos los puestos</span></label>` : ""}
+    ${canShare ? `<label class="lv-set-check"><input type="checkbox" id="lv-view-shared"><span>Compartir con todos (los roles se eligen en Configuración → Tableros)</span></label>` : ""}` : ""}
     <div class="muted lv-small" id="lv-views-msg"></div>`;
   $("#lv-view-save")?.addEventListener("click", lvSaveView);
   $("#lv-view-name")?.addEventListener("keydown", (e) => { if (e.key === "Enter") lvSaveView(); });
@@ -2748,30 +2764,35 @@ async function lvRenderViewsPop() {
   lvRenderViewsList();
 }
 
+/** Cuadros de cámara del tablero (los demás solo los muestra el cliente de escritorio). */
+const lvViewCameras = (v) => v.items.filter((i) => !i.kind || i.kind === "camera");
+
 function lvViewDetail(v) {
   const found = lvFindLayout(v.layoutName);
   const layout = found ? lvLayoutLabel(found) : v.layoutName;
-  const owner = v.shared ? ` · compartida${v.owner && v.owner !== Api.username ? ` por ${v.owner}` : ""}` : "";
-  return `${v.items.length} cámara(s) · división ${layout}${owner}`;
+  const cameras = lvViewCameras(v).length, others = v.items.length - cameras;
+  const owner = !v.shared ? "" : v.roles?.length ? ` · para ${v.roles.join(", ")}`
+    : ` · compartido${v.owner && v.owner !== Api.username ? ` por ${v.owner}` : ""}`;
+  return `${cameras} cámara(s)${others ? ` + ${others} cuadro(s) del cliente` : ""} · división ${layout}${owner}`;
 }
 
-/** Vistas de este árbol: las de Flota tienen cámaras de vehículos y las de la vista en vivo, de equipos fijos. */
-function lvViewsHere() { return lv.views.filter((v) => v.items.some((i) => lv.channels.has(i.channelId))); }
+/** Tableros de este árbol: los de Flota tienen cámaras de vehículos y los de la vista en vivo, de equipos fijos. */
+function lvViewsHere() { return lv.views.filter((v) => lvViewCameras(v).some((i) => lv.channels.has(i.channelId))); }
 
 function lvRenderViewsList() {
   const list = $("#lv-views-list");
   if (!list) return;
   const views = lvViewsHere();
   if (!views.length) {
-    list.innerHTML = `<div class="muted lv-small">Todavía no hay vistas. Arme la grilla y guárdela con un nombre.</div>`;
+    list.innerHTML = `<div class="muted lv-small">Todavía no hay tableros con cámaras. Arme la grilla y guárdela con un nombre.</div>`;
     return;
   }
   list.innerHTML = views.map((v) => `
-    <div class="lv-view-row" data-view="${v.id}" title="Cargar esta vista en la grilla">
+    <div class="lv-view-row" data-view="${v.id}" title="Cargar este tablero en la grilla">
       <div class="lv-view-text"><b>${esc(v.name)}</b><span class="muted">${esc(lvViewDetail(v))}</span></div>
       ${v.canEdit ? `<span class="lv-view-actions">
-        <button type="button" class="lv-icon-btn" data-vact="update" title="Actualizar esta vista con la grilla actual">${lvSvg(LV_ICO.edit, 13)}</button>
-        <button type="button" class="lv-icon-btn danger" data-vact="delete" title="Eliminar esta vista">${lvSvg(LV_ICO.trash, 13)}</button>
+        <button type="button" class="lv-icon-btn" data-vact="update" title="Actualizar este tablero con la grilla actual">${lvSvg(LV_ICO.edit, 13)}</button>
+        <button type="button" class="lv-icon-btn danger" data-vact="delete" title="Eliminar este tablero">${lvSvg(LV_ICO.trash, 13)}</button>
       </span>` : ""}
     </div>`).join("");
   $$("#lv-views-list .lv-view-row").forEach((row) => row.addEventListener("click", (e) => {
@@ -2787,7 +2808,8 @@ function lvRenderViewsList() {
 function lvViewRequest(name, shared) {
   return {
     name, layoutName: lv.layout.key, columns: lv.layout.columns, rows: lv.layout.rows, shared,
-    items: lv.cells.map((c, i) => (c.feed ? { cellIndex: i, channelId: c.feed.channel.id, streamType: c.feed.profile === "Main" ? 0 : 1 } : null)).filter(Boolean),
+    items: lv.cells.map((c, i) => (c.feed ? { cellIndex: i, channelId: c.feed.channel.id, streamType: c.feed.profile === "Main" ? 0 : 1, kind: "camera" } : null)).filter(Boolean),
+    roleIds: lv.views.find((v) => v.name === name && v.shared === shared)?.roleIds ?? null,
   };
 }
 
@@ -2798,8 +2820,8 @@ function lvViewsMsg(text, isError) {
 
 async function lvSaveView() {
   const name = $("#lv-view-name").value.trim();
-  if (!name) { lvViewsMsg("Escriba un nombre para la vista.", true); return; }
-  const req = lvViewRequest(name, $("#lv-view-shared").checked);
+  if (!name) { lvViewsMsg("Escriba un nombre para el tablero.", true); return; }
+  const req = lvViewRequest(name, !!$("#lv-view-shared")?.checked);
   if (!req.items.length) { lvViewsMsg("La grilla está vacía: abra al menos una cámara antes de guardar.", true); return; }
   try {
     const saved = await Api.post("/api/live-views", req);
@@ -2808,30 +2830,35 @@ async function lvSaveView() {
     lvRenderViewsButton();
     $("#lv-view-name").value = "";
     lvRenderViewsList();
-    lvViewsMsg(`Vista "${saved.name}" guardada.`);
+    lvViewsMsg(`Tablero "${saved.name}" guardado.`);
   } catch (err) { lvViewsMsg(err.error, true); }
 }
 
 async function lvUpdateView(v) {
+  // Los recursos, tarjetas y páginas web del tablero no se ven aquí: reemplazarlo los borraría.
+  if (v.items.length > lvViewCameras(v).length) {
+    lvViewsMsg(`"${v.name}" tiene cuadros que el panel web no muestra (recursos, tarjetas o páginas web): actualícelo desde el cliente de escritorio${v.shared ? " o en Configuración → Tableros" : ""}.`, true);
+    return;
+  }
   const req = lvViewRequest(v.name, v.shared);
-  if (!req.items.length) { lvViewsMsg("La grilla está vacía: no hay nada que guardar en la vista.", true); return; }
-  if (!confirm(`¿Reemplazar la vista "${v.name}" con la grilla actual (${req.items.length} cámara(s), división ${lv.layout.key})?`)) return;
+  if (!req.items.length) { lvViewsMsg("La grilla está vacía: no hay nada que guardar en el tablero.", true); return; }
+  if (!confirm(`¿Reemplazar el tablero "${v.name}" con la grilla actual (${req.items.length} cámara(s), división ${lv.layout.key})?`)) return;
   try {
     const saved = await Api.put(`/api/live-views/${v.id}`, req);
     lv.views = lv.views.map((x) => (x.id === saved.id ? saved : x));
     lvRenderViewsList();
-    lvViewsMsg(`Vista "${saved.name}" actualizada.`);
+    lvViewsMsg(`Tablero "${saved.name}" actualizado.`);
   } catch (err) { lvViewsMsg(err.error, true); }
 }
 
 async function lvDeleteView(v) {
-  if (!confirm(`¿Eliminar la vista "${v.name}"?${v.shared ? " Está compartida: desaparece para todos los puestos." : ""}`)) return;
+  if (!confirm(`¿Eliminar el tablero "${v.name}"?${v.shared ? " Está compartido: desaparece para todos los puestos." : ""}`)) return;
   try {
     await Api.delete(`/api/live-views/${v.id}`);
     lv.views = lv.views.filter((x) => x.id !== v.id);
     if (lv.activeView === v.name) { lv.activeView = ""; lvRenderViewsButton(); }
     lvRenderViewsList();
-    lvViewsMsg(`Vista "${v.name}" eliminada.`);
+    lvViewsMsg(`Tablero "${v.name}" eliminado.`);
   } catch (err) { lvViewsMsg(err.error, true); }
 }
 
@@ -2840,7 +2867,8 @@ async function lvApplyView(v) {
   let view = v;
   try { view = await Api.post(`/api/live-views/${v.id}/apply`); } // la versión vigente + bitácora
   catch (err) { lvStatus(err.error, true); return; }
-  const fit = lvFitSavedItems(lvRestoreLayout(view.layoutName, view.columns, view.rows), view.items);
+  const cameras = lvViewCameras(view), others = view.items.length - cameras.length;
+  const fit = lvFitSavedItems(lvRestoreLayout(view.layoutName, view.columns, view.rows), cameras);
   lvApplyLayout(fit.layout);
   if (lvFindLayout(fit.layout.key)) { lv.prefs.layout = fit.layout.key; lvSavePrefs(); }
   lv.cells.forEach((c) => c.clear());
@@ -2858,10 +2886,11 @@ async function lvApplyView(v) {
   await lvOpenMany(view.name, items);
   const notes = [];
   if (fit.compacted)
-    notes.push(`es de ${view.items.length} cámara(s) en división ${view.layoutName}; el panel web muestra hasta ${LV_MAX_CELLS} cuadros ` +
-      `(la vista completa, en el cliente de escritorio)`);
+    notes.push(`es de ${cameras.length} cámara(s) en división ${view.layoutName}; el panel web muestra hasta ${LV_MAX_CELLS} cuadros ` +
+      `(el tablero completo, en el cliente de escritorio)`);
   if (missing) notes.push(`${missing} cámara(s) ya no están disponibles y se omitieron`);
-  if (notes.length) lvStatus(`Vista "${view.name}": ${notes.join("; ")}.`, true);
+  if (others) notes.push(`${others} cuadro(s) con recursos, tarjetas o páginas web se ven solo en el cliente de escritorio`);
+  if (notes.length) lvStatus(`Tablero "${view.name}": ${notes.join("; ")}.`, true);
 }
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
 
     /// <summary>El cuadro cambió de canal (o quedó libre): el shell actualiza
     /// la marca de "en vivo" del árbol.</summary>
+    /// <summary>Cambió lo que muestra el cuadro (una cámara, o un recurso, tarjeta o página web).</summary>
     public event Action? AssignedChannelChanged;
 
     /// <summary>Se guardó un archivo local (título, glifo MDL2, ruta completa):
@@ -83,7 +84,37 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
 
     [ObservableProperty] private string? _title;
     [ObservableProperty] private string _status = "";
-    [ObservableProperty] private bool _isEmpty = true;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasVideo))]
+    private bool _isEmpty = true;
+
+    /// <summary>
+    /// Contenido del cuadro que no es video (puerta, panel de alarma, cerco,
+    /// tarjeta, página web…); null = cuadro de cámara. Ver <see cref="CellPanel"/>.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasVideo))]
+    [NotifyPropertyChangedFor(nameof(HasPanel))]
+    private CellPanel? _panel;
+
+    /// <summary>El cuadro muestra video: el host de Flyleaf y los botones de video de la barra.</summary>
+    public bool HasVideo => !IsEmpty && Panel is null;
+
+    public bool HasPanel => Panel is not null;
+
+    /// <summary>
+    /// Pone un contenido que no es video en el cuadro: lo que hubiera (cámara u
+    /// otro panel) se cierra antes.
+    /// </summary>
+    public async Task ShowPanelAsync(CellPanel panel)
+    {
+        Clear();
+        Panel = panel;
+        Title = panel.Title;
+        IsEmpty = false;
+        try { await panel.LoadAsync(); }
+        catch (Exception ex) { panel.Status = ex.Message; }
+    }
 
     /// <summary>Selección de «Unir cuadros» en curso: 0 fuera, 1 se une, 2 la
     /// selección corta este cuadro (no se puede unir). El borde lo muestra.</summary>
@@ -203,6 +234,12 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     /// <summary>Abre un canal en esta celda (perfil main/sub según el tamaño de la grilla).</summary>
     public async Task OpenAsync(ChannelNode node, StreamProfile profile)
     {
+        // Una cámara reemplaza lo que el cuadro mostraba (página, puerta, tarjeta…).
+        if (Panel is { } previous)
+        {
+            Panel = null;
+            previous.Dispose();
+        }
         int sequence = ++_openSequence;
         StopClipRecording(notify: true);
         ResetDigitalZoom();
@@ -669,7 +706,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     }
 
     /// <summary>Un cuadro vacío no tiene nada que acercar.</summary>
-    public bool CanDigitalZoom => !IsEmpty;
+    public bool CanDigitalZoom => HasVideo;
 
     /// <summary>Acerca el área marcada con el mouse (píxeles físicos de la ventana de video).</summary>
     public void DigitalZoomToArea(System.Windows.Rect areaPx)
@@ -775,6 +812,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         (a._grantSource, b._grantSource) = (b._grantSource, a._grantSource);
         (a.AssignedChannel, b.AssignedChannel) = (b.AssignedChannel, a.AssignedChannel);
         (a.Title, b.Title) = (b.Title, a.Title);
+        (a.Panel, b.Panel) = (b.Panel, a.Panel);
         (a.Status, b.Status) = (b.Status, a.Status);
         (a.Profile, b.Profile) = (b.Profile, a.Profile);
         (a.IsConnecting, b.IsConnecting) = (b.IsConnecting, a.IsConnecting);
@@ -808,6 +846,18 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     }
 
     partial void OnAssignedChannelChanged(ChannelNode? value) => AssignedChannelChanged?.Invoke();
+    partial void OnPanelChanged(CellPanel? oldValue, CellPanel? newValue)
+    {
+        if (oldValue is not null) oldValue.PropertyChanged -= OnPanelPropertyChanged;
+        if (newValue is not null) newValue.PropertyChanged += OnPanelPropertyChanged;
+        AssignedChannelChanged?.Invoke();
+    }
+
+    /// <summary>Cambió lo que se guarda del panel (el zoom de una página): se guarda la sesión.</summary>
+    private void OnPanelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(CellPanel.Content)) AssignedChannelChanged?.Invoke();
+    }
 
     [RelayCommand]
     private void ToggleAudio() => IsAudioOn = !IsAudioOn;
@@ -832,6 +882,8 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         AssignedChannel = null;
         IsAudioOn = false;
         Player?.Stop();
+        Panel?.Dispose();
+        Panel = null;
         Title = null;
         Status = "";
         IsConnecting = false;
@@ -848,6 +900,8 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         _grantSource = null;
         AssignedChannel = null; // el árbol deja de marcarlo en vivo
         ReleaseParked();
+        Panel?.Dispose();
+        Panel = null;
         Player?.Dispose();
     }
 }

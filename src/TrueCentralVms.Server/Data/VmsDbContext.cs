@@ -51,6 +51,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
 
     // Parlantes IP
     public DbSet<Speaker> Speakers => Set<Speaker>();
+    public DbSet<SpeakerGroup> SpeakerGroups => Set<SpeakerGroup>();
+    public DbSet<SpeakerGroupMember> SpeakerGroupMembers => Set<SpeakerGroupMember>();
 
     // Módulos de entradas y salidas (relés de barreras, portones, balizas)
     public DbSet<IoModule> IoModules => Set<IoModule>();
@@ -121,6 +123,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     // Vistas guardadas del monitoreo en vivo (Custom View de iVMS-4200)
     public DbSet<LiveView> LiveViews => Set<LiveView>();
     public DbSet<LiveViewItem> LiveViewItems => Set<LiveViewItem>();
+    public DbSet<LiveViewRole> LiveViewRoles => Set<LiveViewRole>();
+    public DbSet<WebLink> WebLinks => Set<WebLink>();
 
     // Ubicaciones: el árbol lógico de Recursos (cada recurso apunta a una)
     public DbSet<Location> Locations => Set<Location>();
@@ -266,6 +270,11 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(d => d.IsupDeviceId).HasMaxLength(32);
             // Equipos por ISUP: no tienen IP; los identifica su ID ISUP, único por tipo de equipo.
             e.HasIndex(d => d.IsupDeviceId).IsUnique().HasFilter("\"IsupDeviceId\" IS NOT NULL");
+            e.Property(d => d.PartsNote).HasMaxLength(256);
+            // Cámara de un terminal de acceso: una por terminal, y se va con él (sus canales también).
+            e.HasOne(d => d.AccessDevice).WithOne()
+                .HasForeignKey<Device>(d => d.AccessDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Vehículos de la flota: un grabador por vehículo; borrar el vehículo borra su grabador (y este, sus canales).
@@ -379,11 +388,18 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         // -------------------------------------------------------------------
         modelBuilder.Entity<Speaker>(e =>
         {
+            // Altavoz de un terminal de acceso o de un equipo de video: uno por equipo, y se va con él.
+            e.HasOne(s => s.AccessDevice).WithOne()
+                .HasForeignKey<Speaker>(s => s.AccessDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(s => s.Device).WithOne()
+                .HasForeignKey<Speaker>(s => s.DeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Ignore(s => s.IsPart);
             e.Property(s => s.Name).HasMaxLength(128);
             e.Property(s => s.DriverKey).HasMaxLength(32);
             e.Property(s => s.Host).HasMaxLength(255);
             e.Property(s => s.Username).HasMaxLength(64);
-            e.Property(s => s.GroupName).HasMaxLength(64);
             e.Property(s => s.Model).HasMaxLength(64);
             e.Property(s => s.SerialNumber).HasMaxLength(64);
             e.Property(s => s.FirmwareVersion).HasMaxLength(64);
@@ -403,6 +419,21 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.HasIndex(s => s.EnrollmentCodeHash).HasFilter("\"EnrollmentCodeHash\" IS NOT NULL");
         });
 
+        modelBuilder.Entity<SpeakerGroup>(e =>
+        {
+            e.Property(g => g.Name).HasMaxLength(64);
+            e.Property(g => g.Description).HasMaxLength(255);
+            e.HasIndex(g => g.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<SpeakerGroupMember>(e =>
+        {
+            e.HasKey(m => new { m.SpeakerGroupId, m.SpeakerId });
+            e.HasOne(m => m.Group).WithMany(g => g.Members).HasForeignKey(m => m.SpeakerGroupId).OnDelete(DeleteBehavior.Cascade);
+            // Borrar un parlante lo saca de sus grupos.
+            e.HasOne(m => m.Speaker).WithMany(s => s.GroupMemberships).HasForeignKey(m => m.SpeakerId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         // Módulos de entradas y salidas: una fila por módulo y una por cada
         // entrada o salida con su nombre (se van con el módulo).
         modelBuilder.Entity<IoModule>(e =>
@@ -416,6 +447,15 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(m => m.LastError).HasMaxLength(512);
             e.Property(m => m.Status).HasConversion<string>().HasMaxLength(16);
             e.HasIndex(m => new { m.Host, m.Port }).IsUnique();
+            e.Property(m => m.Username).HasMaxLength(64);
+            // Entradas y salidas de un terminal de acceso o de un equipo de video: un módulo por equipo, y se va con él.
+            e.HasOne(m => m.AccessDevice).WithOne()
+                .HasForeignKey<IoModule>(m => m.AccessDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(m => m.Device).WithOne()
+                .HasForeignKey<IoModule>(m => m.DeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Ignore(m => m.IsPart);
             e.HasMany(m => m.Points).WithOne(p => p.IoModule)
                 .HasForeignKey(p => p.IoModuleId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -619,6 +659,7 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(a => a.FirmwareVersion).HasMaxLength(64);
             e.Property(a => a.MacAddress).HasMaxLength(32);
             e.Property(a => a.LastError).HasMaxLength(512);
+            e.Property(a => a.PartsNote).HasMaxLength(256);
             e.Property(a => a.Kind).HasConversion<string>().HasMaxLength(16);
             e.Property(a => a.Status).HasConversion<string>().HasMaxLength(16);
             e.HasIndex(a => new { a.Host, a.Port }).IsUnique().HasFilter("\"IsupDeviceId\" IS NULL");
@@ -1204,13 +1245,34 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
                 .WithMany(v => v.Items)
                 .HasForeignKey(i => i.LiveViewId)
                 .OnDelete(DeleteBehavior.Cascade);
-            // Un cuadro sin canal no tiene sentido: si el canal desaparece del
-            // inventario, el cuadro se va con él y la vista abre con ese hueco.
+            // Si el canal desaparece del inventario, su cuadro se va con él y el
+            // tablero abre con ese hueco (los cuadros que no son cámara no tienen canal).
             e.HasOne(i => i.Channel)
                 .WithMany()
                 .HasForeignKey(i => i.ChannelId)
                 .OnDelete(DeleteBehavior.Cascade);
+            e.Property(i => i.Kind).HasMaxLength(16).HasDefaultValue("camera");
+            e.Property(i => i.Ref).HasMaxLength(2048);
+            e.Property(i => i.Title).HasMaxLength(128);
             e.HasIndex(i => new { i.LiveViewId, i.CellIndex }).IsUnique();
+        });
+
+        modelBuilder.Entity<LiveViewRole>(e =>
+        {
+            e.ToTable("LiveViewRoles");
+            e.HasKey(r => new { r.LiveViewId, r.RoleId });
+            e.HasOne<LiveView>().WithMany(v => v.Roles).HasForeignKey(r => r.LiveViewId).OnDelete(DeleteBehavior.Cascade);
+            // Borrar un rol lo saca de los tableros; si era el único, el tablero
+            // queda visible solo para quien administra los tableros (RestrictToRoles).
+            e.HasOne<Role>().WithMany().HasForeignKey(r => r.RoleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WebLink>(e =>
+        {
+            e.Property(l => l.Name).HasMaxLength(128);
+            e.Property(l => l.Url).HasMaxLength(2048);
+            e.Property(l => l.Description).HasMaxLength(500);
+            e.HasIndex(l => l.Name).IsUnique();
         });
 
         // -------------------------------------------------------------------

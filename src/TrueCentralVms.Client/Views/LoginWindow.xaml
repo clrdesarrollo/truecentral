@@ -37,6 +37,34 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- Flecha dentro de un campo que despliega sus valores recientes
+             (servidores, usuarios). Sin el aspecto claro de Windows al marcarse. -->
+        <Style x:Key="RecentToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Width" Value="26"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="Margin" Value="0,1,1,1"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="Transparent">
+                            <TextBlock Text="▾" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
     <!-- Ventana transparente: solo se ve la tarjeta redondeada (sin el
          cuadrado de fondo). Sin marco de Windows, se arrastra desde cualquier
@@ -97,9 +125,43 @@
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Column="0" Text="Dirección (IP o nombre)" Style="{StaticResource FieldLabel}"/>
                         <TextBlock Grid.Column="2" Text="Puerto" Style="{StaticResource FieldLabel}"/>
-                        <TextBox x:Name="HostBox" Grid.Row="1" Grid.Column="0" Style="{StaticResource DarkTextBox}"
-                                 TextChanged="OnServerPartChanged"
-                                 ToolTip="IP o nombre del servidor; también puede pegar la dirección completa (https://…)"/>
+                        <Grid Grid.Row="1" Grid.Column="0">
+                            <TextBox x:Name="HostBox" Style="{StaticResource DarkTextBox}" Padding="8,7,34,7"
+                                     TextChanged="OnServerPartChanged"
+                                     ToolTip="IP o nombre del servidor; también puede pegar la dirección completa (https://…)"/>
+                            <!-- Despliega los últimos servidores en que se ha ingresado -->
+                            <ToggleButton x:Name="ServersToggle" Style="{StaticResource RecentToggleStyle}"
+                                          ToolTip="Servidores recientes"/>
+                            <Popup x:Name="ServersPopup" PlacementTarget="{Binding ElementName=HostBox}" Placement="Bottom"
+                                   IsOpen="{Binding IsChecked, ElementName=ServersToggle}" StaysOpen="False"
+                                   AllowsTransparency="True" Width="{Binding ActualWidth, ElementName=HostBox}">
+                                <Border Background="{StaticResource Panel2Brush}" BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="1" CornerRadius="6" Margin="0,2,0,0">
+                                    <ItemsControl x:Name="ServersList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel>
+                                                    <!-- Quitar el servidor de la lista -->
+                                                    <Button DockPanel.Dock="Right" Content="🗑" FontSize="11" Width="30"
+                                                            Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                            Foreground="{StaticResource MutedBrush}"
+                                                            ToolTip="Quitar de la lista (las cuentas recordadas se conservan)"
+                                                            Click="OnDeleteServer" Tag="{Binding}"/>
+                                                    <Button Click="OnPickServer" Tag="{Binding}"
+                                                            Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                            HorizontalContentAlignment="Left" Padding="10,7">
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding HostLabel}" Foreground="{StaticResource TextBrush}" FontSize="12.5"/>
+                                                            <TextBlock Text="{Binding DetailLabel}" Foreground="{StaticResource MutedBrush}" FontSize="10.5"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Border>
+                            </Popup>
+                        </Grid>
                         <TextBox x:Name="PortBox" Grid.Row="1" Grid.Column="2" Style="{StaticResource DarkTextBox}"
                                  TextChanged="OnServerPartChanged" MaxLength="5"
                                  ToolTip="Puerto del servidor (por defecto 443)"/>
@@ -114,9 +176,7 @@
             <Grid Margin="0,0,0,12">
                 <TextBox x:Name="UserBox" Style="{StaticResource DarkTextBox}" Padding="8,7,34,7"/>
                 <!-- Despliega los últimos usuarios que han iniciado sesión -->
-                <ToggleButton x:Name="UsersToggle" Width="26" HorizontalAlignment="Right" Margin="0,1,1,1"
-                              Background="Transparent" BorderThickness="0" Cursor="Hand"
-                              Foreground="{StaticResource MutedBrush}" Content="▾"
+                <ToggleButton x:Name="UsersToggle" Style="{StaticResource RecentToggleStyle}"
                               ToolTip="Usuarios recientes"/>
                 <Popup x:Name="UsersPopup" PlacementTarget="{Binding ElementName=UserBox}" Placement="Bottom"
                        IsOpen="{Binding IsChecked, ElementName=UsersToggle}" StaysOpen="False"

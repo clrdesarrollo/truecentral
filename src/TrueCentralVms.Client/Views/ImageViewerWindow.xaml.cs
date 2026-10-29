@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
+using TrueCentralVms.Client.Services;
 
 namespace TrueCentralVms.Client.Views;
 
@@ -32,6 +33,8 @@ public partial class ImageViewerWindow : Window
         _captions = captions;
         _index = Math.Clamp(start, 0, Math.Max(0, images.Count - 1));
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "image-viewer");
         if (owner is not null && owner.IsLoaded)
         {
             try { Owner = owner; } catch (InvalidOperationException) { /* sin dueño */ }

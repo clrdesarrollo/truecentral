@@ -1,7 +1,10 @@
 namespace TrueCentralVms.Core.Drivers;
 
-/// <summary>Datos de conexión a un módulo de entradas y salidas digitales.</summary>
-public sealed record IoConnectionInfo(string Host, int Port);
+/// <summary>
+/// Datos de conexión a un módulo de entradas y salidas digitales. Usuario y
+/// clave solo para los drivers que los piden (ISAPI); Modbus no tiene.
+/// </summary>
+public sealed record IoConnectionInfo(string Host, int Port, string Username = "", string Password = "", bool UseHttps = false);
 
 /// <summary>
 /// Modelo de módulo que conoce un driver: cuántas entradas y salidas tiene.
@@ -119,6 +122,12 @@ public interface IIoModuleDriverFactory
     string DisplayName { get; }
 
     int DefaultPort { get; }
+
+    /// <summary>
+    /// Solo lo usa el servidor para las partes de otros equipos (las entradas y
+    /// salidas de un terminal de acceso): no se ofrece al agregar un módulo.
+    /// </summary>
+    bool Internal => false;
 
     IIoModuleDriver Create();
 }

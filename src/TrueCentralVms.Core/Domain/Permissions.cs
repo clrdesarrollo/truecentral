@@ -14,6 +14,8 @@ public static class Permissions
     public const string LiveView = "live.view";
     public const string LivePtz = "live.ptz";
     public const string LiveViewsManage = "live.views";
+    public const string DashboardsManage = "dashboards.manage";
+    public const string DashboardsWebUrl = "dashboards.weburl";
     public const string PlaybackView = "playback.view";
     public const string PlaybackExport = "playback.export";
     public const string WallOperate = "wall.operate";
@@ -94,8 +96,14 @@ public static class Permissions
             "Abrir cámaras en vivo y sus imágenes instantáneas.", []),
         new(LivePtz, "Video", "Mover cámaras PTZ",
             "Mover, acercar y llamar posiciones guardadas de las cámaras PTZ.", [LiveView]),
-        new(LiveViewsManage, "Video", "Guardar vistas",
-            "Crear, modificar y borrar vistas (grupos de cámaras con su distribución).", [LiveView]),
+        new(LiveViewsManage, "Video", "Crear tableros propios",
+            "Guardar, modificar y borrar sus propios tableros del Centro de mando. Quitarlo deja al usuario " +
+            "solo con los tableros compartidos (no puede armar ni cambiar los suyos).", [LiveView]),
+        new(DashboardsManage, "Video", "Administrar tableros compartidos",
+            "Crear, modificar y borrar los tableros que ven todos o ciertos roles, y la lista de páginas web " +
+            "que se pueden poner en un cuadro.", [LiveView, LiveViewsManage]),
+        new(DashboardsWebUrl, "Video", "Abrir cualquier página web",
+            "Poner en un cuadro una dirección web escrita a mano, no solo las de la lista del servidor.", [LiveView]),
         new(PlaybackView, "Video", "Ver grabaciones",
             "Buscar y reproducir video grabado.", []),
         new(PlaybackExport, "Video", "Exportar grabaciones",
@@ -159,7 +167,7 @@ public static class Permissions
         new(DevicesManage, "Configuración", "Fuentes de video",
             "Agregar y configurar cámaras, grabadores, decodificadores y muros; buscar equipos en la red.", []),
         new(FleetManage, "Configuración", "Vehículos de flota",
-            "Agregar, importar y configurar vehículos y sus grabadores móviles.", [FleetView]),
+            "Agregar, importar y configurar vehículos y sus grabadores móviles, y los ajustes del mapa de flota (mapa base, posición inicial y retención de posiciones).", [FleetView]),
         new(AccessConfigure, "Configuración", "Equipos de acceso",
             "Agregar y configurar terminales y puertas, y sincronizarlos.", []),
         new(AlarmsConfigure, "Configuración", "Paneles de alarma",

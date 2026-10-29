@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -21,6 +22,24 @@ public sealed class SavedAccount
     public DateTime LastLoginUtc { get; set; }
 
     public string DisplayLabel => $"{Username} — {ServerUrl.Replace("http://", "").Replace("https://", "")}";
+}
+
+/// <summary>
+/// Servidor en que se ingresó desde este equipo: se ofrece en la lista del
+/// campo Dirección del ingreso. Va aparte de las cuentas para que quitar una
+/// credencial no olvide el servidor (ni al revés). La URL lleva el protocolo
+/// detectado al ingresar.
+/// </summary>
+public sealed class SavedServer
+{
+    public string Url { get; set; } = "";
+    public DateTime LastLoginUtc { get; set; }
+
+    [JsonIgnore]
+    public string HostLabel => ClientSettings.TryParseServerUrl(Url, out var uri) ? uri.Host : Url;
+
+    [JsonIgnore]
+    public string DetailLabel => ClientSettings.TryParseServerUrl(Url, out var uri) ? $"Puerto {uri.Port} · {uri.Scheme}" : "";
 }
 
 /// <summary>
@@ -54,12 +73,22 @@ public class LiveSessionGrid
     public List<LiveSessionCell> Cells { get; set; } = [];
 }
 
-/// <summary>Un cuadro con cámara: posición (0..n-1), id del canal y stream (0 principal, 1 secundario).</summary>
+/// <summary>
+/// Un cuadro: posición (0..n-1) y, si es una cámara, id del canal y stream (0
+/// principal, 1 secundario). Si no (Kind con valor), lo que muestra en el
+/// formato de los tableros: recurso, tarjeta o página web.
+/// </summary>
 public sealed class LiveSessionCell
 {
     public int Index { get; set; }
     public int ChannelId { get; set; }
     public int Profile { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Kind { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? RefId { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Ref { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Title { get; set; }
+    /// <summary>Zoom de una página web en porcentaje (null = 100 %).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? Zoom { get; set; }
 }
 
 /// <summary>Una pantalla auxiliar: su grilla y dónde estaba su ventana.</summary>
@@ -104,6 +133,7 @@ public sealed class JoystickConfig
 public sealed class ClientSettings
 {
     private const int MaxAccounts = 8;
+    private const int MaxServers = 8;
 
     public string ServerUrl { get; set; } = "https://localhost";
     public string Username { get; set; } = "";
@@ -114,6 +144,12 @@ public sealed class ClientSettings
     public string? LastLayout { get; set; }
     /// <summary>Últimos inicios de sesión, el más reciente primero.</summary>
     public List<SavedAccount> Accounts { get; set; } = [];
+    /// <summary>
+    /// Servidores en que se ha ingresado, el más reciente primero (uno por
+    /// dirección y puerto). null solo en un client.json anterior a esta lista:
+    /// al cargarlo se arma con los servidores de las cuentas recordadas.
+    /// </summary>
+    public List<SavedServer>? Servers { get; set; }
 
     // ---------- Configuración (ventana de ajustes) ----------
 
@@ -141,9 +177,6 @@ public sealed class ClientSettings
     public string? MicrophoneDevice { get; set; }
     /// <summary>Tono de apertura (dos pitidos cortos) antes de la voz al hablar por los parlantes IP.</summary>
     public bool TalkPreTone { get; set; } = true;
-    /// <summary>Árbol de cámaras de Vista en vivo y Reproducción: true = por
-    /// ubicación (Recursos del servidor), false = por equipo.</summary>
-    public bool TreeByLocation { get; set; }
     /// <summary>
     /// Al iniciar sesión, volver a abrir las cámaras de la última sesión (grilla
     /// principal y pantallas auxiliares). Sirve para que un cierre inesperado —o
@@ -167,15 +200,24 @@ public sealed class ClientSettings
     /// <summary>Paleta de la Consola (<see cref="ConsolePalettes"/>): "grafito" (por defecto), "control", "petroleo" o "ambar".</summary>
     public string ConsolePalette { get; set; } = ConsolePalettes.Default;
 
-    // ---------- Ventana de alarma ----------
+    // ---------- Viñetas de la ventana principal ----------
+
+    /// <summary>Orden de las viñetas de módulos elegido por el operador
+    /// arrastrándolas (claves de sección: Home, Live, Playback…). Las que no
+    /// están en la lista van al final, en su orden de siempre.</summary>
+    public List<string> TabOrder { get; set; } = [];
+
+    // ---------- Lugar de las ventanas ----------
 
     /// <summary>
-    /// Abrir la ventana de alarma donde quedó la última vez (monitor, posición
-    /// y tamaño) en vez de centrada. Sirve en puestos con dos pantallas: las
-    /// cámaras en una y la alarma en la de trabajo, donde el guardia la opera.
+    /// Abrir cada ventana donde quedó la última vez (monitor, posición, tamaño
+    /// y maximizada) en vez de centrada: en los puestos con varias pantallas
+    /// los avisos de alarma y de citofonía no saltan de monitor. Los lugares
+    /// van en windows.json (ver <see cref="WindowPlacements"/>).
     /// </summary>
-    public bool AlertWindowRememberPlacement { get; set; }
-    /// <summary>Último lugar de la ventana de alarma (se anota siempre al cerrarla).</summary>
+    public bool RememberWindowPlacement { get; set; } = true;
+    /// <summary>Lugar de la ventana de alarma de las versiones anteriores a
+    /// windows.json: solo se lee, para estrenar la ventana donde estaba.</summary>
     public WindowBounds? AlertWindowBounds { get; set; }
 
     // ---------- Exportación de grabaciones (diálogo Exportar) ----------
@@ -227,6 +269,9 @@ public sealed class ClientSettings
     public string EffectiveExportFolder =>
         string.IsNullOrWhiteSpace(ExportFolder) ? EffectiveRecordingFolder : ExportFolder;
 
+    /// <summary>Ruta de client.json (windows.json va al lado).</summary>
+    public static string FileLocation => FilePath;
+
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "CLRTrueCentralVMS", "client.json");
@@ -236,10 +281,10 @@ public sealed class ClientSettings
         try
         {
             if (File.Exists(FilePath))
-                return (JsonSerializer.Deserialize<ClientSettings>(File.ReadAllText(FilePath)) ?? new()).UpgradeServerUrls();
+                return (JsonSerializer.Deserialize<ClientSettings>(File.ReadAllText(FilePath)) ?? new()).UpgradeServerUrls().SeedServers();
         }
         catch { /* preferencias corruptas: se parte de cero */ }
-        return new() { ServerUrl = InstalledServerUrl() ?? "https://localhost" };
+        return new() { ServerUrl = InstalledServerUrl() ?? "https://localhost", Servers = [] };
     }
 
     public void Save()
@@ -261,8 +306,43 @@ public sealed class ClientSettings
         ServerUrl = UpgradeUrl(ServerUrl);
         foreach (var account in Accounts) account.ServerUrl = UpgradeUrl(account.ServerUrl);
         if (LastSession is not null) LastSession.ServerUrl = UpgradeUrl(LastSession.ServerUrl);
+        foreach (var server in Servers ?? []) server.Url = UpgradeUrl(server.Url);
         return this;
     }
+
+    /// <summary>
+    /// Un client.json anterior a la lista de servidores la estrena con los de las
+    /// cuentas recordadas, así la lista no parte vacía tras actualizar el cliente.
+    /// </summary>
+    private ClientSettings SeedServers()
+    {
+        if (Servers is not null) return this;
+        Servers = [];
+        foreach (var account in Accounts.OrderByDescending(a => a.LastLoginUtc))
+            if (!Servers.Any(s => SameServer(s.Url, account.ServerUrl)))
+                Servers.Add(new SavedServer { Url = account.ServerUrl, LastLoginUtc = account.LastLoginUtc });
+        Servers = Servers.Take(MaxServers).ToList();
+        return this;
+    }
+
+    /// <summary>"https://host:puerto" → Uri. Sin protocolo se asume https (como el campo único de antes).</summary>
+    public static bool TryParseServerUrl(string? url, [NotNullWhen(true)] out Uri? uri)
+    {
+        uri = null;
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        string text = url.Trim();
+        if (!text.Contains("://")) text = "https://" + text;
+        if (!Uri.TryCreate(text, UriKind.Absolute, out var parsed) ||
+            (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) || parsed.Host.Length == 0)
+            return false;
+        uri = parsed;
+        return true;
+    }
+
+    /// <summary>Misma dirección y puerto, sea cual sea el protocolo (el ingreso lo detecta solo).</summary>
+    private static bool SameServer(string? a, string? b) =>
+        TryParseServerUrl(a, out var ua) && TryParseServerUrl(b, out var ub) && ua.Port == ub.Port &&
+        string.Equals(ua.IdnHost, ub.IdnHost, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Dirección del servidor del que se descargó el instalador (la deja el instalador), si la hay.</summary>
     private static string? InstalledServerUrl()
@@ -304,14 +384,30 @@ public sealed class ClientSettings
         account.ProtectedPassword = passwordToRemember is null ? null : CredentialVault.Protect(passwordToRemember);
 
         Accounts = Accounts.OrderByDescending(a => a.LastLoginUtc).Take(MaxAccounts).ToList();
+        RecordServer(serverUrl, account.LastLoginUtc);
         ServerUrl = serverUrl;
         Username = username;
         Save();
     }
 
+    /// <summary>El servidor pasa al tope de la lista; reemplaza al de igual dirección y puerto (aunque cambie el protocolo).</summary>
+    private void RecordServer(string serverUrl, DateTime loginUtc)
+    {
+        var servers = (Servers ?? []).Where(s => !SameServer(s.Url, serverUrl)).ToList();
+        servers.Insert(0, new SavedServer { Url = serverUrl, LastLoginUtc = loginUtc });
+        Servers = servers.Take(MaxServers).ToList();
+    }
+
     public void RemoveAccount(SavedAccount account)
     {
         Accounts.Remove(account);
+        Save();
+    }
+
+    /// <summary>Quita el servidor de la lista; las cuentas recordadas de ese servidor se conservan.</summary>
+    public void RemoveServer(SavedServer server)
+    {
+        Servers?.Remove(server);
         Save();
     }
 }

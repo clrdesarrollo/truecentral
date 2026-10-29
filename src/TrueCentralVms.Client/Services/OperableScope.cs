@@ -15,11 +15,12 @@ public sealed class OperableScope
     private sealed record Sets(
         bool All, string Signature,
         HashSet<int> Locations, HashSet<int> Channels, HashSet<string> Areas, HashSet<string> Zones,
-        HashSet<int> WholePanels, HashSet<int> Doors, HashSet<int> Fences, HashSet<int> Speakers, HashSet<int> Intercoms);
+        HashSet<int> WholePanels, HashSet<int> Doors, HashSet<int> Fences, HashSet<int> Speakers, HashSet<int> Intercoms,
+        HashSet<int> IoModules);
 
     // Antes que Current: los estáticos se inicializan en orden de declaración y
     // la instancia compartida parte de este valor.
-    private static readonly Sets Everything = new(true, "all", [], [], [], [], [], [], [], [], []);
+    private static readonly Sets Everything = new(true, "all", [], [], [], [], [], [], [], [], [], []);
 
     public static OperableScope Current { get; } = new();
 
@@ -44,6 +45,7 @@ public sealed class OperableScope
     public bool CanOperateFence(int id) => _sets.All || _sets.Fences.Contains(id);
     public bool CanOperateSpeaker(int id) => _sets.All || _sets.Speakers.Contains(id);
     public bool CanOperateIntercom(int id) => _sets.All || _sets.Intercoms.Contains(id);
+    public bool CanOperateIoModule(int id) => _sets.All || _sets.IoModules.Contains(id);
 
     /// <summary>Aplica lo que entregó el servidor; avisa solo si algo cambió.</summary>
     public void Update(OperableDto dto)
@@ -54,9 +56,10 @@ public sealed class OperableScope
                 string.Join(',', dto.Locations), string.Join(',', dto.Channels), string.Join(',', dto.Areas),
                 string.Join(',', dto.Zones), string.Join(',', dto.WholePanels), string.Join(',', dto.Doors),
                 string.Join(',', dto.Fences), string.Join(',', dto.Speakers), string.Join(',', dto.Intercoms),
+                string.Join(',', dto.IoModules ?? []),
             }),
             [.. dto.Locations], [.. dto.Channels], [.. dto.Areas], [.. dto.Zones], [.. dto.WholePanels],
-            [.. dto.Doors], [.. dto.Fences], [.. dto.Speakers], [.. dto.Intercoms]);
+            [.. dto.Doors], [.. dto.Fences], [.. dto.Speakers], [.. dto.Intercoms], [.. dto.IoModules ?? []]);
         if (next.Signature == _sets.Signature) return;
         _sets = next;
         Changed?.Invoke();

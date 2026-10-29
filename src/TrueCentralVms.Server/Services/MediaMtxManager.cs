@@ -561,7 +561,9 @@ public sealed partial class MediaMtxManager(
             using (var scope = scopeFactory.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
-                var devices = await db.Devices.Include(d => d.Channels).AsNoTracking().ToListAsync(ct);
+                // La cámara de un terminal de acceso apagado no se sirve (el terminal está fuera de uso).
+                var devices = await db.Devices.Include(d => d.Channels).AsNoTracking()
+                    .Where(d => d.AccessDeviceId == null || d.AccessDevice!.Enabled).ToListAsync(ct);
 
                 int pathCount = 0;
                 foreach (var device in devices)

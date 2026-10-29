@@ -7,6 +7,11 @@
              xmlns:services="clr-namespace:TrueCentralVms.Client.Services"
              Background="{StaticResource BgBrush}">
     <UserControl.Resources>
+        <ResourceDictionary>
+        <!-- Centro de mando: lista de recursos y cuadros que no son video -->
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="/TrueCentralVms.Client;component/Views/CommandCenterTemplates.xaml"/>
+        </ResourceDictionary.MergedDictionaries>
         <!-- GhostToggle vive en App.xaml: lo comparte con Reproducción. -->
 
         <!-- Botón de cada división dentro del popup (miniatura + número) -->
@@ -159,6 +164,7 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+        </ResourceDictionary>
     </UserControl.Resources>
     <DockPanel>
         <!-- Panel izquierdo: árbol de dispositivos + asa para colapsarlo -->
@@ -192,27 +198,16 @@
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
                 Visibility="{Binding IsTreeCollapsed, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
             <DockPanel>
-                <!-- Encabezado: el árbol agrupa por equipo o por ubicación (Recursos) -->
-                <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8">
-                    <Border DockPanel.Dock="Right" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                            CornerRadius="6" Padding="2">
-                        <StackPanel Orientation="Horizontal">
-                            <Button Style="{StaticResource SegmentButton}" Content="Equipo"
-                                    Tag="{Binding IsTreeByDevice}" Command="{Binding ShowTreeByDeviceCommand}"
-                                    ToolTip="Cámaras agrupadas por equipo (DVR, NVR, cámara)"/>
-                            <Button Style="{StaticResource SegmentButton}" Content="Ubicación"
-                                    Tag="{Binding IsTreeByLocation}" Command="{Binding ShowTreeByLocationCommand}"
-                                    ToolTip="Cámaras agrupadas por ubicación (sitio, edificio, sector…), como en Recursos del panel web"/>
-                        </StackPanel>
-                    </Border>
-                    <TextBlock Text="CÁMARAS" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                <!-- Encabezado: la lista va por ubicación, como Recursos del panel web -->
+                <DockPanel DockPanel.Dock="Top" Margin="14,9,10,8" MinHeight="24">
+                    <TextBlock Text="RECURSOS" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
                                Foreground="{StaticResource MutedBrush}"/>
                 </DockPanel>
                 <!-- Buscador del árbol (filtra canales y equipos, sin tildes) -->
                 <Grid DockPanel.Dock="Top" Margin="10,0,10,8">
                     <TextBox x:Name="SearchBox" Style="{StaticResource DarkTextBox}" Padding="9,6" FontSize="12"
                              Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
-                    <TextBlock Text="Buscar canal…" IsHitTestVisible="False"
+                    <TextBlock Text="Buscar…" IsHitTestVisible="False"
                                Margin="11,0,0,0" VerticalAlignment="Center" FontSize="12">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -600,22 +595,23 @@
                                 <StackPanel.ContextMenu>
                                     <ContextMenu Style="{StaticResource DarkContextMenu}">
                                         <MenuItem Header="Abrir sus cámaras" Click="OnLocationOpenCameras"/>
-                                        <Separator/>
+                                        <!-- "Sin ubicación" y sus equipos no son ubicaciones: sin órdenes -->
+                                        <Separator Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                         <MenuItem Header="Armar total sus áreas de alarma…" Click="OnLocationArmAway"
                                                   IsEnabled="{Binding CanCommand}" ToolTip="{Binding CommandHint}"
-                                                  ToolTipService.ShowOnDisabled="True"/>
+                                                  ToolTipService.ShowOnDisabled="True" Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                         <MenuItem Header="Armar parcial sus áreas de alarma…" Click="OnLocationArmStay"
                                                   IsEnabled="{Binding CanCommand}" ToolTip="{Binding CommandHint}"
-                                                  ToolTipService.ShowOnDisabled="True"/>
+                                                  ToolTipService.ShowOnDisabled="True" Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                         <MenuItem Header="Desarmar sus áreas de alarma…" Click="OnLocationDisarm"
                                                   IsEnabled="{Binding CanCommand}" ToolTip="{Binding CommandHint}"
-                                                  ToolTipService.ShowOnDisabled="True"/>
+                                                  ToolTipService.ShowOnDisabled="True" Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                     </ContextMenu>
                                 </StackPanel.ContextMenu>
                                 <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="12"
                                            Foreground="{StaticResource MutedBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
                                 <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
-                                <TextBlock Text="{Binding ChannelCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                <TextBlock Text="{Binding ItemCount}" FontSize="11" Foreground="{StaticResource MutedBrush}"
                                            Margin="7,0,0,0" VerticalAlignment="Center"/>
                             </StackPanel>
                         </HierarchicalDataTemplate>
@@ -813,19 +809,19 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- Vistas guardadas (las "Custom View" de iVMS-4200): al centro de
-                 la barra, porque es a lo que más se vuelve en un turno. Cada
-                 vista recuerda la división y qué cámara había en cada cuadro. -->
+            <!-- Tableros: al centro de la barra, porque es a lo que más se vuelve
+                 en un turno. Cada uno recuerda la división y qué había en cada
+                 cuadro (cámara, recurso, tarjeta o página web). -->
             <Grid Grid.Column="1" Margin="{x:Static services:ClientTheme.LiveToolbarGroupGap}">
                 <ToggleButton x:Name="ViewsToggle" Style="{StaticResource GhostToggle}" Padding="14,5"
                               HorizontalAlignment="Center" VerticalAlignment="Center"
                               IsChecked="{Binding IsViewsPopupOpen, Mode=TwoWay}"
-                              ToolTip="Vistas guardadas: deje la grilla como la armó y vuelva a ella con un clic">
+                              ToolTip="Tableros: deje la grilla como la armó y vuelva a ella con un clic">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE8A9;" FontFamily="Segoe MDL2 Assets" FontSize="12"
                                    VerticalAlignment="Center"/>
-                        <TextBlock Text="Vistas" Margin="7,0,0,0" VerticalAlignment="Center"/>
-                        <!-- Última vista cargada: el operador sabe en qué está parado -->
+                        <TextBlock Text="Tableros" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                        <!-- Último tablero cargado: el operador sabe en qué está parado -->
                         <TextBlock Text="{Binding ActiveViewName}" Margin="6,0,0,0" VerticalAlignment="Center"
                                    MaxWidth="180" TextTrimming="CharacterEllipsis"
                                    Foreground="{StaticResource AccentBrush}"
@@ -841,11 +837,11 @@
                     <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
                             BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4,8,8" Width="380">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="VISTAS GUARDADAS" FontSize="11"
+                            <TextBlock DockPanel.Dock="Top" Text="TABLEROS" FontSize="11"
                                        FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"
                                        Margin="2,0,0,8"/>
 
-                            <!-- Guardar la grilla que hay ahora (solo con el permiso "Guardar vistas") -->
+                            <!-- Guardar la grilla que hay ahora (solo con "Crear tableros propios") -->
                             <StackPanel DockPanel.Dock="Bottom">
                                 <StackPanel Visibility="{Binding CanSaveViews, Converter={x:Static vm:BoolToVisibility.Instance}}">
                                 <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,10,0,10"/>
@@ -853,12 +849,12 @@
                                     <Button DockPanel.Dock="Right" Content="Guardar" Padding="12,5" Margin="8,0,0,0"
                                             Style="{StaticResource PrimaryButton}"
                                             Command="{Binding SaveCurrentViewCommand}"
-                                            ToolTip="Guarda la división y las cámaras que hay ahora en la grilla"/>
+                                            ToolTip="Guarda la división y lo que hay ahora en cada cuadro"/>
                                     <Grid>
                                         <TextBox x:Name="ViewNameBox" Style="{StaticResource DarkTextBox}"
                                                  Padding="9,6" FontSize="12"
                                                  Text="{Binding NewViewName, UpdateSourceTrigger=PropertyChanged}"/>
-                                        <TextBlock Text="Nombre de la vista…" IsHitTestVisible="False"
+                                        <TextBlock Text="Nombre del tablero…" IsHitTestVisible="False"
                                                    Margin="11,0,0,0" VerticalAlignment="Center" FontSize="12"
                                                    Foreground="{StaticResource MutedBrush}">
                                             <TextBlock.Style>
@@ -874,9 +870,11 @@
                                         </TextBlock>
                                     </Grid>
                                 </DockPanel>
-                                <CheckBox Content="Compartir con todos los puestos" Margin="2,8,0,0" FontSize="12"
+                                <!-- Solo quien administra los compartidos; los roles se eligen en el panel web -->
+                                <CheckBox Content="Compartir con todos (los roles se eligen en el panel web)" Margin="2,8,0,0" FontSize="12"
                                           Style="{StaticResource DarkCheckBox}"
-                                          IsChecked="{Binding NewViewShared, Mode=TwoWay}"/>
+                                          IsChecked="{Binding NewViewShared, Mode=TwoWay}"
+                                          Visibility="{Binding CanShareViews, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding SavedViewsStatus}" Margin="2,8,0,0" FontSize="11.5"
                                            TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
@@ -884,7 +882,7 @@
                                                         Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
                             </StackPanel>
 
-                            <!-- Lista de vistas: el clic en la fila la carga en la grilla -->
+                            <!-- Lista de tableros (compartidos primero): el clic en la fila lo carga en la grilla -->
                             <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto">
                                 <ItemsControl ItemsSource="{Binding SavedViews}">
                                     <ItemsControl.ItemTemplate>
@@ -894,17 +892,25 @@
                                                         Command="{Binding DataContext.ApplySavedViewCommand,
                                                                   RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                         CommandParameter="{Binding}"
-                                                        ToolTip="Cargar esta vista en la grilla">
+                                                        ToolTip="Cargar este tablero en la grilla">
                                                     <StackPanel Margin="0,0,60,0">
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <DockPanel>
+                                                            <!-- Candado: compartido, se usa tal cual -->
+                                                            <TextBlock DockPanel.Dock="Left" Text="&#xE72E;" FontFamily="Segoe MDL2 Assets"
+                                                                       FontSize="11" Margin="0,0,6,0" VerticalAlignment="Center"
+                                                                       Foreground="{StaticResource MutedBrush}"
+                                                                       ToolTip="Tablero compartido: solo lo cambia quien administra los tableros"
+                                                                       Visibility="{Binding Locked, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                                       TextTrimming="CharacterEllipsis"/>
+                                                        </DockPanel>
                                                         <TextBlock Text="{Binding Detail}" FontSize="11" Margin="0,2,0,0"
                                                                    Foreground="{StaticResource MutedBrush}"
                                                                    TextTrimming="CharacterEllipsis"/>
                                                     </StackPanel>
                                                 </Button>
-                                                <!-- Actualizar / eliminar: solo en las vistas propias
-                                                     (o para el administrador) -->
+                                                <!-- Actualizar / eliminar: los propios, y los compartidos
+                                                     solo para quien los administra -->
                                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                                                             VerticalAlignment="Center" Margin="0,0,8,0"
                                                             Visibility="{Binding CanEdit,
@@ -914,13 +920,13 @@
                                                             Command="{Binding DataContext.UpdateSavedViewCommand,
                                                                       RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}"
-                                                            ToolTip="Actualizar esta vista con la grilla actual"/>
+                                                            ToolTip="Actualizar este tablero con la grilla actual"/>
                                                     <Button Style="{StaticResource SavedViewDeleteButton}"
                                                             Content="&#xE74D;" Margin="2,0,0,0"
                                                             Command="{Binding DataContext.DeleteSavedViewCommand,
                                                                       RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                             CommandParameter="{Binding}"
-                                                            ToolTip="Eliminar esta vista"/>
+                                                            ToolTip="Eliminar este tablero"/>
                                                 </StackPanel>
                                             </Grid>
                                         </DataTemplate>
@@ -1038,7 +1044,7 @@
                                 <Button DockPanel.Dock="Right" Command="{Binding ToggleRecordingCommand}"
                                         Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"
                                         Focusable="False" Content="&#x25CF;" FontSize="10"
-                                        Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                        Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}">
                                     <Button.Style>
                                         <Style TargetType="Button">
                                             <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
@@ -1059,13 +1065,13 @@
                                         FontFamily="Segoe MDL2 Assets" FontSize="11"
                                         Foreground="{StaticResource MutedBrush}"
                                         ToolTip="Guardar una captura de imagen de este cuadro"
-                                        Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                                        Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                 <!-- Stream del cuadro: P = principal, S = secundario (clic alterna).
                                      Va en la barra porque el video de Flyleaf se traga los clics. -->
                                 <Button DockPanel.Dock="Right" Command="{Binding SwitchProfileCommand}"
                                         Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"
                                         Focusable="False" FontSize="10" FontWeight="Bold"
-                                        Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                        Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}">
                                     <Button.Style>
                                         <Style TargetType="Button">
                                             <Setter Property="Content" Value="P"/>
@@ -1087,7 +1093,7 @@
                                         Focusable="False"
                                         FontFamily="Segoe MDL2 Assets" FontSize="11"
                                         ToolTip="Audio de este cuadro (se silencia el resto)"
-                                        Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                        Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}">
                                     <Button.Style>
                                         <Style TargetType="Button">
                                             <Setter Property="Content" Value="&#xE74F;"/>
@@ -1142,7 +1148,11 @@
                                                 KeyBindings="None" OpenOnDrop="None" SwapOnDrop="None"
                                                 ToggleFullScreenOnDoubleClick="None"
                                                 Loaded="OnFlyleafHostLoaded"
-                                                Visibility="{Binding IsEmpty, Converter={x:Static vm:InverseBoolToVisibility.Instance}}"/>
+                                                Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                <!-- Contenido que no es video (puerta, panel, cerco, tarjeta, página web):
+                                     cada tipo trae su DataTemplate en Views/CellPanelTemplates.xaml. -->
+                                <ContentControl Content="{Binding Panel}" Focusable="False"
+                                                Visibility="{Binding HasPanel, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                 <TextBlock Text="Clic para seleccionar este cuadro y doble clic en un canal"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"
                                            Foreground="{StaticResource FaintTextBrush}" FontSize="11.5" TextWrapping="Wrap"
@@ -1151,8 +1161,18 @@
                             </Grid>
                             <!-- Consola: telemetría del cuadro (la refresca CellTelemetryTicker
                                  cada segundo). Fila propia bajo el video. -->
-                            <DockPanel Grid.Row="2" Background="{StaticResource CellBarBrush}"
-                                       Visibility="{x:Static services:ClientTheme.ConsoleOnly}">
+                            <DockPanel Grid.Row="2" Background="{StaticResource CellBarBrush}">
+                                <!-- Solo con video: un cuadro de puerta, alarma… no tiene telemetría -->
+                                <DockPanel.Style>
+                                    <Style TargetType="DockPanel">
+                                        <Setter Property="Visibility" Value="{x:Static services:ClientTheme.ConsoleOnly}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasPanel}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DockPanel.Style>
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding TelemetryUptime}"
                                            FontFamily="{StaticResource MonoFont}" FontSize="10.5"
                                            Foreground="{StaticResource OkBrush}" Margin="8,3"/>

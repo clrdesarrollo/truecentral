@@ -35,8 +35,9 @@ reproducción.
 
 == Elegir las cámaras
 
-Las cámaras se eligen en el árbol *GRABACIONES*. Los botones #boton("Equipo") y
-#boton("Ubicación") cambian cómo se agrupan, y el buscador *Buscar canal…*
+Las cámaras se eligen en el árbol *GRABACIONES*, ordenado por ubicación como
+la lista del Centro de mando, pero solo con cámaras; las que nadie ubicó van al
+final, en *Sin ubicación*, agrupadas por su equipo. El buscador *Buscar canal…*
 filtra la lista aunque no escriba las tildes.
 
 - *Doble clic* en una cámara la agrega en la primera posición libre de la

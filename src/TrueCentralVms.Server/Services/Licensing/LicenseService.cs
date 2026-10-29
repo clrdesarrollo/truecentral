@@ -238,7 +238,7 @@ public sealed class LicenseService : BackgroundService
     {
         var usage = new Dictionary<string, int>
         {
-            [LicenseFeatures.VideoChannels] = await db.Channels.CountAsync(c => c.Enabled && !c.Device.IsMobile, ct),
+            [LicenseFeatures.VideoChannels] = await db.Channels.CountAsync(c => c.Enabled && !c.Device.IsMobile && c.Device.AccessDeviceId == null, ct),
             [LicenseFeatures.AnprChannels] = await db.Devices.CountAsync(d => d.AnprEnabled, ct),
             [LicenseFeatures.FleetVehicles] = await db.Vehicles.CountAsync(v => v.Enabled, ct),
             [LicenseFeatures.AlarmPanels] = await db.AlarmPanels.CountAsync(p => p.Enabled, ct),
@@ -246,9 +246,9 @@ public sealed class LicenseService : BackgroundService
             [LicenseFeatures.AccessDoors] = await db.AccessDoors.CountAsync(d => d.Enabled && d.AccessDevice!.Enabled, ct),
             [LicenseFeatures.Videowalls] = await db.Walls.CountAsync(ct),
             [LicenseFeatures.VideowallDecoders] = await db.Decoders.CountAsync(d => d.Enabled, ct),
-            [LicenseFeatures.SpeakerChannels] = await db.Speakers.CountAsync(s => s.Enabled, ct),
+            [LicenseFeatures.SpeakerChannels] = await db.Speakers.CountAsync(s => s.Enabled && s.AccessDeviceId == null && s.DeviceId == null, ct),
             [LicenseFeatures.IntercomDevices] = await db.Intercoms.CountAsync(i => i.Enabled, ct),
-            [LicenseFeatures.IoModules] = await db.IoModules.CountAsync(m => m.Enabled, ct),
+            [LicenseFeatures.IoModules] = await db.IoModules.CountAsync(m => m.Enabled && m.AccessDeviceId == null && m.DeviceId == null, ct),
             [LicenseFeatures.PatrolReaders] = await db.PatrolReaders.CountAsync(r => r.Enabled && r.Status == PatrolReaderStatus.Approved, ct),
             [LicenseFeatures.PatrolCheckpoints] = await db.PatrolCheckpoints.CountAsync(c => c.Enabled, ct),
             [LicenseFeatures.AlarmScreens] = await db.AlarmScreens.CountAsync(s => s.Status == AlarmScreenStatus.Approved, ct),
@@ -768,13 +768,13 @@ public sealed class LicenseService : BackgroundService
             await using var scope = _scopes.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
             var pending = await db.Channels.Include(c => c.Device)
-                .Where(c => c.DisabledByLicense && !c.Enabled && !c.Device.IsMobile)
+                .Where(c => c.DisabledByLicense && !c.Enabled && !c.Device.IsMobile && c.Device.AccessDeviceId == null)
                 .OrderBy(c => c.DeviceId).ThenBy(c => c.ChannelNumber)
                 .ToListAsync(ct);
             if (pending.Count == 0) return;
 
             int quota = Quota(LicenseFeatures.VideoChannels);
-            int available = quota - await db.Channels.CountAsync(c => c.Enabled && !c.Device.IsMobile, ct);
+            int available = quota - await db.Channels.CountAsync(c => c.Enabled && !c.Device.IsMobile && c.Device.AccessDeviceId == null, ct);
             if (available <= 0) return;
 
             var restored = pending.Take(available).ToList();

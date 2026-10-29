@@ -153,8 +153,14 @@ async function loadLocationChoices() {
   return out;
 }
 
-/** Campo "Ubicación" con el árbol indentado; "" = por ubicar. */
-function locationFieldHtml(id, choices, selectedId, hint) {
+/**
+ * Campo "Ubicación" con el árbol indentado; "" = por ubicar. En el alta y la
+ * edición de un equipo (equipment) ofrece además «Nueva, con el nombre del
+ * equipo» dentro de la ubicación que se elija (solo a quien administra
+ * Recursos); en el alta es la opción por omisión, así lo nuevo no se acumula
+ * en "Por ubicar". La crea locationFieldCommit al guardar.
+ */
+function locationFieldHtml(id, choices, selectedId, hint, { equipment = false, isNew = false } = {}) {
   if (!choices) {
     return `
       <div class="field">
@@ -162,22 +168,59 @@ function locationFieldHtml(id, choices, selectedId, hint) {
         <select id="${id}" data-keep="1" disabled><option>No se pudo leer el árbol: se conserva la actual</option></select>
       </div>`;
   }
+  const offerNew = equipment && Perms.can("resources.manage");
+  const startNew = offerNew && isNew;
+  const options = (selected) => choices.map((c) =>
+    `<option value="${c.id}" ${c.id === selected ? "selected" : ""}>${"   ".repeat(c.depth)}${esc(c.name)}</option>`).join("");
   return `
     <div class="field">
       <label for="${id}">Ubicación</label>
-      <select id="${id}">
-        <option value="">Por ubicar</option>
-        ${choices.map((c) => `<option value="${c.id}" ${c.id === selectedId ? "selected" : ""}>${"\u00a0\u00a0\u00a0".repeat(c.depth)}${esc(c.name)}</option>`).join("")}
+      <select id="${id}"${offerNew ? ` data-loc-new="${id}-new"` : ""}>
+        ${offerNew ? `<option value="new"${startNew ? " selected" : ""}>Nueva, con el nombre del equipo</option>` : ""}
+        <option value=""${!startNew && selectedId == null ? " selected" : ""}>Por ubicar</option>
+        ${options(startNew ? null : selectedId)}
       </select>
+      ${offerNew ? `
+      <div class="loc-new" id="${id}-new"${startNew ? "" : " hidden"}>
+        <label for="${id}-parent">Dentro de</label>
+        <select id="${id}-parent">
+          <option value="">La raíz del árbol</option>
+          ${options(null)}
+        </select>
+        <div class="muted field-hint">Si ahí ya hay una ubicación con ese nombre, se usa esa.</div>
+      </div>` : ""}
       ${hint ? `<div class="muted field-hint">${esc(hint)}</div>` : ""}
     </div>`;
 }
 
-/** Lo que va al servidor: el id elegido, 0 = por ubicar, null = conservar la actual. */
+// «Nueva, con el nombre del equipo» muestra dónde crearla.
+document.addEventListener("change", (e) => {
+  const target = e.target.dataset?.locNew;
+  if (target) $("#" + target).hidden = e.target.value !== "new";
+});
+
+/**
+ * Lo que va al servidor: el id elegido, 0 = por ubicar, null = conservar la
+ * actual (también con «Nueva, con el nombre del equipo», hasta que
+ * locationFieldCommit la cree al guardar: probar la conexión no crea nada).
+ */
 function locationFieldValue(id) {
   const select = $("#" + id);
-  if (!select || select.dataset.keep) return null;
+  if (!select || select.dataset.keep || select.value === "new") return null;
   return select.value ? Number(select.value) : 0;
+}
+
+/**
+ * Justo antes de guardar el equipo: con «Nueva, con el nombre del equipo»,
+ * crea la ubicación con body.name (o toma la que ya se llama así en ese
+ * lugar) y deja su id en body.locationId.
+ */
+async function locationFieldCommit(id, body) {
+  const select = $("#" + id);
+  if (!select || select.value !== "new") return;
+  const parent = $(`#${id}-parent`)?.value;
+  const result = await Api.post("/api/locations/ensure", { name: body.name, parentId: parent ? Number(parent) : null });
+  body.locationId = result.id;
 }
 
 /**
@@ -818,19 +861,22 @@ async function renderDevices() {
         <tbody>
           ${devices.map((d) => `
             <tr data-id="${d.id}">
-              <td>${esc(d.name)}${locationLineHtml(d.location)}</td>
+              <td>${esc(d.name)}${d.accessDeviceId ? `<div class="muted field-hint">Cámara de un terminal de acceso · incluida, no ocupa canal de video</div>` : ""}${devicePartsLine(d)}${locationLineHtml(d.location)}</td>
               <td>${esc(typeLabel(d.deviceType))}</td>
               <td class="muted">${esc(brandOf(d.driverKey))}</td>
-              <td class="muted">${d.isupDeviceId ? isupAddressHtml(d.isupDeviceId) : `${esc(d.host)}:${d.sdkPort}`}</td>
+              <td class="muted">${d.isupDeviceId ? isupAddressHtml(d.isupDeviceId)
+                : d.accessDeviceId ? `${esc(d.host)} · RTSP ${d.rtspPort}` : `${esc(d.host)}:${d.sdkPort}`}</td>
               <td>${esc(d.model ?? "—")}</td>
               <td class="muted">${esc(d.serialNumber ?? "—")}</td>
               <td class="muted">${esc(d.firmwareVersion ?? "—")}</td>
               <td>${channelCountCell(d)}</td>
-              <td>${anprCell(d, isAdmin)}</td>
+              <td>${d.accessDeviceId ? `<span class="muted">—</span>` : anprCell(d, isAdmin)}</td>
               <td>${statusTag(d.status)}</td>
               <td class="row-actions">
                 <button class="btn ghost btn-channels">Canales</button>
-                ${isAdmin ? `<button class="btn ghost btn-revalidate" title="Volver a sondear el equipo (modelo, firmware, canales, puerto RTSP)">Revalidar</button>
+                ${isAdmin && d.accessDeviceId ? `<a class="btn ghost" href="#/access/device?id=${d.accessDeviceId}"
+                  title="Su dirección y credenciales son las del terminal: se administra en Control de acceso">Ver terminal</a>` : ""}
+                ${isAdmin && !d.accessDeviceId ? `<button class="btn ghost btn-revalidate" title="Volver a sondear el equipo (modelo, firmware, canales, puerto RTSP)">Revalidar</button>
                 <button class="btn ghost btn-edit">Editar</button>
                 <button class="btn danger btn-delete">Eliminar</button>` : ""}
               </td>
@@ -896,6 +942,46 @@ async function renderDevices() {
       renderDevices();
     } catch (err) { toast(err.error, true); }
   }));
+}
+
+/** Drivers de video cuyas partes (altavoz, entradas y salidas de alarma) sabe ver el VMS. */
+const DEVICE_PARTS_DRIVERS = ["hikvision-netsdk"];
+
+/** Debajo del nombre: las partes del equipo que se ofrecen como recursos. */
+function devicePartsLine(d) {
+  const parts = [];
+  if (d.hasSpeaker && d.useSpeaker !== false) parts.push("altavoz");
+  const io = (d.ioInputs ?? 0) + (d.ioOutputs ?? 0);
+  if (io > 0 && d.useIo !== false) parts.push(`${d.ioInputs} entrada(s) y ${d.ioOutputs} salida(s) de alarma`);
+  return parts.length ? `<div class="muted field-hint">Con ${esc(parts.join(" y "))} · incluidos, no ocupan licencia</div>` : "";
+}
+
+/** Partes del equipo en su formulario: puerto HTTP (ISAPI) y qué se ofrece como recurso. */
+function devicePartsFieldHtml(device) {
+  const hint = (text) => `<div class="muted field-hint acd-part-hint">${text}</div>`;
+  const known = (has, use, yes, off) => !device?.partsChecked ? ""
+    : has && use !== false ? hint(yes) : has ? hint(off) : hint("No se le detectó (se vuelve a mirar al revalidarlo).");
+  const io = device ? (device.ioInputs ?? 0) + (device.ioOutputs ?? 0) : 0;
+  return `
+      <div class="acd-parts" id="df-parts">
+        <div class="acd-parts-title">Partes del equipo <span class="muted">(incluidas: no ocupan licencia)</span></div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Puerto HTTP (ISAPI)</label>
+            <input id="df-httpport" type="number" min="1" max="65535" value="${device?.httpPort ?? 80}">
+            <div class="muted field-hint">Por ahí se leen y se operan su altavoz y sus entradas y salidas.</div>
+          </div>
+        </div>
+        <label class="checkbox-row" title="Su salida de audio (audio bidireccional): voz en vivo y sonidos desde el Centro de mando, grupos de parlantes y automatizaciones.">
+          <input type="checkbox" id="df-speaker" ${device?.useSpeaker === false ? "" : "checked"}> Su altavoz, como un parlante más</label>
+        ${known(device?.hasSpeaker, device?.useSpeaker, `Está en Parlantes IP como «${esc(device?.name ?? "")}».`, "Tiene altavoz, pero no se está ofreciendo.")}
+        <label class="checkbox-row" title="Sus entradas y salidas de alarma: estado en vivo, «Operar relé» y disparadores de automatizaciones.">
+          <input type="checkbox" id="df-io" ${device?.useIo === false ? "" : "checked"}> Sus entradas y salidas de alarma, como un módulo de E/S</label>
+        ${known(io > 0, device?.useIo,
+          `${device?.ioInputs ?? 0} entrada(s) y ${device?.ioOutputs ?? 0} salida(s) en Módulos de E/S como «${esc(device?.name ?? "")}».`,
+          `Tiene ${device?.ioInputs ?? 0} entrada(s) y ${device?.ioOutputs ?? 0} salida(s), pero no se están ofreciendo.`)}
+        ${device?.partsNote ? `<div class="field-hint" style="color:var(--warn-text)">${esc(device.partsNote)}</div>` : ""}
+      </div>`;
 }
 
 /**
@@ -1396,7 +1482,7 @@ async function deviceModal(device, prefill) {
         <input id="df-name" required maxlength="128" value="${esc(device?.name ?? seed.name ?? "")}" placeholder="NVR Bodega, Cámara acceso...">
       </div>
       ${locationFieldHtml("df-location", places, device?.locationId ?? null,
-        "Sus canales la heredan; los que ubique aparte en Recursos se quedan donde están.")}
+        "Sus canales la heredan; los que ubique aparte en Recursos se quedan donde están.", { equipment: true, isNew })}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="df-driver">
@@ -1428,6 +1514,7 @@ async function deviceModal(device, prefill) {
           <label>${isNew || device?.isupDeviceId ? "Contraseña del equipo" : "Contraseña (vacío = no cambiar)"}</label>
           <input id="df-password" type="password" autocomplete="new-password" ${isNew || device?.isupDeviceId ? "required" : ""}>
         </div>
+        ${devicePartsFieldHtml(device)}
       </div>
       <div id="df-isup-wrap">${isupFieldsHtml("df", device, isNew, "equipo")}</div>
       <div id="probe-result"></div>
@@ -1453,6 +1540,10 @@ async function deviceModal(device, prefill) {
   };
   wireIsupFields("df", "equipo");
   toggleIsup(drivers.find((x) => x.key === $("#df-driver").value));
+  // Las partes (altavoz, entradas y salidas) solo en las marcas que el VMS sabe ver.
+  const toggleParts = () => { $("#df-parts").hidden = !DEVICE_PARTS_DRIVERS.includes($("#df-driver").value); };
+  toggleParts();
+  $("#df-driver").addEventListener("change", toggleParts);
   $("#df-driver").addEventListener("change", () => {
     const dr = drivers.find((x) => x.key === $("#df-driver").value);
     if (dr && isNew && !dr.usesIsup) { $("#df-sdkport").value = dr.defaultSdkPort; $("#df-rtspport").value = dr.defaultRtspPort; }
@@ -1526,6 +1617,11 @@ async function deviceModal(device, prefill) {
       password: $("#df-password").value || null,
       locationId: locationFieldValue("df-location"),
     };
+    if (!isup && !$("#df-parts").hidden) {
+      body.httpPort = Number($("#df-httpport").value) || 80;
+      body.useSpeaker = $("#df-speaker").checked;
+      body.useIo = $("#df-io").checked;
+    }
     if (pickerActive()) body.enabledChannels = pickedChannels();
     return body;
   };
@@ -1591,6 +1687,7 @@ async function deviceModal(device, prefill) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
+      await locationFieldCommit("df-location", body);
       const result = isNew
         ? await Api.post("/api/devices", body)
         : await Api.put(`/api/devices/${device.id}`, body);
@@ -2239,6 +2336,7 @@ const routes = {
   "#/walls": renderWalls,
   "#/walls/edit": renderWallEditor,
   "#/resources": renderResources,
+  "#/boards": renderBoards,
   "#/sessions": renderSessions,
   "#/users": renderUsers,
   "#/roles": renderRoles,
@@ -2396,6 +2494,7 @@ function leaveCurrentPage() {
   if (typeof cercoDetachHub === "function") cercoDetachHub(); // suelta hub + delegaciones de cerco
   if (typeof accessDetachHub === "function") accessDetachHub(); // ídem el monitoreo de puertas
   if (typeof resourcesDetachHub === "function") resourcesDetachHub(); // ídem la página Recursos
+  if (typeof boardsDetachHub === "function") boardsDetachHub();       // ídem la página Tableros
   if (typeof rolesDetachHub === "function") rolesDetachHub(); // ídem la página Roles
   if (typeof ioModulesDetachHub === "function") ioModulesDetachHub(); // ídem los módulos de E/S
   if (typeof patrolDetachHub === "function") patrolDetachHub(); // ídem el control de rondas
@@ -2429,7 +2528,7 @@ const MANUAL_CHAPTERS = {
   "#/anpr": "12-reconocimiento-de-patentes",
   "#/workflows": "13-automatizaciones", "#/workflow-runs": "13-automatizaciones", "#/workflow-alerts": "13-automatizaciones",
   "#/devices": "14-fuentes-de-video", "#/device-maintenance": "14-fuentes-de-video",
-  "#/resources": "15-recursos-y-ubicaciones",
+  "#/resources": "15-recursos-y-ubicaciones", "#/boards": "03-vista-en-vivo",
   "#/users": "16-usuarios-y-roles", "#/roles": "16-usuarios-y-roles", "#/audit": "16-usuarios-y-roles",
   "#/sessions": "17-sistema", "#/services": "17-sistema", "#/isup": "17-sistema", "#/license": "17-sistema",
   "#/backups": "17-sistema", "#/mail": "17-sistema", "#/time": "17-sistema", "#/wan": "17-sistema",

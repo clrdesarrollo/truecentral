@@ -21,6 +21,8 @@ public partial class LoginWindow : Window
     public LoginWindow(bool skipAutoLogin = false, string? notice = null)
     {
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "login");
         if (skipAutoLogin) _autoLoginAttempted = true;
         if (notice is not null)
         {
@@ -31,6 +33,7 @@ public partial class LoginWindow : Window
         UserBox.Text = _settings.Username;
         RememberCheck.IsChecked = _settings.RememberPassword;
         AutoLoginCheck.IsChecked = _settings.AutoLogin;
+        RefreshServersList();
         RefreshAccountsList();
         RestoreRememberedPassword();
         (string.IsNullOrEmpty(_settings.Username) ? (UIElement)UserBox : PasswordBox).Focus();
@@ -73,6 +76,40 @@ public partial class LoginWindow : Window
         if (_settings.Accounts.Count == 0)
             UsersToggle.IsChecked = false;
         e.Handled = true; // que el clic no seleccione la cuenta que se está borrando
+    }
+
+    // ------------------------------------------------------------------
+    // Servidores recientes (lista del campo Dirección)
+    // ------------------------------------------------------------------
+    private void RefreshServersList()
+    {
+        var servers = _settings.Servers ?? [];
+        ServersList.ItemsSource = null;
+        ServersList.ItemsSource = servers;
+        ServersToggle.Visibility = servers.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnPickServer(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: SavedServer server }) return;
+        ShowServer(server.Url);
+        ServersToggle.IsChecked = false;
+        // La contraseña escrita o recordada era para el servidor anterior: se
+        // trae la recordada de este usuario en este servidor, o se pide.
+        var account = _settings.FindAccount(server.Url, UserBox.Text.Trim());
+        SetPassword(CredentialVault.Unprotect(account?.ProtectedPassword) ?? "");
+        (UserBox.Text.Trim().Length == 0 ? (UIElement)UserBox
+            : CurrentPassword().Length > 0 ? LoginButton : PasswordBox).Focus();
+    }
+
+    private void OnDeleteServer(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: SavedServer server }) return;
+        _settings.RemoveServer(server);
+        RefreshServersList();
+        if (_settings.Servers is not { Count: > 0 })
+            ServersToggle.IsChecked = false;
+        e.Handled = true; // que el clic no seleccione el servidor que se está quitando
     }
 
     // ------------------------------------------------------------------
@@ -147,12 +184,7 @@ public partial class LoginWindow : Window
         scheme = Uri.UriSchemeHttps;
         host = "";
         port = DefaultServerPort;
-        if (string.IsNullOrWhiteSpace(url)) return false;
-        string text = url.Trim();
-        if (!text.Contains("://")) text = "https://" + text;
-        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) || uri.Host.Length == 0)
-            return false;
+        if (!ClientSettings.TryParseServerUrl(url, out var uri)) return false;
         scheme = uri.Scheme;
         host = uri.Host;
         port = uri.Port;
@@ -190,7 +222,9 @@ public partial class LoginWindow : Window
         string? Match(string? url) =>
             TryParseServer(url, out _, out string h, out int p) && p == port &&
             string.Equals(h, host.Trim('[', ']'), StringComparison.OrdinalIgnoreCase) ? url : null;
-        return Match(_settings.ServerUrl) ?? _settings.Accounts.Select(a => Match(a.ServerUrl)).FirstOrDefault(u => u is not null);
+        return Match(_settings.ServerUrl)
+               ?? (_settings.Servers ?? []).Select(s => s.Url).Concat(_settings.Accounts.Select(a => a.ServerUrl))
+                   .Select(Match).FirstOrDefault(u => u is not null);
     }
 
     /// <summary>
@@ -202,6 +236,7 @@ public partial class LoginWindow : Window
         string https = ServerProtocol.Compose(Uri.UriSchemeHttps, host, port);
         bool saved = new[] { _settings.ServerUrl, _settings.LastSession?.ServerUrl }
             .Concat(_settings.Accounts.Select(a => a.ServerUrl))
+            .Concat((_settings.Servers ?? []).Select(s => s.Url))
             .Any(u => string.Equals(u?.TrimEnd('/'), https, StringComparison.OrdinalIgnoreCase));
         return saved || (Uri.TryCreate(https, UriKind.Absolute, out var uri) && ServerTrust.IsPinned(uri));
     }

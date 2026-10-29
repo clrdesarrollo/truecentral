@@ -97,7 +97,8 @@ public sealed class SpeakerTalkClient(ApiClient api) : IAsyncDisposable
             yield return pcm.GetRange(offset, Math.Min(640, pcm.Count - offset)).ToArray();
     }
 
-    public async Task StartAsync(IReadOnlyList<int> speakerIds, string? microphone, bool preTone, CancellationToken ct = default)
+    public async Task StartAsync(IReadOnlyList<int> speakerIds, string? microphone, bool preTone, CancellationToken ct = default,
+        string? group = null)
     {
         await _gate.WaitAsync(ct);
         try
@@ -114,7 +115,9 @@ public sealed class SpeakerTalkClient(ApiClient api) : IAsyncDisposable
             {
                 Scheme = baseUri.Scheme == "https" ? "wss" : "ws",
                 Path = "/api/speakers/talk",
-                Query = $"ids={string.Join(',', speakerIds)}&access_token={Uri.EscapeDataString(api.Token)}",
+                // El nombre del grupo solo va para la bitácora ("habló al grupo …").
+                Query = $"ids={string.Join(',', speakerIds)}&access_token={Uri.EscapeDataString(api.Token)}" +
+                        (string.IsNullOrWhiteSpace(group) ? "" : $"&group={Uri.EscapeDataString(group)}"),
             };
             var socket = new ClientWebSocket();
             socket.Options.RemoteCertificateValidationCallback = ServerTrust.ForWebSocket(baseUri);

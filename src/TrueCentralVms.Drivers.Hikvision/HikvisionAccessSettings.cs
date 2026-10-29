@@ -40,6 +40,17 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
 {
     public string DriverKey => "hikvision-isapi";
 
+    /// <summary>
+    /// Numeración de Hikvision: la puerta N tiene el lector 2N-1 de entrada y
+    /// el 2N de salida (en un terminal, el propio y la entrada para uno externo).
+    /// </summary>
+    public IReadOnlyList<AccessDoorSection> SectionsOfDoor(int doorNumber) =>
+    [
+        new($"door:{doorNumber}", null),
+        new($"reader:{2 * doorNumber - 1}", "lector de entrada"),
+        new($"reader:{2 * doorNumber}", "lector de salida"),
+    ];
+
     private const string Noun = "equipo de control de acceso";
     private const int MaxDoors = 16;
     private const int MaxReaders = 8;

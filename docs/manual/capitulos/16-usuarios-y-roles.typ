@@ -162,7 +162,8 @@ resumen). A la derecha está el editor del rol elegido.
   [Operador],
   [Rol para la operación diaria. Se puede ajustar, pero no eliminar ni
     renombrar. En una instalación nueva incluye todos los permisos de los
-    grupos _Video_ (salvo _Ver recorridos de vehículos_) y _Monitoreo y
+    grupos _Video_ (salvo _Administrar tableros compartidos_, _Abrir
+    cualquier página web_ y _Ver recorridos de vehículos_) y _Monitoreo y
     operación_, más _Ver rondas_, _Exportar rondas_, _Ver personas_, _Ver
     automatizaciones_ y _Ver hora y mantenimiento_.],
 )
@@ -265,7 +266,9 @@ control sobre la seguridad del sistema.
   grupo[Video],
   [Ver video en vivo], [Abrir cámaras en vivo y sus imágenes instantáneas.],
   [Mover cámaras PTZ], [Mover, acercar y llamar posiciones guardadas de las cámaras PTZ. #incluye[Ver video en vivo]],
-  [Guardar vistas], [Crear, modificar y borrar vistas (grupos de cámaras con su distribución). #incluye[Ver video en vivo]],
+  [Crear tableros propios], [Guardar, modificar y borrar sus propios tableros del Centro de mando. Quitarlo deja al usuario solo con los tableros compartidos (no puede armar ni cambiar los suyos). #incluye[Ver video en vivo]],
+  [Administrar tableros compartidos], [Crear, modificar y borrar los tableros que ven todos o ciertos roles, y la lista de páginas web que se pueden poner en un cuadro. #incluye[Ver video en vivo y Crear tableros propios]],
+  [Abrir cualquier página web], [Poner en un cuadro una dirección web escrita a mano, no solo las de la lista del servidor. #incluye[Ver video en vivo]],
   [Ver grabaciones], [Buscar y reproducir video grabado.],
   [Exportar grabaciones], [Descargar tramos de video grabado al equipo del operador. #incluye[Ver grabaciones]],
   [Operar el muro de video], [Poner cámaras en el muro, limpiarlo y aplicar diseños guardados. #incluye[Ver video en vivo]],
@@ -299,7 +302,7 @@ control sobre la seguridad del sistema.
   [Administrar personas], [Crear, modificar y borrar personas, sus credenciales, niveles de acceso y horarios. #incluye[Ver personas]],
   grupo[Configuración],
   [Fuentes de video], [Agregar y configurar cámaras, grabadores, decodificadores y muros; buscar equipos en la red.],
-  [Vehículos de flota], [Agregar, importar y configurar vehículos y sus grabadores móviles. #incluye[Ver la flota]],
+  [Vehículos de flota], [Agregar, importar y configurar vehículos y sus grabadores móviles, y los ajustes del mapa de flota (mapa base, posición inicial y retención de posiciones). #incluye[Ver la flota]],
   [Equipos de acceso], [Agregar y configurar terminales y puertas, y sincronizarlos.],
   [Paneles de alarma], [Agregar y configurar paneles de alarma.],
   [Paneles de cerco], [Agregar y configurar paneles de cerco, sus controles remotos y su firmware.],

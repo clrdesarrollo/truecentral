@@ -18,16 +18,20 @@ más detalle en su capítulo.
 )
 
 #modulo("video")[
-  == Vista en vivo (cliente de monitoreo)
+  == Centro de mando (cliente de monitoreo)
 
   #table(
     columns: (auto, 1fr),
     table.header[Tecla o gesto][Acción],
-    [Doble clic en una cámara, equipo o ubicación de la lista], [Abrir sus cámaras
+    [Doble clic en una cámara o una ubicación de la lista], [Abrir sus cámaras
       en la grilla (hasta 64).],
-    [Arrastrar una cámara a un cuadro], [Abrirla en ese cuadro.],
+    [Doble clic en un recurso, una tarjeta o una página web], [Abrirlo en el
+      cuadro seleccionado o en el primero libre.],
+    [Arrastrar una cámara o un recurso a un cuadro], [Abrirlo en ese cuadro.],
     [Arrastrar un cuadro sobre otro], [Intercambiarlos.],
     [Doble clic en un cuadro], [Maximizarlo dentro de la grilla o devolverlo.],
+    [#tecla("Ctrl") + rueda del mouse sobre una página web], [Acercar o alejar
+      la página.],
     [Rueda del mouse sobre el video], [Zoom digital centrado en el puntero.],
     [Clic derecho con el modo zoom activo], [Volver a 1×.],
     [Clic derecho en una ubicación], [Menú de órdenes de la ubicación.],

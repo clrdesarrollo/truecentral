@@ -249,7 +249,7 @@ async function intercomModal(intercom, prefill) {
           <input id="ic-group" maxlength="64" value="${esc(intercom?.groupName ?? "")}" placeholder="Portería, Torre A…">
         </div>
       </div>
-      ${locationFieldHtml("ic-location", places, intercom?.locationId ?? null)}
+      ${locationFieldHtml("ic-location", places, intercom?.locationId ?? null, null, { equipment: true, isNew })}
       <div class="field">
         <label>Marca / protocolo</label>
         <select id="ic-driver">
@@ -389,6 +389,7 @@ async function intercomModal(intercom, prefill) {
     saveButton.textContent = "Validando…";
     try {
       const body = readForm();
+      await locationFieldCommit("ic-location", body);
       const saved = isNew ? await Api.post("/api/intercoms", body) : await Api.put(`/api/intercoms/${intercom.id}`, body);
       closeModal();
       // Por ISUP el frente puede no haberse conectado todavía: se guarda igual y se completa en su primer contacto.

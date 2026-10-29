@@ -18,6 +18,9 @@ public partial class MainWindow : Window
         _vm = vm;
         DataContext = vm;
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "main");
+        ApplyTabOrder();
         // El menú del usuario cuelga alineado a la DERECHA de su botón: es lo
         // último del navbar y el menú es más ancho que el botón.
         UserMenuPopup.CustomPopupPlacementCallback = PlaceUserMenu;

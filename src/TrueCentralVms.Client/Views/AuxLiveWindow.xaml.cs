@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using TrueCentralVms.Client.Services;
 using TrueCentralVms.Client.ViewModels;
 
 namespace TrueCentralVms.Client.Views;
@@ -49,14 +50,31 @@ public partial class AuxLiveWindow : Window
         PreviewKeyDown += OnWindowKeyDown;
         // Cerrar la pantalla detiene y libera sus streams (la principal sigue).
         Closed += (_, _) => Vm.Dispose();
+        // Su lugar queda anotado por número de pantalla: la próxima vez que se
+        // abra la pantalla 2, vuelve al monitor donde estaba la 2.
+        Closing += (_, _) => WindowPlacements.Store(this, PlacementKey);
     }
 
+    private string PlacementKey => Vm.IsFleet ? "fleet-live" : $"aux{Vm.SlotNumber}";
+
     // ------------------------------------------------------------------
-    // Apertura: la pantalla parte maximizada en el primer monitor que no
-    // tenga ventanas de la aplicación (para eso existe: más monitores). Si
-    // todos están ocupados, cae en cascada sobre la ventana ancla.
+    // Apertura: la pantalla vuelve donde quedó la última vez que se cerró
+    // (con la opción de Configuración encendida). Si no hay lugar anotado,
+    // parte maximizada en el primer monitor que no tenga ventanas de la
+    // aplicación (para eso existe: más monitores). Si todos están ocupados,
+    // cae en cascada sobre la ventana ancla.
     // ------------------------------------------------------------------
     public void ShowOnFreeMonitor(IReadOnlyList<Window> occupied)
+    {
+        if (ClientSettings.Load().RememberWindowPlacement && WindowPlacements.Get(PlacementKey) is { } saved)
+        {
+            ShowAt(new Rect(saved.Left, saved.Top, saved.Width, saved.Height), saved.Maximized, occupied);
+            return;
+        }
+        ShowOnFirstFreeMonitor(occupied);
+    }
+
+    private void ShowOnFirstFreeMonitor(IReadOnlyList<Window> occupied)
     {
         var used = new HashSet<IntPtr>();
         foreach (var window in occupied)
@@ -113,7 +131,7 @@ public partial class AuxLiveWindow : Window
         }
         if (!usable)
         {
-            ShowOnFreeMonitor(occupied);
+            ShowOnFirstFreeMonitor(occupied);
             return;
         }
         Left = bounds.Left;
@@ -293,6 +311,12 @@ public partial class AuxLiveWindow : Window
     // ------------------------------------------------------------------
     private async void OnTreeDoubleClick(object sender, MouseButtonEventArgs e)
     {
+        // Centro de mando: puertas, paneles, cercos… se abren en un cuadro igual que una cámara.
+        if (DeviceTree.SelectedItem is ResourceNode resource)
+        {
+            await Vm.OpenResourceAsync(resource);
+            return;
+        }
         if (DeviceTree.SelectedItem is ChannelNode node)
             await Vm.OpenChannelAsync(node);
         else if (DeviceTree.SelectedItem is DeviceNode device)
@@ -301,12 +325,14 @@ public partial class AuxLiveWindow : Window
             await Vm.OpenLocationAsync(location);
     }
 
-    private ChannelNode? _dragCandidate;
+    /// <summary>Canal o recurso del árbol que puede empezar a arrastrarse.</summary>
+    private object? _dragCandidate;
     private Point _dragStart;
 
     private void OnTreeMouseDown(object sender, MouseButtonEventArgs e)
     {
-        _dragCandidate = (e.OriginalSource as FrameworkElement)?.DataContext as ChannelNode;
+        _dragCandidate = (e.OriginalSource as FrameworkElement)?.DataContext is ChannelNode or ResourceNode
+            ? ((FrameworkElement)e.OriginalSource).DataContext : null;
         _dragStart = e.GetPosition(this);
     }
 
@@ -318,8 +344,9 @@ public partial class AuxLiveWindow : Window
         if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _dragCandidate = null;
-        try { DragDrop.DoDragDrop(DeviceTree, new DataObject(typeof(ChannelNode), node), DragDropEffects.Copy); }
-        finally { _grow.Cancel(); }
+        WebCellView.DragActive = true; // las páginas web se esconden: el cuadro recibe el arrastre
+        try { DragDrop.DoDragDrop(DeviceTree, new DataObject(node.GetType(), node), DragDropEffects.Copy); }
+        finally { _grow.Cancel(); WebCellView.DragActive = false; }
     }
 
     private void OnGridPanelLoaded(object sender, RoutedEventArgs e)
@@ -416,14 +443,16 @@ public partial class AuxLiveWindow : Window
                 Math.Abs(position.Y - _cellDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         }
         _cellDragCandidate = null;
+        WebCellView.DragActive = true;
         try { DragDrop.DoDragDrop(source, new DataObject(typeof(VideoCellViewModel), cell), DragDropEffects.Move); }
-        finally { Vm.DropTargetCell = null; }
+        finally { Vm.DropTargetCell = null; WebCellView.DragActive = false; }
     }
 
     private static DragDropEffects CellDropEffect(DragEventArgs e, VideoCellViewModel cell) =>
         e.Data.GetData(typeof(VideoCellViewModel)) is VideoCellViewModel dragged
             ? ReferenceEquals(dragged, cell) ? DragDropEffects.None : DragDropEffects.Move
-            : e.Data.GetDataPresent(typeof(ChannelNode)) ? DragDropEffects.Copy : DragDropEffects.None;
+            : e.Data.GetDataPresent(typeof(ChannelNode)) || e.Data.GetDataPresent(typeof(ResourceNode))
+                ? DragDropEffects.Copy : DragDropEffects.None;
 
     private void HandleCellDragOver(VideoCellViewModel cell, DragEventArgs e, Visual source)
     {
@@ -457,6 +486,11 @@ public partial class AuxLiveWindow : Window
         {
             e.Handled = true;
             await Vm.OpenChannelInCellAsync(node, cell);
+        }
+        else if (e.Data.GetData(typeof(ResourceNode)) is ResourceNode resource)
+        {
+            e.Handled = true;
+            await Vm.OpenResourceInCellAsync(resource, cell);
         }
     }
 

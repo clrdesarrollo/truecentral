@@ -374,8 +374,12 @@
                     </Grid>
                 </StackPanel>
 
-                <!-- Viñetas de módulos -->
-                <StackPanel Orientation="Horizontal">
+                <!-- Viñetas de módulos: se reordenan arrastrándolas (el orden se recuerda) -->
+                <StackPanel x:Name="TabStrip" Orientation="Horizontal" Background="Transparent"
+                            PreviewMouseLeftButtonDown="OnTabStripMouseDown"
+                            PreviewMouseMove="OnTabStripMouseMove"
+                            PreviewMouseLeftButtonUp="OnTabStripMouseUp"
+                            LostMouseCapture="OnTabStripLostCapture">
                     <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
                                  IsChecked="{Binding ActiveSection, Mode=TwoWay,
                                              Converter={x:Static vm:SectionEquals.Instance}, ConverterParameter=Home}">
@@ -394,13 +398,13 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE714;" FontSize="12"
                                            VerticalAlignment="Center" Margin="0,0,7,0"/>
-                                <TextBlock Text="Vista en Vivo" VerticalAlignment="Center"/>
+                                <TextBlock Text="Centro de mando" VerticalAlignment="Center"/>
                             </StackPanel>
                         </RadioButton>
                         <Button Style="{StaticResource TabCloseButton}" Content="&#xE8BB;"
                                 HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
                                 Command="{Binding CloseLiveViewCommand}"
-                                ToolTip="Cerrar Vista en Vivo (detiene los streams)"/>
+                                ToolTip="Cerrar el Centro de mando (detiene los streams)"/>
                     </Grid>
                     <Grid Visibility="{Binding IsPlaybackOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
                         <RadioButton Style="{StaticResource NavTabRadio}" GroupName="NavTabs"
@@ -558,7 +562,7 @@
                     <StackPanel Margin="0,6,0,0">
                         <Button Style="{StaticResource RailHomeButton}" Content="&#xE80F;" ToolTip="Inicio"
                                 Command="{Binding GoHomeCommand}"/>
-                        <Button Style="{StaticResource RailLiveButton}" Content="&#xE714;" ToolTip="Vista en Vivo"
+                        <Button Style="{StaticResource RailLiveButton}" Content="&#xE714;" ToolTip="Centro de mando"
                                 Command="{Binding OpenLiveViewCommand}"
                                 Visibility="{Binding CanLiveView, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         <Button Style="{StaticResource RailPlaybackButton}" Content="&#xE768;"

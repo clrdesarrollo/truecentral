@@ -1,5 +1,5 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Server/wwwroot/io-modules.js, src/TrueCentralVms.Server/Api/IoModulesApi.cs, src/TrueCentralVms.Server/Services/IoModuleService.cs, src/TrueCentralVms.Server/Services/Workflows/Actions/RelayAction.cs, src/TrueCentralVms.Drivers.Adam/AdamModel.cs
+// Fuentes: src/TrueCentralVms.Server/wwwroot/io-modules.js, src/TrueCentralVms.Server/Api/IoModulesApi.cs, src/TrueCentralVms.Server/Services/IoModuleService.cs, src/TrueCentralVms.Server/Services/Workflows/Actions/RelayAction.cs, src/TrueCentralVms.Drivers.Adam/AdamModel.cs, src/TrueCentralVms.Server/Services/EquipmentParts.cs (entradas y salidas de otros equipos), src/TrueCentralVms.Drivers.Hikvision/HikvisionIoDriver.cs, src/TrueCentralVms.Drivers.Hikvision/HikvisionSdkIoDriver.cs, src/TrueCentralVms.Drivers.Hikvision/HikvisionAcsIoDriver.cs
 
 = Módulos de entradas y salidas <cap-modulos-de-es>
 
@@ -9,7 +9,9 @@ portón o encienden una baliza o una sirena. Sus *entradas* leen un pulsador,
 el lazo detector de una barrera o el sensor de una puerta.
 
 El sistema trabaja con los módulos Advantech ADAM-6050, 6051, 6052, 6055, 6060
-y 6066, conectados a la red.
+y 6066, conectados a la red. También usa como módulos las entradas y salidas
+de alarma de los terminales de acceso, las cámaras y los grabadores Hikvision
+(vea «Entradas y salidas de alarma de otros equipos»).
 
 #captura-pendiente("Panel web: Dispositivos › Módulos de E/S con un módulo en línea, sus entradas (una activa) y sus relés con los botones Pulso, Encender y Apagar", alto: 6cm)
 
@@ -31,7 +33,9 @@ El estado se actualiza solo, en cuanto el módulo informa un cambio. Si el
 módulo no está en línea, las entradas y salidas muestran _Sin lectura_.
 
 #nota[Al dejar el puntero sobre el nombre de una entrada se ve si se
-  considera activa al cerrar o al abrir el contacto (vea «Agregar un módulo»).]
+  considera activa al cerrar o al abrir el contacto (vea «Agregar un módulo»).
+  En las de un terminal, una cámara o un grabador no aparece: eso lo decide el
+  propio equipo.]
 
 == Operar un relé a mano
 
@@ -75,6 +79,59 @@ deshabilitados.
 
   Vea #capitulo(<cap-automatizaciones>).
 ]
+
+== Entradas y salidas de alarma de otros equipos
+
+Los terminales de acceso, las cámaras y los grabadores Hikvision que tienen
+entradas y salidas de alarma las aportan como un módulo de E/S más, incluido
+con el equipo: no ocupa módulo de la licencia. El módulo se crea solo al
+agregar o revalidar el equipo, si en su formulario está marcada la casilla
+*Sus entradas y salidas de alarma, como un módulo de E/S* (vea
+#capitulo(<cap-fuentes-de-video>)#modulo("access")[ y
+#capitulo(<cap-control-de-acceso>)]), y lleva el nombre del equipo.
+
+Su tarjeta se distingue por la línea bajo el nombre: _Entradas y salidas de
+alarma de un terminal de acceso · incluidas, no ocupan licencia_ o _Entradas y
+salidas de alarma de una cámara o grabador · incluidas, no ocupan licencia_. En
+vez del modelo muestra cuántas tiene, por ejemplo _2 entrada(s) · 1
+salida(s)_. De fábrica, cada una se llama como la numera el equipo: _Entrada
+de alarma 1_, _Salida de alarma 1_…, con su rótulo DI0, DO0…
+
+Se operan igual que las de un módulo ADAM: #boton("Pulso"), #boton("Encender")
+y #boton("Apagar") en la tarjeta#modulo("automation")[, y en las
+automatizaciones la acción _Operar relé_ (con estos equipos, el parpadeo no
+puede alternar más rápido que cada 1 segundo) y el disparador _Entrada de
+módulo de E/S_]. Las diferencias:
+
+- Si una entrada está _Activa_ o _En reposo_ lo informa el propio equipo:
+  aquí no se elige si se activa al cerrar o al abrir el contacto.
+- El estado se lee cada 2 a 5 segundos, según el equipo. Un pulsador
+  apretado por menos tiempo puede pasar inadvertido.
+
+En vez de #boton("Editar") y #boton("Eliminar"), la tarjeta tiene
+#boton("Nombres") y #boton("Ver equipo"), que abre el terminal en Control de
+acceso o #menu("Dispositivos", "Fuentes de video"). La dirección y las
+credenciales son las del equipo y se actualizan solas cuando cambian allá.
+Para quitar estas entradas y salidas, desmarque la casilla en el formulario
+del equipo. Si elimina el equipo, el módulo se va con él; si desactiva un
+terminal, su módulo queda pausado.
+
+#nota[Estas entradas y salidas no se agregan con #boton("Agregar módulo"): la
+  lista *Marca / protocolo* no las ofrece.]
+
+=== Nombrar sus entradas y salidas
+
+#requiere("Módulos de E/S")
+
++ Haga clic en #boton("Nombres") en la tarjeta.
++ En la ventana _Entradas y salidas de «…»_, escriba en cada fila de
+  *Entradas de alarma* y *Salidas de alarma* el nombre de lo que tiene
+  cableado (hasta 64 caracteres), por ejemplo _Sensor puerta bodega_.
++ Haga clic en #boton("Guardar"). Aparece _Nombres guardados._
+
+Con esos nombres aparecen en el Centro de mando, en las automatizaciones y en
+la bitácora. Una fila que deje vacía vuelve al nombre de fábrica (_Entrada de
+alarma 1_, _Salida de alarma 2_…).
 
 == Configuración
 
@@ -140,7 +197,8 @@ fabricante mientras el servidor lo esté usando.
 
 === Cupo de la licencia
 
-La licencia fija cuántos módulos de E/S pueden estar activos a la vez. Si se
+La licencia fija cuántos módulos de E/S pueden estar activos a la vez. Las
+entradas y salidas de terminales, cámaras y grabadores no cuentan. Si se
 supera, el alta o la activación se rechaza con uno de estos mensajes:
 
 - _La licencia permite N módulos y ya hay N en uso. Amplíe la licencia para

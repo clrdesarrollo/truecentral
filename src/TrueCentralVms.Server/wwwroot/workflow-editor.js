@@ -127,6 +127,7 @@ async function renderWorkflowEditor() {
   }
 
   let catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules, fleet, patrolRoutes, workflow = null;
+  wfSpeakerGroupsCache = null; // los grupos de parlantes se releen al abrir el editor
   try {
     [catalog, cameras, devices, doors, panels, speakers, audio, accessDevices, ioModules, fleet, patrolRoutes] = await Promise.all([
       wfCatalog(), wfCameras(), Api.get("/api/workflows/devices"), Api.get("/api/workflows/doors"),

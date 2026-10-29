@@ -154,13 +154,18 @@ viñeta junto a ella; un clic en una viñeta cambia de módulo sin cerrar el
 anterior, que sigue trabajando por detrás (por ejemplo, el video de la Vista en
 Vivo no se corta al pasar a Inicio).
 
+Para ordenar las viñetas a su gusto, arrastre una (también #boton("Inicio"))
+hacia la izquierda o la derecha: las demás se corren a medida que pasa sobre
+ellas y, al soltar, queda en ese lugar y activa. El orden se recuerda en el
+puesto: la próxima vez cada módulo abre su viñeta en el lugar que le dio.
+
 Para cerrar un módulo, haga clic en la #boton("✕") de su viñeta. Qué pasa al
 cerrarlo depende del módulo:
 
 #table(
   columns: (1fr, 2fr),
   table.header[Viñeta][Al cerrarla],
-  [Vista en Vivo], [Se detienen todos los videos de la grilla.],
+  [Centro de mando], [Se detienen todos los videos de la grilla.],
   [Reproducción], [Se detiene el video que se estaba reproduciendo.],
   [Muro de video], [Solo sale de la vista: el muro sigue mostrando lo que tenía.],
   [Paneles de alarma, Cerco eléctrico, Citofonía],
@@ -215,7 +220,7 @@ nombre. Solo aparecen los módulos que sus roles permiten:
   columns: (1fr, 1fr),
   table.header[Botón del riel][Aparece con el permiso],
   [Inicio], [Siempre],
-  [Vista en Vivo], [Ver video en vivo],
+  [Centro de mando], [Ver video en vivo],
   [Reproducción], [Ver grabaciones],
   [Muro de video], [Operar el muro de video],
   [Paneles de alarma], [Ver alarmas],
@@ -240,7 +245,7 @@ Algunos botones avisan aunque su viñeta esté cerrada:
 === Página Inicio
 
 La página Inicio saluda con su nombre de usuario y muestra una tarjeta por
-módulo, agrupadas en *MÓDULOS* (Vista en Vivo, Reproducción, Centro de
+módulo, agrupadas en *MÓDULOS* (Centro de mando, Reproducción, Centro de
 eventos, Muro de video, Paneles de alarma, Cerco eléctrico, Citofonía y Centro
 de descargas) y *APLICACIONES* (Reconocimiento de patentes). Haga clic en una
 tarjeta para abrir el módulo; se agrega su viñeta en la barra superior. El
@@ -322,11 +327,11 @@ rigen de inmediato, salvo los que indican lo contrario.
     medida, sin cuadros de sobra; por ejemplo, 40 cámaras en 8×5. *División
     estándar más cercana* usa la división del selector donde quepan.],
   [*Al iniciar sesión*],
-  [*Volver a abrir las cámaras de la última sesión* reabre la Vista en Vivo
+  [*Volver a abrir las cámaras de la última sesión* reabre el Centro de mando
     como quedó. Viene apagada. Ver
     #modulo("video")[#capitulo(<cap-vista-en-vivo>).]],
   [*Carpeta de grabaciones locales*],
-  [Dónde se guardan las grabaciones que hace desde la Vista en Vivo. Escriba
+  [Dónde se guardan las grabaciones que hace desde el Centro de mando. Escriba
     la ruta o use #boton("Examinar…"). Vacía, se usa la subcarpeta
     `TrueCentral VMS` de su carpeta Videos; la ruta exacta aparece bajo el
     campo.],
@@ -349,7 +354,7 @@ rigen de inmediato, salvo los que indican lo contrario.
 
 *Volumen inicial de los cuadros* (de 0 a 100) es el volumen con que suena un
 cuadro al activar su audio. Rige para los cuadros que se creen desde ahora (al
-cambiar la división o volver a abrir la Vista en Vivo). El audio de cada
+cambiar la división o volver a abrir el Centro de mando). El audio de cada
 cuadro sigue partiendo silenciado.
 
 === Red
@@ -368,16 +373,18 @@ tiempo de espera de la API debe ser un número entre 5 y 120.»
   [La misma opción de la ventana de ingreso. Debajo se indica con qué cuenta y
     en qué servidor ingresa. Apagarla rige desde la próxima vez que se abra el
     cliente.],
-  [*Abrir la ventana de alarma donde quedó la última vez*],
-  [Apagada, la ventana de alarma aparece centrada sobre la ventana principal.
-    Encendida, se abre en el monitor, la posición y el tamaño en que se cerró
-    la anterior. Si ese monitor ya no está conectado, vuelve a aparecer
+  [*Abrir cada ventana donde quedó la última vez*],
+  [Viene encendida. La ventana principal, las pantallas auxiliares y las
+    ventanas de alarma, de citofonía y de verificación, entre otras, vuelven a
+    abrirse en el monitor, la posición y el tamaño en que se cerraron (y
+    maximizadas, si lo estaban). Si ese monitor ya no está conectado, la
+    ventana aparece en su lugar de siempre. Apagada, cada ventana abre
     centrada.],
 )
 
-#consejo[En puestos con dos pantallas, encienda *Abrir la ventana de alarma
-  donde quedó la última vez* y arrastre la ventana de alarma una vez a la
-  pantalla de trabajo.]
+#consejo[En puestos con varias pantallas, deje una vez cada aviso (alarma,
+  citofonía) en la pantalla donde el guardia lo opera: desde entonces se abre
+  siempre ahí y no salta de monitor.]
 
 === Licencia
 

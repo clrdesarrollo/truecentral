@@ -57,6 +57,8 @@ public partial class VerificationWindow : Window
         _findChannel = findChannel;
         _openInLive = openInLive;
         InitializeComponent();
+        // Abre donde quedó la última vez (ver WindowPlacements).
+        WindowPlacements.Remember(this, "verification");
         StateChanged += (_, _) => MaxGlyph.Text = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
         Closed += (_, _) =>
         {

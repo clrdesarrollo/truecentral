@@ -269,10 +269,14 @@ public sealed class HikvisionSpeakerDriver : ISpeakerDriver
         if (firmware is not null && build is { Length: > 0 }) firmware = $"{firmware} {build}";
         string? deviceType = Value(device.Root, "deviceType");
 
-        // Canal de audio en vivo y sus códecs.
+        // Canal de audio en vivo y sus códecs. Las cámaras y los terminales que no
+        // contestan las capacidades (la DS-2CD2721G0-IZS da 403) sí entregan la lista
+        // de canales, que es la misma con que se abre la voz: sirve igual.
         var liveCodecs = new List<string>();
         bool supportsLive = false;
         var (liveStatus, liveBody) = await CallAsync(info, HttpMethod.Get, "/ISAPI/System/TwoWayAudio/channels/capabilities", null, ct);
+        if (liveStatus != HttpStatusCode.OK)
+            (liveStatus, liveBody) = await CallAsync(info, HttpMethod.Get, "/ISAPI/System/TwoWayAudio/channels", null, ct);
         if (liveStatus == HttpStatusCode.OK)
         {
             try

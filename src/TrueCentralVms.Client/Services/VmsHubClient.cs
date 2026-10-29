@@ -70,6 +70,12 @@ public sealed class VmsHubClient : IAsyncDisposable
     /// <summary>Un parlante IP cambió de estado de conexión.</summary>
     public event Action<SpeakerDto>? SpeakerStatusChanged;
 
+    /// <summary>Cambió el estado de una puerta de control de acceso (abierta, modo, conexión).</summary>
+    public event Action<AccessDoorStateDto>? AccessDoorStateChanged;
+
+    /// <summary>Cambió el estado de un módulo de E/S (conexión, entradas o salidas).</summary>
+    public event Action<IoModuleDto>? IoModuleChanged;
+
     /// <summary>Un frente de citofonía cambió de estado de conexión.</summary>
     public event Action<IntercomDto>? IntercomStatusChanged;
 
@@ -124,6 +130,8 @@ public sealed class VmsHubClient : IAsyncDisposable
         _connection.On<WorkflowNotificationDto>(VmsHubContract.WorkflowNotification, dto => WorkflowNotification?.Invoke(dto));
         _connection.On<WorkflowAlertDto>(VmsHubContract.WorkflowAlertAcknowledged, dto => WorkflowAlertAcknowledged?.Invoke(dto));
         _connection.On<SpeakerDto>(VmsHubContract.SpeakerStatusChanged, dto => SpeakerStatusChanged?.Invoke(dto));
+        _connection.On<AccessDoorStateDto>(VmsHubContract.AccessDoorStateChanged, dto => AccessDoorStateChanged?.Invoke(dto));
+        _connection.On<IoModuleDto>(VmsHubContract.IoModuleChanged, dto => IoModuleChanged?.Invoke(dto));
         _connection.On<IntercomDto>(VmsHubContract.IntercomStatusChanged, dto => IntercomStatusChanged?.Invoke(dto));
         _connection.On<IntercomCallDto>(VmsHubContract.IntercomCallChanged, dto => IntercomCallChanged?.Invoke(dto));
 

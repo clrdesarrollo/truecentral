@@ -31,12 +31,16 @@ public partial class MainViewModel
     // Acciones dentro de los módulos (además, el recurso tiene que estar en su alcance).
     public bool CanPtz => Perms.Has(Permissions.LivePtz);
     public bool CanSaveViews => Perms.Has(Permissions.LiveViewsManage);
+    /// <summary>Guarda y cambia los tableros compartidos (los roles se eligen en el panel web).</summary>
+    public bool CanShareViews => Perms.Has(Permissions.DashboardsManage);
+    /// <summary>Puede escribir una dirección web cualquiera en un cuadro (no solo las de la lista).</summary>
+    public bool CanOpenAnyUrl => Perms.Has(Permissions.DashboardsWebUrl);
 
     private static readonly string[] ModuleFlags =
     [
         nameof(CanLiveView), nameof(CanPlayback), nameof(CanWall), nameof(CanAlarms), nameof(CanCerco),
         nameof(CanIntercom), nameof(CanEvents), nameof(CanLpr), nameof(CanFleet), nameof(CanFleetMap), nameof(CanDownloads), nameof(RoleLabel),
-        nameof(CanPtz), nameof(CanSaveViews),
+        nameof(CanPtz), nameof(CanSaveViews), nameof(CanShareViews), nameof(CanOpenAnyUrl),
     ];
 
     /// <summary>Relee los permisos de la sesión (al entrar y cuando el servidor avisa que cambiaron).</summary>

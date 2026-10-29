@@ -70,5 +70,16 @@ public sealed record AccessDeviceSettingsDto(
     /// <summary>Avisos de la lectura (un bloque que el equipo no contestó, por ejemplo).</summary>
     IReadOnlyList<string> Notes);
 
+/// <summary>
+/// Los parámetros de UNA puerta (la puerta y sus lectores), para la pestaña
+/// Parámetros de su ficha en Recursos. Se leen del equipo como en su página.
+/// </summary>
+public sealed record AccessDoorSettingsDto(
+    int AccessDeviceId,
+    string AccessDeviceName,
+    int DoorNumber,
+    IReadOnlyList<AccessSettingsSectionDto> Sections,
+    IReadOnlyList<string> Notes);
+
 /// <summary>Lo que el administrador cambió en un bloque: solo las claves que tocó.</summary>
 public sealed record AccessSettingsWriteDto(Dictionary<string, string?> Values);

@@ -4,10 +4,11 @@
 // vehículo con sus cámaras en vivo (las mismas sesiones WebRTC de la vista en vivo), seguir al vehículo y su recorrido de las
 // últimas horas (permiso aparte: es dato personal del conductor).
 //
-// Mapa: MapLibre GL (BSD-3, vendor/maplibre, módulo ES cargado bajo demanda). Mapa base según Sistema del módulo: ninguno (fondo
-// liso), teselas de un proveedor en línea, o un archivo PMTiles del servidor (sin internet; vendor/pmtiles + estilo de
-// vendor/protomaps, por ahora sin nombres de calles porque las fuentes no se incluyen todavía). Los tiles públicos de
-// OpenStreetMap NO se pueden usar en un producto distribuido.
+// Mapa: MapLibre GL (BSD-3, vendor/maplibre, módulo ES cargado bajo demanda). Mapa base según los ajustes del SERVIDOR (uno solo
+// para todos; los cambia quien tiene fleet.manage): ninguno (fondo liso), teselas de un proveedor en línea (intermediadas por
+// el servidor en /api/fleet/map/tiles: la clave del proveedor no llega al navegador), o un archivo PMTiles del servidor (sin
+// internet; vendor/pmtiles + estilo de vendor/protomaps, por ahora sin nombres de calles porque las fuentes no se incluyen
+// todavía). Los tiles públicos de OpenStreetMap NO se pueden usar en un producto distribuido.
 //
 // Se carga ANTES que app.js: solo declara funciones.
 "use strict";
@@ -76,10 +77,11 @@ function fmLoadScript(src, global) {
 /** Estilo del mapa base según los ajustes. */
 async function fmStyle(settings) {
   const bg = { id: "fondo", type: "background", paint: { "background-color": "#e7eaee" } };
-  if (settings.mode === "raster" && settings.rasterUrl) {
+  if (settings.mode === "raster") {
+    // Por el servidor (con la sesión: ver fmTransformRequest), no directo al proveedor.
     return {
       version: 8,
-      sources: { base: { type: "raster", tiles: [settings.rasterUrl], tileSize: 256, maxzoom: 19, attribution: settings.attribution || "" } },
+      sources: { base: { type: "raster", tiles: [`${location.origin}/api/fleet/map/tiles/{z}/{x}/{y}`], tileSize: 256, maxzoom: 19, attribution: settings.attribution || "" } },
       layers: [bg, { id: "base", type: "raster", source: "base" }],
     };
   }
@@ -103,6 +105,13 @@ async function fmStyle(settings) {
     };
   }
   return { version: 8, sources: {}, layers: [bg] };
+}
+
+/** Las teselas en línea las entrega el servidor con la sesión del usuario: se piden con su token. */
+function fmTransformRequest(url) {
+  return url.startsWith(`${location.origin}/api/fleet/map/tiles/`)
+    ? { url, headers: { Authorization: `Bearer ${Api.token}` } }
+    : undefined;
 }
 
 async function renderFleetMap() {
@@ -175,6 +184,7 @@ async function renderFleetMap() {
       center: [settings.centerLongitude, settings.centerLatitude],
       zoom: settings.zoom,
       attributionControl: { compact: true },
+      transformRequest: fmTransformRequest,
     });
     fm.map.addControl(new lib.NavigationControl({ showCompass: false }), "top-left");
     fm.map.addControl(new lib.ScaleControl({ unit: "metric" }), "bottom-right");
@@ -474,7 +484,7 @@ function fmSettingsModal() {
     $("#fm-raster-fields").hidden = m !== "raster";
     $("#fm-mode-hint").textContent = m === "pmtiles"
       ? (s.pmtilesAvailable ? "Se usa el archivo basemap.pmtiles del servidor." : "Copie el archivo basemap.pmtiles (extracto de Protomaps de su región) en la carpeta maps de los datos del servidor.")
-      : m === "raster" ? "Cada navegador pide las teselas directo al proveedor (con su clave). Los servidores públicos de OpenStreetMap no se permiten en un producto."
+      : m === "raster" ? "El servidor pide las teselas al proveedor y las entrega a cada operador: la clave queda solo en el servidor (que necesita salida a internet). Teselas raster de 256 px ({z}/{x}/{y}, {s} opcional). Los servidores públicos de OpenStreetMap (tile.openstreetmap.org) no se permiten en un producto: use un proveedor con clave."
       : "";
   };
   $("#fm-mode").addEventListener("change", hint);

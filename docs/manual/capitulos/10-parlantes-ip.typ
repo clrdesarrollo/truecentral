@@ -1,13 +1,15 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Client/Views/LiveView.xaml (panel PARLANTES), src/TrueCentralVms.Client/Views/LiveView.xaml.cs, src/TrueCentralVms.Client/ViewModels/SpeakersViewModel.cs, src/TrueCentralVms.Client/Services/SpeakerTalkClient.cs, src/TrueCentralVms.Server/wwwroot/speakers.js, src/TrueCentralVms.Server/wwwroot/live.js (panel de parlantes), src/TrueCentralVms.Server/wwwroot/workflows.js (renderSounds), src/TrueCentralVms.Server/Api/SpeakersApi.cs, src/TrueCentralVms.Server/Services/SpeakerService.cs, src/TrueCentralVms.Server/Api/WorkflowsApi.cs (sonidos)
+// Fuentes: src/TrueCentralVms.Client/Views/LiveView.xaml (panel PARLANTES), src/TrueCentralVms.Client/Views/LiveView.xaml.cs, src/TrueCentralVms.Client/ViewModels/SpeakersViewModel.cs, src/TrueCentralVms.Client/Services/SpeakerTalkClient.cs, src/TrueCentralVms.Server/wwwroot/speakers.js, src/TrueCentralVms.Server/wwwroot/live.js (panel de parlantes), src/TrueCentralVms.Server/wwwroot/workflows.js (renderSounds), src/TrueCentralVms.Server/Api/SpeakersApi.cs, src/TrueCentralVms.Server/Services/SpeakerService.cs, src/TrueCentralVms.Server/Api/WorkflowsApi.cs (sonidos), src/TrueCentralVms.Server/Api/SpeakerGroupsApi.cs, src/TrueCentralVms.Client/Views/CommandCenterTemplates.xaml (cuadro del grupo de parlantes), src/TrueCentralVms.Client/ViewModels/CellPanels.Resources.cs (SpeakerGroupCellPanel), src/TrueCentralVms.Client/ViewModels/MainViewModel.Resources.cs (Grupos de parlantes en la lista), src/TrueCentralVms.Drivers.Hikvision/HikvisionSdkSpeakerDriver.cs, src/TrueCentralVms.Server/Services/EquipmentParts.cs (altavoces de otros equipos)
 
 = Parlantes IP <cap-parlantes-ip>
 
 Los parlantes IP permiten hablarle a la gente en terreno desde el puesto de
 monitoreo: dar un aviso con el micrófono, hacer sonar una sirena o un mensaje
 grabado, o hacer que el parlante lea un texto en voz alta. Se puede usar un
-parlante o varios a la vez, y los sonidos del servidor suenan sincronizados en
-todos los elegidos.
+parlante, varios a la vez o un grupo armado de antemano, y los sonidos del
+servidor suenan sincronizados en todos los elegidos. Además de los parlantes
+IP, se pueden usar los altavoces de los terminales de acceso, las cámaras y los
+grabadores Hikvision.
 
 #captura-pendiente("Cliente de monitoreo: vista en vivo con el panel PARLANTES desplegado en la columna izquierda, dos parlantes marcados", alto: 6cm)
 
@@ -178,8 +180,9 @@ servidor; si no, el botón #boton("Mantener para hablar") queda deshabilitado,
 pero se pueden reproducir sonidos, audios y textos.
 
 También se puede operar desde #menu("Dispositivos", "Parlantes IP"). La
-tabla muestra cada parlante con sus *Funciones* (_Voz_, _Biblioteca_, _TTS_),
-su *Volumen*, el estado de *Conexión* y si está *En uso*; se actualiza sola.
+tabla muestra cada parlante con sus *Grupos*, sus *Funciones* (_Voz_,
+_Biblioteca_, _TTS_), su *Volumen*, el estado de *Conexión* y si está *En
+uso*; se actualiza sola.
 
 - El botón de *Volumen* de cada fila abre un deslizador; el cambio se aplica al
   soltarlo y #tecla("Esc") lo cierra.
@@ -194,7 +197,9 @@ su *Volumen*, el estado de *Conexión* y si está *En uso*; se actualiza sola.
 Para reproducir desde la ventana:
 
 + Si eligió #boton("Reproducir en varios…"), marque los parlantes en
-  *Parlantes*.
+  *Parlantes*. Si hay grupos, los botones de _Marcar solo el grupo:_ marcan de
+  una vez los parlantes de un grupo que están a su alcance y desmarcan el
+  resto.
 + En *Qué reproducir*, elija el origen:
   - _Sonido del servidor_: elija el *Sonido* y cuántas *Repeticiones* (1 a
     5). El botón 🔈 lo escucha en el navegador.
@@ -206,18 +211,86 @@ Para reproducir desde la ventana:
   parlante con ✔ o ✖. #boton("Detener") corta el sonido sin cerrar la
   ventana.
 
+== Hablarle a un grupo de parlantes
+
+#requiere("Usar parlantes")
+
+Un grupo de parlantes junta varios parlantes bajo un nombre (_Perímetro_,
+_Bodega_, _Todos_) para hablarles o hacerlos sonar de una vez. Un parlante
+puede estar en varios grupos. Los grupos los arma el administrador (vea «Armar
+grupos de parlantes», en la configuración de este capítulo).
+
+#captura-pendiente("Cliente de monitoreo: Centro de mando con el cuadro de un grupo de parlantes «Perímetro» — resumen, Hablar al grupo, Detener, un sonido con Reproducir, la línea de estado y la lista PARLANTES con un integrante sin conexión", alto: 6cm)
+
+=== En el Centro de mando del cliente
+
+En el Centro de mando, la lista de recursos tiene la sección *Grupos de
+parlantes*, con cada grupo y su descripción (o cuántos parlantes tiene). La
+sección aparece solo si hay al menos un grupo armado. Un grupo se abre en un
+cuadro igual que una cámara: con doble clic o arrastrándolo hasta el
+cuadro#modulo("video")[ (vea #capitulo(<cap-vista-en-vivo>))]. El cuadro se
+guarda con el tablero como cualquier otro.
+
+El cuadro muestra:
+
+- el nombre del grupo y un resumen, por ejemplo _4 parlante(s) · 3 en
+  línea_; si hay parlantes del grupo fuera de su alcance, agrega cuántos
+  (_· 1 fuera de su alcance_);
+- los botones #boton("Hablar al grupo") y #boton("Detener");
+- si el servidor tiene sonidos, la lista de sonidos con #boton("Reproducir");
+- una línea de estado con el resultado de cada orden;
+- bajo *PARLANTES*, cada integrante con un punto verde si está en línea y, a
+  la derecha, en qué está ocupado.
+
+Para hablarle al grupo:
+
++ Elija el micrófono en el panel *PARLANTES* (vea «Elegir y probar el
+  micrófono»): el cuadro usa ese mismo.
++ Haga clic en #boton("Hablar al grupo"). No hay que mantenerlo presionado:
+  el botón pasa a decir #boton("Dejar de hablar").
++ Hable.
++ Haga clic en #boton("Dejar de hablar") para terminar.
+
+La voz va solo a los integrantes que están en línea y a su alcance. Si alguno
+está sin conexión, la línea de estado avisa cuál quedó fuera: _Hablando. Sin
+conexión, se omitió: …_. Al hablar, el panel *PARLANTES* queda con los
+parlantes del grupo marcados.
+
+Para hacerlo sonar, elija el sonido en la lista y haga clic en
+#boton("Reproducir"): suena sincronizado en los parlantes del grupo que están
+a su alcance. #boton("Detener") corta lo que esté sonando en el grupo,
+incluida su voz.
+
+#table(
+  columns: (1fr, 1fr),
+  table.header[Mensaje][Qué hacer],
+  [Ningún parlante del grupo está a su alcance.], [Sus permisos no alcanzan a ningún parlante del grupo. Consulte al administrador.],
+  [Ningún parlante del grupo está en línea.], [Revise la conexión de los parlantes del grupo.],
+  [El grupo no tiene parlantes activos.], [El grupo está vacío o sus parlantes están pausados. Avise al administrador.],
+  [El grupo ya no existe.], [El administrador eliminó el grupo: use otro en ese cuadro.],
+)
+
+=== En el panel web
+
+En #menu("Dispositivos", "Parlantes IP"), bajo la tabla de parlantes, la
+sección *Grupos de parlantes* muestra cada *Grupo* con sus *Parlantes* y su
+*Descripción*. El botón #boton("Reproducir") de un grupo abre la ventana
+_Reproducir en varios parlantes_ con los parlantes de ese grupo; se usa igual
+que en «Usar los parlantes desde el panel web».
+
 == Configuración
 
 #requiere("Parlantes IP")
 
 Los parlantes se agregan en el panel web, en #menu("Dispositivos",
-"Parlantes IP"). Son compatibles dos familias Hikvision:
+"Parlantes IP"). Son compatibles estos equipos Hikvision:
 
 #table(
   columns: (auto, 1fr),
   table.header[Marca / protocolo][Qué permite],
   [Hikvision (parlante IP por ISAPI)], [Voz en vivo, sonidos del servidor, biblioteca propia de audios y texto a voz, según el modelo.],
   [Hikvision DS-PA (adaptador de audio, RTP)], [Voz en vivo y sonidos del servidor. No tiene biblioteca ni texto a voz.],
+  [Hikvision por SDK (audio bidireccional de cámaras, terminales y grabadores, puerto 8000)], [El altavoz de una cámara, un terminal de acceso o un grabador: voz en vivo y sonidos del servidor. No tiene biblioteca, texto a voz ni volumen (vea «El altavoz de un equipo Hikvision, por el puerto 8000»).],
 )
 
 #captura-pendiente("Panel web: Dispositivos › Parlantes IP con la tabla de parlantes y el formulario Agregar parlante IP con el resultado de Probar conexión")
@@ -225,13 +298,14 @@ Los parlantes se agregan en el panel web, en #menu("Dispositivos",
 === Agregar un parlante
 
 + Haga clic en #boton("Agregar parlante").
-+ Escriba el *Nombre* (por ejemplo, _Acceso proveedores_) y, si quiere, un
-  *Grupo*. El grupo permite elegir varios parlantes de una vez en las
-  automatizaciones.
++ Escriba el *Nombre* (por ejemplo, _Acceso proveedores_). El campo *Grupos*
+  solo informa a qué grupos pertenece el parlante: los grupos se arman aparte
+  (vea «Armar grupos de parlantes»).
 + Elija la *Ubicación* en el árbol de recursos (vea
   #capitulo(<cap-recursos-y-ubicaciones>)).
 + Elija la *Marca / protocolo*.
-+ Escriba la *Dirección (IP o hostname)* y el *Puerto HTTP* (80 por omisión).
++ Escriba la *Dirección (IP o hostname)* y el *Puerto HTTP* (80 por omisión;
+  8000 con la marca _Hikvision por SDK_).
 + Escriba el *Usuario del parlante* y la *Contraseña*. Use un usuario local
   del parlante, normalmente _admin_.
 + Marque *Usar HTTPS (certificado autofirmado aceptado)* solo si el parlante
@@ -267,6 +341,58 @@ el sistema lee sus datos. La voz, los sonidos del servidor, los audios de su
 biblioteca, el texto a voz y el volumen funcionan igual; lo único que no se
 puede por ISUP es subirle audios nuevos a su biblioteca.
 
+=== El altavoz de un equipo Hikvision, por el puerto 8000
+
+La marca _Hikvision por SDK (audio bidireccional de cámaras, terminales y
+grabadores, puerto 8000)_ agrega como parlante el altavoz de una cámara, un
+terminal de acceso o un grabador Hikvision, por su audio bidireccional:
+
+- En *Puerto del equipo (SDK)* va el puerto 8000 del equipo; el formulario lo
+  propone al elegir la marca. Use el usuario y la contraseña del propio
+  equipo.
+- Sirve solo para voz en vivo y sonidos del servidor: no tiene biblioteca,
+  texto a voz ni volumen (el volumen se ajusta en el propio equipo). Al probar
+  la conexión, *Voz en vivo* dice _sí_ y lo demás _no_; el equipo no informa
+  modelo ni número de serie.
+- Su estado _En línea_ solo indica que el equipo contesta en ese puerto: un
+  usuario o una contraseña equivocados se notan recién al hablar o reproducir.
+- Agregado a mano, ocupa un parlante de la licencia como cualquier otro.
+
+#nota[Si el equipo ya está agregado en Fuentes de video o en Control de
+  acceso, no hace falta agregarlo aquí: su altavoz aparece solo (vea
+  «Altavoces de terminales, cámaras y grabadores»).]
+
+=== Altavoces de terminales, cámaras y grabadores
+
+Los terminales de acceso, las cámaras y los grabadores Hikvision que tienen
+altavoz lo aportan como un parlante más, incluido con el equipo: no ocupa
+parlante de la licencia. El parlante se crea solo al agregar o revalidar el
+equipo, si en su formulario está marcada la casilla *Su altavoz, como un
+parlante más* (vea #capitulo(<cap-fuentes-de-video>)#modulo("access")[ y
+#capitulo(<cap-control-de-acceso>)]). Lleva el nombre del equipo y se usa
+como cualquier parlante: en el panel *PARLANTES*, en los grupos de parlantes y
+en las automatizaciones.
+
+En la tabla se distinguen por la línea bajo el nombre: _Altavoz de un terminal
+de acceso · incluido, no ocupa licencia_ o _Altavoz de una cámara o grabador ·
+incluido, no ocupa licencia_.
+
+- En vez de #boton("Editar") y #boton("Eliminar") tienen
+  #boton("Ver terminal"), que abre el terminal en Control de acceso, o
+  #boton("Ver equipo"), que abre #menu("Dispositivos", "Fuentes de video").
+  Su dirección y sus credenciales son las del equipo y se actualizan solas
+  cuando cambian allá.
+- Para quitar el altavoz, desmarque la casilla en el formulario del equipo. Si
+  elimina el equipo, su altavoz se va con él; si desactiva un terminal, su
+  altavoz queda pausado.
+- Si ese altavoz ya estaba agregado a mano como parlante, con la misma
+  dirección y puerto, no se duplica: se sigue usando el que estaba.
+
+Algunos equipos, como los terminales faciales, suenan por el audio
+bidireccional del equipo, igual que con la marca _Hikvision por SDK_: solo
+aceptan voz en vivo y sonidos del servidor, sin biblioteca, texto a voz ni
+volumen. En su columna *Funciones* aparece solo _Voz_.
+
 === La biblioteca de cada parlante
 
 Con el permiso *Parlantes IP*, la #boton("Biblioteca") de cada fila suma estas
@@ -288,6 +414,30 @@ opciones:
   los audios por nombre. Si renombra o borra un audio, revise las
   automatizaciones que lo usan.]
 
+=== Armar grupos de parlantes
+
+Los grupos se arman en #menu("Dispositivos", "Parlantes IP"), en la sección
+*Grupos de parlantes*, debajo de la tabla. Un parlante puede estar en varios
+grupos, y los grupos se usan en el Centro de mando del cliente (vea «Hablarle a
+un grupo de parlantes») y en las automatizaciones#modulo("automation")[ (vea
+#capitulo(<cap-automatizaciones>))].
+
++ Haga clic en #boton("Nuevo grupo").
++ Escriba el *Nombre* (hasta 64 caracteres; por ejemplo, _Perímetro_) y, si
+  quiere, una *Descripción (opcional)*.
++ En *Parlantes del grupo*, marque los parlantes que lo forman. Los pausados
+  aparecen con _(pausado)_.
++ Haga clic en #boton("Guardar"). Aparece _Grupo "…" guardado._
+
+#boton("Editar") abre el mismo formulario para cambiar el nombre, la
+descripción o los integrantes. Si cambia el nombre, las automatizaciones que
+usan el grupo pasan solas al nombre nuevo.
+
+#boton("Eliminar") pide confirmación (_¿Eliminar el grupo "…"? Los parlantes
+no se tocan._) y, si hay automatizaciones que lo nombran, avisa cuántas
+acciones dejarán de hacer sonar algo por él. Los cuadros de los tableros que
+tenían ese grupo quedan libres.
+
 === Mensajes de la configuración
 
 #table(
@@ -298,10 +448,14 @@ opciones:
   [El parlante rechazó las credenciales (usuario o contraseña incorrectos).], [Revise el usuario y la contraseña.],
   [El equipo respondió algo que no es la API de un DS-PA: verifique la dirección y el puerto.], [Revise la dirección, el puerto y la *Marca / protocolo* elegida.],
   [El módulo «Parlantes IP» no está incluido en la licencia. Amplíe la licencia para habilitarlo.], [La licencia no trae parlantes: contacte a su proveedor.],
-  [La licencia permite N parlantes y ya hay N en uso. Amplíe la licencia para agregar más.], [Cada parlante activo ocupa un cupo. Pause o elimine uno, o amplíe la licencia.],
+  [La licencia permite N parlantes y ya hay N en uso. Amplíe la licencia para agregar más.], [Cada parlante activo ocupa un cupo (los altavoces de terminales, cámaras y grabadores no cuentan). Pause o elimine uno, o amplíe la licencia.],
   [El parlante está en uso (…); deténgalo antes de eliminarlo.], [Haga clic en #boton("Detener") y vuelva a intentar.],
   [El audio no puede pesar más de 20 MB.], [Use un archivo más liviano.],
   [Formato no admitido por el parlante: use mp3, wav, aac o mp2.], [Convierta el archivo a uno de esos formatos.],
+  [El equipo no tiene audio bidireccional por SDK con un códec que el VMS sepa generar (G.711µ o G.711A).], [Con la marca _Hikvision por SDK_: configure el audio del equipo en G.711 o use otro equipo.],
+  [El equipo … no responde en el puerto del SDK.], [Revise la dirección, que el puerto sea el 8000 del equipo y que el equipo esté encendido.],
+  [Ya hay un grupo con ese nombre.], [Elija otro nombre para el grupo.],
+  [El nombre del grupo es obligatorio.], [Escriba el *Nombre* del grupo.],
 )
 
 == Biblioteca de sonidos

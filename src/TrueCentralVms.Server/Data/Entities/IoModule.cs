@@ -18,6 +18,26 @@ public class IoModule : ILocatable
     public string Host { get; set; } = "";
     public int Port { get; set; } = 502;
 
+    /// <summary>Credenciales de los drivers que las piden (ISAPI); Modbus no tiene.</summary>
+    public string Username { get; set; } = "";
+    public byte[] PasswordCiphertext { get; set; } = [];
+    public bool UseHttps { get; set; }
+
+    /// <summary>
+    /// Entradas y salidas de alarma de un terminal de acceso: el VMS crea el
+    /// módulo a partir del terminal (dirección, credenciales, ubicación) y se
+    /// borra con él. No ocupa módulo de E/S de la licencia.
+    /// </summary>
+    public int? AccessDeviceId { get; set; }
+    public AccessDevice? AccessDevice { get; set; }
+
+    /// <summary>Entradas y salidas de alarma de una cámara o de un grabador (igual que las de un terminal).</summary>
+    public int? DeviceId { get; set; }
+    public Device? Device { get; set; }
+
+    /// <summary>Es parte de otro equipo (terminal o cámara): se administra desde ese equipo.</summary>
+    public bool IsPart => AccessDeviceId is not null || DeviceId is not null;
+
     /// <summary>Modelo elegido a mano ("ADAM-6066"); null = el que informa el equipo.</summary>
     public string? ModelKey { get; set; }
     /// <summary>Modelo con que se trabaja: el elegido o, si no, el detectado al probarlo.</summary>
