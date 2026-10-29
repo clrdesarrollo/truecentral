@@ -144,6 +144,9 @@ public class AccessDevice : IIsupEquipment
     /// <summary>Ofrecer su altavoz como parlante. Si se quita, no vuelve solo al revalidar.</summary>
     public bool UseSpeaker { get; set; } = true;
 
+    /// <summary>Su altavoz va por el audio bidireccional del SDK (puerto 8000), no por ISAPI.</summary>
+    public bool SpeakerViaSdk { get; set; }
+
     /// <summary>
     /// Sus entradas y salidas de alarma (null = no tiene): se ofrecen como un
     /// módulo de E/S (<see cref="IoModule.AccessDeviceId"/>), incluido con el equipo.

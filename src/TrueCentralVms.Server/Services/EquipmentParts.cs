@@ -62,7 +62,13 @@ public static class EquipmentParts
     /// </summary>
     private sealed record Owner(int? AccessDeviceId, int? DeviceId, string Name, string Host, int Port, bool UseHttps,
         string Username, byte[] PasswordCiphertext, int? LocationId, bool Enabled, string? Model, string? SerialNumber,
-        bool Reachable, string? WhyNot, string DriverKey);
+        bool Reachable, string? WhyNot, string DriverKey, bool SpeakerViaSdk = false)
+    {
+        /// <summary>Driver y puerto del altavoz: ISAPI por el puerto HTTP, o la voz del SDK por el 8000.</summary>
+        public string SpeakerDriver => SpeakerViaSdk ? HikvisionSdkSpeakerDriver.DriverKey : PartDriversOf[DriverKey].Speaker;
+        public int SpeakerPort => SpeakerViaSdk ? SdkPort : Port;
+        public bool SpeakerHttps => !SpeakerViaSdk && UseHttps;
+    }
 
     // ------------------------------------------------------------------
     // Terminales de acceso
@@ -88,7 +94,7 @@ public static class EquipmentParts
             : !Supports(terminal.DriverKey) ? "su marca todavía no lo permite" : null;
         var owner = new Owner(terminal.Id, null, terminal.Name, terminal.Host, terminal.Port, terminal.UseHttps, terminal.Username,
             terminal.PasswordCiphertext, terminal.LocationId, terminal.Enabled, terminal.Model, terminal.SerialNumber,
-            reachable, whyNot, terminal.DriverKey);
+            reachable, whyNot, terminal.DriverKey, terminal.SpeakerViaSdk);
 
         if (await SyncCameraAsync(db, terminal, reachable, whyNot, notes, ct) is { } camera) changes.Add(camera);
         if (await SyncSpeakerAsync(db, owner, terminal.HasSpeaker && terminal.UseSpeaker,
@@ -275,9 +281,10 @@ public static class EquipmentParts
 
         if (speaker is null)
         {
+            int speakerPort = owner.SpeakerPort;
             var manual = await db.Speakers.AsNoTracking()
                 .FirstOrDefaultAsync(s => s.AccessDeviceId == null && s.DeviceId == null && s.IsupDeviceId == null &&
-                                          s.Host == owner.Host && s.Port == owner.Port, ct);
+                                          s.Host == owner.Host && s.Port == speakerPort, ct);
             if (manual is not null)
             {
                 notes.Add($"Su altavoz ya está en Parlantes IP como \"{manual.Name}\": se usa ese.");
@@ -287,7 +294,7 @@ public static class EquipmentParts
             {
                 AccessDeviceId = aid,
                 DeviceId = did,
-                DriverKey = PartDriversOf[owner.DriverKey].Speaker,
+                DriverKey = owner.SpeakerDriver,
                 Name = owner.Name,
                 LocationId = owner.LocationId,
                 Enabled = owner.Enabled,
@@ -300,7 +307,7 @@ public static class EquipmentParts
             try
             {
                 var info = await registry.Find(speaker.DriverKey)!.Create().ProbeAsync(new SpeakerConnectionInfo(
-                    owner.Host, owner.Port, owner.UseHttps, owner.Username, protector.Unprotect(owner.PasswordCiphertext)), ct);
+                    owner.Host, owner.SpeakerPort, owner.SpeakerHttps, owner.Username, protector.Unprotect(owner.PasswordCiphertext)), ct);
                 Api.SpeakersApi.ApplyProbe(speaker, info);
                 // El equipo ya mostró su canal de audio bidireccional (aunque no conteste sus capacidades).
                 speaker.SupportsLiveAudio = true;
@@ -323,9 +330,10 @@ public static class EquipmentParts
     private static void ApplySpeaker(Speaker speaker, Owner owner)
     {
         Set(speaker.Name, owner.Name, v => speaker.Name = v);
+        Set(speaker.DriverKey, owner.SpeakerDriver, v => speaker.DriverKey = v);
         Set(speaker.Host, owner.Host, v => speaker.Host = v);
-        Set(speaker.Port, owner.Port, v => speaker.Port = v);
-        Set(speaker.UseHttps, owner.UseHttps, v => speaker.UseHttps = v);
+        Set(speaker.Port, owner.SpeakerPort, v => speaker.Port = v);
+        Set(speaker.UseHttps, owner.SpeakerHttps, v => speaker.UseHttps = v);
         Set(speaker.Username, owner.Username, v => speaker.Username = v);
         CopyPassword(speaker.PasswordCiphertext, owner.PasswordCiphertext, v => speaker.PasswordCiphertext = v);
         Set(speaker.Model, owner.Model, v => speaker.Model = v);

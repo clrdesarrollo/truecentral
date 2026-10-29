@@ -315,21 +315,26 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
 
         var kind = ClassifyModel(model) ?? KindOfDoorCount(doors.Count);
         return new AccessDeviceInfo(model, Value("serialNumber"), Value("firmwareVersion"), Value("deviceType"),
-            Value("macAddress"), kind, capabilities, doors, profile, await ReadPartsAsync(client, ct));
+            Value("macAddress"), kind, capabilities, doors, profile, await ReadPartsAsync(info, client, ct));
     }
 
     public Task<DeviceParts?> ReadPartsAsync(AccessConnectionInfo info, CancellationToken ct = default) =>
-        ReadPartsAsync(Client(info), ct);
+        ReadPartsAsync(info, Client(info), ct);
+
+    /// <summary>Puerto del SDK de los terminales (el de fábrica): por ahí va la voz de los que no la tienen por ISAPI.</summary>
+    private const int SdkPort = 8000;
 
     /// <summary>
     /// Cámara, altavoz y entradas/salidas de alarma. Por ISUP no se ofrecen
     /// (ni el video ni el audio llegan por esa vía todavía).
     /// </summary>
-    private static async Task<DeviceParts?> ReadPartsAsync(HikvisionIsapiClient client, CancellationToken ct)
+    private static async Task<DeviceParts?> ReadPartsAsync(AccessConnectionInfo info, HikvisionIsapiClient client, CancellationToken ct)
     {
         if (client.IsIsup) return null;
-        return new DeviceParts(await ReadCameraAsync(client, ct), await HikvisionParts.HasSpeakerAsync(client, ct),
-            await HikvisionParts.ReadIoAsync(client, ct));
+        bool speaker = await HikvisionParts.HasSpeakerAsync(client, ct);
+        // Los faciales sin audio bidireccional por ISAPI (DS-K1T321MFWX V3.9) lo tienen por el SDK, como un citófono.
+        bool viaSdk = !speaker && await HikvisionSdkVoice.HasVoiceAsync(info.Host, SdkPort, info.Username, info.Password, ct);
+        return new DeviceParts(await ReadCameraAsync(client, ct), speaker || viaSdk, await HikvisionParts.ReadIoAsync(client, ct), viaSdk);
     }
 
     /// <summary>

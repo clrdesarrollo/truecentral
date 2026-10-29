@@ -44,7 +44,8 @@ public sealed record DeviceIoInfo(int Inputs, int Outputs);
 /// recursos propios, incluidos con el equipo (no ocupan licencia): su cámara,
 /// su altavoz y sus entradas y salidas de alarma. Null en cada uno = no tiene.
 /// </summary>
-public sealed record DeviceParts(AccessCameraInfo? Camera, bool HasSpeaker, DeviceIoInfo? Io);
+/// <param name="SpeakerViaSdk">El altavoz no está por ISAPI sino por el audio bidireccional del SDK (puerto 8000).</param>
+public sealed record DeviceParts(AccessCameraInfo? Camera, bool HasSpeaker, DeviceIoInfo? Io, bool SpeakerViaSdk = false);
 
 /// <summary>Identificación del equipo obtenida al validar las credenciales.</summary>
 public sealed record AccessDeviceInfo(

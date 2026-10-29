@@ -211,6 +211,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Ser
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionIsupSpeakerDriverFactory>();
+builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSdkSpeakerDriverFactory>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.SpeakerAgents.SpeakerAgentHub>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, TrueCentralVms.Server.Services.SpeakerAgents.AgentSpeakerDriverFactory>();
 builder.Services.AddSingleton<SpeakerDriverRegistry>();

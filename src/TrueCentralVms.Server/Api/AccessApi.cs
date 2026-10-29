@@ -135,7 +135,11 @@ public static class AccessApi
         if (parts is null) return;
         bool sameDevice = device.PartsChecked && string.Equals(device.Model, model, StringComparison.OrdinalIgnoreCase);
         if (parts.Camera is not null || !sameDevice) device.CameraRtspPort = parts.Camera?.RtspPort;
-        if (parts.HasSpeaker || !sameDevice) device.HasSpeaker = parts.HasSpeaker;
+        if (parts.HasSpeaker || !sameDevice)
+        {
+            device.HasSpeaker = parts.HasSpeaker;
+            device.SpeakerViaSdk = parts.SpeakerViaSdk;
+        }
         if (parts.Io is not null || !sameDevice)
         {
             device.IoInputs = parts.Io?.Inputs;

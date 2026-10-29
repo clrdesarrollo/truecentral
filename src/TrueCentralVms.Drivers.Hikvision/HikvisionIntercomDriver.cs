@@ -53,8 +53,6 @@ public sealed class HikvisionIsupIntercomDriverFactory : IIntercomDriverFactory
 /// </summary>
 public sealed class HikvisionIntercomDriver : IIntercomDriver
 {
-    /// <summary>Trama de voz del frente: 160 bytes G.711 = 20 ms a 8 kHz.</summary>
-    private const int VoiceFrameBytes = 160;
 
     private static HikvisionIsapiClient Isapi(IntercomConnectionInfo info) =>
         new(new AlarmConnectionInfo(info.Host, info.HttpPort, false, info.Username, info.Password, info.IsupId),
@@ -90,12 +88,7 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
         return userId;
     }
 
-    private static string? CodecOf(int userId)
-    {
-        var compress = new IntercomInterop.NET_DVR_COMPRESSION_AUDIO { byres = new byte[4] };
-        if (!IntercomInterop.NET_DVR_GetCurrentAudioCompress(userId, ref compress)) return null;
-        return compress.byAudioEncType switch { 1 => "ulaw", 2 => "alaw", _ => null };
-    }
+    private static string? CodecOf(int userId) => HikvisionSdkVoice.CodecOf(userId);
 
     // ------------------------------------------------------------------
     // Identificación y configuración
@@ -482,8 +475,8 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
         {
             string codec = CodecOf(userId)
                 ?? throw new DriverException("El citófono usa un códec de voz no soportado (se admite G.711µ y G.711A).");
-            var session = new VoiceSession(userId, codec, onAudio);
-            session.Start(info.Host);
+            var session = new HikvisionSdkVoiceSession(userId, codec, onAudio);
+            session.Start(info.Host, "citófono");
             return session;
         }
         catch
@@ -493,82 +486,4 @@ public sealed class HikvisionIntercomDriver : IIntercomDriver
         }
     }, ct);
 
-    private sealed class VoiceSession(int userId, string codec, Action<ReadOnlyMemory<byte>> onAudio) : IIntercomVoiceSession
-    {
-        private readonly object _sync = new();
-        private readonly byte[] _pending = new byte[VoiceFrameBytes];
-        private int _pendingLength;
-        private int _handle = -1;
-        private int _disposed;
-        private int _consecutiveFailures;
-        private IntercomInterop.VoiceDataCallback? _callback;
-
-        public string Codec => codec;
-
-        public bool IsAlive => Volatile.Read(ref _disposed) == 0 && _handle >= 0 && _consecutiveFailures < 25;
-
-        public void Start(string host)
-        {
-            _callback = OnVoice;
-            int handle = IntercomInterop.NET_DVR_StartVoiceCom_MR_V30(userId, 1, _callback, IntPtr.Zero);
-            if (handle < 0)
-            {
-                uint code = CHCNetSDK.NET_DVR_GetLastError();
-                throw new DriverException(
-                    $"El citófono {host} no abrió el canal de voz: {HikvisionException.DescribeForUser(code)} (error {code}).");
-            }
-            _handle = handle;
-        }
-
-        private void OnVoice(int handle, IntPtr buffer, uint size, byte flag, IntPtr user)
-        {
-            // flag 1 = audio que viene del equipo; 0 = eco de lo que enviamos.
-            if (flag != 1 || size == 0 || size > 64 * 1024) return;
-            try
-            {
-                var copy = new byte[size];
-                Marshal.Copy(buffer, copy, 0, (int)size);
-                onAudio(copy);
-            }
-            catch { /* nunca propagar al hilo del SDK */ }
-        }
-
-        public Task WriteAsync(ReadOnlyMemory<byte> frame, CancellationToken ct = default)
-        {
-            // Llamada nativa corta y sin bloqueo de red: se hace en línea.
-            lock (_sync)
-            {
-                if (!IsAlive) return Task.CompletedTask;
-                var span = frame.Span;
-                while (span.Length > 0)
-                {
-                    int take = Math.Min(VoiceFrameBytes - _pendingLength, span.Length);
-                    span[..take].CopyTo(_pending.AsSpan(_pendingLength));
-                    _pendingLength += take;
-                    span = span[take..];
-                    if (_pendingLength < VoiceFrameBytes) break;
-                    _consecutiveFailures = IntercomInterop.NET_DVR_VoiceComSendData(_handle, _pending, VoiceFrameBytes)
-                        ? 0
-                        : _consecutiveFailures + 1;
-                    _pendingLength = 0;
-                }
-            }
-            return Task.CompletedTask;
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
-            return new ValueTask(Task.Run(() =>
-            {
-                lock (_sync)
-                {
-                    if (_handle >= 0) IntercomInterop.NET_DVR_StopVoiceCom(_handle);
-                    _handle = -1;
-                    CHCNetSDK.NET_DVR_Logout(userId);
-                }
-                GC.KeepAlive(_callback);
-            }));
-        }
-    }
 }
