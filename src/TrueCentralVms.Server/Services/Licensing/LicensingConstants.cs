@@ -61,6 +61,8 @@ public static class LicensingConstants
         [LicenseFeatures.AnprChannels] = 2,
         [LicenseFeatures.ModuleFleet] = true,
         [LicenseFeatures.FleetVehicles] = 5,
+        [LicenseFeatures.ModuleIntegrationApi] = true,
+        [LicenseFeatures.IntegrationApps] = 2,
         [LicenseFeatures.ModuleAlarms] = true,
         [LicenseFeatures.AlarmPanels] = 2,
         [LicenseFeatures.ModuleFence] = true,

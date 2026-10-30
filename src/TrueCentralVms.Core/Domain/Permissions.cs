@@ -78,6 +78,7 @@ public static class Permissions
     public const string SystemBackup = "system.backup";
     public const string SystemCertificate = "system.certificate";
     public const string SystemNetwork = "system.network";
+    public const string SystemIntegrations = "system.integrations";
     public const string RemoteAccess = "remote.access";
 
     /// <summary>Un permiso del catálogo.</summary>
@@ -219,6 +220,9 @@ public static class Permissions
         new(SystemNetwork, "Sistema y seguridad", "Acceso desde Internet",
             "Encender o apagar el acceso desde Internet y definir la dirección pública, las redes locales y los puertos.", [],
             Sensitive: true),
+        new(SystemIntegrations, "Sistema y seguridad", "Integraciones",
+            "Crear, modificar y revocar las aplicaciones integradas y sus credenciales (API de integración): con ellas un sistema externo lee el padrón de personas y sus fotos.",
+            [], Sensitive: true),
         new(RemoteAccess, "Sistema y seguridad", "Entrar desde Internet",
             "Iniciar sesión y operar desde fuera de las redes locales (con el acceso desde Internet encendido). Sin él, el usuario solo entra desde la red local.",
             [], Sensitive: true),

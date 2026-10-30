@@ -114,6 +114,8 @@ builder.Services.AddDbContext<VmsDbContext>(o => o.UseNpgsql(EF.IsDesignTime
 
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<UrlTicketService>();
+// Firma de la API de integración (sistemas externos con su aplicación integrada, sin sesión).
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.Integration.IntegrationAuth>();
 builder.Services.AddSingleton(_ => new LoginThrottle());
 // Alcance por ubicación de cada usuario (qué recursos ve y opera) y el hub
 // que entrega los eventos según ese alcance.
@@ -672,6 +674,8 @@ app.MapDeviceMaintenanceApi();
 app.MapWorkflowsApi();
 app.MapAlarmScreensApi();
 app.MapDashboardApi();
+app.MapIntegrationAppsApi();
+app.MapIntegrationApi(serverVersion);
 
 app.MapHub<VmsHub>(VmsHubContract.HubPath);
 app.MapHub<AlarmScreenHub>(AlarmScreenProtocol.HubPath);

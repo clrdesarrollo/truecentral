@@ -57,7 +57,7 @@ public sealed record LicensePackageDefinition(
 public static class LicenseCatalog
 {
     /// <summary>Versión del catálogo: subirla con cualquier cambio de este archivo.</summary>
-    public const int Version = 6;
+    public const int Version = 7;
 
     /// <summary>Formato del JSON exportado (lo valida el servidor de licencias).</summary>
     public const int SchemaVersion = 1;
@@ -65,7 +65,7 @@ public static class LicenseCatalog
     // Identidad del producto: el servidor de licencias la actualiza en cada importación.
     public const string ProductName = "CLRobotics TrueCentral VMS";
     public const string ProductDescription =
-        "Plataforma de video, flota (DVR móviles), alarmas, cerco eléctrico, control de acceso, muro de video, parlantes IP, citofonía, módulos de E/S y pantallas de alarma";
+        "Plataforma de video, flota (DVR móviles), alarmas, cerco eléctrico, control de acceso, muro de video, parlantes IP, citofonía, módulos de E/S, pantallas de alarma y API de integración";
 
     // Valores INICIALES: solo se usan al crear el producto en el servidor de
     // licencias; después se ajustan en su web (política y texto comercial).
@@ -78,7 +78,7 @@ public static class LicenseCatalog
         "de este certificado (activación en línea).\n" +
         "3. Si el servidor no tiene salida a internet, genere ahí la \"solicitud de activación\" " +
         "(.req), envíela a soporte@clrobotics.cl y luego importe el archivo .lic que recibirá.\n\n" +
-        "Las expansiones (canales, vehículos de flota, decodificadores, paneles de alarma y de cerco, parlantes, frentes de citofonía, módulos de E/S, pantallas de alarma) " +
+        "Las expansiones (canales, vehículos de flota, decodificadores, paneles de alarma y de cerco, parlantes, frentes de citofonía, módulos de E/S, pantallas de alarma, aplicaciones integradas) " +
         "se suman automáticamente a esta licencia: no requieren activación aparte.";
 
     /// <summary>Características, en el orden del certificado y del backoffice.</summary>
@@ -127,6 +127,9 @@ public static class LicenseCatalog
         Bool(LicenseFeatures.ModulePatrol, "Módulo de control de rondas", "Control de rondas", false),
         Int(LicenseFeatures.PatrolReaders, "Bastones de ronda", "Control de rondas", 0, "Bastones"),
         Int(LicenseFeatures.PatrolCheckpoints, "Puntos de control de ronda", "Control de rondas", 0, "Puntos"),
+
+        Bool(LicenseFeatures.ModuleIntegrationApi, "Módulo de API de integración", "Integración", false),
+        Int(LicenseFeatures.IntegrationApps, "Aplicaciones integradas", "Integración", 0, "Aplicaciones"),
     ];
 
     /// <summary>Packages estándar. Los especiales para un cliente se crean en la web del servidor de licencias.</summary>
@@ -160,7 +163,8 @@ public static class LicenseCatalog
             (LicenseFeatures.ModuleIo, true), (LicenseFeatures.IoModules, 32),
             (LicenseFeatures.ModuleAlarmScreens, true), (LicenseFeatures.AlarmScreens, 32),
             (LicenseFeatures.ModuleAutomation, true), (LicenseFeatures.AutomationRules, 500),
-            (LicenseFeatures.ModulePatrol, true), (LicenseFeatures.PatrolReaders, 16), (LicenseFeatures.PatrolCheckpoints, 200)),
+            (LicenseFeatures.ModulePatrol, true), (LicenseFeatures.PatrolReaders, 16), (LicenseFeatures.PatrolCheckpoints, 200),
+            (LicenseFeatures.ModuleIntegrationApi, true), (LicenseFeatures.IntegrationApps, 5)),
 
         // Expansiones: lo que SUMAN a la licencia base. Una que habilita un
         // módulo trae el booleano en true para servir también sobre una base
@@ -205,6 +209,9 @@ public static class LicenseCatalog
             (LicenseFeatures.ModuleFleet, true), (LicenseFeatures.FleetVehicles, 10)),
         Addon("addon_fleet_vehicles_50", "Expansión 50 vehículos de flota",
             (LicenseFeatures.ModuleFleet, true), (LicenseFeatures.FleetVehicles, 50)),
+        // API de integración: Enterprise trae 5 aplicaciones; Professional ninguna (decisión del usuario, 2026-10-30).
+        Addon("addon_integration_app_1", "Expansión 1 aplicación integrada (API de integración)",
+            (LicenseFeatures.ModuleIntegrationApi, true), (LicenseFeatures.IntegrationApps, 1)),
     ];
 
     // Mismas restricciones que el servidor de licencias (SlugField de 50, nombres de 120...)

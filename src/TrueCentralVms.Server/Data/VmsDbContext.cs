@@ -34,6 +34,9 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<AccessVehicle> AccessVehicles => Set<AccessVehicle>();
     public DbSet<VehicleAccessRecord> VehicleAccessRecords => Set<VehicleAccessRecord>();
 
+    /// <summary>Aplicaciones integradas: sistemas externos que leen el padrón (API de integración).</summary>
+    public DbSet<IntegrationApp> IntegrationApps => Set<IntegrationApp>();
+
     /// <summary>Bitácora de auditoría (solo-agregar; ver Services\AuditService).</summary>
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
@@ -289,6 +292,20 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.HasIndex(v => v.Code).IsUnique();
             e.HasIndex(v => v.DeviceId).IsUnique();
             e.HasOne(v => v.Device).WithOne().HasForeignKey<Vehicle>(v => v.DeviceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<IntegrationApp>(e =>
+        {
+            e.Property(a => a.Name).HasMaxLength(64);
+            e.Property(a => a.Description).HasMaxLength(256);
+            e.Property(a => a.AppKey).HasMaxLength(32);
+            e.Property(a => a.Scopes).HasMaxLength(256);
+            e.Property(a => a.AllowedIps).HasMaxLength(2000);
+            e.Property(a => a.LastUsedIp).HasMaxLength(64);
+            e.Ignore(a => a.ScopeList);
+            e.Ignore(a => a.AllowedIpList);
+            e.HasIndex(a => a.AppKey).IsUnique();
+            e.HasIndex(a => a.Name).IsUnique();
         });
 
         // Eventos de vehículos: se listan por vehículo y hora, y los pendientes de acusar.
