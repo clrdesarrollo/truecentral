@@ -447,6 +447,16 @@ public static class AuditCatalog
             new("license-quota-trimmed", "Recursos apagados por sobrepasar el cupo de la licencia"),
             new("license-quota-restored", "Recursos encendidos al volver a haber cupo en la licencia"),
         ]),
+        new("integration", "API de integración",
+        [
+            new("app-created", "Aplicación integrada creada"),
+            new("app-updated", "Aplicación integrada modificada (permisos, direcciones, vencimiento o estado)"),
+            new("app-secret-rotated", "Secreto de una aplicación integrada cambiado"),
+            new("app-deleted", "Aplicación integrada eliminada (su llave deja de valer)"),
+            new("request-rejected", "Petición de un sistema externo rechazada (firma, llave, dirección, vencimiento o permiso)"),
+            new("app-used", "Aplicación integrada en uso (primera petición del día)"),
+            new("photos-read", "Fotos de personas descargadas por una aplicación integrada"),
+        ]),
         new("isup", "Conexión ISUP",
         [
             new("device-connected", "Equipo conectado por ISUP"),

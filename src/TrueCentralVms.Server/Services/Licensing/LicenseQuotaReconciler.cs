@@ -163,6 +163,13 @@ public sealed class LicenseQuotaReconciler(IServiceScopeFactory scopes, AuditSer
             (x, on) => { x.Enabled = on; x.DisabledByLicense = !on; x.UpdatedAt = DateTime.UtcNow; }, x => x.Code,
             async (_, _, _, _) => await Changed("fleet")), ct);
 
+        // Una aplicación apagada por licencia conserva su llave: vuelve sola si alcanza el cupo.
+        await RunAsync(db, sp, f, new Spec<IntegrationApp>(
+            "aplicaciones integradas", LicenseFeatures.ModuleIntegrationApi, LicenseFeatures.IntegrationApps,
+            d => d.IntegrationApps, x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,
+            (x, on) => { x.Enabled = on; x.DisabledByLicense = !on; x.UpdatedAt = DateTime.UtcNow; }, x => x.Name,
+            async (_, _, _, _) => await Changed("integrations")), ct);
+
         await RunAsync(db, sp, f, new Spec<Workflow>(
             "automatizaciones", LicenseFeatures.ModuleAutomation, LicenseFeatures.AutomationRules,
             d => d.Workflows, x => x.Enabled, x => x.DisabledByLicense && !x.Enabled, x => true,

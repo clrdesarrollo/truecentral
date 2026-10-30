@@ -253,6 +253,7 @@ public sealed class LicenseService : BackgroundService
             [LicenseFeatures.PatrolCheckpoints] = await db.PatrolCheckpoints.CountAsync(c => c.Enabled, ct),
             [LicenseFeatures.AlarmScreens] = await db.AlarmScreens.CountAsync(s => s.Status == AlarmScreenStatus.Approved, ct),
             [LicenseFeatures.AutomationRules] = await db.Workflows.CountAsync(w => w.Enabled, ct),
+            [LicenseFeatures.IntegrationApps] = await db.IntegrationApps.CountAsync(a => a.Enabled, ct),
             [LicenseFeatures.MaxUsers] = await db.Users.CountAsync(u => u.Enabled, ct),
             [LicenseFeatures.MaxClientSessions] = _tokens.CountDesktopSessions(),
         };

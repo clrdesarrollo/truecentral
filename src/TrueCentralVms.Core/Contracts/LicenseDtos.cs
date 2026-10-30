@@ -74,6 +74,11 @@ public static class LicenseFeatures
     public const string ModuleFleet = "module_fleet";
     public const string FleetVehicles = "fleet_vehicles";
 
+    // API de integración: sistemas externos (el kiosco de un casino, remuneraciones) que leen el padrón con
+    // credenciales propias. Se licencia por aplicación habilitada.
+    public const string ModuleIntegrationApi = "module_integration_api";
+    public const string IntegrationApps = "integration_apps";
+
     /// <summary>Tope de canales habilitados por vehículo: un grabador fijo no debe poder darse de alta como vehículo para
     /// esquivar el cupo de canales de video.</summary>
     public const int MaxChannelsPerVehicle = 16;
@@ -110,6 +115,7 @@ public static class LicenseFeatures
         new(ModuleAutomation, "Automatizaciones", AutomationRules, "reglas", AreaAutomation),
         new(ModulePatrol, "Control de rondas", PatrolReaders, "bastones", AreaSecurity),
         new(ModulePatrol, "Puntos de control de ronda", PatrolCheckpoints, "puntos", AreaSecurity),
+        new(ModuleIntegrationApi, "API de integración", IntegrationApps, "aplicaciones", AreaPlatform),
     ];
 
     /// <summary>Cupos que no dependen de un módulo (siempre aplican).</summary>

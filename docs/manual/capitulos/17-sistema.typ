@@ -216,6 +216,77 @@ Abra #menu("Sistema", "Conexión ISUP") para ver el estado del servicio:
 Las conexiones, desconexiones y rechazos de cada equipo quedan en la bitácora,
 en la categoría «Conexión ISUP».
 
+== Integraciones
+
+#requiere("Integraciones")
+
+Una *aplicación integrada* es un sistema externo que lee el padrón de personas
+por la *API de integración*: por ejemplo el kiosco de un casino o un sistema
+de remuneraciones. Usa una llave y un secreto propios, no un usuario del
+sistema, y solo lee: legajo, nombre, departamento, cargo, vigencia, los campos
+personalizados (como la colación) y, si se le permite, la foto del rostro.
+
+Abra #menu("Sistema", "Integraciones"). La tabla muestra cada aplicación con
+su llave, sus permisos, desde dónde puede conectarse, cuándo vence, su último
+uso y su estado.
+
+=== Agregar una aplicación
+
++ Haga clic en #boton("Agregar aplicación").
++ Escriba el *Nombre* y, si quiere, una *Descripción*.
++ Marque los *Permisos*: *Leer el padrón* y, solo si el sistema la necesita,
+  *Descargar fotos*.
++ En *Direcciones permitidas*, escriba la IP del sistema externo o una red
+  (por ejemplo 192.168.1.0/24). Si lo deja vacío, se acepta desde cualquier
+  dirección.
++ Si la aplicación es temporal, elija la fecha en *Vence*.
++ Haga clic en #boton("Agregar").
+
+La ventana siguiente muestra lo que hay que cargar en el sistema externo: la
+dirección del servidor, la *llave*, el *secreto* y la *huella del
+certificado*. #boton("Copiar todo") copia los cuatro datos de una vez.
+
+#importante[El secreto se muestra una sola vez. Si se pierde, use
+  #boton("Cambiar secreto"): el anterior deja de valer al instante y hay que
+  cargar el nuevo en el sistema externo.]
+
+Por ejemplo, el kiosco del casino se configura en sus ajustes, en
+*Integración → Servidor TrueCentral*: se elige TrueCentral como origen del
+padrón y se escriben la dirección, la llave y el secreto. La huella se puede
+escribir o dejar vacía: en ese caso el kiosco la fija en la primera conexión.
+
+=== Modificar, deshabilitar o eliminar
+
+- #boton("Editar") cambia el nombre, los permisos, las direcciones, el
+  vencimiento y si está habilitada. Una aplicación deshabilitada conserva su
+  llave y no consume licencia.
+- #boton("Cambiar secreto") genera uno nuevo y anula el anterior.
+- #boton("Eliminar") borra la aplicación: su llave deja de valer.
+
+=== Licencia y seguridad
+
+Cada aplicación habilitada consume una unidad del cupo *Aplicaciones
+integradas* del módulo *API de integración*. Si la licencia se reduce, las que
+sobran quedan *Sin cupo de licencia* y vuelven solas cuando hay cupo.
+
+Cada petición del sistema externo va firmada con el secreto: una petición
+capturada no se puede repetir ni modificar, y si la hora del sistema externo
+difiere en más de 5 minutos de la del servidor, se rechaza. La huella del
+certificado le permite al sistema externo comprobar que habla con este
+servidor. Si se carga otro certificado HTTPS, la huella cambia y hay que
+actualizarla allá.
+
+Quedan en la bitácora, en la categoría «API de integración»:
+- las altas, los cambios, los secretos cambiados y las eliminaciones;
+- las peticiones rechazadas, con el motivo: firma, llave, dirección,
+  vencimiento o permiso;
+- la primera conexión de cada día;
+- la descarga de fotos.
+
+#nota[Quien programe un sistema externo puede pedir a soporte la
+  especificación técnica de la API: cómo se firma cada petición y qué rutas
+  hay.]
+
 == Licencia
 
 Abra #menu("Sistema", "Licencia"). Todos los usuarios ven el estado de la

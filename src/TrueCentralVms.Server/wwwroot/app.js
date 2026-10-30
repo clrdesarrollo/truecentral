@@ -2506,6 +2506,7 @@ const routes = {
   "#/account": renderAccount,
   "#/wan": renderWan,
   "#/time": renderTime,
+  "#/integrations": renderIntegrations,
 
   "#/license": renderLicense,
 };
@@ -2690,7 +2691,7 @@ const MANUAL_CHAPTERS = {
   "#/users": "16-usuarios-y-roles", "#/roles": "16-usuarios-y-roles", "#/audit": "16-usuarios-y-roles",
   "#/sessions": "17-sistema", "#/services": "17-sistema", "#/isup": "17-sistema", "#/license": "17-sistema",
   "#/backups": "17-sistema", "#/mail": "17-sistema", "#/time": "17-sistema", "#/wan": "17-sistema",
-  "#/certificate": "17-sistema",
+  "#/certificate": "17-sistema", "#/integrations": "17-sistema",
 };
 
 function manualHref(base) {
