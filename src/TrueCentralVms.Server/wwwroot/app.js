@@ -242,13 +242,118 @@ function locationLineHtml(path) {
 }
 
 function openModal(html, size) {
+  // El alta de un equipo abierta desde su ruta (#/devices/new…) se dibuja como página;
+  // si se fue de ella antes de que el formulario cargara, el formulario se descarta.
+  if (formPage && !formPage.drawn) {
+    if (formPage.left) { formPage = null; return; }
+    if (location.hash === formPage.hash) { drawFormPage(html); return; }
+  }
   // `size`: true = "wide" (formularios con grilla, editor de muros) o el
   // nombre de una clase de ancho ("wider" para tablas dentro del modal).
   $("#modal").className = "modal" + (size === true ? " wide" : size ? " " + size : "");
   $("#modal").innerHTML = html;
   $("#modal-backdrop").classList.remove("hidden");
 }
-function closeModal() { $("#modal-backdrop").classList.add("hidden"); }
+function closeModal() {
+  const backdrop = $("#modal-backdrop");
+  if (!backdrop.classList.contains("hidden")) { backdrop.classList.add("hidden"); return; }
+  // Sin modal a la vista, cerrar el alta como página es volver a su lista. Con replace: el
+  // formulario no queda en el historial (Atrás no lo vuelve a abrir vacío).
+  if (formPage?.drawn && location.hash === formPage.hash) {
+    const back = formPage.back;
+    formPage = null;
+    location.replace(back);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Alta de equipos como página. Los formularios son los mismos de siempre (los
+// abre openModal y los cierra closeModal, y también se usan para editar, en
+// modal); abiertos desde su ruta, el primer openModal los dibuja en la página:
+// el título en la cabecera y en las migas, el formulario en una tarjeta y sus
+// botones en una barra que queda a la vista al bajar. Guardar o Cancelar
+// vuelven a la lista; un diálogo que el formulario abra encima sigue siendo modal.
+// ---------------------------------------------------------------------------
+let formPage = null;         // { hash, back, icon, hint, drawn, left }
+let formPagePrefill = null;  // { base, data }: el equipo elegido en Equipos en línea
+
+/** Abre el alta como página; `prefill` = los datos del equipo encontrado en la red. */
+function openFormPage(newHash, prefill) {
+  formPagePrefill = prefill ? { base: newHash.split("?")[0], data: prefill } : null;
+  location.hash = newHash;
+}
+
+/** Ruta de un alta: `back` = su lista, `icon`/`hint` = la columna de al lado; `open(prefill, query)` llama al formulario de siempre. */
+function formPageRoute({ back, icon, hint }, open) {
+  return async () => {
+    const hash = location.hash;
+    const base = hash.split("?")[0];
+    const prefill = formPagePrefill?.base === base ? formPagePrefill.data : null;
+    formPagePrefill = null;
+    const me = { hash, back, icon, hint, drawn: false, left: false };
+    formPage = me;
+    $("#view").innerHTML = `<div class="muted">Cargando el formulario…</div>`;
+    await open(prefill, new URLSearchParams(hash.split("?")[1] ?? ""));
+    if (formPage !== me || me.drawn) return;
+    formPage = null;
+    // El formulario no se pudo armar (el error ya se avisó): queda el camino de vuelta.
+    if (location.hash === hash)
+      $("#view").innerHTML = `<div class="error-box">No se pudo abrir el formulario.
+        <a href="${esc(back)}">Volver a la lista</a></div>`;
+  };
+}
+
+/** Al dejar la página: un alta a medio cargar se descarta cuando llegue (ver openModal). */
+function leaveFormPage() {
+  if (formPage && !formPage.drawn) formPage.left = true;
+  else formPage = null;
+}
+
+function drawFormPage(html) {
+  formPage.drawn = true;
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  const heading = box.querySelector("h3");
+  const title = heading?.textContent.trim() || "Agregar";
+  heading?.remove();
+  const nav = $("#nav a.active");
+  const listName = nav?.textContent.trim() || "la lista";
+  $("#page-title").textContent = title;
+  // Migas: la lista pasa a ser un enlace y el alta queda al final.
+  const crumbs = $("#breadcrumb");
+  const last = crumbs?.lastElementChild;
+  if (last && !last.querySelector("a")) {
+    const link = document.createElement("a");
+    link.href = formPage.back;
+    link.textContent = last.textContent;
+    last.replaceChildren(link);
+    const li = document.createElement("li");
+    li.textContent = title;
+    crumbs.append(li);
+  }
+  // Al lado del formulario, de qué sección es y qué hace el sistema al guardar.
+  const page = document.createElement("div");
+  page.className = "form-page";
+  page.innerHTML = `
+    <a class="form-page-back" href="${esc(formPage.back)}"><span aria-hidden="true">←</span> Volver a ${esc(listName)}</a>
+    <div class="form-page-layout">
+      <aside class="form-page-aside">
+        <div class="form-page-icon"><i class="mdi ${esc(formPage.icon)}" aria-hidden="true"></i></div>
+        <div>
+          <div class="form-page-section">${esc(listName)}</div>
+          <p>${esc(formPage.hint)}</p>
+        </div>
+      </aside>
+      <div class="form-page-card"></div>
+    </div>`;
+  const card = page.querySelector(".form-page-card");
+  card.append(...box.childNodes);
+  $("#view").replaceChildren(page);
+  // La página la desplaza el documento: así la barra de botones queda a la vista al bajar.
+  $("#view").classList.add("view-form-page");
+  page.querySelector(".form-page-back").addEventListener("click", (e) => { e.preventDefault(); closeModal(); });
+  card.querySelector("input:not([type=hidden]):not([disabled]), select")?.focus({ preventScroll: true });
+}
 // Un clic en el fondo NO cierra el modal: acá casi todos son formularios (alta
 // de un equipo, asistente de personas, editor de horarios) y un clic al lado
 // perdía todo lo escrito sin preguntar. Se cierran por su botón Cancelar o
@@ -906,7 +1011,7 @@ async function renderDevices() {
       renderDevices();
     } catch (err) { toast(err.error, true); e.target.disabled = false; }
   }));
-  $("#btn-device-new")?.addEventListener("click", () => deviceModal(null));
+  $("#btn-device-new")?.addEventListener("click", () => openFormPage("#/devices/new"));
   $("#btn-device-scan")?.addEventListener("click", () => runDiscovery(devices));
   if (lastScan) renderOnlineDevices(devices);
   if (isAdmin) startDiscoveryPolling(devices);
@@ -1015,7 +1120,7 @@ const DEVICE_DISCOVERY = {
   emptyText: "No se encontraron equipos de video en este segmento de red. " +
     "Los sondeos son de difusión y no cruzan routers ni VPN: solo ven el segmento del servidor. " +
     "Un equipo fuera de él se agrega a mano con su dirección.",
-  onUse: (d) => deviceModal(null, {
+  onUse: (d) => openFormPage("#/devices/new", {
     name: d.model || d.ip,
     host: d.ip,
     sdkPort: d.commandPort || 8000,
@@ -2325,6 +2430,34 @@ const routes = {
   "#/alarm-panels": renderAlarmPanels,
   "#/access": renderAccessDevices,
   "#/access/device": renderAccessDevicePage,
+  // Alta de equipos como página (los mismos formularios que editan en modal).
+  "#/devices/new": formPageRoute({ back: "#/devices", icon: "mdi-video",
+    hint: "Al guardar se validan las credenciales contra el equipo y se leen su modelo, número de serie, firmware y canales." },
+    (prefill) => deviceModal(null, prefill)),
+  "#/access/new": formPageRoute({ back: "#/access", icon: "mdi-key-variant",
+    hint: "Al guardar se validan las credenciales contra el equipo y se leen su modelo, firmware, capacidades y las puertas que administra." },
+    (prefill) => accessDeviceModal(null, prefill)),
+  "#/alarm-panels/new": formPageRoute({ back: "#/alarm-panels", icon: "mdi-shield",
+    hint: "Por IP, al guardar se validan las credenciales contra la central y se leen sus áreas y zonas. Por ISUP, el panel se conecta solo al servidor con su ID y su clave." },
+    () => alarmPanelModal(null)),
+  "#/cerco-panels/new": formPageRoute({ back: "#/cerco-panels", icon: "mdi-flash",
+    hint: "Al guardar, el sistema genera el ID de equipo y el código de enrolamiento que el instalador carga en el panel. Se muestran una sola vez." },
+    () => cercoPanelModal(null)),
+  "#/speakers/new": formPageRoute({ back: "#/speakers", icon: "mdi-bullhorn",
+    hint: "Al guardar se validan las credenciales contra el equipo y se leen sus capacidades: voz en vivo, biblioteca de audios y texto a voz." },
+    () => speakerModal(null)),
+  "#/io-modules/new": formPageRoute({ back: "#/io-modules", icon: "mdi-toggle-switch",
+    hint: "Al guardar se lee el modelo y se arman sus entradas y relés, que después puede nombrar." },
+    () => ioModuleModal(null)),
+  "#/intercoms/new": formPageRoute({ back: "#/intercoms", icon: "mdi-deskphone",
+    hint: "Al guardar se validan las credenciales contra el equipo y se configura su botón para que llame a la central." },
+    (prefill) => intercomModal(null, prefill)),
+  "#/decoders/new": formPageRoute({ back: "#/decoders", icon: "mdi-monitor-multiple",
+    hint: "Al guardar se validan las credenciales contra el equipo y se leen sus salidas físicas y canales de decodificación; después se abre su página." },
+    (prefill) => decoderModal(prefill ?? {})),
+  "#/fleet/vehicles/new": formPageRoute({ back: "#/fleet/vehicles", icon: "mdi-bus",
+    hint: "En el grabador móvil hay que apuntar la plataforma ISUP (EHome) a este servidor con el mismo ID ISUP: sus cámaras aparecen solas cuando se conecta." },
+    (_, query) => flVehicleModal(null, query.get("detected") ?? undefined)),
   "#/access-monitor": renderAccessMonitor,
   "#/access-persons": renderAccessPersons,
   "#/access-levels": renderAccessLevels,
@@ -2500,6 +2633,7 @@ new MutationObserver(() => {
 
 function leaveCurrentPage() {
   setPageActions("");            // las acciones son de la página que se deja
+  leaveFormPage();               // el alta de un equipo como página
   clearInterval(sessionsTimer);  // el sondeo de sesiones vive solo en su página
   dashboardLeave();              // ídem el refresco y el reloj del panel de inicio
   clearInterval(wallsTimer);     // ídem el del estado de los muros

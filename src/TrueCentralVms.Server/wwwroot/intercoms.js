@@ -120,7 +120,7 @@ async function renderIntercoms() {
     <div id="ic-history"></div>`;
 
   const byRow = (e) => intercoms.find((i) => i.id === Number(e.target.closest("tr").dataset.id));
-  $("#btn-intercom-new")?.addEventListener("click", () => intercomModal(null));
+  $("#btn-intercom-new")?.addEventListener("click", () => openFormPage("#/intercoms/new"));
   $("#btn-intercom-scan")?.addEventListener("click", () => runDiscovery(knownDevices));
   if (scanReady) renderOnlineDevices(knownDevices);
   if (isAdmin) startDiscoveryPolling(knownDevices, INTERCOM_DISCOVERY);
@@ -213,7 +213,7 @@ const INTERCOM_DISCOVERY = {
   emptyText: "No se encontraron frentes de videoportero compatibles en este segmento de red. " +
     "Los sondeos son de difusión y no cruzan routers ni VPN: solo ven el segmento del servidor. " +
     "Un frente fuera de él se agrega a mano con su dirección.",
-  onUse: (d) => intercomModal(null, {
+  onUse: (d) => openFormPage("#/intercoms/new", {
     name: d.model || d.ip,
     host: d.ip,
     port: d.commandPort || 8000,

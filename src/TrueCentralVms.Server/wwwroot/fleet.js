@@ -89,9 +89,10 @@ async function renderFleetVehicles() {
       </table></div>`}`;
 
   const byRow = (e) => vehicles.find((v) => v.id === Number(e.target.closest("tr").dataset.id));
-  $("#btn-fl-new").addEventListener("click", () => flVehicleModal(null));
+  $("#btn-fl-new").addEventListener("click", () => openFormPage("#/fleet/vehicles/new"));
   $("#btn-fl-import").addEventListener("click", flImportModal);
-  $$("#view .fl-detected").forEach((b) => b.addEventListener("click", () => flVehicleModal(null, b.dataset.id)));
+  $$("#view .fl-detected").forEach((b) => b.addEventListener("click", () =>
+    openFormPage(`#/fleet/vehicles/new?detected=${encodeURIComponent(b.dataset.id)}`)));
   $$("#view .fl-edit").forEach((b) => b.addEventListener("click", (e) => flVehicleModal(byRow(e))));
   $$("#view .fl-cams").forEach((b) => b.addEventListener("click", (e) => flCamerasModal(byRow(e))));
   $$("#view .fl-reval").forEach((b) => b.addEventListener("click", async (e) => {

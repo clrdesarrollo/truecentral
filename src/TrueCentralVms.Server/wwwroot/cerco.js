@@ -84,7 +84,7 @@ async function renderCercoPanels() {
   // Delegación de acciones (sobrevive a las actualizaciones incrementales).
   $("#view").addEventListener("click", onCercoAdminClick);
   // «Agregar panel» sube a la cabecera (fuera de #view): su clic va directo.
-  $("#btn-cerco-new")?.addEventListener("click", () => cercoPanelModal(null));
+  $("#btn-cerco-new")?.addEventListener("click", () => openFormPage("#/cerco-panels/new"));
 
   // Tiempo real: actualizar la fila del panel que cambió (y el modal de configuración si está abierto).
   cercoBind("CercoPanelStateChanged", (p) => {
@@ -153,7 +153,7 @@ async function cercoPanelModal(panel) {
     <h3>${editing ? "Editar" : "Agregar"} panel de cerco</h3>
     <div class="field"><label>Nombre</label><input id="c-name" maxlength="128" value="${editing ? esc(panel.name) : ""}" placeholder="Cerco perímetro norte"></div>
     ${locationFieldHtml("c-location", places, editing ? panel.locationId ?? null : null, null, { equipment: true, isNew: !editing })}
-    <div class="field checkbox"><label><input type="checkbox" id="c-enabled" ${!editing || panel.enabled ? "checked" : ""}> Habilitado</label></div>
+    <label class="checkbox-row"><input type="checkbox" id="c-enabled" ${!editing || panel.enabled ? "checked" : ""}> Habilitado</label>
     ${editing ? "" : `<div class="info-box">Al guardar, el sistema genera el <b>ID de equipo</b> (6 dígitos) y el <b>código de enrolamiento</b> (8 dígitos, válido 48 h). Se muestran una sola vez: el instalador los carga en el panel.</div>`}
     <div class="modal-actions">
       <button class="btn ghost" type="button" id="c-cancel">Cancelar</button>
@@ -249,7 +249,7 @@ async function cercoConfigModal(panel) {
       <input type="number" id="cfg-siren" min="10" max="900" value="${config.sirenSeconds}"></div>
     <div class="field"><label>Retardo de salida antes de energizar (segundos, 0–120)</label>
       <input type="number" id="cfg-exit" min="0" max="120" value="${config.exitDelaySeconds}"></div>
-    <div class="field checkbox"><label><input type="checkbox" id="cfg-chirp" ${config.chirp ? "checked" : ""}> Chirp de sirena al armar/desarmar</label></div>
+    <label class="checkbox-row"><input type="checkbox" id="cfg-chirp" ${config.chirp ? "checked" : ""}> Chirp de sirena al armar/desarmar</label>
 
     <h4 style="margin:12px 0 4px">Llave</h4>
     <div class="field"><select id="cfg-key">${cercoOpts(CERCO_KEY_MODES, config.keyMode)}</select>
@@ -257,7 +257,7 @@ async function cercoConfigModal(panel) {
 
     <h4 style="margin:12px 0 4px">Zona 0 (entrada cableada)</h4>
     <div class="field"><select id="cfg-z0">${cercoOpts(CERCO_ZONE_MODES, config.zone0Mode)}</select></div>
-    <div class="field checkbox"><label><input type="checkbox" id="cfg-z0block" ${config.zone0BlocksArm ? "checked" : ""}> Si está abierta, no permitir armar</label></div>
+    <label class="checkbox-row"><input type="checkbox" id="cfg-z0block" ${config.zone0BlocksArm ? "checked" : ""}> Si está abierta, no permitir armar</label>
     <div class="muted" style="font-size:11px">Lectura actual: <b id="cfg-z0adc">—</b> (normal entre 384 y 895; fuera = corto o línea abierta)</div>
 
     <div class="modal-actions">

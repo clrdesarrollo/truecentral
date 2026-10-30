@@ -156,7 +156,7 @@ async function renderAccessDevices() {
     </div>` : ""}`;
 
   const byRow = (e) => devices.find((d) => d.id === Number(e.target.closest("tr").dataset.id));
-  $("#btn-access-new")?.addEventListener("click", () => accessDeviceModal(null));
+  $("#btn-access-new")?.addEventListener("click", () => openFormPage("#/access/new"));
   $("#btn-access-scan")?.addEventListener("click", () => runDiscovery(devices));
   if (scanReady) renderOnlineDevices(devices);
   if (isAdmin) startDiscoveryPolling(devices, ACCESS_DISCOVERY);
@@ -237,7 +237,7 @@ const ACCESS_DISCOVERY = {
   emptyText: "No se encontraron equipos de control de acceso compatibles en este segmento de red. " +
     "Los sondeos son de difusión y no cruzan routers ni VPN: solo ven el segmento del servidor. " +
     "Un equipo fuera de él se agrega a mano con su dirección.",
-  onUse: (d) => accessDeviceModal(null, {
+  onUse: (d) => openFormPage("#/access/new", {
     name: d.model || d.ip,
     host: d.ip,
     port: d.httpPort || 80,

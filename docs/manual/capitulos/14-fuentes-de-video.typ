@@ -86,7 +86,8 @@ decodificador no llega al equipo). Vea #menu("Sistema", "Conexión ISUP") en
 
 #requiere("Fuentes de video")
 
-+ Haga clic en #boton("Agregar dispositivo").
++ Haga clic en #boton("Agregar dispositivo"). Se abre la página *Agregar
+  dispositivo* (vea _La página de alta_).
 + Escriba un *Nombre*, por ejemplo «NVR Bodega».
 + En *Ubicación*, elija dónde está el equipo o deje _Por ubicar_. Sus canales
   heredan esa ubicación.
@@ -124,10 +125,28 @@ Debajo aparecen los canales: en verde los que tienen señal y en gris los que no
 Al guardar, entran habilitados los canales que tienen señal; los que no tienen
 señal quedan deshabilitados y puede habilitarlos después desde #boton("Canales").
 
+=== La página de alta
+
+Agregar un equipo, de cualquier tipo (fuentes de video, control de acceso,
+paneles de alarma y de cerco, parlantes, módulos de E/S, citofonía,
+decodificadores y vehículos), abre una página propia, no una ventana:
+
+- arriba, el enlace *Volver a…* regresa a la lista sin guardar, igual que
+  #boton("Cancelar");
+- a la izquierda, qué hace el sistema al guardar (por ejemplo, validar las
+  credenciales y leer los canales o las puertas del equipo);
+- a la derecha, el formulario. Sus botones quedan siempre a la vista al pie,
+  aunque baje por la página.
+
+Al guardar, la página vuelve a la lista. Editar un equipo que ya está en el
+sistema sigue abriendo una ventana sobre la lista.
+
+#captura-pendiente("Panel web: página Agregar equipo de control de acceso, con Volver a Control de acceso, la explicación a la izquierda, el formulario y la barra de botones al pie")
+
 === Agregar desde la búsqueda en la red
 
-En *Equipos en línea*, el botón #boton("Agregar") de un equipo abre el mismo
-formulario con el nombre (el modelo), la dirección, el puerto y la marca ya
+En *Equipos en línea*, el botón #boton("Agregar") de un equipo abre la misma
+página con el nombre (el modelo), la dirección, el puerto y la marca ya
 completos. Escriba el usuario y la contraseña, y siga desde el paso de probar
 la conexión.
 

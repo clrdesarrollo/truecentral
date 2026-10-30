@@ -140,7 +140,7 @@ alarma 1_, _Salida de alarma 2_…).
 #requiere("Módulos de E/S")
 
 + Abra #menu("Dispositivos", "Módulos de E/S") y haga clic en
-  #boton("Agregar módulo").
+  #boton("Agregar módulo"). Se abre la página *Agregar módulo de E/S*.
 + Escriba un *Nombre*, por ejemplo _Gabinete acceso vehicular_, y elija su
   *Ubicación*.
 + Deje *Marca / protocolo* en _Advantech ADAM-6000 (Modbus TCP, puerto 502)_.

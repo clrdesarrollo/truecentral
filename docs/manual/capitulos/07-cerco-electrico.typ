@@ -216,7 +216,8 @@ el sistema genera.
 
 === Agregar un panel
 
-+ Haga clic en #boton("Agregar panel").
++ Haga clic en #boton("Agregar panel"). Se abre la página *Agregar panel de
+  cerco*.
 + Escriba el *Nombre*, elija la *Ubicación* y deje marcado *Habilitado*.
 + Haga clic en #boton("Crear y generar clave").
 + El sistema muestra las *Credenciales* del panel: el *ID de equipo* (6

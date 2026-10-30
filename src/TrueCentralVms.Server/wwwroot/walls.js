@@ -129,7 +129,7 @@ async function renderDecoders() {
         (Hikvision DS-64xx/69xx/C10, Dahua NVD); cámaras, grabadores y otros equipos se omiten.</div>
     </div>` : ""}`;
 
-  $("#btn-decoder-new")?.addEventListener("click", () => decoderModal());
+  $("#btn-decoder-new")?.addEventListener("click", () => openFormPage("#/decoders/new"));
   // Decodificadores en línea (mismo sondeo que Fuentes de video, filtrado a decodificadores).
   const knownDecoders = decoders.map((d) => ({ host: d.host }));
   $("#btn-decoder-scan")?.addEventListener("click", () => runDiscovery(knownDecoders));
@@ -155,7 +155,7 @@ const DECODER_DISCOVERY = {
   emptyText: "No se encontraron decodificadores de muro en este segmento de red. " +
     "Los sondeos son de difusión y no cruzan routers ni VPN: solo ven el segmento del servidor. " +
     "Un decodificador fuera de él se agrega a mano con su dirección (Agregar decodificador).",
-  onUse: (d) => decoderModal({
+  onUse: (d) => openFormPage("#/decoders/new", {
     name: d.model || d.ip,
     host: d.ip,
     port: d.commandPort || 8000,

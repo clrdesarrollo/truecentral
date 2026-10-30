@@ -306,7 +306,8 @@ En *Marca / protocolo* se elige cómo se conecta el sistema con el panel:
 
 #captura-pendiente("Panel web: formulario Agregar panel de alarma con conexión directa y el resultado de Probar conexión", alto: 6cm)
 
-+ Haga clic en #boton("Agregar panel").
++ Haga clic en #boton("Agregar panel"). Se abre la página *Agregar panel de
+  alarma*.
 + Escriba el *Nombre* y elija su *Ubicación*. Las áreas y zonas del panel
   heredan esa ubicación; las que ubique aparte en Recursos se quedan donde
   están.
@@ -350,7 +351,8 @@ de alarmas (SIA DC-09)* se ve en #menu("Sistema", "Servicios").
 
 === Agregar un panel que se conecta por ISUP
 
-+ Haga clic en #boton("Agregar panel").
++ Haga clic en #boton("Agregar panel"). Se abre la página *Agregar panel de
+  alarma*.
 + Escriba el *Nombre* y elija su *Ubicación*.
 + En *Marca / protocolo*, elija *Hikvision AX PRO / AX Hybrid (ISUP, el panel
   se conecta al servidor)*.
