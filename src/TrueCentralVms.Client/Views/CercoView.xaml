@@ -9,30 +9,160 @@
         <SolidColorBrush x:Key="ArmedBgBrush" Color="#2622C55E"/>
         <SolidColorBrush x:Key="DisarmedBgBrush" Color="#268B98A5"/>
         <SolidColorBrush x:Key="PartialBgBrush" Color="#263B82F6"/>
+        <SolidColorBrush x:Key="TriggeredBgBrush" Color="#26FCD34D"/>
+        <!-- Bordes de las etiquetas y del recuadro: el mismo color, más presente que el fondo -->
+        <SolidColorBrush x:Key="AlarmLineBrush" Color="#8CEF4444"/>
+        <SolidColorBrush x:Key="ArmedLineBrush" Color="#7322C55E"/>
+        <SolidColorBrush x:Key="DisarmedLineBrush" Color="#4D8B98A5"/>
+        <SolidColorBrush x:Key="PartialLineBrush" Color="#733B82F6"/>
+        <SolidColorBrush x:Key="TriggeredLineBrush" Color="#73FCD34D"/>
 
-        <!-- Píldora de estado: el color sale de Tag (mismo criterio que Paneles de alarma) -->
+        <!-- Etiqueta de los eventos: fondo tenue, borde y texto del color de Tag
+             (Armed, Normal, Partial, Alarm, Triggered) -->
         <Style x:Key="LevelBadge" TargetType="Border">
-            <Setter Property="CornerRadius" Value="999"/>
-            <Setter Property="Padding" Value="8,2"/>
+            <Setter Property="CornerRadius" Value="5"/>
+            <Setter Property="Padding" Value="7,2"/>
             <Setter Property="Margin" Value="0,0,6,4"/>
+            <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Background" Value="{StaticResource DisarmedBgBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DisarmedLineBrush}"/>
             <Style.Triggers>
-                <Trigger Property="Tag" Value="Armed"><Setter Property="Background" Value="{StaticResource ArmedBgBrush}"/></Trigger>
-                <Trigger Property="Tag" Value="Normal"><Setter Property="Background" Value="{StaticResource DisarmedBgBrush}"/></Trigger>
-                <Trigger Property="Tag" Value="Partial"><Setter Property="Background" Value="{StaticResource PartialBgBrush}"/></Trigger>
-                <Trigger Property="Tag" Value="Alarm"><Setter Property="Background" Value="{StaticResource AlarmBgBrush}"/></Trigger>
-                <Trigger Property="Tag" Value="Triggered"><Setter Property="Background" Value="#33FCD34D"/></Trigger>
+                <Trigger Property="Tag" Value="Armed">
+                    <Setter Property="Background" Value="{StaticResource ArmedBgBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource ArmedLineBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Partial">
+                    <Setter Property="Background" Value="{StaticResource PartialBgBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource PartialLineBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Alarm">
+                    <Setter Property="Background" Value="{StaticResource AlarmBgBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource AlarmLineBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Triggered">
+                    <Setter Property="Background" Value="{StaticResource TriggeredBgBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource TriggeredLineBrush}"/>
+                </Trigger>
             </Style.Triggers>
         </Style>
         <Style x:Key="LevelBadgeText" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="FontSize" Value="11"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
             <Style.Triggers>
                 <Trigger Property="Tag" Value="Armed"><Setter Property="Foreground" Value="{StaticResource OkBrush}"/></Trigger>
                 <Trigger Property="Tag" Value="Partial"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></Trigger>
                 <Trigger Property="Tag" Value="Alarm"><Setter Property="Foreground" Value="{StaticResource DangerBrush}"/></Trigger>
                 <Trigger Property="Tag" Value="Triggered"><Setter Property="Foreground" Value="{StaticResource WarnBrush}"/></Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Recuadro de estado de la tarjeta: fondo y borde del color de CardLevel
+             (Armed, Disarmed, Partial, Alarm; Offline = el último estado, apagado) -->
+        <Style x:Key="StateBanner" TargetType="Border">
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="10,9"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="{StaticResource DisarmedBgBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DisarmedLineBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Armed">
+                    <Setter Property="Background" Value="{StaticResource ArmedBgBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource ArmedLineBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Partial">
+                    <Setter Property="Background" Value="{StaticResource PartialBgBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource PartialLineBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Alarm">
+                    <Setter Property="Background" Value="{StaticResource AlarmBgBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource AlarmLineBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Offline"><Setter Property="Opacity" Value="0.6"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Disco del candado: sólido en el color del estado -->
+        <Style x:Key="StateDisc" TargetType="Border">
+            <Setter Property="Width" Value="34"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="CornerRadius" Value="17"/>
+            <Setter Property="Background" Value="#4B5563"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Armed"><Setter Property="Background" Value="{StaticResource OkBrush}"/></Trigger>
+                <Trigger Property="Tag" Value="Partial"><Setter Property="Background" Value="{StaticResource AccentBrush}"/></Trigger>
+                <Trigger Property="Tag" Value="Alarm"><Setter Property="Background" Value="{StaticResource DangerBrush}"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Glifo del disco según GlyphKind: candado cerrado, abierto o alerta -->
+        <Style x:Key="StateGlyph" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Text" Value="&#xE785;"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Locked"><Setter Property="Text" Value="&#xE72E;"/></Trigger>
+                <Trigger Property="Tag" Value="Alarm"><Setter Property="Text" Value="&#xE814;"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="StateTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Armed"><Setter Property="Foreground" Value="{StaticResource OkBrush}"/></Trigger>
+                <Trigger Property="Tag" Value="Partial"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></Trigger>
+                <Trigger Property="Tag" Value="Alarm"><Setter Property="Foreground" Value="{StaticResource DangerBrush}"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Barra de la potencia según PowerLevel: Ok, Warn (sin retorno) o Muted (desarmado) -->
+        <Style x:Key="PowerFill" TargetType="Border">
+            <Setter Property="CornerRadius" Value="3"/>
+            <Setter Property="Background" Value="{StaticResource MutedBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Ok"><Setter Property="Background" Value="{StaticResource OkBrush}"/></Trigger>
+                <Trigger Property="Tag" Value="Warn"><Setter Property="Background" Value="{StaticResource WarnBrush}"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Lo que hay que atender, bajo el recuadro: etiqueta sólida (Alarm rojo, Triggered ámbar) -->
+        <Style x:Key="IssueChip" TargetType="Border">
+            <Setter Property="CornerRadius" Value="5"/>
+            <Setter Property="Padding" Value="8,3"/>
+            <Setter Property="Margin" Value="0,0,6,4"/>
+            <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Triggered"><Setter Property="Background" Value="{StaticResource WarnBrush}"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="IssueChipText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Triggered"><Setter Property="Foreground" Value="#1F1600"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Punto de la conexión según ConnectionState -->
+        <Style x:Key="ConnectionDot" TargetType="Ellipse">
+            <Setter Property="Width" Value="7"/>
+            <Setter Property="Height" Value="7"/>
+            <Setter Property="Margin" Value="0,0,5,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Fill" Value="{StaticResource MutedBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ConnectionState}" Value="Online"><Setter Property="Fill" Value="{StaticResource OkBrush}"/></DataTrigger>
+                <DataTrigger Binding="{Binding ConnectionState}" Value="Offline"><Setter Property="Fill" Value="{StaticResource DangerBrush}"/></DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Señal WiFi: texto del color de SignalLevel (Armed buena, Triggered regular, Alarm débil) -->
+        <Style x:Key="SignalText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Armed"><Setter Property="Foreground" Value="{StaticResource OkBrush}"/></Trigger>
+                <Trigger Property="Tag" Value="Triggered"><Setter Property="Foreground" Value="{StaticResource WarnBrush}"/></Trigger>
+                <Trigger Property="Tag" Value="Alarm"><Setter Property="Foreground" Value="{StaticResource DangerBrush}"/></Trigger>
             </Style.Triggers>
         </Style>
 
@@ -104,46 +234,86 @@
                         <DataTemplate>
                             <Border Style="{StaticResource PanelCard}">
                                 <StackPanel>
+                                    <!-- Nombre y conexión (punto de color) -->
                                     <DockPanel>
-                                        <TextBlock DockPanel.Dock="Right" Text="{Binding ConnectionText}" FontSize="11"
-                                                   Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Ellipse Style="{StaticResource ConnectionDot}"/>
+                                            <TextBlock Text="{Binding ConnectionText}" FontSize="11"
+                                                       Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                                        </StackPanel>
                                         <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
                                                    Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
                                     </DockPanel>
-                                    <TextBlock Text="{Binding Subtitle}" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,8"/>
+                                    <TextBlock Text="{Binding Subtitle}" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,1,0,10"/>
 
-                                    <WrapPanel Margin="0,0,0,8">
-                                        <Border Style="{StaticResource LevelBadge}" Tag="{Binding Level}">
-                                            <TextBlock Style="{StaticResource LevelBadgeText}" Tag="{Binding Level}" Text="{Binding StateText}"/>
-                                        </Border>
-                                        <Border Style="{StaticResource LevelBadge}" Tag="Alarm"
+                                    <!-- Estado de un vistazo: candado, armado o no y la potencia del energizador -->
+                                    <Border Style="{StaticResource StateBanner}" Tag="{Binding CardLevel}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Style="{StaticResource StateDisc}" Tag="{Binding CardLevel}" VerticalAlignment="Center">
+                                                <TextBlock Style="{StaticResource StateGlyph}" Tag="{Binding GlyphKind}"/>
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Headline}" Style="{StaticResource StateTitle}" Tag="{Binding CardLevel}"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{Binding Caption}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                                           Visibility="{Binding Caption, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+                                                <Grid Margin="0,6,0,0" Visibility="{Binding HasPower, Converter={x:Static vm:BoolToVisibility.Instance}}"
+                                                      ToolTip="Potencia configurada del energizador (de 7 a 21). El panel no mide kilovoltios.">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="Potencia" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                    <Border Grid.Column="1" Height="6" CornerRadius="3" Background="{StaticResource BorderBrush}"
+                                                            VerticalAlignment="Center">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="{Binding PowerFill}"/>
+                                                                <ColumnDefinition Width="{Binding PowerRest}"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Style="{StaticResource PowerFill}" Tag="{Binding PowerLevel}"/>
+                                                        </Grid>
+                                                    </Border>
+                                                    <TextBlock Grid.Column="2" Text="{Binding PowerText}" FontSize="11" FontWeight="SemiBold"
+                                                               Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+
+                                    <!-- Lo que hay que atender -->
+                                    <WrapPanel Margin="0,8,0,0" Visibility="{Binding HasIssues, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                        <Border Style="{StaticResource IssueChip}" Tag="Alarm"
                                                 Visibility="{Binding Siren, Converter={x:Static vm:BoolToVisibility.Instance}}">
-                                            <TextBlock Style="{StaticResource LevelBadgeText}" Tag="Alarm" Text="Sirena sonando"/>
+                                            <TextBlock Style="{StaticResource IssueChipText}" Tag="Alarm" Text="Sirena sonando"/>
                                         </Border>
-                                        <Border Style="{StaticResource LevelBadge}" Tag="Alarm"
+                                        <Border Style="{StaticResource IssueChip}" Tag="Alarm"
                                                 Visibility="{Binding FenceDown, Converter={x:Static vm:BoolToVisibility.Instance}}">
-                                            <TextBlock Style="{StaticResource LevelBadgeText}" Tag="Alarm" Text="Cerco caído"/>
+                                            <TextBlock Style="{StaticResource IssueChipText}" Tag="Alarm" Text="Cerco caído"/>
                                         </Border>
-                                        <Border Style="{StaticResource LevelBadge}" Tag="Alarm"
+                                        <Border Style="{StaticResource IssueChip}" Tag="Alarm"
                                                 Visibility="{Binding ZoneAlarm, Converter={x:Static vm:BoolToVisibility.Instance}}">
-                                            <TextBlock Style="{StaticResource LevelBadgeText}" Tag="Alarm" Text="{Binding ZoneText}"/>
+                                            <TextBlock Style="{StaticResource IssueChipText}" Tag="Alarm" Text="{Binding ZoneText}"/>
                                         </Border>
-                                        <Border Style="{StaticResource LevelBadge}" Tag="Triggered"
+                                        <Border Style="{StaticResource IssueChip}" Tag="Triggered"
                                                 Visibility="{Binding PulseMissing, Converter={x:Static vm:BoolToVisibility.Instance}}">
-                                            <TextBlock Style="{StaticResource LevelBadgeText}" Tag="Triggered" Text="Sin retorno"/>
-                                        </Border>
-                                        <Border Style="{StaticResource LevelBadge}" Tag="Normal"
-                                                Visibility="{Binding LevelText, Converter={x:Static vm:NonEmptyToVisibility.Instance}}">
-                                            <TextBlock Style="{StaticResource LevelBadgeText}" Tag="Normal" Text="{Binding LevelText}"/>
-                                        </Border>
-                                        <Border Style="{StaticResource LevelBadge}" Tag="{Binding SignalLevel}"
-                                                ToolTip="Señal WiFi del panel. Con menos de -75 dBm puede perder la conexión de vez en cuando: revise la antena o acerque el punto de acceso."
-                                                Visibility="{Binding SignalText, Converter={x:Static vm:NonEmptyToVisibility.Instance}}">
-                                            <TextBlock Style="{StaticResource LevelBadgeText}" Tag="{Binding SignalLevel}" Text="{Binding SignalText}"/>
+                                            <TextBlock Style="{StaticResource IssueChipText}" Tag="Triggered" Text="Sin retorno"/>
                                         </Border>
                                     </WrapPanel>
 
-                                    <StackPanel Orientation="Horizontal">
+                                    <!-- Señal WiFi del panel -->
+                                    <TextBlock Text="{Binding SignalText}" Style="{StaticResource SignalText}" Tag="{Binding SignalLevel}"
+                                               Margin="2,8,0,0"
+                                               ToolTip="Señal WiFi del panel. Con menos de -75 dBm puede perder la conexión de vez en cuando: revise la antena o acerque el punto de acceso."
+                                               Visibility="{Binding SignalText, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                                         <Button Style="{StaticResource SmallPrimary}" Content="Armar"
                                                 IsEnabled="{Binding CanArm}"
                                                 Command="{Binding DataContext.ArmCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
