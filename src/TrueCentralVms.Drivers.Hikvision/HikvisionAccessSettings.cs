@@ -54,8 +54,8 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
     private const string Noun = "equipo de control de acceso";
     private const int MaxDoors = 16;
     private const int MaxReaders = 8;
-    private const string DoorCapsPath = "/ISAPI/AccessControl/Door/param/capabilities?format=json";
-    private const string ReaderCapsPath = "/ISAPI/AccessControl/CardReaderCfg/capabilities?format=json";
+    private const string DoorCapsPath = "/ISAPI/AccessControl/Door/param/capabilities";
+    private const string ReaderCapsPath = "/ISAPI/AccessControl/CardReaderCfg/capabilities";
 
     private static string DoorPath(int n) => $"/ISAPI/AccessControl/Door/param/{n}";
     private static string ReaderPath(int n) => $"/ISAPI/AccessControl/CardReaderCfg/{n}";
@@ -527,11 +527,10 @@ public sealed class HikvisionAccessSettingsProvider : IAccessDeviceSettingsProvi
 
     private sealed record CapInfo(int? Min, int? Max, IReadOnlyList<string>? Options);
 
+    /// <summary>Capacidades del bloque, en JSON o en XML (ver <see cref="HikvisionIsapiCaps"/>); null = se sigue sin rangos.</summary>
     private static async Task<JsonObject?> CapsAsync(HikvisionIsapiClient client, string path, CancellationToken ct)
     {
-        string? json;
-        try { json = await client.RequestAsync(HttpMethod.Get, path, ct: ct); }
-        catch (DriverException) { return null; }   // sin permiso o función deshabilitada: se sigue sin rangos
+        string? json = await HikvisionIsapiCaps.TryGetAsync(client, path, ct);
         if (string.IsNullOrWhiteSpace(json)) return null;
         try { return JsonNode.Parse(json) as JsonObject; }
         catch (JsonException) { return null; }

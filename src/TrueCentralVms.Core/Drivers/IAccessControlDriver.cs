@@ -100,8 +100,11 @@ public sealed record AccessEventRecord(
 
 /// <summary>
 /// Una lectura del historial por número de serie: los eventos (ya sin el ruido
-/// que el driver descarta) y el último número que el equipo entregó, CONTANDO
-/// lo descartado, para que la próxima lectura empiece después de él.
+/// que el driver descarta) y hasta qué número se leyó SIN HUECOS, contando lo
+/// descartado: la próxima lectura empieza después de él. Puede haber eventos
+/// con un número mayor (los que llegaron después de un hueco): se entregan
+/// igual y se vuelven a leer mientras el hueco no se llene, así que quien los
+/// guarda descarta los repetidos. null = la marca no se mueve.
 /// </summary>
 public sealed record AccessEventPage(IReadOnlyList<AccessEventRecord> Events, long? LastSerial);
 

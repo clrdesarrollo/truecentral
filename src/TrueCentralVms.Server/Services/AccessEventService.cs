@@ -303,23 +303,51 @@ public sealed class AccessEventService(
         await Task.WhenAll(devices.Select(async device =>
         {
             await limiter.WaitAsync(ct);
+            var gate = GateOf(device.Id);
+            await gate.WaitAsync(ct);
             try { await PollOneAsync(device, ct); }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.LogDebug(ex, "No se pudo leer el historial del equipo {Device}.", device.Name);
             }
-            finally { limiter.Release(); }
+            finally
+            {
+                gate.Release();
+                limiter.Release();
+            }
         }));
     }
+
+    /// <summary>
+    /// Una lectura del historial por equipo a la vez: la relectura que pide un
+    /// administrador (<see cref="RereadAsync"/>) retrocede la marca, y una
+    /// lectura en curso con la marca vieja la volvería a adelantar.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> _gates = new();
+
+    private SemaphoreSlim GateOf(int deviceId) => _gates.GetOrAdd(deviceId, _ => new SemaphoreSlim(1, 1));
 
     private async Task PollOneAsync(AccessDevice device, CancellationToken ct)
     {
         var driver = access.DriverOf(device);
         var connection = access.ConnectionOf(device);
 
+        // Las marcas se releen ya con el equipo tomado: la lista de la vuelta
+        // pudo leerse antes de una relectura.
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var marks = await db.AccessDevices.AsNoTracking().Where(d => d.Id == device.Id)
+                .Select(d => new { d.LastEventSerial, d.LastEventAt }).FirstOrDefaultAsync(ct);
+            if (marks is null) return;
+            device.LastEventSerial = marks.LastEventSerial;
+            device.LastEventAt = marks.LastEventAt;
+        }
+
         // Por número de evento, si ya se conoce uno y el equipo sabe buscar así
-        // (el driver devuelve null si no). Lo que trae, aunque sea solo ruido
-        // descartado, adelanta la marca.
+        // (el driver devuelve null si no). La marca avanza hasta donde el driver
+        // leyó sin huecos, contando el ruido descartado.
+        bool bySerial = false;
         if (device.LastEventSerial is long after)
         {
             AccessEventPage? page;
@@ -331,6 +359,7 @@ public sealed class AccessEventService(
             }
             if (page is not null)
             {
+                bySerial = true;
                 await StoreAsync(device.Id, page.Events, ct, page.LastSerial, fromHistory: true);
                 if (_lastTimeCheck.TryGetValue(device.Id, out var checkedAt) && DateTime.UtcNow - checkedAt < TimeCheckInterval)
                     return;
@@ -349,15 +378,20 @@ public sealed class AccessEventService(
         }
         _lastTimeCheck[device.Id] = DateTime.UtcNow;
 
-        // La primera vez, el número más alto de lo anterior a la marca fija la
-        // marca por número aunque no haya llegado nada nuevo: desde ahí sigue la
-        // lectura por número, que no depende de la hora del equipo. Después no
-        // se usa: podría pasar por encima de eventos del mismo segundo que la
-        // lectura por número todavía no entregó.
-        long? firstSerial = device.LastEventSerial is null ? history.LastSerial : null;
-        if (history.Events.Count == 0 && firstSerial is null) return;
+        // La primera vez se fija la marca por número, y desde ahí sigue la lectura
+        // por número, que no depende de la hora del equipo: justo antes del
+        // primer evento nuevo, para que esa lectura relea lo recién guardado (se
+        // descarta repetido) con el control de huecos, que recupera un evento
+        // escrito tarde que esta lectura no alcanzó a ver; si no llegó nada
+        // nuevo, en el número más alto de lo anterior. Después, en un equipo que
+        // se lee por número, esta lectura NO mueve esa marca: la dejaría por
+        // encima de eventos del mismo segundo, o escritos tarde, que la lectura
+        // por número todavía no entregó.
+        long? advanceTo = device.LastEventSerial is null ? history.Events.Min(e => e.SerialNo) - 1 ?? history.LastSerial
+            : bySerial ? null : history.Events.Max(e => e.SerialNo);
+        if (history.Events.Count == 0 && advanceTo is null) return;
 
-        await StoreAsync(device.Id, history.Events, ct, firstSerial, fromHistory: true);
+        await StoreAsync(device.Id, history.Events, ct, advanceTo, fromHistory: true);
     }
 
     /// <summary>
@@ -379,18 +413,18 @@ public sealed class AccessEventService(
     /// Descarta lo repetido: el sondeo y la escucha se pisan a propósito, y
     /// varios firmware reenvían el último evento al reconectar.
     /// </summary>
-    /// <param name="lastSerial">Último número que entregó la lectura, contando el ruido descartado.</param>
-    /// <param name="fromHistory">Viene del historial (sondeo): solo eso adelanta la marca por número.</param>
+    /// <param name="advanceSerialTo">Hasta dónde avanza la marca por número (nunca retrocede por esto); null = no se mueve.</param>
+    /// <param name="fromHistory">Viene del historial (sondeo o relectura), no de la escucha en vivo.</param>
     private async Task StoreAsync(int deviceId, IReadOnlyList<AccessEventRecord> records, CancellationToken ct,
-        long? lastSerial = null, bool fromHistory = false)
+        long? advanceSerialTo = null, bool fromHistory = false)
     {
-        if (records.Count == 0 && lastSerial is null) return;
+        if (records.Count == 0 && advanceSerialTo is null) return;
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
         var tracked = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == deviceId, ct);
         if (tracked is null) return;
 
-        bool serialMoved = AdvanceSerial(tracked, records, lastSerial, fromHistory);
+        bool serialMoved = AdvanceSerial(tracked, records, advanceSerialTo);
         if (records.Count == 0)
         {
             if (serialMoved) await db.SaveChangesAsync(ct);
@@ -400,20 +434,28 @@ public sealed class AccessEventService(
         var since = records.Min(r => r.Timestamp).AddSeconds(-1);
         var known = await db.AccessEvents
             .Where(e => e.AccessDeviceId == deviceId && e.Timestamp >= since)
-            .Select(e => new { e.Timestamp, e.EmployeeNo, e.MinorType, e.DoorNumber, e.SerialNo })
+            .Select(e => new { e.Id, e.Timestamp, e.EmployeeNo, e.MinorType, e.DoorNumber, e.SerialNo, e.Kind })
             .ToListAsync(ct);
 
         var stored = new List<AccessEvent>();
+        var relabel = new Dictionary<long, AccessEventRecord>();
         foreach (var record in records)
         {
             // Con número de evento, número y hora lo identifican; sin él (equipos
             // que no lo informan, eventos de antes), la hora y lo que pasó.
-            if (known.Any(k => k.Timestamp == record.Timestamp &&
+            var repeated = known.FirstOrDefault(k => k.Timestamp == record.Timestamp &&
                                (record.SerialNo is long serial && k.SerialNo is long knownSerial
                                    ? serial == knownSerial
                                    : k.EmployeeNo == record.EmployeeNo && k.MinorType == record.MinorType &&
-                                     k.DoorNumber == record.DoorNumber)))
+                                     k.DoorNumber == record.DoorNumber));
+            if (repeated is not null)
+            {
+                // Un código que el driver no entendía cuando se guardó (quedó
+                // como "Otro") y ahora sí: la relectura lo corrige.
+                if (fromHistory && repeated.Kind == AccessEventKind.Other && record.Kind != AccessEventKind.Other)
+                    relabel[repeated.Id] = record;
                 continue;
+            }
 
             // Los terminales de UNA puerta (los faciales) a menudo no informan
             // el número de puerta en sus accesos: si el evento es de paso por
@@ -447,17 +489,33 @@ public sealed class AccessEventService(
             db.AccessEvents.Add(entity);
         }
 
+        if (relabel.Count > 0)
+        {
+            foreach (var row in await db.AccessEvents.Where(e => relabel.Keys.Contains(e.Id)).ToListAsync(ct))
+            {
+                var record = relabel[row.Id];
+                row.Kind = record.Kind;
+                row.Credential = record.Credential;
+                row.Description = Shorten(record.Description, 512);
+            }
+            logger.LogInformation("{Device}: {Count} evento(s) guardados como «Otro» quedaron con su descripción.",
+                tracked.Name, relabel.Count);
+        }
+
+        // La marca de agua solo avanza: la escucha en vivo y el sondeo llegan
+        // desordenados y retrocederla haría releer lo mismo una y otra vez. Lo
+        // leído del historial la mueve aunque sea todo repetido (una relectura
+        // por hora no puede quedarse leyendo lo mismo).
+        var ultimo = records.Max(r => r.Timestamp);
+        bool timeMoved = (stored.Count > 0 || fromHistory) && (tracked.LastEventAt is null || ultimo > tracked.LastEventAt);
+        if (timeMoved) tracked.LastEventAt = ultimo;
+
         if (stored.Count == 0)
         {
-            if (serialMoved) await db.SaveChangesAsync(ct);
+            if (serialMoved || timeMoved || relabel.Count > 0) await db.SaveChangesAsync(ct);
             return;
         }
         await LinkPersonsAsync(db, stored, ct);
-
-        // La marca de agua solo avanza: la escucha en vivo y el sondeo llegan
-        // desordenados y retrocederla haría releer lo mismo una y otra vez.
-        var ultimo = records.Max(r => r.Timestamp);
-        if (tracked.LastEventAt is null || ultimo > tracked.LastEventAt) tracked.LastEventAt = ultimo;
         await db.SaveChangesAsync(ct);
 
         // Automatizaciones ("acceso denegado fuera de horario → foto y aviso").
@@ -483,17 +541,18 @@ public sealed class AccessEventService(
     /// Mueve la marca por número de evento. Devuelve true si cambió.
     ///
     /// <list type="bullet">
-    /// <item>Avanza solo con lo que trajo el historial: un evento en vivo con un
-    /// número alto, después de un corte de la escucha, saltaría lo perdido. Lo
-    /// en vivo se guarda igual y el sondeo lo relee (se descarta repetido).</item>
+    /// <item>Avanza solo hasta donde diga quien leyó el historial
+    /// (<paramref name="advanceTo"/>), no hasta el número más alto que llegó: un
+    /// evento en vivo con un número alto, después de un corte de la escucha, o
+    /// uno del historial que llegó después de un hueco, saltarían lo que falta.
+    /// Esos se guardan igual y se releen (se descartan repetidos).</item>
     /// <item>Retrocede si el contador del equipo volvió a empezar (se restableció o
     /// es otro equipo en la misma dirección): llega un evento MÁS NUEVO que la
     /// marca de hora con un número que ya se había pasado. Retroceder siempre
     /// es seguro: a lo sumo se relee algo y se descarta.</item>
     /// </list>
     /// </summary>
-    private bool AdvanceSerial(AccessDevice device, IReadOnlyList<AccessEventRecord> records, long? lastSerial,
-        bool fromHistory)
+    private bool AdvanceSerial(AccessDevice device, IReadOnlyList<AccessEventRecord> records, long? advanceTo)
     {
         if (device.LastEventSerial is long current && device.LastEventAt is DateTime lastAt)
         {
@@ -511,11 +570,90 @@ public sealed class AccessEventService(
             }
         }
 
-        if (!fromHistory) return false;
-        long? newest = new[] { lastSerial, records.Max(r => r.SerialNo) }.Max();
-        if (newest is not long top || device.LastEventSerial is long known && top <= known) return false;
+        if (advanceTo is not long top || device.LastEventSerial is long known && top <= known) return false;
         device.LastEventSerial = top;
         return true;
+    }
+
+    // ------------------------------------------------------------------
+    // Relectura a pedido
+    // ------------------------------------------------------------------
+
+    /// <summary>Resultado de <see cref="RereadAsync"/>, para la respuesta y la bitácora.</summary>
+    public sealed record RereadResult(bool Started, string Message, long? PreviousSerial, long? FromSerial,
+        DateTime? FromTime);
+
+    /// <summary>
+    /// Vuelve a leer el historial de un equipo desde el evento número
+    /// <paramref name="fromSerial"/> o desde <paramref name="fromUtc"/>: sirve
+    /// para recuperar lo que una versión anterior se saltó. Solo retrocede la
+    /// marca; la lectura la hace el sondeo de siempre, que lo trae a su ritmo
+    /// (200 eventos por vuelta) y descarta lo que ya estaba.
+    ///
+    /// Desde una fecha se busca primero, por hora, el primer evento desde ahí, y
+    /// se sigue por número desde él (no pierde nada del mismo segundo ni lo
+    /// escrito tarde). Un equipo que no numera sus eventos se relee por hora.
+    /// </summary>
+    public async Task<RereadResult> RereadAsync(int deviceId, long? fromSerial, DateTime? fromUtc, CancellationToken ct)
+    {
+        var gate = GateOf(deviceId);
+        await gate.WaitAsync(ct);
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var device = await db.AccessDevices.Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == deviceId, ct)
+                         ?? throw new InvalidOperationException("El equipo ya no existe.");
+            long? previous = device.LastEventSerial;
+
+            if (fromSerial is long serial)
+            {
+                if (previous is not long current)
+                    return new(false, "Este equipo todavía no se lee por número de evento: indique una fecha.", previous, null, null);
+                if (serial - 1 >= current)
+                    return new(false, $"El historial ya se leyó hasta el evento {current}: no hay nada que releer desde el {serial}.",
+                        previous, null, null);
+                device.LastEventSerial = serial - 1;
+                await db.SaveChangesAsync(ct);
+                RequestPoll(deviceId);
+                return new(true, $"Se vuelve a leer desde el evento {serial} (iba en el {current}).", previous, serial, null);
+            }
+
+            var since = DateTime.SpecifyKind(fromUtc!.Value, DateTimeKind.Utc);
+            AccessEventPage first;
+            try
+            {
+                first = await access.DriverOf(device).FetchEventsSinceAsync(access.ConnectionOf(device), since.AddSeconds(-1), 1, ct);
+            }
+            catch (DriverException ex)
+            {
+                return new(false, $"El equipo no entregó su historial: {ex.Message}", previous, null, since);
+            }
+
+            if (first.Events.Count == 0)
+                return new(false, "El equipo no tiene eventos desde esa fecha.", previous, null, since);
+            if (first.Events[0].SerialNo is long found && previous is not null)
+            {
+                if (found - 1 >= previous)
+                    return new(false, $"El primer evento desde esa fecha es el {found} y el historial ya se leyó hasta el {previous}: " +
+                                      "no hay nada que releer.", previous, null, since);
+                device.LastEventSerial = found - 1;
+                await db.SaveChangesAsync(ct);
+                RequestPoll(deviceId);
+                return new(true, $"Se vuelve a leer desde el evento {found}, el primero desde esa fecha (iba en el {previous}).",
+                    previous, found, since);
+            }
+
+            // Sin número de evento: por hora, desde esa fecha. Sin marca por número
+            // la primera lectura vuelve a fijarla, y no se toma lo releído por un
+            // contador que volvió a empezar.
+            device.LastEventSerial = null;
+            device.LastEventAt = since.AddSeconds(-1);
+            await db.SaveChangesAsync(ct);
+            RequestPoll(deviceId);
+            return new(true, "Se vuelve a leer por hora desde esa fecha.", previous, null, since);
+        }
+        finally { gate.Release(); }
     }
 
     private static bool IsDoorEvent(AccessEventKind kind) =>
