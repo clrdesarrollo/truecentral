@@ -486,6 +486,6 @@ public static class CercoApi
             byte[] bom = System.Text.Encoding.UTF8.GetPreamble();
             byte[] body = System.Text.Encoding.UTF8.GetBytes(csv.ToString());
             return Results.File(bom.Concat(body).ToArray(), "text/csv", $"eventos_cerco_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
     }
 }

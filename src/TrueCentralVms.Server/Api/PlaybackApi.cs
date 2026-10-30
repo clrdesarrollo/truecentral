@@ -474,7 +474,7 @@ public static class PlaybackApi
                 }
             }
             return Results.Empty;
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
     }
 
     /// <summary>

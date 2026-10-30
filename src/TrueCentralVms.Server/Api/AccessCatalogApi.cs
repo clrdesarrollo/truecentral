@@ -220,8 +220,8 @@ public static class AccessCatalogApi
             return Results.Ok(PublishedInstallers.Describe(FindWebControlInstaller(config, env)));
         });
 
-        // La descarga acepta el token por query: la inicia el navegador (no
-        // fetch) y no puede mandar la cabecera Authorization.
+        // La descarga la inicia el navegador (no fetch) y no puede mandar la
+        // cabecera Authorization: acepta un ticket de descarga (UrlTicketService).
         app.MapGet("/api/webcontrol/installer", async (HttpContext ctx, IConfiguration config, IWebHostEnvironment env,
             AuditService audit) =>
         {
@@ -233,7 +233,7 @@ public static class AccessCatalogApi
             await audit.LogAsync(ctx, "access", "webcontrol-downloaded",
                 detail: $"Descargó el instalador del complemento de enrolamiento ({file.Name}).");
             return Results.File(file.FullName, "application/octet-stream", file.Name);
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
 
         // Escribir ahora lo que esté pendiente, sin esperar el reintento solo.
         // Avance de la escritura en los equipos y conteo por estado: es lo que
@@ -1032,7 +1032,7 @@ public static class AccessCatalogApi
             var face = await db.AccessFaces.AsNoTracking().FirstOrDefaultAsync(f => f.AccessPersonId == id, ct);
             if (face is null) return Results.NotFound();
             return Results.File(protector.UnprotectBytes(face.ImageCiphertext), face.ContentType);
-        });
+        }).AllowUrlTicket(UrlTicketUse.Media);
 
         app.MapDelete("/api/access/persons/{id:int}", async (HttpContext ctx, int id, VmsDbContext db,
             AccessControlService access, AccessSyncService sync, AuditService audit, CancellationToken ct) =>

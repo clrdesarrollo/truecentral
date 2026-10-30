@@ -261,7 +261,7 @@ public static class VehicleAccessApi
                 return Error("El registro no tiene foto de la patente.", StatusCodes.Status404NotFound);
             ctx.Response.Headers.CacheControl = "private, max-age=86400";
             return Results.File(path, "image/jpeg");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Media);
 
         app.MapGet("/api/vehicle-access/records/export", async (HttpContext ctx, VmsDbContext db, AuditService audit,
             IWebHostEnvironment env, string? format, CancellationToken ct) =>
@@ -299,7 +299,7 @@ public static class VehicleAccessApi
             return pdf
                 ? Results.File(content, "application/pdf", file + ".pdf")
                 : Results.File(content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file + ".xlsx");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
     }
 
     public static Filter ReadFilter(IQueryCollection q)

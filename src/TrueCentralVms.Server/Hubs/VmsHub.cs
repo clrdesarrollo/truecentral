@@ -6,8 +6,8 @@ namespace TrueCentralVms.Server.Hubs;
 /// <summary>
 /// Hub de tiempo real del VMS. Solo push servidor→cliente (vía
 /// IHubContext&lt;VmsHub&gt;); los clientes no invocan métodos. La conexión
-/// exige sesión válida (el middleware de tokens acepta ?access_token= además
-/// del header, que es como autentica el WebSocket de SignalR, y sin sesión
+/// exige sesión válida (en /hubs el middleware de tokens acepta ?access_token=
+/// además del header, que es como autentica el WebSocket de SignalR, y sin sesión
 /// vigente responde 401 antes de abrirla).
 ///
 /// Cada conexión entra al grupo de su usuario (<see cref="UserGroup"/>) para

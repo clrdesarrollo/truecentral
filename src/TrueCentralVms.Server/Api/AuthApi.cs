@@ -227,6 +227,36 @@ public static class AuthApi
             ApiSecurity.CurrentSession(ctx) is { } s
                 ? Results.Ok(new { s.ExpiresAt })
                 : Results.Unauthorized());
+
+        // Ticket de URL para lo que el navegador pide sin la cabecera de sesión
+        // (ver UrlTicketService): "media" para los <img> y <audio> del panel (vale
+        // un minuto; el panel lo renueva cada medio) o "download" para UNA
+        // descarga de la dirección indicada. Pedirlo no va a la bitácora (lo que
+        // se baja con él sí); presentar uno inválido, sí.
+        app.MapPost("/api/auth/ticket", (HttpContext ctx, UrlTicketRequest request, UrlTicketService tickets) =>
+        {
+            if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
+            string token = ApiSecurity.CurrentToken(ctx)!;
+            string? target = null;
+            UrlTicketUse use;
+            switch (request.Purpose)
+            {
+                case "media":
+                    use = UrlTicketUse.Media;
+                    break;
+                case "download":
+                    use = UrlTicketUse.Download;
+                    target = UrlTicketService.CanonicalTarget(request.Url);
+                    if (target is null || !target.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+                        return Results.BadRequest(new { error = "Indique la dirección local (/api/...) a descargar." });
+                    break;
+                default:
+                    return Results.BadRequest(new { error = "Propósito desconocido: media o download." });
+            }
+            return tickets.Issue(token, session, use, target) is { } ticket
+                ? Results.Ok(new { ticket, expiresIn = (int)UrlTicketService.Lifetime.TotalSeconds })
+                : Results.Json(new { error = "Demasiados enlaces pedidos a la vez: espere un minuto." }, statusCode: StatusCodes.Status429TooManyRequests);
+        });
     }
 
     // Hash de relleno para usuarios que no existen: se calcula igual el PBKDF2, para que el tiempo de respuesta no

@@ -112,10 +112,10 @@ async function enrollDownloadHtml() {
 }
 
 function bindEnrollDownload(root) {
-  $("#en-download", root)?.addEventListener("click", () => {
-    // La descarga la inicia el navegador: el token va por query porque no
-    // puede mandar la cabecera Authorization.
-    window.location.href = `/api/webcontrol/installer?access_token=${encodeURIComponent(Api.token)}`;
+  $("#en-download", root)?.addEventListener("click", async () => {
+    // La descarga la inicia el navegador, que no puede mandar la cabecera
+    // Authorization: va con un ticket de un solo uso.
+    if (!await Api.download("/api/webcontrol/installer")) return;
     toast("Descargando el instalador del complemento…");
   });
 }

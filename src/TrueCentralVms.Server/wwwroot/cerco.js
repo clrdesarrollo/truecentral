@@ -748,8 +748,7 @@ function cercoHistoryModal(panels) {
   $("#h-close").addEventListener("click", closeModal);
   $("#h-search").addEventListener("click", () => { page = 1; load(); });
   $("#h-export")?.addEventListener("click", () => {
-    const q = query(); q.set("access_token", Api.token);
-    window.open(`/api/cerco/events/export?${q}`);
+    Api.download(`/api/cerco/events/export?${query()}`);
   });
   load();
 }

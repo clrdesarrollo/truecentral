@@ -748,7 +748,7 @@ public static class WorkflowsApi
             if (store.FullPath(path) is not { } full || !File.Exists(full)) return Results.NotFound();
             return Results.File(full, Path.GetExtension(full).Equals(".jpg", StringComparison.OrdinalIgnoreCase)
                 ? "image/jpeg" : "application/octet-stream");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Media);
 
         // ------------------------------------------------------------------
         // Alertas y acuse de recibo ("¿quién la vio y cuándo?")
@@ -931,7 +931,7 @@ public static class WorkflowsApi
             if (ApiSecurity.RequireUser(ctx, out _) is { } failure) return failure;
             if (store.FindAudio(name) is not { } path) return Results.NotFound();
             return Results.File(path, AudioContentType(path), Path.GetFileName(path));
-        });
+        }).AllowUrlTicket(UrlTicketUse.Media);
 
         app.MapPost("/api/workflows/audio", async (HttpContext ctx, IFormFile file, WorkflowStore store,
             AuditService audit, CancellationToken ct) =>

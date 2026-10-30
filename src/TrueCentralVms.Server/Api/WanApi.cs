@@ -115,7 +115,7 @@ public static partial class WanApi
                 detail: "Exportó la tabla de puertos del acceso desde Internet.");
             return Results.File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray(),
                 "text/csv", "truecentral-puertos-router.csv");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
     }
 
     private static object Describe(HttpContext ctx, WanAccessService wan, ServerCertificateManager certificates)

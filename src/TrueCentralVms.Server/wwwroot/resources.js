@@ -925,7 +925,7 @@ function resSnapshotSource(d) {
 // maxAge: el servidor vuelve a capturar si la que tiene es más vieja que eso
 // (si no, devuelve la misma imagen hasta 25 s, y el refresco no se notaría).
 const resSnapshotSrc = (path, maxAge = 2) =>
-  `${path}?access_token=${encodeURIComponent(Api.token)}&maxAge=${maxAge}&t=${Date.now()}`;
+  Api.mediaUrl(`${path}?maxAge=${maxAge}&t=${Date.now()}`);
 
 function resSnapshotHtml(d, title) {
   const source = resSnapshotSource(d);
@@ -1229,8 +1229,8 @@ function resSheetCamerasHtml(d, kind) {
       <div class="res-cam" data-channel="${c.channelId}">
         <div class="res-cam-thumb">
           ${resIcon("camera", 22, "res-cam-placeholder")}
-          <img loading="lazy" alt="" onerror="this.remove()"
-               src="/api/devices/${c.deviceId}/snapshot/${c.channelNumber}?access_token=${encodeURIComponent(Api.token)}">
+          <img loading="lazy" alt="" data-img-error="remove"
+               src="${Api.mediaUrl(`/api/devices/${c.deviceId}/snapshot/${c.channelNumber}`)}">
         </div>
         <div class="res-cam-info">
           <div class="res-cam-name">${esc(c.name)}</div>

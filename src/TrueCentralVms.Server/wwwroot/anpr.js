@@ -26,9 +26,9 @@ function anprFilterQuery() {
   return q.join("&");
 }
 
-/** URL de una foto de la lectura (el token va en la query: un <img> no manda cabeceras). */
+/** URL de una foto de la lectura, con un ticket (un <img> no manda cabeceras): armarla al usarla. */
 function anprImageUrl(id, kind) {
-  return `/api/anpr/events/${id}/${kind}?access_token=${encodeURIComponent(Api.token)}`;
+  return Api.mediaUrl(`/api/anpr/events/${id}/${kind}`);
 }
 
 /**
@@ -343,7 +343,7 @@ function renderAnprDetail(ev) {
         <dl class="anpr-facts">
           ${anprDetailRows(ev).map(([k, v, cls]) => `<dt>${esc(k)}</dt><dd${cls ? ` class="${cls}"` : ""}>${esc(v)}</dd>`).join("")}
         </dl>
-        <a class="btn ghost anpr-zip" href="${anprImageUrl(ev.id, "zip")}" title="Fotos de la lectura y un JSON con todos sus datos"><i class="mdi mdi-folder-zip-outline" aria-hidden="true"></i> Descargar ZIP</a>
+        <button type="button" class="btn ghost anpr-zip" title="Fotos de la lectura y un JSON con todos sus datos"><i class="mdi mdi-folder-zip-outline" aria-hidden="true"></i> Descargar ZIP</button>
       </aside>
     </div>`;
 
@@ -358,8 +358,11 @@ function renderAnprDetail(ev) {
       el.classList.remove("hidden");
     };
     if (img.complete && img.naturalWidth) place(); else img.addEventListener("load", place);
-    img.addEventListener("click", () => window.open(img.src, "_blank"));
+    // Con un ticket nuevo: el de la imagen pudo vencer mientras estaba a la vista.
+    img.addEventListener("click", () => window.open(anprImageUrl(ev.id, "scene"), "_blank"));
   }
+
+  $(".anpr-zip", box).addEventListener("click", () => Api.download(`/api/anpr/events/${ev.id}/zip`));
 
   $("#anpr-copy").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(ev.plateNumber); toast(`Patente ${ev.plateNumber} copiada.`); }

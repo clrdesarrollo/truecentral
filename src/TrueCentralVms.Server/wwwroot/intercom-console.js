@@ -417,7 +417,7 @@ function icaSetupSnapshot(i) {
     const next = new Image();
     next.onload = () => { if ($("#ica-snap")) { img.src = next.src; img.style.display = ""; none.textContent = ""; } };
     next.onerror = () => { if ($("#ica-novideo") && img.style.display === "none") none.textContent = "No se pudo obtener la imagen del frente."; };
-    next.src = `${source}?access_token=${encodeURIComponent(Api.token || "")}&t=${Date.now()}`;
+    next.src = Api.mediaUrl(`${source}?t=${Date.now()}`);
   };
   none.textContent = "Cargando imagen…";
   load();

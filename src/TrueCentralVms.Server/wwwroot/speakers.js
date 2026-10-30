@@ -404,9 +404,7 @@ async function renderSpeakerLibrary(speaker) {
             <td class="muted">${Math.round(a.bytes / 1024)} kB</td>
             <td><div class="row-actions" style="flex-wrap:wrap">
               <button class="btn ghost btn-lib-listen" title="Escuchar en este navegador (no suena en el parlante)">🔈 Escuchar</button>
-              <a class="btn ghost" title="Descargar el archivo desde el parlante a este equipo"
-                 href="/api/speakers/${speaker.id}/library/${a.id}/file?access_token=${encodeURIComponent(Api.token || "")}"
-                 download="${esc(a.name.includes(".") ? a.name : a.name + "." + a.format)}">⬇ Descargar</a>
+              <button class="btn ghost btn-lib-download" title="Descargar el archivo desde el parlante a este equipo">⬇ Descargar</button>
               <button class="btn ghost btn-lib-play" data-op="speaker:${speaker.id}" title="Reproducir EN EL PARLANTE">▶ Reproducir</button>
               ${isAdmin ? `<button class="btn ghost btn-lib-rename" title="Cambiar el nombre con que el parlante muestra este audio">Renombrar</button>` : ""}
               ${isAdmin && !a.builtIn ? `<button class="btn danger btn-lib-delete">Borrar</button>` : ""}
@@ -416,6 +414,12 @@ async function renderSpeakerLibrary(speaker) {
     </div>`;
 
   const audioOf = (e) => items.find((a) => a.id === Number(e.target.closest("tr").dataset.audio));
+  // Descarga con un ticket de un solo uso (un enlace no manda la cabecera de sesión).
+  $$(".btn-lib-download", cell).forEach((b) => b.addEventListener("click", (e) => {
+    const audio = audioOf(e);
+    Api.download(`/api/speakers/${speaker.id}/library/${audio.id}/file`,
+      audio.name.includes(".") ? audio.name : `${audio.name}.${audio.format}`);
+  }));
   // Escucha local: el archivo se descarga del parlante y suena en el navegador
   // del que configura, nunca en el equipo de terreno. Un segundo clic detiene.
   $$(".btn-lib-listen", cell).forEach((b) => b.addEventListener("click", (e) => {
@@ -431,8 +435,7 @@ async function renderSpeakerLibrary(speaker) {
       window.speakerPreview.audio.pause();
       window.speakerPreview.button.textContent = "🔈 Escuchar";
     }
-    const player = new Audio(
-      `/api/speakers/${speaker.id}/library/${audio.id}/file?access_token=${encodeURIComponent(Api.token || "")}`);
+    const player = new Audio(Api.mediaUrl(`/api/speakers/${speaker.id}/library/${audio.id}/file`));
     window.speakerPreview = { id: audio.id, audio: player, button };
     button.textContent = "■ Detener";
     const done = () => { if (window.speakerPreview?.id === audio.id) window.speakerPreview = null; button.textContent = "🔈 Escuchar"; };
@@ -670,7 +673,7 @@ async function speakerPlayModal(speakers, fixed, groups = []) {
       if (libraryPlayer) { libraryPlayer.pause(); libraryPlayer = null; button.textContent = "🔈"; return; }
       const option = $("#sp-play-library").selectedOptions[0];
       if (!option?.dataset.id) return;
-      libraryPlayer = new Audio(`/api/speakers/${fixed.id}/library/${option.dataset.id}/file?access_token=${encodeURIComponent(Api.token || "")}`);
+      libraryPlayer = new Audio(Api.mediaUrl(`/api/speakers/${fixed.id}/library/${option.dataset.id}/file`));
       button.textContent = "■";
       const done = () => { libraryPlayer = null; button.textContent = "🔈"; };
       libraryPlayer.addEventListener("ended", done);

@@ -148,7 +148,7 @@ public static class AuditApi
             byte[] body = Encoding.UTF8.GetBytes(csv.ToString());
             return Results.File(bom.Concat(body).ToArray(), "text/csv",
                 $"auditoria_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
 
         // ------------------------------------------------------------------
         // Eventos reportados por el cliente de escritorio (capturas y

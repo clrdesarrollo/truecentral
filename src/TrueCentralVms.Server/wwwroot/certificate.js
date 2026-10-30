@@ -92,9 +92,7 @@ async function renderCertificate() {
       <button class="btn" id="cert-upload">Cargar y usar</button>
     </div>` : ""}`;
 
-  const download = (kind) => {
-    window.location.href = `/api/system/certificate/download?kind=${kind}&access_token=${encodeURIComponent(Api.token)}`;
-  };
+  const download = (kind) => Api.download(`/api/system/certificate/download?kind=${kind}`);
   $("#cert-download-server").addEventListener("click", () => download("server"));
   $("#cert-download-ca").addEventListener("click", () => download("ca"));
 
