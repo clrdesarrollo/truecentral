@@ -1078,13 +1078,22 @@ async function runDiscovery(devices, showProgress = true) {
   }
 }
 
+/// «Ocultar los ya agregados» de la tabla de equipos en línea: uno solo para todas
+/// las páginas (video, control de acceso, citofonía, decodificadores), recordado en
+/// este navegador.
+const DISCOVERY_HIDE_ADDED_KEY = "tcvms_discovery_hide_added";
+let discoveryHideAdded = (() => {
+  try { return localStorage.getItem(DISCOVERY_HIDE_ADDED_KEY) === "1"; } catch { return false; /* sin almacenamiento */ }
+})();
+
 /// Tabla de equipos descubiertos, al estilo "Online Device" de HikCentral.
 function renderOnlineDevices(devices) {
   const opt = discoveryOptions;
   const box = $(opt.container);
   if (!box) return; // la página cambió mientras corría el sondeo
+  const hideAdded = discoveryHideAdded;
   // El refresco automático no debe repintar la tabla si nada cambió.
-  const signature = JSON.stringify(lastScan) + "|" + devices.map((d) => d.host).join(",");
+  const signature = JSON.stringify(lastScan) + "|" + devices.map((d) => d.host).join(",") + "|" + hideAdded;
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
   if (!lastScan || !lastScan.length) {
@@ -1092,15 +1101,25 @@ function renderOnlineDevices(devices) {
     return;
   }
   const knownHosts = new Set(devices.map((d) => d.host));
+  const addedCount = lastScan.filter((d) => knownHosts.has(d.ip)).length;
+  // El índice es el de lastScan: los botones lo usan para encontrar su equipo.
+  const rows = lastScan.map((d, i) => ({ d, i })).filter(({ d }) => !hideAdded || !knownHosts.has(d.ip));
   // Lo que el equipo no informa se muestra con raya, no como celda vacía.
   const cell = (v) => (v == null || String(v).trim() === "" ? "—" : esc(v));
   box.innerHTML = `
+    <div class="discovery-bar">
+      <label class="ui-switch" title="Deja en la lista solo los equipos que todavía no están en el sistema">
+        <input type="checkbox" id="discovery-hide-added" ${hideAdded ? "checked" : ""}>
+        <span class="ui-switch-track"></span>Ocultar los ya agregados${addedCount ? ` (${addedCount})` : ""}
+      </label>
+    </div>
+    ${rows.length === 0 ? `<div class="info-box">Todos los equipos encontrados ya están agregados.</div>` : `
     <div class="table-scroll"><table class="grid">
       <thead><tr>
         <th>IP</th><th>Marca</th><th>Tipo</th><th>Modelo</th><th>N° serie</th><th>${esc(opt.portLabel ?? "Puerto SDK")}</th>
         <th>MAC</th><th>Estado</th><th></th>
       </tr></thead>
-      <tbody>${lastScan.map((d, i) => {
+      <tbody>${rows.map(({ d, i }) => {
         const added = knownHosts.has(d.ip);
         return `
         <tr>
@@ -1129,7 +1148,13 @@ function renderOnlineDevices(devices) {
         </tr>`;
       }).join("")}
       </tbody>
-    </table></div>`;
+    </table></div>`}`;
+  $("#discovery-hide-added")?.addEventListener("change", (e) => {
+    discoveryHideAdded = e.target.checked;
+    try { localStorage.setItem(DISCOVERY_HIDE_ADDED_KEY, discoveryHideAdded ? "1" : "0"); } catch { /* sin almacenamiento */ }
+    box.dataset.signature = "";
+    renderOnlineDevices(devices);
+  });
   $$(".scan-use").forEach((b) => b.addEventListener("click", () => opt.onUse(lastScan[Number(b.dataset.i)])));
   $$(".scan-init").forEach((b) => b.addEventListener("click", () => initModal(lastScan[Number(b.dataset.i)], devices)));
   $$(".scan-ip").forEach((b) => b.addEventListener("click", () => changeIpModal(lastScan[Number(b.dataset.i)], devices)));
