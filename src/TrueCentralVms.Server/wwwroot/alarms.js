@@ -172,7 +172,7 @@ async function renderAlarmPanels() {
     if (open.has(p.id)) toggleAlarmDetail(p.id);
   }
 
-  $("#btn-alarm-new")?.addEventListener("click", () => alarmPanelModal(null));
+  $("#btn-alarm-new")?.addEventListener("click", () => openFormPage("#/alarm-panels/new"));
   // Un solo manejador para los botones de las filas: sigue sirviendo aunque el refresco reemplace celdas.
   $("#view tbody")?.addEventListener("click", async (e) => {
     const button = e.target.closest("button");

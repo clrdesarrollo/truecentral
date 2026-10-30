@@ -166,7 +166,7 @@ async function renderSpeakers() {
   speakerGroupsBind(groups, speakers);
 
   const byRow = (e) => speakers.find((s) => s.id === Number(e.target.closest("tr").dataset.id));
-  $("#btn-speaker-new")?.addEventListener("click", () => speakerModal(null));
+  $("#btn-speaker-new")?.addEventListener("click", () => openFormPage("#/speakers/new"));
   $("#btn-speaker-play-all")?.addEventListener("click", () => speakerPlayModal(speakers, null, groups));
   $$("#view .btn-edit").forEach((b) => b.addEventListener("click", (e) => speakerModal(byRow(e))));
   $$("#view .btn-play").forEach((b) => b.addEventListener("click", (e) => speakerPlayModal(speakers, byRow(e))));

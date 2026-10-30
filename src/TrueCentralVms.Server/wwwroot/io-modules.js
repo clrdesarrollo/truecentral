@@ -185,7 +185,7 @@ async function renderIoModules() {
       </div>` : ""}`}`;
 
   const byCard = (e) => modules.find((m) => m.id === Number(e.target.closest(".io-card").dataset.id));
-  $("#btn-io-new")?.addEventListener("click", () => ioModuleModal(null));
+  $("#btn-io-new")?.addEventListener("click", () => openFormPage("#/io-modules/new"));
   $$("#view .io-edit").forEach((b) => b.addEventListener("click", (e) => ioModuleModal(byCard(e))));
   $$("#view .io-names").forEach((b) => b.addEventListener("click", (e) => ioTerminalNamesModal(byCard(e))));
   $$("#view .io-delete").forEach((b) => b.addEventListener("click", async (e) => {
