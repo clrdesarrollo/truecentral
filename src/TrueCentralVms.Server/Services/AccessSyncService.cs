@@ -440,6 +440,16 @@ public sealed partial class AccessSyncService(
             var device = row.AccessDevice;
             if (device is null) { person.Devices.Remove(row); continue; }
             row.PendingRemoval = true;
+            if (!device.Enabled && access.SupportsPersonSync(device.DriverKey))
+            {
+                // Pausado quiere decir que el VMS no toca el equipo: ni escribe
+                // ni borra (mientras tanto puede estar en manos de otro sistema,
+                // como en el rollback de una migración). La fila queda y el
+                // borrado se hace en la primera pasada después de reactivarlo.
+                row.State = AccessSyncState.Pending;
+                row.Error = $"El equipo '{device.Name}' está pausado; se quitará al reactivarlo.";
+                continue;
+            }
             try
             {
                 if (access.SupportsPersonSync(device.DriverKey))
@@ -466,6 +476,8 @@ public sealed partial class AccessSyncService(
                 row = new AccessPersonDevice { AccessPersonId = person.Id, AccessDeviceId = deviceId };
                 person.Devices.Add(row);
             }
+            // Volvió a corresponderle antes de que se la pudiera quitar (equipo pausado o caído).
+            row.PendingRemoval = false;
             row.AccessDevice ??= await db.AccessDevices.FindAsync([deviceId], ct);
             if (row.AccessDevice is not { } device)
             {
@@ -492,7 +504,7 @@ public sealed partial class AccessSyncService(
                 row.State = AccessSyncState.Pending;
                 row.Error = device.Enabled
                     ? $"El equipo '{device.Name}' no está en línea; se reintenta solo."
-                    : $"El equipo '{device.Name}' está pausado.";
+                    : $"El equipo '{device.Name}' está pausado; se escribirá al reactivarlo.";
                 continue;
             }
 
@@ -578,6 +590,9 @@ public sealed partial class AccessSyncService(
     /// Qué le corresponde a la persona en cada equipo. Una persona apagada o
     /// vencida no corresponde en ninguno: el equipo la respetaría igual por su
     /// vigencia, pero borrarla es más seguro que confiar en que la respete.
+    /// Un equipo PAUSADO sigue en la cuenta: pausarlo no le quita el permiso a
+    /// nadie, solo deja la escritura en espera (antes salía de la cuenta y el
+    /// sincronizador borraba a sus personas, aunque estuviera pausado).
     /// </summary>
     private async Task<Dictionary<int, DeviceTarget>> TargetsOfAsync(VmsDbContext db, AccessPerson person, CancellationToken ct)
     {
@@ -599,7 +614,7 @@ public sealed partial class AccessSyncService(
             foreach (var levelDoor in level.Doors)
             {
                 var door = levelDoor.AccessDoor;
-                if (door is null || !door.Enabled || door.AccessDevice is null || !door.AccessDevice.Enabled) continue;
+                if (door is null || !door.Enabled || door.AccessDevice is null) continue;
                 if (!byDoor.TryGetValue(door.Id, out var entry))
                     byDoor[door.Id] = entry = (door, [], []);
                 entry.Segments.AddRange(segments);

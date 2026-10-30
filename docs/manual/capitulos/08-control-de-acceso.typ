@@ -603,7 +603,9 @@ La franja desaparece cuando no queda nada pendiente ni con error.
 
 El sistema vuelve a intentar solo: lo pendiente, cada pocos minutos; a una
 persona que un equipo rechazó, cada vez más espaciado (hasta una vez por hora).
-Un equipo sin conexión deja a la persona *Pendiente*, no *Con problemas*.
+Un equipo sin conexión deja a la persona *Pendiente*, no *Con problemas*. Un
+equipo pausado también: lo que haya que escribirle o quitarle espera a que se
+lo reactive.
 
 === Ver qué pasó en cada equipo
 
@@ -888,7 +890,10 @@ El estado de conexión se actualiza solo. En cada fila:
 - #boton("Eliminar") lo borra junto con sus puertas, previa confirmación.
 
 #importante[Al eliminar un equipo se borran también sus registros de acceso. Si
-  solo quiere dejar de usarlo por un tiempo, desmarque *Activo* en su página.]
+  solo quiere dejar de usarlo por un tiempo, desmarque *Activo* en su página.
+  Mientras está pausado, el sistema no le escribe ni le borra personas. Al
+  reactivarlo, use #boton("Reenviar padrón") para reescribir lo que se le haya
+  cargado por otro medio mientras tanto.]
 
 === Reenviar el padrón a un equipo
 
