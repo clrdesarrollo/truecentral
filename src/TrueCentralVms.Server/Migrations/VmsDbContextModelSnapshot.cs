@@ -693,6 +693,75 @@ namespace TrueCentralVms.Server.Migrations
                     b.ToTable("AccessPersonDevices");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPersonField", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Options")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<bool>("Required")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ShowInList")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("AccessPersonFields");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPersonFieldValue", b =>
+                {
+                    b.Property<int>("AccessPersonId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AccessPersonFieldId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.HasKey("AccessPersonId", "AccessPersonFieldId");
+
+                    b.HasIndex("AccessPersonFieldId", "Value");
+
+                    b.ToTable("AccessPersonFieldValues");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPlanSlot", b =>
                 {
                     b.Property<int>("Id")
@@ -5050,6 +5119,25 @@ namespace TrueCentralVms.Server.Migrations
                     b.Navigation("AccessPerson");
                 });
 
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPersonFieldValue", b =>
+                {
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPersonField", "Field")
+                        .WithMany("Values")
+                        .HasForeignKey("AccessPersonFieldId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TrueCentralVms.Server.Data.Entities.AccessPerson", "AccessPerson")
+                        .WithMany("FieldValues")
+                        .HasForeignKey("AccessPersonId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AccessPerson");
+
+                    b.Navigation("Field");
+                });
+
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessScheduleSegment", b =>
                 {
                     b.HasOne("TrueCentralVms.Server.Data.Entities.AccessSchedule", "AccessSchedule")
@@ -5860,9 +5948,16 @@ namespace TrueCentralVms.Server.Migrations
 
                     b.Navigation("Face");
 
+                    b.Navigation("FieldValues");
+
                     b.Navigation("Fingerprints");
 
                     b.Navigation("Levels");
+                });
+
+            modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessPersonField", b =>
+                {
+                    b.Navigation("Values");
                 });
 
             modelBuilder.Entity("TrueCentralVms.Server.Data.Entities.AccessSchedule", b =>

@@ -124,6 +124,16 @@ public sealed class TrueCentralClient : IDisposable
     public Task<AccessPersonDto> UpdatePersonAsync(int id, AccessPersonWriteDto person, CancellationToken ct) =>
         SendAsync<AccessPersonDto>(HttpMethod.Put, $"/api/access/persons/{id}", person, ct);
 
+    /// <summary>Campos personalizados de las personas; null si el servidor es de una versión que no los tiene.</summary>
+    public async Task<List<AccessPersonFieldDto>?> GetPersonFieldsAsync(CancellationToken ct)
+    {
+        try { return await SendAsync<List<AccessPersonFieldDto>>(HttpMethod.Get, "/api/access/person-fields", null, ct); }
+        catch (TrueCentralException ex) when (ex.Status == HttpStatusCode.NotFound) { return null; }
+    }
+
+    public Task<AccessPersonFieldDto> CreatePersonFieldAsync(AccessPersonFieldWriteDto field, CancellationToken ct) =>
+        SendAsync<AccessPersonFieldDto>(HttpMethod.Post, "/api/access/person-fields", field, ct);
+
     // ------------------------------------------------------------------
 
     private sealed record PersonPage(int Total, int Page, int PageSize, List<AccessPersonDto> Items);

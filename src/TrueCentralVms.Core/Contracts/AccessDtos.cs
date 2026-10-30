@@ -459,7 +459,9 @@ public sealed record AccessPersonDto(
     DateTime? LastSyncedAt,
     IReadOnlyList<AccessPersonDeviceDto> Devices,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    /// <summary>Valores de los campos personalizados, por Id de campo (solo los que tienen valor).</summary>
+    IReadOnlyDictionary<int, string>? Fields = null);
 
 public sealed record AccessPersonWriteDto(
     string FirstName,
@@ -483,7 +485,118 @@ public sealed record AccessPersonWriteDto(
     IReadOnlyList<AccessFingerprintWriteDto>? Fingerprints = null,
     /// <summary>Rostro de la persona; null = no tocarlo. Para quitarlo, <see cref="ClearFace"/>.</summary>
     AccessFaceWriteDto? Face = null,
-    bool ClearFace = false);
+    bool ClearFace = false,
+    /// <summary>
+    /// Campos personalizados por Id de campo; null = no tocarlos (quien no los
+    /// administra, como un import viejo). Un campo ausente del diccionario no
+    /// cambia; con valor null o vacío se le quita el valor.
+    /// </summary>
+    IReadOnlyDictionary<int, string?>? Fields = null);
+
+/// <summary>Tipo de un campo personalizado de las personas.</summary>
+public enum AccessPersonFieldKind
+{
+    /// <summary>Texto libre (hasta 512 caracteres).</summary>
+    Text,
+    /// <summary>Número (entero o con decimales; se guarda con punto decimal).</summary>
+    Number,
+    /// <summary>Una opción de una lista fija.</summary>
+    Choice,
+    /// <summary>Sí o no ("true"/"false").</summary>
+    YesNo,
+    /// <summary>Fecha sin hora ("yyyy-MM-dd").</summary>
+    Date,
+}
+
+/// <summary>
+/// Campo personalizado de las personas: un dato propio de cada instalación
+/// (turno de colación, contratista, patente del estacionamiento…) que el
+/// administrador define y que se completa en la ficha de cada persona. No va a
+/// los equipos: es información del padrón.
+/// </summary>
+public sealed record AccessPersonFieldDto(
+    int Id,
+    string Name,
+    AccessPersonFieldKind Kind,
+    /// <summary>Opciones permitidas (solo para <see cref="AccessPersonFieldKind.Choice"/>).</summary>
+    IReadOnlyList<string> Options,
+    bool Required,
+    /// <summary>Se muestra como columna en la lista de personas.</summary>
+    bool ShowInList,
+    int SortOrder,
+    string? Description,
+    /// <summary>Cuántas personas tienen un valor en este campo.</summary>
+    int ValueCount,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+/// <summary>
+/// Reglas de los valores de un campo personalizado, compartidas por el
+/// servidor (que las hace cumplir) y el migrador (que no quiere perder una
+/// persona por un valor que el servidor rechazaría). Los valores se guardan
+/// NORMALIZADOS: número con punto y sin ceros de más, "true"/"false",
+/// "yyyy-MM-dd" y la opción tal como se definió; así un filtro "Colacion = 2"
+/// encuentra igual a quien se cargó como "2" que como "2,0".
+/// </summary>
+public static class AccessPersonFieldRules
+{
+    /// <summary>Largo máximo de un valor (también es lo que entra en el índice por valor de la base).</summary>
+    public const int MaxValueLength = 512;
+
+    /// <summary>
+    /// El valor normalizado según el tipo, o null si no sirve. Acepta lo que
+    /// escribe una persona en Chile: coma decimal, "sí"/"no", fechas dd-mm-aaaa.
+    /// </summary>
+    public static string? Normalize(AccessPersonFieldKind kind, IReadOnlyList<string> options, string? raw)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0 || text.Length > MaxValueLength) return null;
+        switch (kind)
+        {
+            case AccessPersonFieldKind.Number:
+                return decimal.TryParse(text.Replace(',', '.'), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out decimal n)
+                    ? n.ToString("0.############################", System.Globalization.CultureInfo.InvariantCulture)
+                    : null;
+            case AccessPersonFieldKind.Choice:
+                return options.FirstOrDefault(o => string.Equals(o, text, StringComparison.OrdinalIgnoreCase));
+            case AccessPersonFieldKind.YesNo:
+                return text.ToLowerInvariant() switch
+                {
+                    "true" or "1" or "sí" or "si" or "s" or "yes" or "y" => "true",
+                    "false" or "0" or "no" or "n" => "false",
+                    _ => null,
+                };
+            case AccessPersonFieldKind.Date:
+                string[] formats = ["yyyy-MM-dd", "dd-MM-yyyy", "dd/MM/yyyy", "d-M-yyyy", "d/M/yyyy"];
+                return DateOnly.TryParseExact(text, formats, System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out var date)
+                    ? date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+                    : null;
+            default:
+                return text;
+        }
+    }
+
+    /// <summary>El tipo en palabras, para mensajes y la bitácora.</summary>
+    public static string KindName(AccessPersonFieldKind kind) => kind switch
+    {
+        AccessPersonFieldKind.Number => "número",
+        AccessPersonFieldKind.Choice => "lista",
+        AccessPersonFieldKind.YesNo => "sí o no",
+        AccessPersonFieldKind.Date => "fecha",
+        _ => "texto",
+    };
+}
+
+public sealed record AccessPersonFieldWriteDto(
+    string Name,
+    AccessPersonFieldKind Kind,
+    IReadOnlyList<string>? Options = null,
+    bool Required = false,
+    bool ShowInList = true,
+    int SortOrder = 0,
+    string? Description = null);
 
 /// <summary>Asignación masiva de un nivel de acceso a varias personas (y a la inversa).</summary>
 public sealed record AccessAssignDto(IReadOnlyList<int> PersonIds);

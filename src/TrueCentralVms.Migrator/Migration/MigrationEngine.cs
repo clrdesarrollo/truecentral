@@ -91,6 +91,8 @@ public sealed class ImportResult
     public int Fingerprints { get; set; }
     public int Pins { get; set; }
     public int Levels { get; set; }
+    /// <summary>Valores de campos personalizados cargados (personas × campos).</summary>
+    public int FieldValues { get; set; }
 }
 
 /// <summary>
@@ -218,6 +220,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 Department = orgNames.GetValueOrDefault(p.OrgIndexCode),
                 DepartmentName = orgLeaf.GetValueOrDefault(p.OrgIndexCode),
                 CustomFields = new Dictionary<string, string>(p.CustomFields, StringComparer.OrdinalIgnoreCase),
+                Position = Blank(p.Position),
                 Phone = Blank(p.Phone),
                 Email = Blank(p.Email),
                 Notes = Blank(p.Remark),
@@ -238,17 +241,21 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             if (person.Cards.Count > 0) withCards++;
             if (person.HcpFingerprintCount > 0) withFingers++;
             if (!string.IsNullOrWhiteSpace(p.PicUri)) withPhoto++;
+            foreach (var (name, type) in p.CustomFieldTypes) package.CustomFieldTypes[name] = type;
             package.Persons.Add(person);
             _photoUris[p.PersonId] = p.PicUri;
         }
         Info($"Con tarjeta: {withCards} · con huellas registradas: {withFingers} · con foto: {withPhoto}.");
         await ReadLevelsAsync(hcp, package, ct);
-        // Los campos personalizados no tienen todavía dónde ir en TrueCentral: quedan
-        // en el paquete para no perderlos (el casino usa «Colacion»).
+        // Los campos personalizados pasan a TrueCentral como campos de la persona
+        // (con su tipo si HikCentral lo informa); además quedan en el paquete.
         var fieldNames = package.Persons.SelectMany(p => p.CustomFields.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (fieldNames.Count > 0)
-            Info("Campos personalizados de HikCentral (se guardan en el paquete): " + string.Join(", ", fieldNames.Select(n =>
+            Info("Campos personalizados de HikCentral: " + string.Join(", ", fieldNames.Select(n =>
                 $"«{n}» ({package.Persons.Count(p => p.CustomFields.TryGetValue(n, out string? v) && v.Length > 0)} con valor)")) + ".");
+        int withPosition = package.Persons.Count(p => p.Position is not null);
+        if (withPosition > 0) Info($"Personas con cargo: {withPosition}.");
+        else Info("Esta versión de HikCentral no entrega el cargo de las personas por su OpenAPI: en TrueCentral queda vacío.");
         if (withFingers > 0 && package.Persons.Sum(p => p.Fingerprints.Count) == 0)
             Info("HikCentral no entrega las plantillas de huella por OpenAPI: se van a leer desde los terminales.");
         return package;
@@ -843,6 +850,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             Report(0, "copiando los niveles de HikCentral…");
             hcpLevels = await PrepareHcpLevelsAsync(tc, package, persons, result, ct);
         }
+        var customFields = await PrepareCustomFieldsAsync(tc, package, persons, ct);
         List<int> LevelsOf(PackagePerson p) => mode switch
         {
             // PrepareDoorLevelsAsync deja resuelta cada puerta del paquete (o se detiene antes).
@@ -860,6 +868,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             Report((double)i / persons.Count, $"{person.FullName} ({i + 1}/{persons.Count})");
             var levelIds = LevelsOf(person);
             string? pinCode = ValidPin(person);
+            var fieldValues = FieldValuesOf(person, customFields);
 
             string? employeeNo = options.EmployeeNoSource switch
             {
@@ -880,7 +889,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                     try
                     {
                         if (await CompleteExistingAsync(tc, who, person, options, usedCards, result,
-                                mode is LevelMode.PerDoor or LevelMode.CopyHcp ? levelIds : [], pinCode, ct)) result.Updated++;
+                                mode is LevelMode.PerDoor or LevelMode.CopyHcp ? levelIds : [], pinCode, fieldValues, ct)) result.Updated++;
                         else result.Skipped++;
                     }
                     catch (TrueCentralException ex)
@@ -934,7 +943,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 FirstName: Clip(person.FirstName.Length > 0 ? person.FirstName : person.LastName, 64),
                 LastName: Clip(person.LastName.Length > 0 ? person.LastName : person.FirstName, 64),
                 Department: ClipOrNull(person.Department, 64),
-                Position: null,
+                Position: ClipOrNull(person.Position, 128),
                 Email: ClipOrNull(person.Email, 128),
                 Phone: ClipOrNull(person.Phone, 32),
                 Notes: ClipOrNull(person.Notes, 256),
@@ -947,7 +956,8 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 LevelIds: levelIds,
                 EmployeeNo: employeeNo,
                 Fingerprints: fingers.Count > 0 ? fingers : null,
-                Face: face);
+                Face: face,
+                Fields: fieldValues.Count > 0 ? fieldValues : null);
 
             try
             {
@@ -959,8 +969,10 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
                 result.Fingerprints += fingers.Count;
                 if (face is not null) result.Photos++;
                 if (pinCode is not null) result.Pins++;
+                result.FieldValues += fieldValues.Count;
                 Ok($"{created.FullName} → identificador {created.EmployeeNo}: {cards.Count} tarjeta(s), {fingers.Count} huella(s), " +
                    $"{(face is null ? "sin foto" : "con foto")}, {(pinCode is null ? "sin clave" : "con clave")}" +
+                   (fieldValues.Count == 0 ? "" : $", {fieldValues.Count} campo(s) personalizado(s)") +
                    (mode == LevelMode.PerDoor ? $", {levelIds.Count} puerta(s)" : "") +
                    (mode == LevelMode.CopyHcp ? $", {levelIds.Count} nivel(es)" : "") + ".");
             }
@@ -976,6 +988,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             Info($"{upscaled} foto(s) venían chicas (HikCentral entrega miniaturas de ~135 px) y se ampliaron a {UpscaleShortSide} px de lado corto: es lo mínimo que piden los terminales para modelar el rostro.");
         Ok($"Importación terminada: {result.Created} creada(s), {result.Updated} completada(s), {result.Skipped} omitida(s) o sin cambios, {result.Failed} con error. " +
            $"Fotos: {result.Photos} · tarjetas: {result.Cards} · huellas: {result.Fingerprints} · claves: {result.Pins}" +
+           (customFields.Count > 0 ? $" · valores de campos personalizados: {result.FieldValues}" : "") +
            (mode is LevelMode.PerDoor or LevelMode.CopyHcp ? $" · niveles creados: {result.Levels}" : "") + ".");
         if (result.Created > 0 && mode == LevelMode.None)
             Info("Las personas entraron sin nivel de acceso: asígnelos en TrueCentral (Control de acceso → Niveles) para que el sincronizador las baje a los equipos.");
@@ -1231,20 +1244,115 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
         return string.Join(",", list);
     }
 
+    /// <summary><c>customFieldType</c> de HikCentral para los campos numéricos (como «Colacion»).</summary>
+    private const int HcpNumberField = 1;
+
+    /// <summary>
+    /// Deja en TrueCentral los campos personalizados de HikCentral que trae el
+    /// paquete: reutiliza el que ya tenga el mismo nombre y si no lo crea,
+    /// numérico si HikCentral dice que lo es (o, en paquetes sin el tipo, si
+    /// todos sus valores son números) y de texto si no. Devuelve nombre de
+    /// HikCentral → campo de TrueCentral; vacío si el servidor no tiene campos
+    /// personalizados (versión anterior) o el paquete no trae ninguno.
+    /// </summary>
+    private async Task<Dictionary<string, AccessPersonFieldDto>> PrepareCustomFieldsAsync(
+        TrueCentralClient tc, MigrationPackage package, IReadOnlyList<PackagePerson> persons, CancellationToken ct)
+    {
+        var map = new Dictionary<string, AccessPersonFieldDto>(StringComparer.OrdinalIgnoreCase);
+        var names = persons.SelectMany(p => p.CustomFields.Keys).Concat(package.CustomFieldTypes.Keys)
+            .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (names.Count == 0) return map;
+
+        var fields = await tc.GetPersonFieldsAsync(ct);
+        if (fields is null)
+        {
+            Warn($"Este servidor TrueCentral no tiene campos personalizados de personas (versión anterior): no se importan {string.Join(", ", names.Select(n => $"«{n}»"))}.");
+            return map;
+        }
+
+        int order = fields.Count == 0 ? 0 : fields.Max(f => f.SortOrder) + 1;
+        foreach (string hcpName in names)
+        {
+            string name = Clip(hcpName.Trim(), 64);
+            var same = fields.FirstOrDefault(f => f.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (same is not null)
+            {
+                Info($"Campo personalizado «{same.Name}»: ya existe en TrueCentral ({AccessPersonFieldRules.KindName(same.Kind)}); se usa ese.");
+                map[hcpName] = same;
+                continue;
+            }
+
+            var values = persons.Select(p => p.CustomFields.GetValueOrDefault(hcpName)).Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
+            var kind = package.CustomFieldTypes.TryGetValue(hcpName, out int hcpType)
+                ? hcpType == HcpNumberField ? AccessPersonFieldKind.Number : AccessPersonFieldKind.Text
+                : values.Count > 0 && values.All(v => AccessPersonFieldRules.Normalize(AccessPersonFieldKind.Number, [], v) is not null)
+                    ? AccessPersonFieldKind.Number : AccessPersonFieldKind.Text;
+            try
+            {
+                var created = await tc.CreatePersonFieldAsync(new AccessPersonFieldWriteDto(name, kind,
+                    ShowInList: true, SortOrder: order++,
+                    Description: $"Traído de HikCentral por el migrador el {DateTime.Now:dd-MM-yyyy}."), ct);
+                fields.Add(created);
+                map[hcpName] = created;
+                Ok($"Campo personalizado creado: «{created.Name}» ({AccessPersonFieldRules.KindName(created.Kind)}).");
+            }
+            catch (TrueCentralException ex)
+            {
+                Warn($"No se pudo crear el campo personalizado «{name}» ({ex.Message}); sus valores no se importan.");
+            }
+        }
+
+        // Un obligatorio que el paquete no trae hace que el servidor rechace a quien venga con otros campos.
+        var required = fields.Where(f => f.Required && !map.Values.Any(m => m.Id == f.Id)).Select(f => $"«{f.Name}»").ToList();
+        if (required.Count > 0 && map.Count > 0)
+            Warn($"En TrueCentral {(required.Count == 1 ? "es obligatorio el campo" : "son obligatorios los campos")} {string.Join(", ", required)}, " +
+                 "que HikCentral no tiene: las personas nuevas con campos de HikCentral serán rechazadas. Déjelo opcional mientras importa.");
+        return map;
+    }
+
+    /// <summary>
+    /// Valores de los campos personalizados de una persona, ya normalizados
+    /// (id del campo → valor). Los que no sirven para el tipo del campo se
+    /// avisan y se omiten: el servidor rechazaría a la persona entera.
+    /// </summary>
+    private Dictionary<int, string?> FieldValuesOf(PackagePerson person, IReadOnlyDictionary<string, AccessPersonFieldDto> fields)
+    {
+        var values = new Dictionary<int, string?>();
+        foreach (var (hcpName, raw) in person.CustomFields)
+        {
+            if (string.IsNullOrWhiteSpace(raw) || !fields.TryGetValue(hcpName, out var field)) continue;
+            string? value = raw.Trim().Length > AccessPersonFieldRules.MaxValueLength
+                ? null : AccessPersonFieldRules.Normalize(field.Kind, field.Options, raw);
+            if (value is null)
+            {
+                Warn($"{person.FullName}: el valor '{Clip(raw.Trim(), 40)}' no sirve para el campo «{field.Name}» " +
+                     $"({AccessPersonFieldRules.KindName(field.Kind)}); se omite.");
+                continue;
+            }
+            values[field.Id] = value;
+        }
+        return values;
+    }
+
     /// <summary>
     /// Completa una persona que ya está en TrueCentral con las credenciales
     /// que trae el paquete y ella no tiene: dedos nuevos, tarjetas nuevas, la
     /// foto si no tenía rostro, la clave si no tenía y los niveles por puerta
     /// que le falten (<paramref name="doorLevels"/>; nunca le quita uno).
+    /// También los campos personalizados que no tenga y el cargo si estaba
+    /// vacío: lo que ya se cargó en TrueCentral no se pisa.
     /// Devuelve false si no había nada que agregar.
     /// </summary>
     private async Task<bool> CompleteExistingAsync(TrueCentralClient tc, ExistingPerson who, PackagePerson person,
         ImportOptions options, Dictionary<string, string> usedCards, ImportResult result,
-        IReadOnlyList<int> doorLevels, string? pinCode, CancellationToken ct)
+        IReadOnlyList<int> doorLevels, string? pinCode, IReadOnlyDictionary<int, string?> fieldValues, CancellationToken ct)
     {
         var current = await tc.GetPersonAsync(who.Id, ct);
         var newLevels = doorLevels.Where(l => !current.LevelIds.Contains(l)).Distinct().ToList();
         string? newPin = current.HasPin ? null : pinCode;
+        var newFields = fieldValues.Where(f => current.Fields is null || !current.Fields.ContainsKey(f.Key))
+            .ToDictionary(f => f.Key, f => f.Value);
+        string? newPosition = string.IsNullOrWhiteSpace(current.Position) ? ClipOrNull(person.Position, 128) : null;
 
         var newCards = new List<string>();
         foreach (string card in person.Cards.Distinct())
@@ -1276,7 +1384,8 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             }
         }
 
-        if (newCards.Count == 0 && newFingers.Count == 0 && face is null && newPin is null && newLevels.Count == 0)
+        if (newCards.Count == 0 && newFingers.Count == 0 && face is null && newPin is null && newLevels.Count == 0 &&
+            newFields.Count == 0 && newPosition is null)
         {
             Info($"{current.FullName} ({current.EmployeeNo}): ya tenía todo; sin cambios.");
             return false;
@@ -1292,7 +1401,7 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             FirstName: current.FirstName,
             LastName: current.LastName,
             Department: current.Department,
-            Position: current.Position,
+            Position: newPosition ?? current.Position,
             Email: current.Email,
             Phone: current.Phone,
             Notes: current.Notes,
@@ -1305,7 +1414,9 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
             LevelIds: current.LevelIds.Concat(newLevels).ToList(),
             EmployeeNo: null,
             Fingerprints: fingers,
-            Face: face);
+            Face: face,
+            // Solo los que faltan: los que no van en el diccionario no se tocan.
+            Fields: newFields.Count > 0 ? newFields : null);
 
         var updated = await tc.UpdatePersonAsync(who.Id, dto, ct);
         foreach (string c in newCards) usedCards[c] = updated.FullName;
@@ -1313,9 +1424,12 @@ public sealed class MigrationEngine(Action<LogEntry> log, IProgress<ProgressStat
         result.Fingerprints += newFingers.Count;
         if (face is not null) result.Photos++;
         if (newPin is not null) result.Pins++;
+        result.FieldValues += newFields.Count;
         Ok($"{updated.FullName} ({updated.EmployeeNo}) completada: +{newFingers.Count} huella(s), +{newCards.Count} tarjeta(s)" +
            (face is null ? "" : ", foto agregada") + (newPin is null ? "" : ", clave agregada") +
            (newLevels.Count == 0 ? "" : $", +{newLevels.Count} puerta(s)") +
+           (newFields.Count == 0 ? "" : $", +{newFields.Count} campo(s) personalizado(s)") +
+           (newPosition is null ? "" : ", cargo") +
            $"; ahora tiene {updated.Fingerprints.Count} huella(s), {updated.Cards.Count} tarjeta(s) y {updated.LevelIds.Count} nivel(es).");
         return true;
     }

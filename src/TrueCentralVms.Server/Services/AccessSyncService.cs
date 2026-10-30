@@ -421,7 +421,9 @@ public sealed partial class AccessSyncService(
             .Include(p => p.Levels).ThenInclude(x => x.AccessLevel).ThenInclude(l => l!.AccessSchedule)
                 .ThenInclude(s => s!.Segments)
             .Include(p => p.Levels).ThenInclude(x => x.AccessLevel).ThenInclude(l => l!.Doors)
-                .ThenInclude(d => d.AccessDoor).ThenInclude(d => d!.AccessDevice);
+                .ThenInclude(d => d.AccessDoor).ThenInclude(d => d!.AccessDevice)
+            // No van a los equipos, pero el aviso del hub lleva el DTO completo.
+            .Include(p => p.FieldValues);
 
     /// <summary>
     /// Deja a una persona escrita donde corresponde y borrada donde ya no. Un
@@ -717,5 +719,6 @@ public sealed partial class AccessSyncService(
         person.Devices.Select(d => new AccessPersonDeviceDto(
             d.AccessDeviceId, d.AccessDevice?.Name ?? $"Equipo {d.AccessDeviceId}", d.State, d.Error, d.SyncedAt,
             d.AccessDevice?.SupportsFingerprint ?? true, d.AccessDevice?.SupportsFace ?? true)).ToList(),
-        person.CreatedAt, person.UpdatedAt);
+        person.CreatedAt, person.UpdatedAt,
+        person.FieldValues.ToDictionary(v => v.AccessPersonFieldId, v => v.Value));
 }

@@ -64,7 +64,8 @@ public static class AccessCatalogApi
         .Include(p => p.Fingerprints)
         .Include(p => p.Face)
         .Include(p => p.Levels).ThenInclude(x => x.AccessLevel)
-        .Include(p => p.Devices).ThenInclude(d => d.AccessDevice);
+        .Include(p => p.Devices).ThenInclude(d => d.AccessDevice)
+        .Include(p => p.FieldValues);
 
     // ==================================================================
     // Validación
@@ -168,6 +169,7 @@ public static class AccessCatalogApi
         MapHolidays(app);
         MapLevels(app);
         MapPersons(app);
+        app.MapAccessPersonFields();
         // El historial (buscador y reportes) vive en AccessRecordsApi.
 
         // ------------------------------------------------------------------
@@ -841,8 +843,11 @@ public static class AccessCatalogApi
 
     private static void MapPersons(WebApplication app)
     {
+        // field + fieldValue: con ese valor (texto: que lo contenga); field +
+        // fieldEmpty=true: sin valor en ese campo; field solo: con cualquier valor.
         app.MapGet("/api/access/persons", async (HttpContext ctx, VmsDbContext db, string? q, string? department,
-            int? levelId, string? state, int? page, int? pageSize, CancellationToken ct) =>
+            int? levelId, string? state, int? field, string? fieldValue, bool? fieldEmpty, int? page, int? pageSize,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.PersonsView, out _) is { } failure) return failure;
             (int pageNumber, int size) = Paging(page, pageSize);
@@ -862,6 +867,31 @@ public static class AccessCatalogApi
                 query = query.Where(p => p.Levels.Any(x => x.AccessLevelId == level));
             if (Enum.TryParse<AccessSyncState>(state, ignoreCase: true, out var syncState))
                 query = query.Where(p => p.SyncState == syncState);
+            if (field is int fieldId)
+            {
+                if (fieldEmpty == true)
+                    query = query.Where(p => !p.FieldValues.Any(v => v.AccessPersonFieldId == fieldId));
+                else if (!string.IsNullOrWhiteSpace(fieldValue))
+                {
+                    var definition = await db.AccessPersonFields.AsNoTracking().FirstOrDefaultAsync(f => f.Id == fieldId, ct);
+                    if (definition is null) return Error("El campo personalizado indicado ya no existe.");
+                    if (definition.Kind == AccessPersonFieldKind.Text)
+                    {
+                        string term = fieldValue.Trim();
+                        query = query.Where(p => p.FieldValues.Any(v =>
+                            v.AccessPersonFieldId == fieldId && EF.Functions.ILike(v.Value, $"%{term}%")));
+                    }
+                    else
+                    {
+                        string? wanted = AccessPersonFieldsApi.NormalizeValue(definition, fieldValue);
+                        if (wanted is null)
+                            return Error($"«{fieldValue.Trim()}» no es un valor posible de '{definition.Name}'.");
+                        query = query.Where(p => p.FieldValues.Any(v => v.AccessPersonFieldId == fieldId && v.Value == wanted));
+                    }
+                }
+                else
+                    query = query.Where(p => p.FieldValues.Any(v => v.AccessPersonFieldId == fieldId));
+            }
 
             int total = await query.CountAsync(ct);
             var persons = await query.OrderBy(p => p.LastName).ThenBy(p => p.FirstName)
@@ -896,6 +926,8 @@ public static class AccessCatalogApi
         {
             if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             if (await ValidatePersonAsync(db, request, null, ct) is { } invalid) return Error(invalid);
+            var (fieldValues, fieldError) = await AccessPersonFieldsApi.ValidateValuesAsync(db, request.Fields, null, ct);
+            if (fieldError is not null) return Error(fieldError);
 
             string employeeNo = string.IsNullOrWhiteSpace(request.EmployeeNo)
                 ? await NextEmployeeNoAsync(db, ct)
@@ -922,6 +954,7 @@ public static class AccessCatalogApi
                     .Select(c => new AccessCard { Number = c }).ToList(),
                 Levels = request.LevelIds.Distinct().Select(l => new AccessLevelPerson { AccessLevelId = l }).ToList(),
             };
+            if (fieldValues is not null) await AccessPersonFieldsApi.ApplyValuesAsync(db, person, fieldValues, ct);
             db.AccessPersons.Add(person);
             await db.SaveChangesAsync(ct);
 
@@ -939,8 +972,10 @@ public static class AccessCatalogApi
                         (person.Department is null ? "" : $", {person.Department}") +
                         $") con {person.Cards.Count} tarjeta(s), {person.Fingerprints.Count} huella(s), " +
                         $"{(person.Face is null ? "sin rostro" : "rostro cargado")} " +
-                        $"y {person.Levels.Count} nivel(es) de acceso.",
-                data: new { person.EmployeeNo, person.Department, Cards = person.Cards.Count, Levels = person.Levels.Count });
+                        $"y {person.Levels.Count} nivel(es) de acceso" +
+                        (person.FieldValues.Count > 0 ? $"; {person.FieldValues.Count} campo(s) personalizado(s) con valor." : "."),
+                data: new { person.EmployeeNo, person.Department, Cards = person.Cards.Count, Levels = person.Levels.Count,
+                    Fields = person.FieldValues.Count });
             return Results.Ok(AccessSyncService.ToPersonDto(await PersonQuery(db).FirstAsync(p => p.Id == person.Id, ct)));
         });
 
@@ -950,12 +985,16 @@ public static class AccessCatalogApi
         {
             if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var person = await db.AccessPersons.Include(p => p.Cards).Include(p => p.Fingerprints)
-                .Include(p => p.Face).Include(p => p.Levels)
+                .Include(p => p.Face).Include(p => p.Levels).Include(p => p.FieldValues)
                 .FirstOrDefaultAsync(p => p.Id == id, ct);
             if (person is null) return Results.NotFound();
             if (await ValidatePersonAsync(db, request, id, ct) is { } invalid) return Error(invalid);
+            var (fieldValues, fieldError) = await AccessPersonFieldsApi.ValidateValuesAsync(db, request.Fields, person, ct);
+            if (fieldError is not null) return Error(fieldError);
 
             var changes = new List<string>();
+            if (fieldValues is not null)
+                changes.AddRange(await AccessPersonFieldsApi.ApplyValuesAsync(db, person, fieldValues, ct));
             if (person.FullName != $"{request.FirstName.Trim()} {request.LastName.Trim()}".Trim())
                 changes.Add($"nombre '{person.FullName}' → '{request.FirstName.Trim()} {request.LastName.Trim()}'");
             if (person.Department != Trimmed(request.Department))

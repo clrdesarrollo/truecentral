@@ -736,7 +736,194 @@ async function accessAssignModal(level) {
 // Personas
 // ===========================================================================
 
-const accessPersonState = { page: 1, q: "", department: "", levelId: "", state: "" };
+const accessPersonState = {
+  page: 1, q: "", department: "", levelId: "", state: "", fieldId: "", fieldValue: "", fieldEmpty: false,
+};
+
+// ---------------------------------------------------------------------------
+// Campos personalizados de las personas: datos propios de la instalación
+// (turno de colación, empresa contratista…) que el administrador define y que
+// se completan en la ficha. No van a los equipos.
+// ---------------------------------------------------------------------------
+
+/** Los campos definidos; los carga la página Personas y los usan la lista y la ficha. */
+let accessPersonFields = [];
+
+const ACCESS_FIELD_KINDS = {
+  Text: "Texto", Number: "Número", Choice: "Lista de opciones", YesNo: "Sí o no", Date: "Fecha",
+};
+
+/** Un valor tal como lo guarda el servidor, en palabras: "true" → "Sí", "2026-10-30" → "30-10-2026". */
+function accessFieldShow(field, value) {
+  if (value == null || value === "") return "";
+  if (field.kind === "YesNo") return value === "true" ? "Sí" : "No";
+  if (field.kind === "Date") return value.split("-").reverse().join("-");
+  return value;
+}
+
+/** Control de un campo en la ficha de la persona, según su tipo. */
+function accessFieldInput(field, value) {
+  const id = `pw-field-${field.id}`;
+  const v = value ?? "";
+  if (field.kind === "Choice") {
+    return `<select id="${id}"><option value="">—</option>${field.options.map((o) =>
+      `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+  }
+  if (field.kind === "YesNo") {
+    return `<select id="${id}"><option value="">—</option>
+      <option value="true" ${v === "true" ? "selected" : ""}>Sí</option>
+      <option value="false" ${v === "false" ? "selected" : ""}>No</option></select>`;
+  }
+  if (field.kind === "Date") return `<input id="${id}" type="date" value="${esc(v)}">`;
+  if (field.kind === "Number") return `<input id="${id}" inputmode="decimal" maxlength="40" value="${esc(v)}">`;
+  return `<input id="${id}" maxlength="512" value="${esc(v)}">`;
+}
+
+/**
+ * Rótulo y control del filtro de la lista para el campo elegido ("con
+ * cualquier valor", uno en particular o "sin valor"). La casilla "sin valor"
+ * va en la línea del rótulo para no descuadrar la fila de filtros.
+ */
+function accessFieldFilterControl(field) {
+  const label = (extra = "") => `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+    <label for="pf-field-value">Valor</label>${extra}</div>`;
+  if (!field) return label() + `<input id="pf-field-value" disabled placeholder="elija un campo">`;
+  const empty = accessPersonState.fieldEmpty;
+  const value = accessPersonState.fieldValue;
+  if (field.kind === "Choice" || field.kind === "YesNo") {
+    const options = field.kind === "YesNo" ? [["true", "Sí"], ["false", "No"]] : field.options.map((o) => [o, o]);
+    return label() + `<select id="pf-field-value"><option value="">Con cualquier valor</option>
+      ${options.map(([v, l]) => `<option value="${esc(v)}" ${!empty && value === v ? "selected" : ""}>${esc(l)}</option>`).join("")}
+      <option value="__empty" ${empty ? "selected" : ""}>Sin valor</option></select>`;
+  }
+  return label(`<label class="checkbox-row" style="margin:0 0 5px;font-size:12px;font-weight:400">
+      <input type="checkbox" id="pf-field-empty" ${empty ? "checked" : ""}> sin valor</label>`) +
+    `<input id="pf-field-value" value="${esc(empty ? "" : value)}" ${empty ? "disabled" : ""}
+      placeholder="${field.kind === "Text" ? "que contenga… (vacío: cualquiera)" : "igual a… (vacío: cualquiera)"}">`;
+}
+
+/** Lista de los campos definidos, con sus acciones (solo administradores de personas). */
+async function accessPersonFieldsModal() {
+  let fields;
+  try { fields = await Api.get("/api/access/person-fields"); }
+  catch (err) { toast(err.error, true); return; }
+  openModal(`
+    <h3>Campos personalizados</h3>
+    <div class="info-box">Datos propios de esta instalación que se completan en la ficha de cada persona:
+      el turno de colación, la empresa contratista, el número de casillero… No van a los equipos: sirven
+      para filtrar la lista, para los reportes y para las integraciones.</div>
+    <div id="apf-error"></div>
+    ${fields.length ? `<div class="table-scroll"><table class="grid">
+      <thead><tr><th>Campo</th><th>Tipo</th><th>Personas con valor</th><th></th></tr></thead>
+      <tbody>${fields.map((f) => `
+        <tr data-id="${f.id}">
+          <td><b>${esc(f.name)}</b>
+            ${f.required ? ` <span class="tag operator">obligatorio</span>` : ""}
+            ${f.showInList ? "" : ` <span class="tag off" title="No se muestra como columna en la lista">fuera de la lista</span>`}
+            ${f.description ? `<div class="muted" style="font-size:12px">${esc(f.description)}</div>` : ""}</td>
+          <td class="muted">${esc(ACCESS_FIELD_KINDS[f.kind] ?? f.kind)}${f.kind === "Choice" ? `: ${esc(f.options.join(", "))}` : ""}</td>
+          <td class="muted">${f.valueCount}</td>
+          <td><div class="row-actions">
+            <button class="btn ghost apf-edit">Editar</button>
+            <button class="btn danger apf-delete">Eliminar</button>
+          </div></td>
+        </tr>`).join("")}</tbody></table></div>`
+      : `<div class="muted" style="margin:12px 0">Todavía no hay campos personalizados.</div>`}
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" id="apf-close">Cerrar</button>
+      <button class="btn" type="button" id="apf-add">Agregar campo</button>
+    </div>`, "wider");
+
+  const byRow = (e) => fields.find((f) => f.id === Number(e.target.closest("tr").dataset.id));
+  $("#apf-close").addEventListener("click", closeModal);
+  $("#apf-add").addEventListener("click", () => accessPersonFieldModal(null));
+  $$("#modal .apf-edit").forEach((b) => b.addEventListener("click", (e) => accessPersonFieldModal(byRow(e))));
+  $$("#modal .apf-delete").forEach((b) => b.addEventListener("click", async (e) => {
+    const field = byRow(e);
+    const lost = field.valueCount ? ` Se borra su valor en ${field.valueCount} persona(s).` : "";
+    if (!confirm(`¿Eliminar el campo "${field.name}"?${lost}`)) return;
+    try {
+      await Api.delete(`/api/access/person-fields/${field.id}`);
+      toast("Campo eliminado.");
+      await renderAccessPersons();
+      accessPersonFieldsModal();
+    } catch (err) { $("#apf-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; }
+  }));
+}
+
+/** Alta o edición de un campo; al guardar vuelve a la lista de campos. */
+function accessPersonFieldModal(field) {
+  const isNew = !field;
+  openModal(`
+    <h3>${isNew ? "Agregar campo personalizado" : `Editar «${esc(field.name)}»`}</h3>
+    <div id="apfe-error"></div>
+    <form id="apfe-form">
+      <div class="form-grid">
+        <div class="field">
+          <label>Nombre</label>
+          <input id="apfe-name" required maxlength="64" value="${esc(field?.name ?? "")}" placeholder="Colación, Empresa contratista…">
+        </div>
+        <div class="field">
+          <label>Tipo</label>
+          <select id="apfe-kind">${Object.entries(ACCESS_FIELD_KINDS).map(([k, label]) =>
+            `<option value="${k}" ${(field?.kind ?? "Text") === k ? "selected" : ""}>${esc(label)}</option>`).join("")}</select>
+        </div>
+      </div>
+      <div class="field" id="apfe-options-box">
+        <label>Opciones (una por línea)</label>
+        <textarea id="apfe-options" rows="5">${esc((field?.options ?? []).join("\n"))}</textarea>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Descripción (opcional)</label>
+          <input id="apfe-desc" maxlength="256" value="${esc(field?.description ?? "")}" placeholder="Qué significa y cómo se completa">
+        </div>
+        <div class="field">
+          <label>Orden en la ficha y en la lista</label>
+          <input id="apfe-order" type="number" step="1" value="${field?.sortOrder ?? 0}">
+        </div>
+      </div>
+      <label class="checkbox-row"><input type="checkbox" id="apfe-required" ${field?.required ? "checked" : ""}>
+        Obligatorio al crear o editar una persona desde el panel</label>
+      <label class="checkbox-row"><input type="checkbox" id="apfe-list" ${(field?.showInList ?? true) ? "checked" : ""}>
+        Mostrar como columna en la lista de personas</label>
+      ${!isNew && field.valueCount ? `<div class="muted" style="font-size:12px;margin-top:6px">
+        ${field.valueCount} persona(s) tienen un valor: si cambia el tipo o las opciones, esos valores tienen que seguir sirviendo.</div>` : ""}
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" id="apfe-back">Volver</button>
+        <button class="btn" type="submit" id="apfe-save">${isNew ? "Agregar" : "Guardar cambios"}</button>
+      </div>
+    </form>`);
+  const toggleOptions = () => $("#apfe-options-box").classList.toggle("hidden", $("#apfe-kind").value !== "Choice");
+  toggleOptions();
+  $("#apfe-kind").addEventListener("change", toggleOptions);
+  $("#apfe-back").addEventListener("click", () => accessPersonFieldsModal());
+  $("#apfe-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const kind = $("#apfe-kind").value;
+    const body = {
+      name: $("#apfe-name").value.trim(),
+      kind,
+      options: kind === "Choice" ? $("#apfe-options").value.split("\n").map((o) => o.trim()).filter((o) => o) : [],
+      required: $("#apfe-required").checked,
+      showInList: $("#apfe-list").checked,
+      sortOrder: Number($("#apfe-order").value) || 0,
+      description: $("#apfe-desc").value.trim() || null,
+    };
+    const save = $("#apfe-save");
+    save.disabled = true;
+    try {
+      if (isNew) await Api.post("/api/access/person-fields", body);
+      else await Api.put(`/api/access/person-fields/${field.id}`, body);
+      toast(isNew ? "Campo agregado." : "Campo actualizado.");
+      await renderAccessPersons();
+      accessPersonFieldsModal();
+    } catch (err) {
+      $("#apfe-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+      save.disabled = false;
+    }
+  });
+}
 
 function accessSyncTag(person) {
   const state = ACCESS_SYNC_STATES[person.syncState] ?? ACCESS_SYNC_STATES.NotApplicable;
@@ -893,10 +1080,16 @@ async function renderAccessPersons() {
   const isAdmin = Perms.can("persons.manage");
   let levels, departments;
   try {
-    [levels, departments] = await Promise.all([
+    [levels, departments, accessPersonFields] = await Promise.all([
       Api.get("/api/access/levels"), Api.get("/api/access/departments"),
+      Api.get("/api/access/person-fields").catch(() => []),
     ]);
   } catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
+  // Un campo que se borró deja de filtrar.
+  if (!accessPersonFields.some((f) => String(f.id) === String(accessPersonState.fieldId))) {
+    Object.assign(accessPersonState, { fieldId: "", fieldValue: "", fieldEmpty: false });
+  }
+  const filterField = () => accessPersonFields.find((f) => String(f.id) === String(accessPersonState.fieldId));
 
   $("#view").innerHTML = `
     <div class="toolbar page-toolbar">
@@ -905,6 +1098,8 @@ async function renderAccessPersons() {
           title="Escribe ahora en los equipos todo lo que esté pendiente">Escribir pendientes</button>
         <button class="btn ghost" id="btn-person-resend"
           title="Reescribe el padrón COMPLETO en todos los equipos, aunque el VMS los crea al día">Reenviar todo</button>
+        <button class="btn ghost" id="btn-person-fields"
+          title="Datos propios de la instalación que se completan en la ficha de cada persona">Campos personalizados</button>
         <button class="btn" id="btn-person-new">Agregar persona</button>` : ""}
       </div>
     </div>
@@ -925,6 +1120,12 @@ async function renderAccessPersons() {
           ${Object.entries(ACCESS_SYNC_STATES).map(([key, s]) =>
             `<option value="${key}" ${accessPersonState.state === key ? "selected" : ""}>${esc(s.label)}</option>`).join("")}
         </select></div>
+      ${accessPersonFields.length ? `
+        <div class="field"><label>Campo personalizado</label>
+          <select id="pf-field"><option value="">—</option>
+            ${accessPersonFields.map((f) => `<option value="${f.id}" ${String(accessPersonState.fieldId) === String(f.id) ? "selected" : ""}>${esc(f.name)}</option>`).join("")}
+          </select></div>
+        <div class="field" id="pf-field-value-box">${accessFieldFilterControl(filterField())}</div>` : ""}
       <div class="filter-actions">
         <button class="btn" id="pf-search">Buscar</button>
         <button class="btn ghost" id="pf-clear">Limpiar</button>
@@ -937,17 +1138,33 @@ async function renderAccessPersons() {
     accessPersonState.department = $("#pf-department").value;
     accessPersonState.levelId = $("#pf-level").value;
     accessPersonState.state = $("#pf-state").value;
+    accessPersonState.fieldId = $("#pf-field")?.value ?? "";
+    const valueControl = $("#pf-field-value");
+    const pickedEmpty = valueControl?.value === "__empty" || ($("#pf-field-empty")?.checked ?? false);
+    accessPersonState.fieldEmpty = !!accessPersonState.fieldId && pickedEmpty;
+    accessPersonState.fieldValue = accessPersonState.fieldId && !pickedEmpty && !valueControl?.disabled
+      ? valueControl.value.trim() : "";
     accessPersonState.page = 1;
   };
+  $("#pf-field")?.addEventListener("change", () => {
+    Object.assign(accessPersonState, { fieldId: $("#pf-field").value, fieldValue: "", fieldEmpty: false });
+    $("#pf-field-value-box").innerHTML = accessFieldFilterControl(filterField());
+  });
+  $("#pf-field-value-box")?.addEventListener("change", (e) => {
+    if (e.target.id === "pf-field-empty") $("#pf-field-value").disabled = e.target.checked;
+  });
   $("#pf-search").addEventListener("click", () => { readFilters(); loadAccessPersons(levels); });
   $("#pf-q").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { readFilters(); loadAccessPersons(levels); }
   });
   $("#pf-clear").addEventListener("click", () => {
-    Object.assign(accessPersonState, { page: 1, q: "", department: "", levelId: "", state: "" });
+    Object.assign(accessPersonState, {
+      page: 1, q: "", department: "", levelId: "", state: "", fieldId: "", fieldValue: "", fieldEmpty: false,
+    });
     renderAccessPersons();
   });
   $("#btn-person-new")?.addEventListener("click", () => accessPersonModal(null, levels));
+  $("#btn-person-fields")?.addEventListener("click", () => accessPersonFieldsModal());
   $("#btn-person-resend")?.addEventListener("click", (e) => resendAccessPadron(e.currentTarget, levels));
   $("#btn-person-sync")?.addEventListener("click", async (e) => {
     const button = e.currentTarget;
@@ -1117,6 +1334,12 @@ async function loadAccessPersons(levels) {
   if (accessPersonState.department) query.set("department", accessPersonState.department);
   if (accessPersonState.levelId) query.set("levelId", accessPersonState.levelId);
   if (accessPersonState.state) query.set("state", accessPersonState.state);
+  if (accessPersonState.fieldId) {
+    query.set("field", accessPersonState.fieldId);
+    if (accessPersonState.fieldEmpty) query.set("fieldEmpty", "true");
+    else if (accessPersonState.fieldValue) query.set("fieldValue", accessPersonState.fieldValue);
+  }
+  const listFields = accessPersonFields.filter((f) => f.showInList);
 
   let data;
   try { data = await Api.get(`/api/access/persons?${query}`); }
@@ -1131,7 +1354,9 @@ async function loadAccessPersons(levels) {
   box.innerHTML = `
     <div class="table-scroll"><table class="grid">
       <thead><tr>
-        <th>Persona</th><th>Identificador</th><th>Departamento</th><th>Credenciales</th>
+        <th>Persona</th><th>Identificador</th><th>Departamento</th>
+        ${listFields.map((f) => `<th>${esc(f.name)}</th>`).join("")}
+        <th>Credenciales</th>
         <th>Niveles de acceso</th><th>Vigencia</th><th>En los equipos</th><th></th>
       </tr></thead>
       <tbody>
@@ -1146,6 +1371,7 @@ async function loadAccessPersons(levels) {
             </div></td>
             <td class="muted">${esc(p.employeeNo)}</td>
             <td class="muted">${esc(p.department ?? "—")}</td>
+            ${listFields.map((f) => `<td class="muted">${esc(accessFieldShow(f, p.fields?.[f.id])) || "—"}</td>`).join("")}
             <td class="muted">${esc(accessCredentialSummary(p)) || "—"}</td>
             <td>${p.levelNames.length
               ? `<span title="${esc(p.levelNames.join(", "))}">${esc(p.levelNames.join(", "))}</span>`
@@ -1266,6 +1492,8 @@ function accessPersonModal(person, levels) {
     })),
     zkFingers: (person?.fingerprints ?? []).filter((f) => f.format === "zk-v10"),
     levelIds: new Set(person?.levelIds ?? []),
+    // Campos personalizados por Id (las claves llegan como texto en el JSON).
+    fields: { ...(person?.fields ?? {}) },
     // El rostro: `image` en base64 solo cuando se acaba de elegir una foto
     // nueva; `has` dice si la persona ya tiene una guardada, que no se
     // descarga salvo para mostrarla.
@@ -1350,6 +1578,16 @@ function accessPersonModal(person, levels) {
       <label>Notas (opcional)</label>
       <input id="pw-notes" maxlength="1024" value="${esc(draft.notes)}">
     </div>
+    ${accessPersonFields.length ? `
+      <h4 style="margin:14px 0 6px">Campos personalizados</h4>
+      <div class="form-grid">
+        ${accessPersonFields.map((f) => `
+          <div class="field">
+            <label>${esc(f.name)}${f.required ? "" : " (opcional)"}</label>
+            ${accessFieldInput(f, draft.fields[f.id])}
+            ${f.description ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(f.description)}</div>` : ""}
+          </div>`).join("")}
+      </div>` : ""}
     <label class="checkbox-row"><input type="checkbox" id="pw-enabled" ${draft.enabled ? "checked" : ""}>
       Activa (al desactivarla se la borra de los equipos, pero se conserva su historial)</label>`;
 
@@ -1591,6 +1829,7 @@ function accessPersonModal(person, levels) {
       draft.validTo = $("#pw-to").value;
       draft.notes = $("#pw-notes").value.trim();
       draft.enabled = $("#pw-enabled").checked;
+      for (const f of accessPersonFields) draft.fields[f.id] = $(`#pw-field-${f.id}`)?.value.trim() ?? "";
     } else if (step === 1) {
       draft.cards = $$("#pw-cards .access-segment").map((s) => $(".pw-card", s).value.trim());
       draft.pin = $("#pw-pin").value;
@@ -1607,6 +1846,11 @@ function accessPersonModal(person, levels) {
       if (!draft.lastName) return "El apellido es obligatorio.";
       if (!draft.validFrom || !draft.validTo) return "La vigencia necesita fecha de inicio y de término.";
       if (draft.validTo < draft.validFrom) return "El fin de la vigencia tiene que ser posterior a su comienzo.";
+      for (const f of accessPersonFields) {
+        const value = draft.fields[f.id] ?? "";
+        if (f.required && !value) return `«${f.name}» es obligatorio.`;
+        if (value && f.kind === "Number" && !/^-?\d+([.,]\d+)?$/.test(value)) return `«${f.name}» tiene que ser un número.`;
+      }
     }
     if (step === 1) {
       const cards = draft.cards.map((c) => c.replace(/\s+/g, "")).filter((c) => c);
@@ -1979,6 +2223,11 @@ function accessPersonModal(person, levels) {
         ? { image: draft.face.image, contentType: draft.face.contentType, source: "Archivo cargado desde el panel" }
         : null,
       clearFace: draft.face.clear,
+      // Todos los campos definidos: vacío (null) le quita el valor. Sin campos
+      // definidos no viaja nada, y el servidor no toca los que hubiera.
+      fields: accessPersonFields.length
+        ? Object.fromEntries(accessPersonFields.map((f) => [f.id, draft.fields[f.id] || null]))
+        : null,
     };
     const save = $("#pw-save");
     save.disabled = true;
