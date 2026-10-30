@@ -45,6 +45,14 @@ public static class CardKinds
         return reference![(q + "?devices=".Length)..].Split(',', StringSplitOptions.RemoveEmptyEntries)
             .Select(s => int.TryParse(s, out int id) ? id : 0).Where(id => id > 0).ToHashSet();
     }
+
+    /// <summary>«Últimas alertas» con el interruptor «Solo sin confirmar» encendido: "card-alerts?pending=1"
+    /// (apagado = la clave sola).</summary>
+    public static string AlertsRef(bool pendingOnly) => pendingOnly ? $"{Alerts}?pending=1" : Alerts;
+
+    /// <summary>La clave de «Últimas alertas» trae el interruptor «Solo sin confirmar» encendido.</summary>
+    public static bool AlertsPendingOnly(string? reference) =>
+        reference?.Contains("?pending=1", StringComparison.Ordinal) == true;
 }
 
 /// <summary>Base de las tarjetas que se releen solas cada cierto tiempo.</summary>
@@ -320,7 +328,8 @@ public sealed class AlertLine(WorkflowAlertDto alert)
 /// alarma de las casetas (Raspberry): arriba el detalle de la elegida con su
 /// imagen y el botón para confirmarla; abajo la lista. Elige sola la pendiente
 /// más nueva (o la más nueva) y sigue a la que llega, salvo que el operador
-/// esté mirando otra más vieja.
+/// esté mirando otra más vieja. Con «Solo sin confirmar» la lista deja solo las
+/// pendientes: la que se confirma sale y queda elegida la siguiente.
 /// </summary>
 public sealed partial class AlertsCardPanel : CellPanel
 {
@@ -329,12 +338,16 @@ public sealed partial class AlertsCardPanel : CellPanel
     private readonly VmsHubClient _hub;
     private readonly Action<WorkflowAlertDto> _open;
     private long _imageFor;
+    private bool _pendingOnly;
+    /// <summary>Lecturas en curso: solo la última llena la lista (el interruptor puede ir y volver antes de que responda la primera).</summary>
+    private int _reloads;
 
-    public AlertsCardPanel(ApiClient api, VmsHubClient hub, Action<WorkflowAlertDto> open)
+    public AlertsCardPanel(ApiClient api, VmsHubClient hub, Action<WorkflowAlertDto> open, bool pendingOnly = false)
     {
         _api = api;
         _hub = hub;
         _open = open;
+        _pendingOnly = pendingOnly;
         Title = "Últimas alertas";
         _hub.WorkflowNotification += OnNotification;
         _hub.WorkflowAlertAcknowledged += OnAcknowledged;
@@ -350,14 +363,36 @@ public sealed partial class AlertsCardPanel : CellPanel
     [ObservableProperty] private string _pendingText = "";
     [ObservableProperty] private bool _isEmpty;
 
+    /// <summary>
+    /// El interruptor «Solo sin confirmar» sobre la lista. Viaja en la clave de
+    /// la tarjeta, así que el tablero y la última sesión lo recuerdan.
+    /// </summary>
+    public bool PendingOnly
+    {
+        get => _pendingOnly;
+        set
+        {
+            if (!SetProperty(ref _pendingOnly, value)) return;
+            if (Content is { } content)
+            {
+                // El cuadro avisa y se guarda la sesión con el interruptor como quedó.
+                Content = content with { Ref = CardKinds.AlertsRef(value) };
+                OnPropertyChanged(nameof(Content));
+            }
+            _ = ReloadAsync(null);
+        }
+    }
+
     public override Task LoadAsync() => ReloadAsync(null);
 
     /// <param name="arrived">Alerta recién llegada: queda elegida si el operador miraba la más nueva.</param>
     private async Task ReloadAsync(long? arrived)
     {
+        int reload = ++_reloads;
         try
         {
-            var list = await _api.GetAlertsAsync(pendingOnly: false, take: Size);
+            var list = await _api.GetAlertsAsync(pendingOnly: PendingOnly, take: Size);
+            if (reload != _reloads) return;
             long? keep = Selected?.Alert.Id;
             bool followNewest = Selected is null || Selected == Items.FirstOrDefault();
             Items.Clear();
@@ -583,23 +618,82 @@ public sealed partial class PlatesCardPanel : CellPanel
     public override void Dispose() => _hub.PlateRecognized -= OnPlate;
 }
 
-/// <summary>Un paso por cualquier puerta, con la puerta.</summary>
+/// <summary>
+/// Un paso por cualquier puerta, con la puerta, como una tarjeta de la lista de
+/// alertas: la barra de color del resultado, quién, dónde y cuándo.
+/// </summary>
 public sealed class AccessLine(AccessEventDto e)
 {
+    private static readonly System.Windows.Media.SolidColorBrush GrantedBrush = Frozen(0x2E, 0x7D, 0x32),
+        DeniedBrush = Frozen(0xD3, 0x2F, 0x2F), OtherBrush = Frozen(0x60, 0x7D, 0x8B);
+
+    private static System.Windows.Media.SolidColorBrush Frozen(byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
     private readonly AccessEventLine _line = new(e);
+    public AccessEventDto Event { get; } = e;
     public string Time => _line.Time;
+    public string DateText { get; } = e.Timestamp.ToLocalTime().ToString("dd-MM-yyyy HH:mm:ss");
     public string What => _line.What;
     public string Who => _line.Who;
     public string Level => _line.Level;
     public string Door { get; } = string.Join(" · ", new[] { e.DoorName, e.DeviceName }.Where(s => !string.IsNullOrWhiteSpace(s)));
+    /// <summary>Lo pasó una persona del padrón: es la que se muestra arriba, con su foto.</summary>
+    public bool IsPerson { get; } = e.PersonId is not null;
+    /// <summary>La persona tiene foto enrolada (se pide aparte al elegirla).</summary>
+    public bool HasFace { get; } = e is { PersonId: not null, HasFace: true };
+    public string NoFaceText => IsPerson ? "Sin foto en el padrón" : "Evento sin persona del padrón";
+    /// <summary>Área, cargo y con qué se identificó.</summary>
+    public string Detail { get; } = string.Join(" · ", new[] { e.Department, e.Position, CredentialOf(e) }
+        .Where(s => !string.IsNullOrWhiteSpace(s)));
+    public bool HasDetail => Detail.Length > 0;
+    public string ResultText => What.ToUpperInvariant();
+    public System.Windows.Media.Brush ResultBrush { get; } = e.Kind switch
+    {
+        AccessEventKind.Granted => GrantedBrush,
+        AccessEventKind.Denied or AccessEventKind.Alarm => DeniedBrush,
+        _ => OtherBrush,
+    };
+    /// <summary>Lo que no es un paso de alguien (puesta en hora, armado, puerta abierta o cerrada) se apaga:
+    /// de un vistazo se ve quién pasó. Un rechazo o una alarma, aunque no sean de nadie del padrón, no.</summary>
+    public double CardOpacity { get; } = e.PersonId is null && e.Kind is not (AccessEventKind.Denied or AccessEventKind.Alarm) ? 0.6 : 1;
+
+    private static string? CredentialOf(AccessEventDto e) => e.Credential switch
+    {
+        AccessCredentialKind.Card => string.IsNullOrWhiteSpace(e.CardNumber) ? "Tarjeta" : $"Tarjeta {e.CardNumber}",
+        AccessCredentialKind.Fingerprint => "Huella",
+        AccessCredentialKind.Face => "Rostro",
+        AccessCredentialKind.Pin => "PIN",
+        AccessCredentialKind.Remote => "Apertura remota",
+        AccessCredentialKind.ExitButton => "Botón de salida",
+        AccessCredentialKind.Qr => "Código QR",
+        AccessCredentialKind.Plate => "Patente",
+        _ => null,
+    };
 }
 
-/// <summary>Últimos pasos por todas las puertas, en vivo.</summary>
+/// <summary>
+/// Últimos pasos por todas las puertas, en vivo, con el diseño de la tarjeta de
+/// alertas: arriba quién pasó —su foto del padrón, la puerta, la hora y con qué
+/// se identificó—; abajo la lista. Elige solo el último paso de una persona (los
+/// eventos del equipo, como la puesta en hora, solo entran a la lista) y sigue
+/// al que llega, salvo que el operador esté mirando otro. Si los más nuevos son
+/// todos del equipo, el último que ingresó (pedido aparte) queda al pie de la lista.
+/// </summary>
 public sealed partial class AccessCardPanel : CellPanel
 {
     private const int Size = 12;
     private readonly ApiClient _api;
     private readonly VmsHubClient _hub;
+    /// <summary>Fotos ya bajadas por persona: la misma persona entra varias veces al día.</summary>
+    private readonly Dictionary<int, System.Windows.Media.ImageSource> _faces = [];
+    private int _faceFor;
+    /// <summary>El último paso de una persona: no sale de la lista aunque lleguen muchos eventos del equipo.</summary>
+    private AccessLine? _lastPerson;
 
     public AccessCardPanel(ApiClient api, VmsHubClient hub)
     {
@@ -613,19 +707,74 @@ public sealed partial class AccessCardPanel : CellPanel
     public override string Kind => CardKinds.Access;
 
     public ObservableCollection<AccessLine> Items { get; } = [];
+    [ObservableProperty] private AccessLine? _selected;
+    [ObservableProperty] private System.Windows.Media.ImageSource? _selectedFace;
+    [ObservableProperty] private bool _isEmpty;
 
     public override async Task LoadAsync()
     {
-        var page = await _api.GetAccessEventsAsync(Size);
+        // El último que ingresó se pide aparte: entre los más nuevos puede no haber ninguno.
+        var latest = _api.GetAccessEventsAsync(Size);
+        var person = _api.GetAccessEventsAsync(1, withPerson: true);
+        var lines = (await latest).Items.Select(e => new AccessLine(e)).ToList();
+        // Un servidor sin el filtro withPerson devuelve el último de cualquiera: se descarta.
+        var lastPerson = (await person).Items.FirstOrDefault(e => e.PersonId is not null);
+        _lastPerson = lastPerson is null ? null
+            : lines.FirstOrDefault(l => l.Event.Id == lastPerson.Id) ?? new AccessLine(lastPerson);
         Items.Clear();
-        foreach (var e in page.Items) Items.Add(new AccessLine(e));
+        foreach (var line in lines) Items.Add(line);
+        if (_lastPerson is not null && !Items.Contains(_lastPerson)) Items.Add(_lastPerson);
+        Trim();
+        IsEmpty = Items.Count == 0;
+        Selected = Newest();
+    }
+
+    /// <summary>El que se muestra solo: el último paso de una persona o, si no hay, el último evento.</summary>
+    private AccessLine? Newest() => _lastPerson ?? Items.FirstOrDefault();
+
+    /// <summary>Deja la lista en su tamaño quitando los más viejos, menos el último que ingresó.</summary>
+    private void Trim()
+    {
+        while (Items.Count > Size) Items.Remove(Items.Last(l => l != _lastPerson));
     }
 
     private void OnEvent(AccessEventDto e) => Ui.Run(() =>
     {
-        Items.Insert(0, new AccessLine(e));
-        while (Items.Count > Size) Items.RemoveAt(Items.Count - 1);
+        // Si el operador miraba el último, pasa a mostrarse quien acaba de pasar.
+        bool followNewest = Selected is null || Selected == Newest();
+        var line = new AccessLine(e);
+        Items.Insert(0, line);
+        if (line.IsPerson) _lastPerson = line;
+        Trim();
+        IsEmpty = false;
+        if (followNewest || Selected is null || !Items.Contains(Selected)) Selected = Newest();
     });
+
+    partial void OnSelectedChanged(AccessLine? value) => _ = LoadFaceAsync(value);
+
+    private async Task LoadFaceAsync(AccessLine? line)
+    {
+        if (line is not { HasFace: true, Event.PersonId: int person })
+        {
+            _faceFor = 0;
+            SelectedFace = null;
+            return;
+        }
+        _faceFor = person;
+        if (_faces.TryGetValue(person, out var known))
+        {
+            SelectedFace = known;
+            return;
+        }
+        SelectedFace = null;
+        var face = PlatesCardPanel.Decode(await _api.GetAccessPersonFaceAsync(person), 640);
+        if (face is not null)
+        {
+            if (_faces.Count >= 64) _faces.Clear();
+            _faces[person] = face;
+        }
+        if (_faceFor == person) SelectedFace = face;
+    }
 
     public override void Dispose() => _hub.AccessEventReceived -= OnEvent;
 }
