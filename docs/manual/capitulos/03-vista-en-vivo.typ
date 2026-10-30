@@ -222,8 +222,9 @@ se abre:
     se ven la escena y el recorte de la patente. Con el engranaje de la barra
     del cuadro se eligen las cámaras (ver _Elegir las cámaras de Últimas
     patentes_). Pide el permiso *Ver patentes*.],
-  [*Últimos accesos*], [Los pasos por todas las puertas, en vivo. Pide *Ver
-    control de acceso*.],
+  [*Últimos accesos*], [Los pasos por todas las puertas, en vivo, con la foto
+    del último que pasó. Ver _La tarjeta Últimos accesos_. Pide *Ver control
+    de acceso*.],
 )
 
 === La tarjeta Últimas alertas
@@ -260,9 +261,41 @@ no hay pendientes) y, cuando llega una alerta nueva, pasa a ella, salvo que
 usted esté mirando una más antigua. Sin alertas, muestra «Sin alarmas
 pendientes» y «Esperando nuevos eventos».
 
+El interruptor *Solo sin confirmar*, sobre la lista, deja en ella solo las
+alertas pendientes: al confirmar una, sale de la lista y queda elegida la
+siguiente. El cuadro lo recuerda: un tablero o la última sesión vuelven a abrir
+la tarjeta con el interruptor como quedó.
+
 #boton("CONFIRMAR") vale lo mismo que darse por enterado en la ventana de
 alarma: la alerta queda confirmada a su nombre en el Centro de eventos y deja
 de estar pendiente en todos los puestos.
+
+=== La tarjeta Últimos accesos
+
+#requiere("Ver control de acceso")
+
+La tarjeta tiene el mismo diseño que *Últimas alertas*: arriba, el último paso
+de una persona del padrón; abajo, los últimos 12 eventos de todas las puertas.
+
+#captura-pendiente("Cliente de monitoreo: cuadro con la tarjeta Últimos accesos, una persona AUTORIZADO con su foto del padrón, la puerta, la hora y la credencial, y la lista con pasos y eventos del equipo atenuados")
+
+Arriba se ve:
+
+- el resultado (*AUTORIZADO* en verde, *RECHAZADO* en rojo) y el nombre de la
+  persona;
+- la puerta y el equipo, con la fecha y la hora;
+- su área, su cargo y con qué se identificó, por ejemplo «Tarjeta 3558822549»,
+  «Rostro» o «Huella»;
+- su foto del padrón, o «Sin foto en el padrón» si no tiene.
+
+En la lista, cada evento lleva una franja de color según el resultado (verde el
+autorizado, roja el rechazado o la alarma y gris lo demás). Los eventos que no
+son el paso de una persona, como la puesta en hora o el armado de un terminal,
+se ven más tenues. Haga clic en uno para verlo arriba.
+
+Cuando pasa alguien, la tarjeta lo muestra arriba, salvo que usted esté mirando
+otro evento. Si los eventos más nuevos son todos del equipo, el último que pasó
+queda igual arriba y al pie de la lista.
 
 === Elegir las cámaras de Últimas patentes
 
