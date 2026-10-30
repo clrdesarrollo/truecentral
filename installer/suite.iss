@@ -664,6 +664,36 @@ end;
 // permisos heredados y el archivo queda SIN ACL, inaccesible hasta para SYSTEM.
 // La forma correcta es poner la ACL heredable en la raíz y hacer que el
 // contenido vuelva a heredarla.
+//
+// El recorrido archivo por archivo (/T) se hace UNA sola vez por servidor. En
+// una carpeta con meses de uso (pgdata, respaldos, fotos de patentes y de
+// alarmas ISUP) son cientos de miles de archivos, y repetirlo en cada
+// actualización tardaba minutos sin proteger nada nuevo: lo que el servidor
+// crea adentro ya hereda la ACL de la raíz. Ver DataAclDone.
+function DataAclMarker(): string;
+begin
+  // Si algún día cambia la ACL que se aplica, subir a v2 para que se repita.
+  Result := DataDir() + '\permisos.v1';
+end;
+
+// ¿Ya no hace falta recorrer la carpeta? Hay marca y la raíz sigue con
+// exactamente la ACL de TightenDataAcl: sin herencia, y solo SYSTEM y
+// Administradores con control total heredable. Por SID, como icacls. Si alguien
+// cambió la raíz (o PowerShell falla), se repite el recorrido completo.
+function DataAclDone(): Boolean;
+begin
+  Result := False;
+  if not FileExists(DataAclMarker()) then
+    exit;
+  Result := RunHidden(PowerShellExe(),
+    '-NoProfile -NonInteractive -Command "$a = Get-Acl -LiteralPath ''' + DataDir() + '''; ' +
+    '$r = @($a.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])); ' +
+    '$s = @($r | Where-Object { $_.AccessControlType -eq ''Allow'' -and $_.FileSystemRights -eq ''FullControl'' -and ' +
+    '$_.InheritanceFlags -eq ''ContainerInherit, ObjectInherit'' -and $_.PropagationFlags -eq ''None'' } | ' +
+    'ForEach-Object { $_.IdentityReference.Value } | Sort-Object) -join '',''; ' +
+    'if ($a.AreAccessRulesProtected -and $r.Count -eq 2 -and $s -eq ''S-1-5-18,S-1-5-32-544'') { exit 0 } else { exit 1 }"') = 0;
+end;
+
 procedure TightenDataAcl();
 var
   Dir: string;
@@ -672,10 +702,16 @@ begin
   // Dueño = Administradores, para poder reescribir ACLs de archivos que una
   // versión anterior pudo dejar sin permisos (si no, ni el instalador entra).
   RunHidden(SysTool('icacls.exe'), '"' + Dir + '" /setowner *S-1-5-32-544 /T /C /Q');
-  RunHidden(SysTool('icacls.exe'),
-    '"' + Dir + '" /inheritance:r /grant *S-1-5-18:(OI)(CI)F /grant *S-1-5-32-544:(OI)(CI)F /Q');
-  // El contenido existente vuelve a heredar de la raíz.
+  // Sin /C su código de salida es confiable: si la raíz no quedó, no hay marca
+  // y la próxima instalación lo vuelve a intentar.
+  if RunHidden(SysTool('icacls.exe'),
+    '"' + Dir + '" /inheritance:r /grant *S-1-5-18:(OI)(CI)F /grant *S-1-5-32-544:(OI)(CI)F /Q') <> 0 then
+    exit;
+  // El contenido existente vuelve a heredar de la raíz. Con /C icacls sale con
+  // 0 aunque falle algún archivo, así que la marca solo certifica la raíz.
   RunHidden(SysTool('icacls.exe'), '"' + Dir + '\*" /reset /T /C /Q');
+  SaveStringToFile(DataAclMarker(), 'Permisos de la carpeta de datos revisados archivo por archivo ' +
+    'por el instalador {#AppVersion} el ' + GetDateTimeString('yyyy-mm-dd hh:nn', '-', ':') + '.' + #13#10, False);
 end;
 
 // La configuración del servidor también queda solo para SYSTEM y
@@ -1026,14 +1062,21 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  StartTick: DWord;
+  StartTick, AclTick: DWord;
 begin
   if CurStep = ssPostInstall then
   begin
     StartTick := GetTickCount();
     AddSummary('Archivos de la versión {#AppVersion} copiados.');
-    ShowStep(1, 'Protegiendo la carpeta de datos', 'Solo el sistema y los administradores pueden leer la base y sus llaves', -1);
-    TightenDataAcl();
+    ShowStep(1, 'Revisando los permisos de la carpeta de datos', 'Solo el sistema y los administradores pueden leer la base y sus llaves', -1);
+    if not DataAclDone() then
+    begin
+      ShowStep(1, 'Protegiendo la carpeta de datos',
+        'Se revisa cada archivo, solo esta vez: con muchas fotos y respaldos puede tardar unos minutos', -1);
+      AclTick := GetTickCount();
+      TightenDataAcl();
+      AddSummary('Carpeta de datos protegida, archivo por archivo (' + Elapsed(AclTick) + ').');
+    end;
     ShowStep(1, 'Comprobando el puerto de la base de datos', '', -1);
     ConfigurePgPort();   // antes de arrancar: el clúster nace en el puerto elegido
     // Después de ConfigurePgPort, que puede reescribir appsettings.Local.json y
