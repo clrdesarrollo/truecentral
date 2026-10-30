@@ -15,7 +15,7 @@ const BD_CARDS = [
   { key: "card-server", label: "Servidor", detail: "CPU, memoria, disco y servicios" },
   { key: "card-alerts", label: "Últimas alertas", detail: "Alertas de las automatizaciones" },
   { key: "card-plates", label: "Últimas patentes", detail: "Reconocimientos de patente en vivo" },
-  { key: "card-access", label: "Últimos accesos", detail: "Pasos por todas las puertas" },
+  { key: "card-access", label: "Últimos accesos", detail: "Pasos por las puertas, sin eventos del sistema" },
 ];
 /** Tipos de recurso que puede llevar un cuadro (las zonas se ven dentro de su panel). */
 const BD_RESOURCE_KINDS = ["Camera", "Door", "Partition", "Fence", "Intercom", "Speaker", "IoModule"];
@@ -304,14 +304,18 @@ function bdItemInfo(it) {
         sub: group ? `Grupo de parlantes · ${group.speakerIds.length}` : "Grupo de parlantes" };
     }
     case "card": {
-      // La clave puede traer opciones de la tarjeta ("card-plates?devices=3,7": las cámaras elegidas en el cliente;
-      // "card-alerts?pending=1": el interruptor «Solo sin confirmar»).
-      const [key, options] = (it.ref || "").split("?");
+      // La clave puede traer opciones de la tarjeta, elegidas en el cliente ("card-plates?devices=3,7": las
+      // cámaras ANPR; "card-access?devices=3,7&system=1": los equipos de acceso y el interruptor «Eventos del
+      // sistema»; "card-alerts?pending=1": el interruptor «Solo sin confirmar»).
+      const [key, options = ""] = (it.ref || "").split("?");
       const card = BD_CARDS.find((c) => c.key === key);
-      const cams = /devices=([\d,]+)/.exec(options || "")?.[1].split(",").length ?? 0;
-      const pendingOnly = /(^|&)pending=1/.test(options || "");
+      const devices = /(^|&)devices=([\d,]+)/.exec(options)?.[2].split(",").length ?? 0;
+      const notes = [];
+      if (devices) notes.push(key === "card-access" ? `${devices} equipo${devices === 1 ? "" : "s"}` : `${devices} cámara${devices === 1 ? "" : "s"}`);
+      if (/(^|&)pending=1/.test(options)) notes.push("solo sin confirmar");
+      if (/(^|&)system=1/.test(options)) notes.push("con eventos del sistema");
       return { icon: `<i class="mdi mdi-chart-bar" aria-hidden="true"></i>`, name: card?.label ?? it.ref,
-        sub: cams ? `Tarjeta · ${cams} cámara${cams === 1 ? "" : "s"}` : pendingOnly ? "Tarjeta · solo sin confirmar" : "Tarjeta" };
+        sub: ["Tarjeta", ...notes].join(" · ") };
     }
     default:
       return { icon: `<i class="mdi mdi-web" aria-hidden="true"></i>`, name: it.title || it.ref, sub: it.refId ? "Página de la lista" : it.ref };

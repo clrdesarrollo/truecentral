@@ -654,11 +654,23 @@ public sealed class ApiClient
         }
     }
 
-    /// <summary>Últimos eventos de control de acceso (la página más reciente).</summary>
+    /// <summary>Últimos eventos de control de acceso (la página más reciente, lo mismo que el Monitoreo:
+    /// live=true, así que los equipos no se anotan en la bitácora como una búsqueda).</summary>
     /// <param name="withPerson">Solo los de una persona del padrón (no los del equipo, como la puesta en hora).</param>
-    public Task<AccessEventPageDto> GetAccessEventsAsync(int pageSize, bool withPerson = false, CancellationToken ct = default) =>
-        SendAsync<AccessEventPageDto>(HttpMethod.Get,
-            $"/api/access/events?page=1&pageSize={pageSize}" + (withPerson ? "&withPerson=true" : ""), null, ct);
+    /// <param name="devices">Solo de estos equipos de acceso (vacío o null = de todos los de su alcance).</param>
+    /// <param name="noSystem">Sin los eventos del sistema (<see cref="AccessEventRelevance"/>).</param>
+    /// <param name="doors">Solo de estas puertas (Id de la puerta).</param>
+    public Task<AccessEventPageDto> GetAccessEventsAsync(int pageSize, bool withPerson = false,
+        IReadOnlyCollection<int>? devices = null, bool noSystem = false, IReadOnlyCollection<int>? doors = null,
+        CancellationToken ct = default)
+    {
+        var query = new List<string> { "page=1", $"pageSize={pageSize}", "live=true" };
+        if (withPerson) query.Add("withPerson=true");
+        if (noSystem) query.Add("noSystem=true");
+        if (devices is { Count: > 0 }) query.Add($"deviceIds={string.Join(',', devices.Order())}");
+        if (doors is { Count: > 0 }) query.Add($"doorIds={string.Join(',', doors.Order())}");
+        return SendAsync<AccessEventPageDto>(HttpMethod.Get, $"/api/access/events?{string.Join('&', query)}", null, ct);
+    }
 
     /// <summary>Módulos de E/S (relés) con el estado de sus entradas y salidas.</summary>
     public Task<List<IoModuleDto>> GetIoModulesAsync(CancellationToken ct = default) =>

@@ -938,52 +938,58 @@
                     </Grid>
                 </Grid>
             </Border>
-            <!-- La lista: el elegido se marca con el filo de acento -->
-            <ListBox Grid.Row="1" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected, Mode=TwoWay}"
-                     Background="Transparent" BorderThickness="0" Padding="6,2,6,6"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="Margin" Value="0,2"/>
-                        <Setter Property="Cursor" Value="Hand"/>
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="ListBoxItem">
-                                    <Border x:Name="Row" CornerRadius="5" BorderThickness="1" BorderBrush="Transparent" Padding="1">
-                                        <ContentPresenter/>
-                                    </Border>
-                                    <ControlTemplate.Triggers>
-                                        <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                        </Trigger>
-                                    </ControlTemplate.Triggers>
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                    </Style>
-                </ListBox.ItemContainerStyle>
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Border CornerRadius="4" ClipToBounds="True" Background="{StaticResource Panel2Brush}">
-                            <DockPanel Opacity="{Binding CardOpacity}">
-                                <Rectangle DockPanel.Dock="Left" Width="4" Fill="{Binding ResultBrush}"/>
-                                <StackPanel Margin="9,5,6,5">
-                                    <TextBlock Text="{Binding Who}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Text="{Binding Door}" Style="{StaticResource PanelHint}" TextWrapping="NoWrap"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                        <TextBlock Text="{Binding Time}" FontSize="11" FontFamily="{StaticResource MonoFont}"
-                                                   Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
-                                        <TextBlock Text="{Binding ResultText}" FontSize="10.5" FontWeight="Bold" Margin="8,0,0,0"
-                                                   Foreground="{Binding ResultBrush}" VerticalAlignment="Center"/>
+            <!-- La lista: el elegido se marca con el filo de acento. Encima, el interruptor
+                 que suma los eventos del sistema (la puesta en hora, la cerradura…). -->
+            <DockPanel Grid.Row="1">
+                <ToggleButton DockPanel.Dock="Top" Style="{StaticResource CardSwitch}" HorizontalAlignment="Right"
+                              Margin="0,2,14,2" Content="Eventos del sistema" IsChecked="{Binding IncludeSystem}"
+                              ToolTip="Mostrar también la puesta en hora, los avisos del equipo y la cerradura y el sensor de la puerta"/>
+                <ListBox ItemsSource="{Binding Items}" SelectedItem="{Binding Selected, Mode=TwoWay}"
+                         Background="Transparent" BorderThickness="0" Padding="6,2,6,6"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Margin" Value="0,2"/>
+                            <Setter Property="Cursor" Value="Hand"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border x:Name="Row" CornerRadius="5" BorderThickness="1" BorderBrush="Transparent" Padding="1">
+                                            <ContentPresenter/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border CornerRadius="4" ClipToBounds="True" Background="{StaticResource Panel2Brush}">
+                                <DockPanel Opacity="{Binding CardOpacity}">
+                                    <Rectangle DockPanel.Dock="Left" Width="4" Fill="{Binding ResultBrush}"/>
+                                    <StackPanel Margin="9,5,6,5">
+                                        <TextBlock Text="{Binding Who}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Door}" Style="{StaticResource PanelHint}" TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                            <TextBlock Text="{Binding Time}" FontSize="11" FontFamily="{StaticResource MonoFont}"
+                                                       Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding ResultText}" FontSize="10.5" FontWeight="Bold" Margin="8,0,0,0"
+                                                       Foreground="{Binding ResultBrush}" VerticalAlignment="Center"/>
+                                        </StackPanel>
                                     </StackPanel>
-                                </StackPanel>
-                            </DockPanel>
-                        </Border>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
             <TextBlock Grid.Row="1" Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="10,0,10,6"
                        VerticalAlignment="Bottom"
                        Visibility="{Binding Status, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>

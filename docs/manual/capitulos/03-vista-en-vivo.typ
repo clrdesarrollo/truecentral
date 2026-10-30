@@ -1,5 +1,5 @@
 #import "../plantilla.typ": *
-// Fuentes: src/TrueCentralVms.Client/Views/LiveView.xaml, src/TrueCentralVms.Client/Views/LiveView.xaml.cs, src/TrueCentralVms.Client/Views/AuxLiveWindow.xaml, src/TrueCentralVms.Client/Views/AuxLiveWindow.xaml.cs, src/TrueCentralVms.Client/Views/LoadingWindow.xaml, src/TrueCentralVms.Client/Views/ZoomDragController.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.LiveViews.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Session.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.Client/ViewModels/VideoCellViewModel.cs, src/TrueCentralVms.Client/ViewModels/VideoLayouts.cs, src/TrueCentralVms.Client/ViewModels/DigitalZoom.cs, src/TrueCentralVms.Client/ViewModels/AuxScreenViewModel.cs, src/TrueCentralVms.Client/ViewModels/DeviceTreeNodes.cs, src/TrueCentralVms.Client/ViewModels/LocationTreeNodes.cs, src/TrueCentralVms.Server/wwwroot/live.js, src/TrueCentralVms.Server/Api/LiveViewsApi.cs, src/TrueCentralVms.Server/Api/StreamsApi.cs, src/TrueCentralVms.Client/Views/CommandCenterTemplates.xaml, src/TrueCentralVms.Client/Views/WebCellView.xaml, src/TrueCentralVms.Client/Views/WebUrlWindow.xaml, src/TrueCentralVms.Client/ViewModels/MainViewModel.Resources.cs, src/TrueCentralVms.Client/ViewModels/ResourceNodes.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Resources.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Cards.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Web.cs, src/TrueCentralVms.Server/wwwroot/boards.js, src/TrueCentralVms.Client/Views/MainWindow.Tabs.cs, src/TrueCentralVms.Client/Views/DetachedTabWindow.xaml, src/TrueCentralVms.Client/Views/DetachedTabWindow.xaml.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Tabs.cs, src/TrueCentralVms.Client/Views/PlateSourcesWindow.xaml, src/TrueCentralVms.Client/Views/PlateSourcesWindow.xaml.cs, src/TrueCentralVms.Server/Api/LiveViewsApi.cs
+// Fuentes: src/TrueCentralVms.Client/Views/LiveView.xaml, src/TrueCentralVms.Client/Views/LiveView.xaml.cs, src/TrueCentralVms.Client/Views/AuxLiveWindow.xaml, src/TrueCentralVms.Client/Views/AuxLiveWindow.xaml.cs, src/TrueCentralVms.Client/Views/LoadingWindow.xaml, src/TrueCentralVms.Client/Views/ZoomDragController.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.LiveViews.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Session.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Locations.cs, src/TrueCentralVms.Client/ViewModels/VideoCellViewModel.cs, src/TrueCentralVms.Client/ViewModels/VideoLayouts.cs, src/TrueCentralVms.Client/ViewModels/DigitalZoom.cs, src/TrueCentralVms.Client/ViewModels/AuxScreenViewModel.cs, src/TrueCentralVms.Client/ViewModels/DeviceTreeNodes.cs, src/TrueCentralVms.Client/ViewModels/LocationTreeNodes.cs, src/TrueCentralVms.Server/wwwroot/live.js, src/TrueCentralVms.Server/Api/LiveViewsApi.cs, src/TrueCentralVms.Server/Api/StreamsApi.cs, src/TrueCentralVms.Client/Views/CommandCenterTemplates.xaml, src/TrueCentralVms.Client/Views/WebCellView.xaml, src/TrueCentralVms.Client/Views/WebUrlWindow.xaml, src/TrueCentralVms.Client/ViewModels/MainViewModel.Resources.cs, src/TrueCentralVms.Client/ViewModels/ResourceNodes.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Resources.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Cards.cs, src/TrueCentralVms.Client/ViewModels/CellPanels.Web.cs, src/TrueCentralVms.Server/wwwroot/boards.js, src/TrueCentralVms.Client/Views/MainWindow.Tabs.cs, src/TrueCentralVms.Client/Views/DetachedTabWindow.xaml, src/TrueCentralVms.Client/Views/DetachedTabWindow.xaml.cs, src/TrueCentralVms.Client/ViewModels/MainViewModel.Tabs.cs, src/TrueCentralVms.Client/Views/CardSourcesWindow.xaml, src/TrueCentralVms.Client/Views/CardSourcesWindow.xaml.cs, src/TrueCentralVms.Server/Api/LiveViewsApi.cs
 
 = Centro de mando <cap-vista-en-vivo>
 
@@ -222,9 +222,11 @@ se abre:
     se ven la escena y el recorte de la patente. Con el engranaje de la barra
     del cuadro se eligen las cámaras (ver _Elegir las cámaras de Últimas
     patentes_). Pide el permiso *Ver patentes*.],
-  [*Últimos accesos*], [Los pasos por todas las puertas, en vivo, con la foto
-    del último que pasó. Ver _La tarjeta Últimos accesos_. Pide *Ver control
-    de acceso*.],
+  [*Últimos accesos*], [Los pasos por las puertas, en vivo, con la foto del
+    último que pasó; por omisión, sin los eventos del sistema. Con el engranaje
+    de la barra del cuadro se eligen los equipos de acceso (ver _Elegir los
+    equipos de Últimos accesos_). Ver _La tarjeta Últimos accesos_. Pide *Ver
+    control de acceso*.],
 )
 
 === La tarjeta Últimas alertas
@@ -275,9 +277,9 @@ de estar pendiente en todos los puestos.
 #requiere("Ver control de acceso")
 
 La tarjeta tiene el mismo diseño que *Últimas alertas*: arriba, el último paso
-de una persona del padrón; abajo, los últimos 12 eventos de todas las puertas.
+de una persona del padrón; abajo, los últimos 12 pasos por las puertas.
 
-#captura-pendiente("Cliente de monitoreo: cuadro con la tarjeta Últimos accesos, una persona AUTORIZADO con su foto del padrón, la puerta, la hora y la credencial, y la lista con pasos y eventos del equipo atenuados")
+#captura-pendiente("Cliente de monitoreo: cuadro con la tarjeta Últimos accesos, una persona AUTORIZADO con su foto del padrón, la puerta, la hora y la credencial, y la lista con pasos, un botón de salida atenuado y el interruptor Eventos del sistema apagado")
 
 Arriba se ve:
 
@@ -290,8 +292,18 @@ Arriba se ve:
 
 En la lista, cada evento lleva una franja de color según el resultado (verde el
 autorizado, roja el rechazado o la alarma y gris lo demás). Los eventos que no
-son el paso de una persona, como la puesta en hora o el armado de un terminal,
-se ven más tenues. Haga clic en uno para verlo arriba.
+son el paso de una persona del padrón, como una salida con el botón, se ven más
+tenues. Haga clic en uno para verlo arriba.
+
+Por omisión, la lista muestra solo lo que sirve para vigilar: los accesos
+autorizados y rechazados, las alarmas y las aperturas con el botón de salida, a
+distancia o con la clave de la puerta. El interruptor *Eventos del sistema*,
+sobre la lista, suma lo demás: la puesta en hora (si otro sistema, como
+HikCentral, sigue conectado a los terminales, la hace cada minuto en cada uno),
+los avisos del equipo, como el armado o la batería, y lo que informan la
+cerradura y el sensor de la puerta en cada paso. El cuadro lo recuerda: un
+tablero o la última sesión vuelven a abrir la tarjeta con el interruptor como
+quedó.
 
 Cuando pasa alguien, la tarjeta lo muestra arriba, salvo que usted esté mirando
 otro evento. Si los eventos más nuevos son todos del equipo, el último que pasó
@@ -316,6 +328,24 @@ entre las lecturas más recientes no hay ninguna de esas cámaras, la tarjeta
 dice «Sin lecturas recientes de las cámaras elegidas.». Para volver a verlas todas,
 elija *De todas las cámaras ANPR*. Lo elegido queda con el cuadro: se guarda en
 la última sesión y en los tableros.
+
+=== Elegir los equipos de Últimos accesos
+
+Por omisión, la tarjeta *Últimos accesos* muestra los pasos por las puertas de
+todos los equipos de acceso que usted puede ver. Para que muestre solo algunos,
+por ejemplo los de la entrada que vigila ese puesto:
+
++ Haga clic en el engranaje de la barra del cuadro (*Elegir de qué equipos de
+  acceso se muestran los pasos*). Se abre *Equipos de «Últimos accesos»*.
++ Elija *Solo de los equipos marcados* y marque los equipos. El punto verde
+  indica que el equipo está en línea; bajo cada uno se indica su puerta (o
+  cuántas tiene) y su ubicación.
++ Haga clic en #boton("Aplicar").
+
+La barra del cuadro lo indica, por ejemplo «Últimos accesos · 2 equipos». El
+último que pasó, arriba, también es de esos equipos. Para volver a verlos todos,
+elija *De todos los equipos de acceso*. Lo elegido queda con el cuadro: se
+guarda en la última sesión y en los tableros.
 
 Si la lista dice «No hay cámaras ANPR a su alcance: se configuran en el panel
 web (Fuentes de video → ANPR).», no hay cámaras con esa función o ninguna está
@@ -395,8 +425,8 @@ dice «Cuadro libre».
   [Cámara fotográfica], [Guarda una captura de imagen.],
   [●], [Inicia o detiene una grabación local. Mientras graba se pone rojo y
     muestra el tiempo transcurrido.],
-  [Engranaje], [Solo en las tarjetas con opciones, como *Últimas patentes*:
-    las configura.],
+  [Engranaje], [Solo en las tarjetas con opciones, como *Últimas patentes* o
+    *Últimos accesos*: las configura.],
   [Ícono *Subdividir este card para poner más de una cámara*], [Parte el
     cuadro en varios (ver _Subdividir un cuadro_). Está también en los cuadros
     libres.],
@@ -789,7 +819,7 @@ o «No se pudo iniciar la grabación: …».
 
 Un tablero guarda la división de la grilla y lo que hay en cada cuadro: la
 cámara con su stream, el recurso, la tarjeta (con sus opciones, como las
-cámaras de *Últimas patentes*), el grupo de parlantes o la página web (con su
+cámaras de *Últimas patentes* o los equipos de *Últimos accesos*), el grupo de parlantes o la página web (con su
 zoom; una de _Mis páginas_ se guarda con su dirección). Los tableros quedan en el servidor: puede cargarlos desde
 cualquier puesto. Para cargar un tablero basta *Ver video en vivo*; para
 guardarlos, cambiarlos o borrarlos hace falta además *Crear tableros propios*.
@@ -1303,7 +1333,9 @@ guardado desde el cliente con una división que el panel web no dibuja (más de
 16 cuadros o a medida) muestra «(del cliente)»: en el panel web se le cambian
 el nombre y con quién se comparte, y sus cuadros se conservan. Una tarjeta
 *Últimas patentes* con cámaras elegidas en el cliente aparece como, por
-ejemplo, «Tarjeta · 2 cámaras».
+ejemplo, «Tarjeta · 2 cámaras», y una *Últimos accesos* con equipos elegidos
+y los eventos del sistema, como «Tarjeta · 3 equipos · con eventos del
+sistema».
 
 La tabla *Tableros compartidos* muestra, para cada uno, quiénes lo ven
 (*Todos*, los roles, o *Sin roles* si sus roles se borraron), la división, el

@@ -214,6 +214,21 @@ public enum AccessEventKind
 /// <summary>Con qué se identificó la persona.</summary>
 public enum AccessCredentialKind { Unknown, Card, Fingerprint, Face, Pin, Remote, ExitButton, Qr, Plate }
 
+/// <summary>
+/// Eventos del sistema: lo que no le sirve al guardia en una lista de pasos. Le sirven
+/// los accesos concedidos y denegados, las alarmas y las aperturas que hizo alguien
+/// (botón de salida, a distancia, clave de la puerta). Del sistema son los avisos y
+/// operaciones del equipo (la puesta en hora de HikCentral cada minuto, batería,
+/// abierta permanente…) y lo que la cerradura y el sensor informan tras cada paso.
+/// El servidor filtra igual con <c>noSystem=true</c> en /api/access/events.
+/// </summary>
+public static class AccessEventRelevance
+{
+    public static bool IsSystem(AccessEventKind kind, AccessCredentialKind credential) =>
+        kind is not (AccessEventKind.Granted or AccessEventKind.Denied or AccessEventKind.Alarm)
+        && !(kind == AccessEventKind.DoorOpen && credential != AccessCredentialKind.Unknown);
+}
+
 /// <summary>Puerta con el equipo al que pertenece y su estado en vivo, para el monitoreo y los niveles de acceso.</summary>
 public sealed record AccessDoorStateDto(
     int Id,
