@@ -78,12 +78,12 @@ public sealed class AuditService(IServiceScopeFactory scopeFactory, ILogger<Audi
         string? targetType = null, string? targetId = null, string? targetName = null,
         string? detail = null, bool success = true, object? data = null,
         int? userId = null, string username = "sistema", string? clientIp = null,
-        string origin = "server")
+        string origin = "server", string? role = null)
         => WriteAsync(new AuditEvent
         {
             UserId = userId,
             Username = username,
-            Role = null,
+            Role = role,
             Origin = origin,
             ClientIp = clientIp ?? "",
             Category = category,
@@ -123,7 +123,7 @@ public sealed class AuditService(IServiceScopeFactory scopeFactory, ILogger<Audi
 
     /// <summary>Origen del request: el cliente WPF se identifica con la
     /// cabecera X-TCVMS-Client; sin ella se asume el panel web.</summary>
-    private static string OriginOf(HttpContext ctx) =>
+    public static string OriginOf(HttpContext ctx) =>
         ctx.Request.Headers.ContainsKey("X-TCVMS-Client") ? "client" : "web";
 
     private static string? ToJson(object? data) =>

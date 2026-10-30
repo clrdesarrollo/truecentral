@@ -36,12 +36,13 @@ public static class BackupApi
         {
             if (ApiSecurity.Require(ctx, Permissions.SystemBackup, out _) is { } failure) return failure;
             var s = await backups.LoadSettingsAsync(ct);
-            var (healthy, health) = backups.Health();
+            var (healthy, health) = backups.Health(current: false);
             return Results.Ok(new
             {
                 settings = ToDto(s),
                 state = backups.State,
                 busy = backups.Busy,
+                progress = backups.Progress(),
                 healthy,
                 health,
                 directory = backups.Directory,
@@ -117,31 +118,21 @@ public static class BackupApi
             return Results.NoContent();
         });
 
-        app.MapPost("/api/system/backups/run", async (HttpContext ctx, BackupService backups, AuditService audit, CancellationToken ct) =>
+        // Lanza el respaldo y vuelve enseguida (202): uno de 1,7 GB tarda minutos. El avance se sigue con /progress y el
+        // resultado (creado o fallido) queda en la bitácora a nombre de quien lo pidió, aunque haya cerrado el panel.
+        app.MapPost("/api/system/backups/run", (HttpContext ctx, BackupService backups) =>
         {
-            if (ApiSecurity.Require(ctx, Permissions.SystemBackup, out _) is { } failure) return failure;
-            try
-            {
-                var file = await backups.CreateAsync(BackupKinds.Manual, CancellationToken.None);
-                string? secondary = backups.State.LastSecondaryError;
-                await audit.LogAsync(ctx, "backup", "backup-created", targetType: "backup", targetName: file.Name,
-                    detail: $"Respaldo a pedido: {BackupService.Size(file.Size)}{(secondary is null ? "." : $". OJO: {secondary}")}");
-                if (secondary is not null)
-                    await audit.LogAsync(ctx, "backup", "backup-secondary-failed", targetType: "backup", targetName: file.Name,
-                        detail: secondary, success: false);
-                return Results.Ok(new { file, secondaryError = secondary });
-            }
-            catch (InvalidOperationException ex) when (backups.Busy)
-            {
-                return Error(ex.Message, StatusCodes.Status409Conflict);
-            }
-            catch (Exception ex)
-            {
-                await audit.LogAsync(ctx, "backup", "backup-failed", targetType: "backup",
-                    detail: $"Falló el respaldo a pedido: {ex.Message}", success: false);
-                return Error($"No se pudo respaldar: {ex.Message}", StatusCodes.Status500InternalServerError);
-            }
+            if (ApiSecurity.Require(ctx, Permissions.SystemBackup, out var session) is { } failure) return failure;
+            var actor = new BackupActor(session.UserId, session.Username, session.Role,
+                ctx.Connection.RemoteIpAddress?.ToString() ?? "", AuditService.OriginOf(ctx));
+            return backups.StartManual(actor)
+                ? Results.Json(backups.Progress(), statusCode: StatusCodes.Status202Accepted)
+                : Error("Ya hay un respaldo o una prueba de restauración en curso.", StatusCodes.Status409Conflict);
         });
+
+        // Avance del respaldo en curso: solo memoria (ni la base ni el disco), para consultarlo cada pocos segundos.
+        app.MapGet("/api/system/backups/progress", (HttpContext ctx, BackupService backups) =>
+            ApiSecurity.Require(ctx, Permissions.SystemBackup, out _) ?? Results.Ok(backups.Progress()));
 
         app.MapPost("/api/system/backups/{name}/verify", async (HttpContext ctx, string name, BackupService backups,
             AuditService audit, CancellationToken ct) =>

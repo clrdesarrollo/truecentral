@@ -59,10 +59,16 @@ public sealed class StartupStatus(string directory, ILogger logger)
                 break;
             case "verify":
                 Report("backup", 2, "Verificando el respaldo",
-                    $"Se relee completo ({written}) para asegurar que se pueda restaurar");
+                    $"Se relee completo ({written} de {Mb(p.ExpectedBytes)}) para asegurar que se pueda restaurar", Percent(p));
+                break;
+            case "secondary":
+                Report("backup", 2, "Copiando el respaldo al segundo destino", $"{written} de {Mb(p.ExpectedBytes)}", Percent(p));
                 break;
         }
     });
+
+    private static int Percent(Backup.BackupProgress p) =>
+        p.ExpectedBytes > 0 ? (int)Math.Min(100, p.Bytes * 100 / p.ExpectedBytes) : -1;
 
     /// <summary>Arranque terminado: el servidor ya atiende.</summary>
     public void Ready() => Report("ready", Steps, "El servidor está listo", null, 100);

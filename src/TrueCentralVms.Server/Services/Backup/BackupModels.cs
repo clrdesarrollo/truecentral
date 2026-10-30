@@ -46,6 +46,33 @@ public sealed record BackupState
 public sealed record BackupFileDto(string Name, string Kind, DateTime CreatedUtc, long Size, string KeyMode,
     string ServerVersion, string? LastMigration, bool IncludesAnpr, bool? OnSecondary);
 
+/// <summary>
+/// Un respaldo en curso o recién terminado, como lo sigue el panel. Stage, Bytes y ExpectedBytes según
+/// <see cref="BackupProgress"/> ("prepare" mientras arma el trabajo). Los tiempos los mide el servidor (el reloj del
+/// navegador puede estar corrido): ElapsedSeconds desde que empezó, StageSeconds en la etapa e IdleSeconds sin avanzar.
+/// Success es null mientras corre.
+/// </summary>
+public sealed record BackupRunDto(string Kind, string? StartedBy, DateTime StartedUtc, bool Running, string Stage, long Bytes,
+    long ExpectedBytes, bool HasSecondary, double ElapsedSeconds, double StageSeconds, double IdleSeconds, DateTime? FinishedUtc,
+    bool? Success, string? Error, BackupFileDto? File, string? SecondaryError);
+
+/// <summary>
+/// GET /api/system/backups/progress. Busy = hay un respaldo o una prueba en curso; Testing = el respaldo que se está
+/// probando; StallAfterSeconds = desde cuándo el panel avisa que no avanza; TimeoutMinutes = tope en que se detiene solo.
+/// </summary>
+public sealed record BackupProgressDto(bool Busy, BackupRunDto? Run, string? Testing, int StallAfterSeconds, int TimeoutMinutes);
+
+/// <summary>
+/// Quién pidió un respaldo a pedido: el resultado llega minutos después, sin el request a mano, y va a la bitácora a
+/// su nombre.
+/// </summary>
+public sealed record BackupActor(int UserId, string Username, string? Role, string ClientIp, string Origin)
+{
+    public Task LogAsync(AuditService audit, string action, string? target, string detail, bool success) =>
+        audit.LogSystemAsync("backup", action, targetType: "backup", targetName: target, detail: detail, success: success,
+            userId: UserId, username: Username, role: Role, clientIp: ClientIp, origin: Origin);
+}
+
 /// <summary>Carpetas que entran en un respaldo: las mismas que usa el servidor (respetando su configuración).</summary>
 public static class BackupPaths
 {
