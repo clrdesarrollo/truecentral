@@ -306,7 +306,8 @@ decodificador y después se crea el muro sobre él. Ambas páginas están en
 
 En #menu("Dispositivos", "Videowalls", "Decodificadores"):
 
-+ Haga clic en #boton("Agregar decodificador").
++ Haga clic en #boton("Agregar decodificador"). Se abre la página *Nuevo
+  decodificador*.
 + Escriba el *Nombre* (por ejemplo, _Decoder sala de control_).
 + En *Driver*, elija _Hikvision (HCNetSDK)_.
 + Escriba la *Dirección (IP o host)*, el *Puerto SDK* (8000 por omisión), el

@@ -233,7 +233,8 @@ Los frentes se administran en el panel web, en #menu("Dispositivos",
 
 === Agregar un frente
 
-+ Haga clic en #boton("Agregar frente").
++ Haga clic en #boton("Agregar frente"). Se abre la página *Agregar frente de
+  citofonía*.
 + Escriba el *Nombre* (por ejemplo, _Portería principal_) y, si quiere, un
   *Grupo* (_Portería_, _Torre A_…) que ayuda a ordenar la lista.
 + Elija la *Ubicación* del frente en el árbol de recursos (vea

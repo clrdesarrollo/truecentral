@@ -297,7 +297,8 @@ Los parlantes se agregan en el panel web, en #menu("Dispositivos",
 
 === Agregar un parlante
 
-+ Haga clic en #boton("Agregar parlante").
++ Haga clic en #boton("Agregar parlante"). Se abre la página *Agregar parlante
+  IP*.
 + Escriba el *Nombre* (por ejemplo, _Acceso proveedores_). El campo *Grupos*
   solo informa a qué grupos pertenece el parlante: los grupos se arman aparte
   (vea «Armar grupos de parlantes»).

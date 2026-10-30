@@ -809,7 +809,8 @@ cámaras; ver #capitulo(<cap-fuentes-de-video>).
 
 === Agregar un equipo a mano
 
-+ Haga clic en #boton("Agregar equipo").
++ Haga clic en #boton("Agregar equipo"). Se abre la página *Agregar equipo de
+  control de acceso*.
 + Escriba un *Nombre* que lo identifique (por ejemplo, _Portería principal_).
 + Elija su *Ubicación*. Sus puertas la heredan. Si usted tiene el permiso
   _Recursos y ubicaciones_, viene elegida *Nueva, con el nombre del equipo*
