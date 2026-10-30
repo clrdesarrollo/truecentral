@@ -371,6 +371,15 @@ public interface IAccessControlDriver
         Task.FromResult<AccessEventPage?>(null);
 
     /// <summary>
+    /// La foto que tomó el propio equipo en el evento <paramref name="serialNo"/>
+    /// (la captura del terminal facial al autenticar), en JPEG; null si no la
+    /// guardó o no la sabe dar. Es una consulta aparte, de a un evento: la
+    /// lectura del historial no trae fotos.
+    /// </summary>
+    Task<byte[]?> FetchEventPictureAsync(AccessConnectionInfo info, long serialNo, CancellationToken ct = default) =>
+        Task.FromResult<byte[]?>(null);
+
+    /// <summary>
     /// Escucha los eventos que empuja el equipo, hasta que se cancele o se
     /// corte la conexión (solo si <see cref="SupportsEventStream"/>). El
     /// llamador se encarga de reconectar: acá una desconexión termina la

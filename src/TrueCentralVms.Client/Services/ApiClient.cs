@@ -637,12 +637,19 @@ public sealed class ApiClient
         SendAsync<AccessDoorStateDto>(HttpMethod.Post, $"/api/access/doors/{doorId}/command", new AccessDoorCommandDto(command), ct);
 
     /// <summary>Foto del rostro enrolado de una persona del padrón (null si no tiene o no se pudo).</summary>
-    public async Task<byte[]?> GetAccessPersonFaceAsync(int personId, CancellationToken ct = default)
+    public Task<byte[]?> GetAccessPersonFaceAsync(int personId, CancellationToken ct = default) =>
+        GetImageAsync($"/api/access/persons/{personId}/face", ct);
+
+    /// <summary>Foto del momento de un paso (la del terminal o la de la cámara de la puerta); null si no hay.</summary>
+    public Task<byte[]?> GetAccessEventPhotoAsync(long eventId, CancellationToken ct = default) =>
+        GetImageAsync($"/api/access/events/{eventId}/photo", ct);
+
+    private async Task<byte[]?> GetImageAsync(string path, CancellationToken ct)
     {
         if (BaseUrl is null) return null;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/api/access/persons/{personId}/face");
+            using var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + path);
             if (Token is not null)
                 request.Headers.Authorization = new("Bearer", Token);
             using var response = await _http.SendAsync(request, ct);

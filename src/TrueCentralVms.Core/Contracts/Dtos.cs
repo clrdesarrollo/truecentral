@@ -230,6 +230,9 @@ public static class VmsHubContract
     /// <summary>Alguien pasó (o lo rechazaron) por una puerta (payload: AccessEventDto).</summary>
     public const string AccessEventReceived = nameof(AccessEventReceived);
 
+    /// <summary>Quedó la foto del momento de un paso (payload: AccessEventPhotoDto).</summary>
+    public const string AccessEventPhotoReady = nameof(AccessEventPhotoReady);
+
     /// <summary>Cambió lo escrito en los equipos para una persona (payload: AccessPersonDto).</summary>
     public const string AccessPersonSyncChanged = nameof(AccessPersonSyncChanged);
 

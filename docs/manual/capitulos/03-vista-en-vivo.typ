@@ -279,7 +279,7 @@ de estar pendiente en todos los puestos.
 La tarjeta tiene el mismo diseño que *Últimas alertas*: arriba, el último paso
 de una persona del padrón; abajo, los últimos 12 pasos por las puertas.
 
-#captura-pendiente("Cliente de monitoreo: cuadro con la tarjeta Últimos accesos, una persona AUTORIZADO con su foto del padrón, la puerta, la hora y la credencial, y la lista con pasos, un botón de salida atenuado y el interruptor Eventos del sistema apagado")
+#captura-pendiente("Cliente de monitoreo: cuadro con la tarjeta Últimos accesos, una persona AUTORIZADO con la foto del momento (Captura del terminal) al lado de su foto del padrón, la puerta, la hora, la credencial y Ver en vivo, y la lista con pasos, el ícono de cámara en los que tienen foto, un botón de salida atenuado y el interruptor Eventos del sistema apagado")
 
 Arriba se ve:
 
@@ -288,7 +288,12 @@ Arriba se ve:
 - la puerta y el equipo, con la fecha y la hora;
 - su área, su cargo y con qué se identificó, por ejemplo «Tarjeta 3558822549»,
   «Rostro» o «Huella»;
-- su foto del padrón, o «Sin foto en el padrón» si no tiene.
+- la foto del momento del paso y, al lado, su foto del padrón (o «Sin foto en
+  el padrón» si no tiene), para comparar de un vistazo quién pasó con quién
+  dice ser (ver _La foto del momento_);
+- #boton("Ver en vivo"), que abre las cámaras de esa puerta en la ventana de
+  verificación, sin tocar la grilla. Si la puerta no tiene cámaras, la tarjeta
+  lo dice.
 
 En la lista, cada evento lleva una franja de color según el resultado (verde el
 autorizado, roja el rechazado o la alarma y gris lo demás). Los eventos que no
@@ -308,6 +313,25 @@ quedó.
 Cuando pasa alguien, la tarjeta lo muestra arriba, salvo que usted esté mirando
 otro evento. Si los eventos más nuevos son todos del equipo, el último que pasó
 queda igual arriba y al pie de la lista.
+
+=== La foto del momento
+
+El servidor guarda una foto de cada paso (no de los eventos del sistema), de
+una de estas dos fuentes:
+
+- *La captura del terminal*: la que toma el terminal facial al leer la
+  credencial. Es la del instante exacto. El terminal tiene que estar
+  configurado para guardar las fotos de autenticación; al que no las guarda se
+  le deja de pedir por una hora.
+- *La cámara de la puerta*: la del propio terminal o, si no tiene, la primera
+  cámara de la ficha de la puerta (ver
+  #capitulo(<cap-recursos-y-ubicaciones>)). Se toma solo si el paso llegó hace
+  pocos segundos, porque más tarde la foto ya no muestra a quien pasó. El pie
+  lo dice, por ejemplo «Cámara Garita · 4 s después del paso».
+
+La foto llega un poco después que el paso: aparece sola cuando está lista. En
+la lista, los pasos con foto llevan el ícono de una cámara. Las fotos se
+guardan cifradas en el servidor y se borran a los 30 días.
 
 === Elegir las cámaras de Últimas patentes
 

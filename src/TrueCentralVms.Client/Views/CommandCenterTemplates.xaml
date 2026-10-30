@@ -912,6 +912,16 @@
                                     VerticalAlignment="Center" Margin="0,0,8,0">
                                 <TextBlock Text="{Binding Selected.ResultText}" Foreground="White" FontWeight="Bold" FontSize="10.5"/>
                             </Border>
+                            <!-- Las cámaras de la puerta, en la ventana de verificación -->
+                            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Padding="8,2" FontSize="11"
+                                    Margin="8,0,0,0" VerticalAlignment="Center" Command="{Binding OpenLiveCommand}"
+                                    ToolTip="Abrir las cámaras de esta puerta en vivo"
+                                    Visibility="{Binding CanOpenLive, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="11" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Ver en vivo" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
                             <TextBlock Text="{Binding Selected.Who}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
                                        TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip="{Binding Selected.Who}"/>
                         </DockPanel>
@@ -922,19 +932,48 @@
                         <TextBlock Grid.Row="2" Text="{Binding Selected.Detail}" Style="{StaticResource PanelHint}" Margin="0,2,0,0"
                                    TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding Selected.Detail}"
                                    Visibility="{Binding Selected.HasDetail, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
-                        <!-- La foto del padrón: lo que se mira de lejos -->
-                        <Border Grid.Row="3" Margin="0,8,0,0" Background="#000000" CornerRadius="4" MinHeight="30" ClipToBounds="True">
-                            <Grid>
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
-                                            Visibility="{Binding Selected.HasFace, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
-                                    <TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="40"
-                                               Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="{Binding Selected.NoFaceText}" Style="{StaticResource PanelHint}"
-                                               HorizontalAlignment="Center" Margin="0,6,0,0"/>
-                                </StackPanel>
-                                <Image Source="{Binding SelectedFace}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
-                            </Grid>
-                        </Border>
+                        <!-- Lo que se mira de lejos: la foto del momento del paso al lado de la del
+                             padrón, cada una con su pie (de dónde salió y cuándo). -->
+                        <Grid Grid.Row="3" Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3*"/>
+                                <ColumnDefinition Width="6"/>
+                                <ColumnDefinition Width="2*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Background="#000000" CornerRadius="4" MinHeight="30" ClipToBounds="True">
+                                <Grid>
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                Visibility="{Binding Selected.HasPhoto, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                        <TextBlock Text="&#xE722;" FontFamily="Segoe MDL2 Assets" FontSize="34"
+                                                   Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding Selected.PhotoText}" Style="{StaticResource PanelHint}"
+                                                   HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                    <Image Source="{Binding SelectedPhoto}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    <Border VerticalAlignment="Bottom" Background="#B3000000" Padding="8,3"
+                                            Visibility="{Binding Selected.HasPhoto, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                        <TextBlock Text="{Binding Selected.PhotoText}" FontSize="11" Foreground="White"
+                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding Selected.PhotoText}"/>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                            <Border Grid.Column="2" Background="#000000" CornerRadius="4" MinHeight="30" ClipToBounds="True">
+                                <Grid>
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                Visibility="{Binding Selected.HasFace, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                        <TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="34"
+                                                   Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding Selected.NoFaceText}" Style="{StaticResource PanelHint}"
+                                                   HorizontalAlignment="Center" Margin="4,6,4,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                                    </StackPanel>
+                                    <Image Source="{Binding SelectedFace}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    <Border VerticalAlignment="Bottom" Background="#B3000000" Padding="8,3"
+                                            Visibility="{Binding Selected.HasFace, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                        <TextBlock Text="Padrón" FontSize="11" Foreground="White"/>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </Grid>
                     </Grid>
                 </Grid>
             </Border>
@@ -982,6 +1021,11 @@
                                                        Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                                             <TextBlock Text="{Binding ResultText}" FontSize="10.5" FontWeight="Bold" Margin="8,0,0,0"
                                                        Foreground="{Binding ResultBrush}" VerticalAlignment="Center"/>
+                                            <!-- Tiene foto del momento -->
+                                            <TextBlock Text="&#xE722;" FontFamily="Segoe MDL2 Assets" FontSize="11" Margin="8,0,0,0"
+                                                       Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"
+                                                       ToolTip="{Binding PhotoText}"
+                                                       Visibility="{Binding HasPhoto, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                         </StackPanel>
                                     </StackPanel>
                                 </DockPanel>

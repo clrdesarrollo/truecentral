@@ -40,6 +40,7 @@ namespace TrueCentralVms.Server.Services;
 public sealed class AccessEventService(
     IServiceScopeFactory scopeFactory,
     AccessControlService access,
+    AccessEventPhotos photos,
     IConfiguration config,
     ScopedHub hub,
     ILogger<AccessEventService> logger) : SupervisedBackgroundService
@@ -160,6 +161,9 @@ public sealed class AccessEventService(
         // equipo que todavía no se sabe si está vivo es tiempo perdido.
         try { await Task.Delay(TimeSpan.FromSeconds(25), stoppingToken); }
         catch (OperationCanceledException) { return; }
+
+        // Las fotos de los pasos se buscan aparte: un equipo lento no demora la lectura.
+        _ = Task.Run(() => photos.RunAsync(stoppingToken), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -530,6 +534,8 @@ public sealed class AccessEventService(
                 s => s.CanViewAccessEvent(entity.AccessDeviceId, entity.DoorNumber), ct);
             workflows.Publish(Workflows.WorkflowTrigger.FromAccessEvent(entity));
         }
+        // La foto del momento llega después, con su propio aviso (AccessEventPhotoReady).
+        photos.Offer(tracked, stored);
 
         // Un paso, una puerta que se abre o se cierra, o una alarma cambian el
         // estado de la hoja y de la cerradura: se relee ya en vez de esperar
@@ -726,6 +732,7 @@ public sealed class AccessEventService(
         if (removed > 0)
             logger.LogInformation("Historial de accesos: {Count} evento(s) más viejos que {Days} días eliminados.",
                 removed, RetentionDays);
+        await photos.PurgeAsync(db, ct);
     }
 
     private static string Shorten(string text, int max) => text.Length <= max ? text : text[..max];
@@ -735,5 +742,6 @@ public sealed class AccessEventService(
     public static AccessEventDto ToDto(AccessEvent e, PersonInfo? person) => new(
         e.Id, e.AccessDeviceId, e.DeviceName, e.DoorNumber, e.DoorName, e.Timestamp, e.ReceivedAt,
         e.Kind, e.Credential, e.Description, e.EmployeeNo, e.PersonName, e.AccessPersonId, e.CardNumber,
-        person?.Department, person?.Position, person?.HasFace ?? false);
+        person?.Department, person?.Position, person?.HasFace ?? false,
+        e.PhotoPath is not null, e.PhotoCamera, e.PhotoAt);
 }

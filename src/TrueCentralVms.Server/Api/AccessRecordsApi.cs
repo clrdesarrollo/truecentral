@@ -71,6 +71,19 @@ public static class AccessRecordsApi
                     e.AccessPersonId is int id ? people.GetValueOrDefault(id) : null)).ToList()));
         });
 
+        // Foto del momento del paso (AccessEventPhotos), con el mismo permiso y
+        // alcance que el evento: la de la puerta concreta, no la de su ubicación.
+        app.MapGet("/api/access/events/{id:long}/photo", async (HttpContext ctx, long id, VmsDbContext db,
+            AccessEventPhotos photos, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.AccessMonitor, out var session) is { } failure) return failure;
+            var evt = await db.AccessEvents.AsNoTracking().Where(e => e.Id == id)
+                .Select(e => new { e.AccessDeviceId, e.DoorNumber, e.PhotoPath }).FirstOrDefaultAsync(ct);
+            if (evt?.PhotoPath is null || !(await ctx.ScopeAsync(session)).CanViewAccessEvent(evt.AccessDeviceId, evt.DoorNumber))
+                return Results.NotFound();
+            return photos.Read(evt.PhotoPath) is { } jpeg ? Results.File(jpeg, "image/jpeg") : Results.NotFound();
+        }).AllowUrlTicket(UrlTicketUse.Media);
+
         // Reportería: detail = cada registro, attendance = primer y último
         // acceso de cada persona por día, doors = resumen por puerta.
         app.MapGet("/api/access/events/export", async (HttpContext ctx, VmsDbContext db, AuditService audit,

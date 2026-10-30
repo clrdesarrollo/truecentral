@@ -873,6 +873,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(x => x.CardNumber).HasMaxLength(32);
             e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.Credential).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.PhotoPath).HasMaxLength(260);
+            e.Property(x => x.PhotoCamera).HasMaxLength(128);
             e.HasOne(x => x.AccessDevice)
                 .WithMany()
                 .HasForeignKey(x => x.AccessDeviceId)

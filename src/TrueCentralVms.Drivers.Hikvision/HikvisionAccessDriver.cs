@@ -1049,6 +1049,168 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         return (events, more);
     }
 
+    // ------------------------------------------------------------------
+    // Foto del evento (la captura del terminal facial)
+    // ------------------------------------------------------------------
+
+    /// <summary>Tope de una foto de evento: las capturas de los terminales pesan decenas de KB.</summary>
+    private const int MaxEventPicture = 2 * 1024 * 1024;
+
+    private static readonly TimeSpan EventPictureTimeout = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// Se pide aparte, de a un evento, con <c>picEnable</c>: la lectura del
+    /// historial va sin fotos a propósito (ver <see cref="SearchEventsAsync"/>).
+    /// Según el firmware la foto llega dentro de la respuesta (partes MIME, como
+    /// en la guía) o el equipo da su dirección (<c>pictureURL</c>); de esa
+    /// dirección se usa solo la ruta, pedida al mismo equipo: nunca se sigue a
+    /// otro host.
+    /// </summary>
+    public async Task<byte[]?> FetchEventPictureAsync(AccessConnectionInfo info, long serialNo,
+        CancellationToken ct = default)
+    {
+        // Por ISUP el túnel no lleva respuestas en partes ni archivos del equipo.
+        if (info.IsupId is { Length: > 0 }) return null;
+        var client = Client(info);
+        var profile = await ProfileOfAsync(info, client, ct);
+        if (profile?.EventCondFields is not { } fields || !fields.Contains("beginSerialNo") || !fields.Contains("picEnable")
+            || SerialSearchRefused.ContainsKey(DeviceKey(info)))
+            return null;
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(EventPictureTimeout);
+        string body = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["AcsEventCond"] = new Dictionary<string, object>
+            {
+                ["searchID"] = SearchId(),
+                ["searchResultPosition"] = 0,
+                ["maxResults"] = 1,
+                ["major"] = 0,
+                ["minor"] = 0,
+                ["beginSerialNo"] = serialNo,
+                ["endSerialNo"] = serialNo,
+                ["picEnable"] = true,
+            },
+        });
+        string? json;
+        byte[]? inline;
+        using (var response = await client.OpenStreamAsync("/ISAPI/AccessControl/AcsEvent?format=json", timeout.Token,
+                   HttpMethod.Post, body))
+            (json, inline) = await ReadEventWithPictureAsync(response, timeout.Token);
+        if (json is null || !IsEvent(json, serialNo)) return null;
+        if (inline is not null) return inline;
+
+        if (PicturePath(json) is not { } path) return null;
+        using var image = await client.OpenStreamAsync(path, timeout.Token);
+        var bytes = await ReadLimitedAsync(image.Content, timeout.Token);
+        return LooksLikeJpeg(bytes) ? bytes : null;
+    }
+
+    /// <summary>La parte JSON de la respuesta y, si vino adentro, la foto (partes MIME).</summary>
+    private static async Task<(string? Json, byte[]? Picture)> ReadEventWithPictureAsync(HttpResponseMessage response,
+        CancellationToken ct)
+    {
+        var bytes = await ReadLimitedAsync(response.Content, ct);
+        if (bytes is null) return (null, null);
+        var type = response.Content.Headers.ContentType;
+        string? boundary = type?.Parameters.FirstOrDefault(p => p.Name.Equals("boundary", StringComparison.OrdinalIgnoreCase))
+            ?.Value?.Trim('"');
+        if (type?.MediaType?.StartsWith("multipart/", StringComparison.OrdinalIgnoreCase) != true || boundary is null)
+            return (Encoding.UTF8.GetString(bytes), null);
+
+        string? json = null;
+        byte[]? picture = null;
+        foreach (var (headers, content) in MultipartParts(bytes, boundary))
+        {
+            if (headers.Contains("image/", StringComparison.OrdinalIgnoreCase) || LooksLikeJpeg(content))
+                picture ??= LooksLikeJpeg(content) ? content : null;
+            else if (headers.Contains("json", StringComparison.OrdinalIgnoreCase) || content.FirstOrDefault() == (byte)'{')
+                json ??= Encoding.UTF8.GetString(content);
+        }
+        return (json, picture);
+    }
+
+    /// <summary>Las partes de un cuerpo <c>multipart</c>: sus cabeceras (texto) y su contenido.</summary>
+    private static IEnumerable<(string Headers, byte[] Content)> MultipartParts(byte[] body, string boundary)
+    {
+        byte[] marker = Encoding.ASCII.GetBytes("--" + boundary);
+        byte[] blank = "\r\n\r\n"u8.ToArray();
+        int start = IndexOf(body, marker, 0);
+        while (start >= 0)
+        {
+            int partStart = start + marker.Length;
+            // "--" tras el separador: fin del cuerpo.
+            if (partStart + 1 < body.Length && body[partStart] == '-' && body[partStart + 1] == '-') yield break;
+            int next = IndexOf(body, marker, partStart);
+            if (next < 0) yield break;
+            int headerEnd = IndexOf(body, blank, partStart);
+            if (headerEnd < 0 || headerEnd > next) { start = next; continue; }
+            string headers = Encoding.ASCII.GetString(body, partStart, headerEnd - partStart);
+            int contentStart = headerEnd + blank.Length;
+            int contentEnd = next;
+            // El salto de línea antes del separador no es del contenido.
+            if (contentEnd - 2 >= contentStart && body[contentEnd - 2] == '\r' && body[contentEnd - 1] == '\n') contentEnd -= 2;
+            yield return (headers, body[contentStart..contentEnd]);
+            start = next;
+        }
+    }
+
+    private static int IndexOf(byte[] haystack, byte[] needle, int from)
+    {
+        int index = haystack.AsSpan(from).IndexOf(needle);
+        return index < 0 ? -1 : from + index;
+    }
+
+    /// <summary>¿La respuesta es la de ese evento? (un equipo que ignore el número entregaría otro).</summary>
+    private static bool IsEvent(string json, long serialNo)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var search = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "AcsEvent") ?? doc.RootElement;
+            var item = InfoList(search).FirstOrDefault();
+            if (item.ValueKind != JsonValueKind.Object) return false;
+            return !long.TryParse(HikvisionAlarmPanelDriver.GetString(item, "serialNo"), out long serial) || serial == serialNo;
+        }
+        catch (JsonException) { return false; }
+    }
+
+    /// <summary>La ruta de <c>pictureURL</c> en el equipo ("/LOCALS/pic/…"), o null si no la dio.</summary>
+    private static string? PicturePath(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var search = HikvisionAlarmPanelDriver.FindObject(doc.RootElement, "AcsEvent") ?? doc.RootElement;
+            var item = InfoList(search).FirstOrDefault();
+            if (item.ValueKind != JsonValueKind.Object ||
+                HikvisionAlarmPanelDriver.GetString(item, "pictureURL") is not { Length: > 0 } url)
+                return null;
+            if (url.StartsWith('/')) return url;
+            return Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" ? uri.PathAndQuery : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static async Task<byte[]?> ReadLimitedAsync(HttpContent content, CancellationToken ct)
+    {
+        if (content.Headers.ContentLength > MaxEventPicture * 2) return null;
+        await using var stream = await content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[64 * 1024];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, ct)) > 0)
+        {
+            buffer.Write(chunk, 0, read);
+            if (buffer.Length > MaxEventPicture * 2) return null;
+        }
+        return buffer.ToArray();
+    }
+
+    private static bool LooksLikeJpeg(byte[]? bytes) =>
+        bytes is { Length: > 4 and <= MaxEventPicture } && bytes[0] == 0xFF && bytes[1] == 0xD8;
+
     /// <summary>
     /// Nombre de una persona según el equipo, para los eventos que traen el
     /// legajo pero no el nombre (el DS-K1T804AMF V1.4.0 nunca lo manda). Sin

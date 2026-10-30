@@ -198,6 +198,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessControlServi
 // cambios del operador, el otro sondea cada 15 s).
 builder.Services.AddSingleton<AccessSyncService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessSyncService>());
+builder.Services.AddSingleton<AccessEventPhotos>();
 builder.Services.AddSingleton<AccessEventService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessEventService>());
 // Hora de los equipos: revisa su reloj y su zona, y los pone en hora solos.

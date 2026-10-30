@@ -335,4 +335,15 @@ public class AccessEvent
     /// pasadas del mismo segundo ya no se confunden.
     /// </summary>
     public long? SerialNo { get; set; }
+
+    /// <summary>
+    /// Foto del momento del paso (ver <c>AccessEventPhotos</c>): ruta relativa del
+    /// archivo cifrado; null = sin foto (evento del sistema, puerta sin cámara,
+    /// llegó tarde o ya se purgó).
+    /// </summary>
+    public string? PhotoPath { get; set; }
+    /// <summary>Cámara de la que salió la foto; null = la tomó el propio terminal.</summary>
+    public string? PhotoCamera { get; set; }
+    /// <summary>Cuándo se tomó (UTC): la del terminal, la hora del evento; la de una cámara, la de la captura.</summary>
+    public DateTime? PhotoAt { get; set; }
 }
