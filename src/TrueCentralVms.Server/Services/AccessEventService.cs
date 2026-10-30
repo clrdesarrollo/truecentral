@@ -378,15 +378,17 @@ public sealed class AccessEventService(
         }
         _lastTimeCheck[device.Id] = DateTime.UtcNow;
 
-        // La primera vez, el número más alto de lo anterior a la marca fija la
-        // marca por número aunque no haya llegado nada nuevo: desde ahí sigue la
-        // lectura por número, que no depende de la hora del equipo. Después, en
-        // un equipo que se lee por número, esta lectura NO mueve esa marca: la
-        // dejaría por encima de eventos del mismo segundo, o escritos tarde, que
-        // la lectura por número todavía no entregó.
-        long? newest = history.Events.Max(e => e.SerialNo);
-        long? advanceTo = device.LastEventSerial is null ? new[] { history.LastSerial, newest }.Max()
-            : bySerial ? null : newest;
+        // La primera vez se fija la marca por número, y desde ahí sigue la lectura
+        // por número, que no depende de la hora del equipo: justo antes del
+        // primer evento nuevo, para que esa lectura relea lo recién guardado (se
+        // descarta repetido) con el control de huecos, que recupera un evento
+        // escrito tarde que esta lectura no alcanzó a ver; si no llegó nada
+        // nuevo, en el número más alto de lo anterior. Después, en un equipo que
+        // se lee por número, esta lectura NO mueve esa marca: la dejaría por
+        // encima de eventos del mismo segundo, o escritos tarde, que la lectura
+        // por número todavía no entregó.
+        long? advanceTo = device.LastEventSerial is null ? history.Events.Min(e => e.SerialNo) - 1 ?? history.LastSerial
+            : bySerial ? null : history.Events.Max(e => e.SerialNo);
         if (history.Events.Count == 0 && advanceTo is null) return;
 
         await StoreAsync(device.Id, history.Events, ct, advanceTo, fromHistory: true);

@@ -113,14 +113,14 @@ internal sealed class HikvisionAccessProfile
     // ------------------------------------------------------------------
 
     internal const string AccessCapsPath = "/ISAPI/AccessControl/capabilities";
-    private const string UserCapsPath = "/ISAPI/AccessControl/UserInfo/capabilities?format=json";
-    private const string CardCapsPath = "/ISAPI/AccessControl/CardInfo/capabilities?format=json";
-    private const string FaceCapsPath = "/ISAPI/Intelligent/FDLib/capabilities?format=json";
-    private const string EventCapsPath = "/ISAPI/AccessControl/AcsEvent/capabilities?format=json";
+    private const string UserCapsPath = "/ISAPI/AccessControl/UserInfo/capabilities";
+    private const string CardCapsPath = "/ISAPI/AccessControl/CardInfo/capabilities";
+    private const string FaceCapsPath = "/ISAPI/Intelligent/FDLib/capabilities";
+    private const string EventCapsPath = "/ISAPI/AccessControl/AcsEvent/capabilities";
     private const string DoorCapsPath = "/ISAPI/AccessControl/RemoteControl/door/capabilities";
-    private const string FingerCapsPath = "/ISAPI/AccessControl/FingerPrintCfg/capabilities?format=json";
-    private const string FingerDeleteCapsPath = "/ISAPI/AccessControl/FingerPrint/Delete/capabilities?format=json";
-    private const string UserDetailCapsPath = "/ISAPI/AccessControl/UserInfoDetail/Delete/capabilities?format=json";
+    private const string FingerCapsPath = "/ISAPI/AccessControl/FingerPrintCfg/capabilities";
+    private const string FingerDeleteCapsPath = "/ISAPI/AccessControl/FingerPrint/Delete/capabilities";
+    private const string UserDetailCapsPath = "/ISAPI/AccessControl/UserInfoDetail/Delete/capabilities";
     private const string DeployInfoPath = "/ISAPI/AccessControl/DeployInfo";
 
     /// <summary>
@@ -249,9 +249,10 @@ internal sealed class HikvisionAccessProfile
     private void SetFlag(string name, bool value) =>
         Flags[name] = value || (Flags.TryGetValue(name, out bool previous) && previous);
 
+    /// <summary>Lee una ruta de capacidades, en JSON o en XML (ver <see cref="HikvisionIsapiCaps"/>).</summary>
     private async Task ReadJsonAsync(HikvisionIsapiClient client, string path, CancellationToken ct, Action<JsonElement> read)
     {
-        if (await TryGetAsync(client, path, ct) is not { } json || !json.TrimStart().StartsWith('{')) return;
+        if (await HikvisionIsapiCaps.TryGetAsync(client, path, ct) is not { } json || !json.TrimStart().StartsWith('{')) return;
         try
         {
             using var doc = JsonDocument.Parse(json);

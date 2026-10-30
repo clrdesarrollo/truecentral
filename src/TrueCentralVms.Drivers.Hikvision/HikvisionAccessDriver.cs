@@ -286,33 +286,40 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         string? model = Value("model");
 
         // Confirmar que es control de acceso: una cámara o un DVR también
-        // responden deviceInfo, pero no tienen el subsistema de puertas.
-        string? doorCaps = await client.RequestAsync(HttpMethod.Get, "/ISAPI/AccessControl/Door/param/capabilities?format=json", ct: ct);
+        // responden deviceInfo, pero no tienen el subsistema de puertas. Las
+        // capacidades, en JSON o en XML (ver HikvisionIsapiCaps).
+        string? doorCaps = await HikvisionIsapiCaps.GetAsync(client, "/ISAPI/AccessControl/Door/param/capabilities", ct);
         string? acsCaps = doorCaps is null
-            ? await client.RequestAsync(HttpMethod.Get, "/ISAPI/AccessControl/capabilities?format=json", ct: ct)
+            ? await HikvisionIsapiCaps.GetAsync(client, "/ISAPI/AccessControl/capabilities", ct)
             : null;
-        bool remoteControl = await AnswersAsync(client, "/ISAPI/AccessControl/RemoteControl/door/capabilities?format=json", ct);
+        string? remoteCaps = await HikvisionIsapiCaps.TryGetAsync(client, "/ISAPI/AccessControl/RemoteControl/door/capabilities", ct);
+        bool remoteControl = remoteCaps is not null;
         if (doorCaps is null && acsCaps is null && !remoteControl)
             throw new DriverException(
                 $"El equipo ({model ?? "modelo desconocido"}) responde ISAPI pero no es un equipo de control de acceso " +
                 "(no expone /ISAPI/AccessControl).");
 
-        int doorCount = DoorCountOf(doorCaps) ?? DoorCountOf(acsCaps) ?? 1;
+        int doorCount = DoorCountOf(doorCaps) ?? DoorCountOf(acsCaps) ?? DoorCountOf(remoteCaps) ?? 1;
         var doors = await ReadDoorsAsync(client, doorCount, ct);
 
         // La ficha primero: ya averigua si hay lector de huella, y eso mismo es
         // SupportsFingerprint (no se le pregunta dos veces al equipo).
         var profile = await ReadProfileAsync(info, client, ct);
 
+        // Lo que la ficha general declara (isSupport…) vale aunque la ruta
+        // propia de la función no conteste ni en JSON ni en XML.
         var capabilities = new AccessCapabilities(
             DoorCount: doors.Count,
             SupportsRemoteControl: remoteControl,
-            SupportsEvents: await AnswersAsync(client, "/ISAPI/AccessControl/AcsEvent/capabilities?format=json", ct),
-            SupportsCards: await AnswersAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities?format=json", ct),
+            SupportsEvents: await AnswersCapsAsync(client, "/ISAPI/AccessControl/AcsEvent/capabilities", ct) ||
+                            CachedProfile(client)?.Flag("isSupportAcsEvent") == true,
+            SupportsCards: await AnswersCapsAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities", ct) ||
+                           CachedProfile(client)?.Flag("isSupportCardInfo") == true,
             SupportsFingerprint: CachedProfile(client)?.FingerprintReader ?? await HasFingerprintReaderAsync(client, ct),
-            SupportsFace: await AnswersAsync(client, "/ISAPI/Intelligent/FDLib/capabilities?format=json", ct),
-            UserCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/UserInfo/capabilities?format=json", ct),
-            CardCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities?format=json", ct));
+            SupportsFace: await AnswersCapsAsync(client, "/ISAPI/Intelligent/FDLib/capabilities", ct) ||
+                          CachedProfile(client)?.Flag("isSupportFDLib") == true,
+            UserCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/UserInfo/capabilities", ct),
+            CardCapacity: await CapacityAsync(client, "/ISAPI/AccessControl/CardInfo/capabilities", ct));
 
         var kind = ClassifyModel(model) ?? KindOfDoorCount(doors.Count);
         return new AccessDeviceInfo(model, Value("serialNumber"), Value("firmwareVersion"), Value("deviceType"),
@@ -390,12 +397,13 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     // Lectura de capacidades (tolerante: 404 = no soportado)
     // ------------------------------------------------------------------
 
-    /// <summary>true si el equipo contesta esa ruta (la función existe).</summary>
-    private static async Task<bool> AnswersAsync(HikvisionIsapiClient client, string path, CancellationToken ct)
-    {
-        try { return await client.RequestAsync(HttpMethod.Get, path, ct: ct) is not null; }
-        catch (DriverException) { return false; }   // 403 del usuario sin permiso, o función deshabilitada
-    }
+    /// <summary>
+    /// true si el equipo contesta esa ruta de capacidades, en JSON o en XML (la
+    /// función existe). Un 403 del usuario sin permiso, o una función
+    /// deshabilitada, cuentan como que no.
+    /// </summary>
+    private static async Task<bool> AnswersCapsAsync(HikvisionIsapiClient client, string path, CancellationToken ct) =>
+        await HikvisionIsapiCaps.TryGetAsync(client, path, ct) is not null;
 
     /// <summary>
     /// ¿Tiene el equipo dónde leer una huella? Que conteste la ruta de huellas
@@ -417,8 +425,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         int[] readers;
         try
         {
-            if (await client.RequestAsync(HttpMethod.Get,
-                    "/ISAPI/AccessControl/FingerPrintCfg/capabilities?format=json", ct: ct) is not { } json)
+            if (await HikvisionIsapiCaps.GetAsync(client, "/ISAPI/AccessControl/FingerPrintCfg/capabilities", ct) is not { } json)
                 return false;   // no sabe de huellas
             using var doc = JsonDocument.Parse(json);
             if (RangeOf(doc.RootElement, "enableCardReader", depth: 4) is not { } range) return true;
@@ -448,13 +455,10 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         return false;
     }
 
-    /// <summary>Cupo declarado en una ruta de capacidades (<c>maxRecordNum</c> / <c>maxNum</c>).</summary>
+    /// <summary>Cupo declarado en una ruta de capacidades (<c>maxRecordNum</c> / <c>maxNum</c>), en JSON o en XML.</summary>
     private static async Task<int?> CapacityAsync(HikvisionIsapiClient client, string path, CancellationToken ct)
     {
-        string? json;
-        try { json = await client.RequestAsync(HttpMethod.Get, path, ct: ct); }
-        catch (DriverException) { return null; }
-        if (json is null) return null;
+        if (await HikvisionIsapiCaps.TryGetAsync(client, path, ct) is not { } json) return null;
         try
         {
             using var doc = JsonDocument.Parse(json);
@@ -3237,8 +3241,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         // —1..@max— fue lo que dejó a sus personas sin huellas.
         try
         {
-            if (await client.RequestAsync(HttpMethod.Get,
-                    "/ISAPI/AccessControl/FingerPrintCfg/capabilities?format=json", ct: ct) is { } json)
+            if (await HikvisionIsapiCaps.GetAsync(client, "/ISAPI/AccessControl/FingerPrintCfg/capabilities", ct) is { } json)
             {
                 using var doc = JsonDocument.Parse(json);
                 if (RangeOf(doc.RootElement, "enableCardReader", depth: 4) is { } range)
@@ -3251,8 +3254,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         int count = 0;
         try
         {
-            if (await client.RequestAsync(HttpMethod.Get,
-                    "/ISAPI/AccessControl/CardReaderCfg/capabilities?format=json", ct: ct) is { } json)
+            if (await HikvisionIsapiCaps.GetAsync(client, "/ISAPI/AccessControl/CardReaderCfg/capabilities", ct) is { } json)
             {
                 using var doc = JsonDocument.Parse(json);
                 string[] names = ["cardReaderNum", "readerNum", "maxCardReaderNum"];
