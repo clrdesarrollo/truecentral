@@ -50,11 +50,12 @@ public sealed class AccessEventService(
     private const int MaxPerPoll = 200;
 
     /// <summary>
-    /// Cuánto hacia atrás se lee la primera vez que se consulta a un equipo.
-    /// Poco a propósito: un terminal puede tener años de historial guardado y
+    /// Cuánto hacia atrás se lee, como mucho, la primera vez que se consulta a
+    /// un equipo (se parte de su alta, ver <see cref="FirstReadSince"/>). Con
+    /// tope a propósito: un terminal puede tener años de historial guardado y
     /// no corresponde volcarlo entero al VMS por haberlo dado de alta.
     /// </summary>
-    private static readonly TimeSpan FirstReadWindow = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan FirstReadWindow = TimeSpan.FromHours(24);
 
     /// <summary>Equipos que se consultan a la vez.</summary>
     private const int Parallelism = 4;
@@ -338,18 +339,39 @@ public sealed class AccessEventService(
 
         // Por hora: los equipos que no buscan por número, la primera lectura
         // (de ahí sale el primer número) y el control periódico de arriba.
-        var since = device.LastEventAt ?? DateTime.UtcNow - FirstReadWindow;
-        IReadOnlyList<AccessEventRecord> records;
-        try { records = await driver.FetchEventsAsync(connection, since, MaxPerPoll, ct); }
+        var since = device.LastEventAt ?? FirstReadSince(device);
+        AccessEventPage history;
+        try { history = await driver.FetchEventsSinceAsync(connection, since, MaxPerPoll, ct); }
         catch (DriverException ex)
         {
             logger.LogDebug(ex, "El equipo {Device} no entregó su historial.", device.Name);
             return;
         }
         _lastTimeCheck[device.Id] = DateTime.UtcNow;
-        if (records.Count == 0) return;
 
-        await StoreAsync(device.Id, records, ct, fromHistory: true);
+        // La primera vez, el número más alto de lo anterior a la marca fija la
+        // marca por número aunque no haya llegado nada nuevo: desde ahí sigue la
+        // lectura por número, que no depende de la hora del equipo. Después no
+        // se usa: podría pasar por encima de eventos del mismo segundo que la
+        // lectura por número todavía no entregó.
+        long? firstSerial = device.LastEventSerial is null ? history.LastSerial : null;
+        if (history.Events.Count == 0 && firstSerial is null) return;
+
+        await StoreAsync(device.Id, history.Events, ct, firstSerial, fromHistory: true);
+    }
+
+    /// <summary>
+    /// Desde cuándo se lee la primera vez: desde el alta del equipo, para que
+    /// no se pierda lo que pasó entre el alta y la primera lectura que funcionó
+    /// (un equipo que no entregaba su historial, o un servidor actualizado
+    /// después). Con un tope, para no volcar años de historial a un equipo que
+    /// se dio de alta hace mucho.
+    /// </summary>
+    private static DateTime FirstReadSince(AccessDevice device)
+    {
+        var floor = DateTime.UtcNow - FirstReadWindow;
+        var created = DateTime.SpecifyKind(device.CreatedAt, DateTimeKind.Utc).AddMinutes(-1);
+        return created > floor ? created : floor;
     }
 
     /// <summary>
