@@ -105,6 +105,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         Profiles.TryRemove(DeviceKey(info), out _);
         ProfileMisses.TryRemove(DeviceKey(info), out _);
         SerialSearchRefused.TryRemove(DeviceKey(info), out _);
+        SerialGaps.TryRemove(DeviceKey(info), out _);
         SetUpDeleteRefused.TryRemove(DeviceKey(info), out _);
         // Lo que se cambie desde Hora y mantenimiento tiene que verse ya.
         DeviceZones.TryRemove(DeviceKey(info), out _);
@@ -795,6 +796,16 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// comprueba que lo respete: si devuelve un número que no es mayor al pedido
     /// (o eventos sin número), el firmware ignora el filtro y para ese equipo se
     /// vuelve a la búsqueda por hora (null), en vez de volcar su historial viejo.
+    ///
+    /// Que hayan llegado números más altos NO quiere decir que no falte nada
+    /// antes: el DS-K1T321MFWX V3.9.20 deja la autenticación (5/38, huella) en
+    /// el historial un instante DESPUÉS que la apertura de la cerradura (5/21)
+    /// que la sigue en número. Una consulta hecha entre medio veía el 296730
+    /// sin el 296729, la marca pasaba al 296730 y la huella no se volvía a pedir
+    /// nunca (medido en el corte del 2026-10-30). Por eso la marca queda en el
+    /// último número CONSECUTIVO (ver <see cref="ConsecutiveCutoff"/>): lo de
+    /// después del hueco se entrega igual, para que el monitoreo no espere, y se
+    /// relee hasta que el hueco se llene o se lo dé por inexistente.
     /// </summary>
     public async Task<AccessEventPage?> FetchEventsAfterSerialAsync(AccessConnectionInfo info, long afterSerial, int max,
         CancellationToken ct = default)
@@ -827,19 +838,14 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             if (!Honors(all, afterSerial)) return Refuse(key);
             if (all.Count == 0) return new AccessEventPage([], null);
 
-            // Se cortó por el tope: si llegó el número que sigue al pedido, el
-            // equipo entrega en orden y se lee hasta el último CONSECUTIVO. Si
-            // no llegó, está entregando del más nuevo al más viejo: se completa
-            // la lectura (con un tope mayor) y se toman los más antiguos, para no
-            // saltar los del medio.
-            if (truncated)
+            // Se cortó por el tope entregando del más nuevo al más viejo: lo que
+            // llegó no es lo que sigue a la marca. Se completa la lectura (con un
+            // tope mayor) para quedarse con los más antiguos sin saltar los del
+            // medio. En orden, lo que llegó ya es lo primero después de la marca.
+            if (truncated && Descending(all))
             {
-                if (ConsecutiveEnd(all, afterSerial) is long end)
-                    return await Page(all, end);
                 (all, truncated) = await SearchEventsAsync(client, profile, condition, DescendingCatchUp, ct);
-                if (!Honors(all, afterSerial)) return Refuse(key);
-                if (truncated)
-                    return ConsecutiveEnd(all, afterSerial) is long reachable ? await Page(all, reachable) : Refuse(key);
+                if (!Honors(all, afterSerial) || truncated && Descending(all)) return Refuse(key);
             }
         }
         catch (DriverException ex) when (IsRejectedCondition(ex.Message))
@@ -847,24 +853,22 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             return Refuse(key);
         }
 
-        // Lectura completa: no falta nada hasta el último número que llegó, así
-        // que se entregan los primeros max útiles en orden de número y la marca
-        // queda en el último entregado.
+        // Se entregan los primeros max útiles en orden de número...
         var ordered = all.OrderBy(e => e.SerialNo).ToList();
-        long cutoff = ordered[^1].SerialNo!.Value;
+        long last = ordered[^1].SerialNo!.Value;
         int useful = 0;
         foreach (var e in ordered)
         {
             if (IsOwnSessionNoise(e) || ++useful < max) continue;
-            cutoff = e.SerialNo!.Value;
+            last = e.SerialNo!.Value;
             break;
         }
-        return await Page(ordered, cutoff);
+        var delivered = ordered.Where(e => e.SerialNo <= last).ToList();
 
-        async Task<AccessEventPage> Page(List<AccessEventRecord> events, long cutoff) => new(
-            await WithDeviceNamesAsync(client,
-                events.Where(e => e.SerialNo <= cutoff && !IsOwnSessionNoise(e)).OrderBy(e => e.SerialNo), ct),
-            cutoff);
+        // ...pero la marca avanza solo hasta donde no falta nada.
+        return new AccessEventPage(
+            await WithDeviceNamesAsync(client, delivered.Where(e => !IsOwnSessionNoise(e)), ct),
+            ConsecutiveCutoff(key, delivered, afterSerial));
 
         AccessEventPage? Refuse(string device)
         {
@@ -880,14 +884,65 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     private static bool Honors(List<AccessEventRecord> events, long afterSerial) =>
         events.All(e => e.SerialNo is long serial && serial > afterSerial);
 
-    /// <summary>Último número consecutivo desde <paramref name="afterSerial"/> + 1; null si ese ni llegó.</summary>
-    private static long? ConsecutiveEnd(List<AccessEventRecord> events, long afterSerial)
+    /// <summary>El equipo entregó del más nuevo al más viejo (hay firmware que ignora el orden pedido).</summary>
+    private static bool Descending(List<AccessEventRecord> events) =>
+        events.Count > 1 && events[0].SerialNo > events[^1].SerialNo;
+
+    /// <summary>
+    /// Hasta qué número puede avanzar la marca: el último CONSECUTIVO desde
+    /// <paramref name="afterSerial"/> + 1, en <paramref name="ordered"/> (en
+    /// orden de número). null = la marca no se mueve.
+    ///
+    /// Un hueco frena la marca hasta que se llena, salvo que ya no se vaya a
+    /// llenar: lo que el equipo escribe tarde aparece en menos de un segundo, y
+    /// hay números que el equipo nunca entrega (no hay que quedarse pegado en
+    /// ellos). Se lo salta cuando pasó <see cref="SerialGapPatience"/>:
+    /// <list type="bullet">
+    /// <item>desde que se lo vio por primera vez (reloj del servidor: lo que
+    /// asegura que ningún hueco frene la marca para siempre), o</item>
+    /// <item>entre el evento que lo cierra y el más nuevo que entregó el equipo
+    /// (su propio reloj, así que no depende de que esté en hora). Es lo que deja
+    /// pasar al instante los huecos viejos al ponerse al día o al releer.</item>
+    /// </list>
+    /// Cada hueco se recuerda por el número que lo cierra, así que llenarlo en
+    /// parte no le reinicia la espera.
+    /// </summary>
+    private static long? ConsecutiveCutoff(string device, List<AccessEventRecord> ordered, long afterSerial)
     {
-        var serials = events.Select(e => e.SerialNo!.Value).ToHashSet();
-        long next = afterSerial;
-        while (serials.Contains(next + 1)) next++;
-        return next > afterSerial ? next : null;
+        var now = DateTime.UtcNow;
+        var gaps = SerialGaps.GetOrAdd(device, _ => new());
+        var newest = ordered.Max(e => e.Timestamp);
+        long end = afterSerial, previous = afterSerial;
+        bool blocked = false;
+        foreach (var e in ordered)
+        {
+            long serial = e.SerialNo!.Value;
+            if (serial <= previous) continue;   // el mismo número dos veces
+            // Los huecos de más adelante también empiezan a contar desde ya.
+            if (serial > previous + 1 && !blocked)
+            {
+                var seen = gaps.GetOrAdd(serial, now);
+                blocked = now - seen < SerialGapPatience && newest - e.Timestamp < SerialGapPatience;
+            }
+            else if (serial > previous + 1) gaps.TryAdd(serial, now);
+            previous = serial;
+            if (!blocked) end = serial;
+        }
+        foreach (long closer in gaps.Keys)
+            if (closer <= end) gaps.TryRemove(closer, out _);
+        return end > afterSerial ? end : null;
     }
+
+    /// <summary>
+    /// Cuánto se espera a que se llene un hueco de numeración antes de darlo por
+    /// inexistente (ver <see cref="ConsecutiveCutoff"/>): seis vueltas del sondeo
+    /// de 15 s, para algo que el equipo escribe con menos de un segundo de atraso.
+    /// </summary>
+    private static readonly TimeSpan SerialGapPatience = TimeSpan.FromSeconds(90);
+
+    /// <summary>Huecos de numeración pendientes de cada equipo: número que cierra el hueco → cuándo se lo vio.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string,
+        System.Collections.Concurrent.ConcurrentDictionary<long, DateTime>> SerialGaps = new();
 
     /// <summary>
     /// Tope de eventos útiles al ponerse al día con un equipo que entrega del más
@@ -1367,6 +1422,22 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
         [0x99] = (AccessEventKind.Granted, AccessCredentialKind.Unknown, "Acceso concedido con verificación combinada"),                   // MINOR_COMBINED_VERIFY_PASS
         [0x9a] = (AccessEventKind.Denied, AccessCredentialKind.Unknown, "Verificación combinada: se venció el tiempo"),                    // MINOR_COMBINED_VERIFY_TIMEOUT
         [0x9b] = (AccessEventKind.Denied, AccessCredentialKind.Unknown, "La credencial usada no es la que exige la puerta"),               // MINOR_VERIFY_MODE_MISMATCH
+        [0x9c] = (AccessEventKind.Granted, AccessCredentialKind.Qr, "Acceso concedido con código QR"),                                     // MINOR_ORCODE_VERIFY_PASS
+        [0x9d] = (AccessEventKind.Denied, AccessCredentialKind.Qr, "Código QR no reconocido"),                                             // MINOR_ORCODE_VERIFY_FAIL
+        [0x9f] = (AccessEventKind.Granted, AccessCredentialKind.Unknown, "Acceso concedido por Bluetooth"),                                // MINOR_BLUETOOTH_VERIFY_PASS
+        [0xa0] = (AccessEventKind.Denied, AccessCredentialKind.Unknown, "Falló la verificación por Bluetooth"),                            // MINOR_BLUETOOTH_VERIFY_FAIL
+        [0xa1] = (AccessEventKind.Denied, AccessCredentialKind.Unknown, "Falló la verificación del pasaporte"),                            // MINOR_PASSPORT_VERIFY_FAIL
+        [0xa2] = (AccessEventKind.Denied, AccessCredentialKind.Card, "Tarjeta Mifare no válida"),                                          // MINOR_INFORMAL_MIFARE_CARD_VERIFY_FAIL
+        [0xa3] = (AccessEventKind.Denied, AccessCredentialKind.Card, "Falló la verificación del cifrado de la tarjeta CPU"),               // MINOR_CPU_CARD_ENCRYPT_VERIFY_FAIL
+        [0xa4] = (AccessEventKind.Denied, AccessCredentialKind.Card, "La verificación por NFC está desactivada"),                          // MINOR_NFC_DISABLE_VERIFY_FAIL
+        // 0xb3 y 0xb4 están en la guía ISAPI de control de acceso (anexo de
+        // códigos de evento) pero no en el HCNetSDK 6.1.9.4; 0xb5 en los dos.
+        [0xb3] = (AccessEventKind.Granted, AccessCredentialKind.Unknown, "Acceso concedido con código de verificación dinámico"),          // MINOR_DYNAMICCODE_VERIFY_PASS
+        [0xb4] = (AccessEventKind.Denied, AccessCredentialKind.Unknown, "Código de verificación dinámico rechazado"),                      // MINOR_DYNAMICCODE_VERIFY_FAIL
+        [0xb5] = (AccessEventKind.Granted, AccessCredentialKind.Pin, "Acceso concedido con clave"),                                        // MINOR_PASSWD_VERIFY_PASS
+        [0xbc] = (AccessEventKind.Denied, AccessCredentialKind.Card, "Falló la verificación del cifrado de la tarjeta DESFire"),           // MINOR_DESFIRE_CARD_ENCRYPT_VERIFY_FAIL
+        [0xbe] = (AccessEventKind.Granted, AccessCredentialKind.Unknown, "Acceso concedido con iris"),                                     // MINOR_IRIS_VERIFY_PASS
+        [0xbf] = (AccessEventKind.Denied, AccessCredentialKind.Unknown, "Iris no reconocido"),                                             // MINOR_IRIS_VERIFY_FAIL
     };
 
     /// <summary>MAJOR_ALARM (0x1): sabotaje, coacción, incendio y zonas de alarma.</summary>

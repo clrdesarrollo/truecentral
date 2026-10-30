@@ -202,6 +202,7 @@ public static class AuditCatalog
             new("device-deleted", "Equipo eliminado"),
             new("device-probed", "Prueba de conexión con equipo"),
             new("device-revalidated", "Equipo revalidado"),
+            new("events-reread", "Relectura del historial de un equipo"),
             new("device-camera-added", "Cámara del terminal detectada y agregada"),
             new("device-parts-added", "Partes del terminal detectadas (cámara, altavoz, entradas y salidas)"),
             new("device-settings-updated", "Configuración del equipo modificada"),

@@ -29,6 +29,12 @@ public static class AccessApi
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);
 
+    /// <summary>Lo más atrás que se puede pedir releer por fecha: lo de antes ya pasó por muchas lecturas.</summary>
+    private static readonly TimeSpan MaxRereadAge = TimeSpan.FromDays(31);
+
+    /// <summary>Desde dónde volver a leer el historial: un número de evento o una fecha (uno de los dos).</summary>
+    public sealed record AccessRereadRequest(long? FromSerial, DateTimeOffset? From);
+
     private static string? ValidateWrite(AccessDeviceWriteDto request, AccessDriverRegistry drivers)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 128)
@@ -542,6 +548,50 @@ public static class AccessApi
                         $"{device.Model ?? "modelo desconocido"}, firmware {device.FirmwareVersion ?? "desconocido"}, {doorChanges}.");
             await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "access-devices", cancellationToken: ct);
             return Results.Ok(service.ToDto(device));
+        });
+
+        // Hasta dónde se leyó el historial del equipo (Hora y mantenimiento → Historial de accesos).
+        app.MapGet("/api/access/devices/{id:int}/event-mark", async (HttpContext ctx, int id, VmsDbContext db,
+            AccessControlService service, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out var session) is { } failure) return failure;
+            var device = await db.AccessDevices.AsNoTracking().Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
+            if (device is null || (await ctx.ScopeAsync(session)).Visible(service.ToDto(device)) is null)
+                return Results.NotFound();
+            return Results.Ok(new { lastEventSerial = device.LastEventSerial, lastEventAt = device.LastEventAt,
+                supportsEvents = device.SupportsEvents });
+        });
+
+        // Volver a leer el historial desde el evento N o desde una fecha, para
+        // recuperar lo que una versión anterior se saltó. Solo retrocede la
+        // marca: lo trae el sondeo de siempre y descarta lo que ya estaba.
+        app.MapPost("/api/access/devices/{id:int}/reread-events", async (HttpContext ctx, int id,
+            AccessRereadRequest request, VmsDbContext db, AccessControlService service, AccessEventService events,
+            AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.AccessConfigure, out var session) is { } failure) return failure;
+            var device = await db.AccessDevices.AsNoTracking().Include(d => d.Doors).FirstOrDefaultAsync(d => d.Id == id, ct);
+            if (device is null || (await ctx.ScopeAsync(session)).Visible(service.ToDto(device)) is null)
+                return Results.NotFound();
+            if (!device.SupportsEvents) return Error("Este equipo no entrega el historial de accesos.");
+            if ((request.FromSerial is null) == (request.From is null))
+                return Error("Indique desde qué número de evento o desde qué fecha volver a leer (uno de los dos).");
+            if (request.FromSerial is < 1) return Error("El número de evento debe ser mayor que cero.");
+            DateTime? fromUtc = request.From?.UtcDateTime;
+            if (fromUtc is DateTime from && (from > DateTime.UtcNow || from < DateTime.UtcNow - MaxRereadAge))
+                return Error($"La fecha debe estar entre hoy y hace {MaxRereadAge.TotalDays:0} días.");
+
+            var result = await events.RereadAsync(id, request.FromSerial, fromUtc, ct);
+            string desde = request.FromSerial is long n ? $"el evento {n}"
+                : $"el {fromUtc!.Value.ToLocalTime():dd-MM-yyyy HH:mm:ss}";
+            await audit.LogAsync(ctx, "access", "events-reread",
+                targetType: "access-device", targetId: device.Id.ToString(), targetName: device.Name,
+                detail: $"Pidió volver a leer el historial del equipo '{device.Name}' ({WhereOf(device)}) desde {desde}: " +
+                        result.Message,
+                success: result.Started);
+            return result.Started
+                ? Results.Ok(new { message = result.Message, fromSerial = result.FromSerial, previousSerial = result.PreviousSerial })
+                : Error(result.Message, StatusCodes.Status409Conflict);
         });
 
         // Probar conexión (sin persistir). Con ?deviceId= reutiliza la clave guardada.

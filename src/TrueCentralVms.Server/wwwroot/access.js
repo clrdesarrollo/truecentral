@@ -635,12 +635,71 @@ async function acdDrawTab() {
       await acdDrawCapabilities(body);
       break;
     case "maintenance":
-      body.innerHTML = `<div class="acd-narrow"><div id="mt-section"><div class="muted" id="mt-section-body">Leyendo la hora del equipo…</div></div></div>`;
+      body.innerHTML = `<div class="acd-narrow"><div id="mt-section"><div class="muted" id="mt-section-body">Leyendo la hora del equipo…</div></div>
+        <div id="acd-history"></div></div>`;
       maintFillDeviceSection("access", acdState.id);
+      acdDrawHistory();
       break;
     default:
       await acdDrawConnection(body);
   }
+}
+
+// ---------- Historial de accesos (relectura) ----------
+// Para recuperar registros que una versión anterior se saltó: el servidor solo
+// retrocede la marca y el sondeo de siempre los trae, descartando lo repetido.
+
+async function acdDrawHistory() {
+  const d = acdState.device;
+  if (!$("#acd-history") || !d.supportsEvents || !Perms.can("access.configure")) return;
+  let mark;
+  try { mark = await Api.get(`/api/access/devices/${acdState.id}/event-mark`); }
+  catch { return; }
+  const box = $("#acd-history");
+  if (!box || acdState.tab !== "maintenance") return;   // cambió de pestaña mientras cargaba
+  const at = mark.lastEventAt ? new Date(mark.lastEventAt).toLocaleString("es-CL") : null;
+  box.innerHTML = `
+    <section class="acd-card" style="margin-top:16px">
+      <div class="acd-card-head"><h4>Historial de accesos</h4>
+        <span class="muted">${mark.lastEventSerial != null ? `Leído hasta el evento ${mark.lastEventSerial}` : "Se lee por hora"}${
+          at ? ` · último evento del ${esc(at)}` : ""}</span></div>
+      <p class="muted res-tab-intro">Vuelve a leer el historial del equipo desde un número de evento o desde una fecha,
+        para recuperar registros que no entraron. Lo que ya está en los registros no se duplica, y lo que faltaba entra
+        al ritmo de la lectura normal (unos 200 eventos cada 15 segundos).</p>
+      <div class="form-grid">
+        <div class="field">
+          <label>Desde el evento número</label>
+          <input id="acd-rr-serial" type="number" min="1" step="1" placeholder="${esc(String(mark.lastEventSerial ?? ""))}">
+        </div>
+        <div class="field">
+          <label>o desde la fecha y hora</label>
+          <input id="acd-rr-from" type="datetime-local" step="1">
+        </div>
+      </div>
+      <div class="acd-actions"><button class="btn ghost" type="button" id="acd-rr-go">Volver a leer</button></div>
+    </section>`;
+
+  $("#acd-rr-go").addEventListener("click", async (e) => {
+    const serial = $("#acd-rr-serial").value.trim();
+    const from = $("#acd-rr-from").value;
+    if (!serial === !from) { toast("Indique un número de evento o una fecha y hora (uno de los dos).", true); return; }
+    const desde = serial ? `el evento ${serial}` : `el ${new Date(from).toLocaleString("es-CL")}`;
+    if (!confirm(`¿Volver a leer el historial de "${d.name}" desde ${desde}?\n\n` +
+      "Lo que ya está en los registros no se duplica.")) return;
+    const button = e.currentTarget;
+    button.disabled = true;
+    button.textContent = "Buscando…";
+    try {
+      const r = await Api.post(`/api/access/devices/${acdState.id}/reread-events`,
+        serial ? { fromSerial: Number(serial) } : { from: new Date(from).toISOString() });
+      toast(r.message);
+      acdDrawHistory();
+    } catch (err) {
+      toast(err.error, true);
+      button.disabled = false;
+      button.textContent = "Volver a leer";
+    }
+  });
 }
 
 // ---------- Capacidades ----------

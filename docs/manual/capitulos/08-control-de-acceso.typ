@@ -1026,6 +1026,21 @@ Muestra la hora del equipo, su zona horaria y su desfase. Con el permiso
 #boton("Reiniciar / restablecer…"). *Ver todos los equipos* lleva a
 #menu("Dispositivos", "Hora y mantenimiento").
 
+Con el permiso *Equipos de acceso*, debajo aparece la tarjeta *Historial de
+accesos*: dice hasta qué número de evento se leyó el historial del equipo y la
+hora de su último evento. Sirve para
+recuperar registros que no entraron (por ejemplo, los que una versión anterior
+del sistema se saltó):
+
++ Escriba *Desde el evento número* o elija *o desde la fecha y hora* (uno de
+  los dos; la fecha, hasta un mes atrás).
++ Haga clic en #boton("Volver a leer") y confirme.
+
+El sistema vuelve a leer el historial del equipo desde ahí, a su ritmo normal
+(unos 200 eventos cada 15 segundos). Lo que ya estaba en los registros no se
+duplica, y los eventos que se habían guardado como *Otro* porque el sistema no
+conocía su código quedan con su descripción. Cada pedido queda en la bitácora.
+
 == Cámara, altavoz y entradas y salidas del terminal
 
 #requiere("Equipos de acceso")
