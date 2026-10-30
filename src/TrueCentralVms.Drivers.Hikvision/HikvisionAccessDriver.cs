@@ -713,21 +713,75 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// y lo que devuelve se convierte a UTC.
     /// </summary>
     public async Task<IReadOnlyList<AccessEventRecord>> FetchEventsAsync(AccessConnectionInfo info, DateTime sinceUtc,
-        int max, CancellationToken ct = default)
+        int max, CancellationToken ct = default) =>
+        (await FetchEventsSinceAsync(info, sinceUtc, max, ct)).Events;
+
+    /// <summary>
+    /// <see cref="FetchEventsAsync"/> más el número más alto que llegó entre
+    /// lo anterior a <paramref name="sinceUtc"/> (ver la interfaz).
+    ///
+    /// El rango de horas NO se le cree al equipo: el DS-K1T321MFWX V3.9.20 lo
+    /// convierte con su desfase estándar e ignora el horario de verano, así que
+    /// entrega lo de UNA HORA ANTES (medido el 2026-10-30: pedido 08:28–08:44
+    /// −03:00, entregó 07:29–07:44 −03:00). Con el rango justo no llegaba nunca
+    /// nada nuevo y la marca por número no se fijaba. Por eso se pide un rango
+    /// más ancho (<see cref="RangeSlack"/>) y se filtra por la hora de cada evento.
+    ///
+    /// Lo anterior a <paramref name="sinceUtc"/> no cuenta para el tope: una
+    /// hora con mucho movimiento antes de la marca dejaría trabado al equipo.
+    /// Si el equipo declara <c>timeReverseOrder</c> se lee del más nuevo al más
+    /// viejo y se deja de pedir páginas al llegar a lo anterior; si no, en orden
+    /// y desde la marca (lo de antes que entregue se recorre con un tope).
+    /// </summary>
+    public async Task<AccessEventPage> FetchEventsSinceAsync(AccessConnectionInfo info, DateTime sinceUtc, int max,
+        CancellationToken ct = default)
     {
         var client = Client(info);
         var profile = await ProfileOfAsync(info, client, ct);
-        var (all, _) = await SearchEventsAsync(client, profile, new Dictionary<string, object>
+        bool reverse = profile?.EventCondFields?.Contains("timeReverseOrder") == true;
+        var condition = new Dictionary<string, object>
         {
-            ["startTime"] = IsapiTime(sinceUtc),
-            ["endTime"] = IsapiTime(DateTime.UtcNow.AddMinutes(1)),
-        }, max, ct);
+            // Hacia atrás solo leyendo del más nuevo al más viejo, que corta
+            // apenas llega a lo ya leído; en orden, cada evento de antes es una
+            // consulta de más en cada vuelta.
+            ["startTime"] = IsapiTime(reverse ? sinceUtc - RangeSlack : sinceUtc),
+            ["endTime"] = IsapiTime(DateTime.UtcNow + RangeSlack),
+        };
+        if (reverse) condition["timeReverseOrder"] = true;
 
-        // El equipo entrega del más nuevo al más viejo en algunos firmware: el
-        // servidor los quiere en orden cronológico para guardarlos de corrido.
-        return await WithDeviceNamesAsync(client,
-            all.Where(e => !IsOwnSessionNoise(e) && e.Timestamp > sinceUtc).OrderBy(e => e.Timestamp), ct);
+        bool IsNew(AccessEventRecord e) => !IsOwnSessionNoise(e) && e.Timestamp > sinceUtc;
+        // Del más nuevo al más viejo se lee todo lo nuevo (con un tope) y se
+        // entregan los más antiguos: así no queda un hueco entre la marca y lo
+        // entregado. El corte es al llegar a lo anterior a la marca, y solo si
+        // de verdad vino en orden inverso (hay firmware que ignora el campo).
+        var (all, _) = reverse
+            ? await SearchEventsAsync(client, profile, condition, DescendingCatchUp, ct, IsNew,
+                read => read.Count > 1 && read[0].Timestamp > read[^1].Timestamp && read[^1].Timestamp <= sinceUtc,
+                DescendingCatchUp + OlderReadCap)
+            : await SearchEventsAsync(client, profile, condition, max, ct, IsNew, maxRead: max + OlderReadCap);
+
+        // Lo anterior a la marca solo sirve para fijar el número; se cree
+        // únicamente lo que cae cerca del rango pedido (un firmware que ignore
+        // el rango entregaría historial viejo).
+        long? before = all
+            .Where(e => e.Timestamp <= sinceUtc && e.Timestamp >= sinceUtc - 2 * RangeSlack)
+            .Max(e => e.SerialNo);
+
+        // Al servidor le van en orden cronológico, para guardarlos de corrido.
+        var events = await WithDeviceNamesAsync(client,
+            all.Where(IsNew).OrderBy(e => e.Timestamp).ThenBy(e => e.SerialNo).Take(max), ct);
+        return new AccessEventPage(events, before);
     }
+
+    /// <summary>
+    /// Margen del rango de horas que se le pide al equipo, a cada lado: cubre
+    /// el corrimiento de una hora del firmware que ignora el horario de verano
+    /// (ver <see cref="FetchEventsSinceAsync"/>), en cualquiera de los dos sentidos.
+    /// </summary>
+    private static readonly TimeSpan RangeSlack = TimeSpan.FromHours(2);
+
+    /// <summary>Tope de eventos anteriores a la marca que se recorren en una lectura por hora.</summary>
+    private const int OlderReadCap = 1000;
 
     /// <summary>
     /// Historial por número de serie (<c>beginSerialNo</c> de
@@ -861,10 +915,15 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
     /// llama: su número de serie también cuenta para avanzar), y si se cortó
     /// por haber juntado <paramref name="max"/> eventos útiles con más por leer.
     /// </summary>
+    /// <param name="counts">Qué eventos cuentan para <paramref name="max"/> (por omisión, todo lo que no es ruido).</param>
+    /// <param name="enough">Se deja de pedir páginas cuando lo leído hasta ahí lo cumple.</param>
+    /// <param name="maxRead">Tope de eventos leídos en total, cuenten o no.</param>
     private static async Task<(List<AccessEventRecord> All, bool Truncated)> SearchEventsAsync(
         HikvisionIsapiClient client, HikvisionAccessProfile? profile, Dictionary<string, object> condition, int max,
-        CancellationToken ct)
+        CancellationToken ct, Func<AccessEventRecord, bool>? counts = null,
+        Func<List<AccessEventRecord>, bool>? enough = null, int maxRead = int.MaxValue)
     {
+        counts ??= e => !IsOwnSessionNoise(e);
         int pageSize = profile?.EventMaxResults is { } declared and > 0
             ? Math.Min(declared, MaxEventPageSize)
             : EventPageSize;
@@ -911,7 +970,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
                 {
                     var record = ParseEvent(item);
                     events.Add(record);
-                    if (!IsOwnSessionNoise(record)) useful++;
+                    if (counts(record)) useful++;
                 }
                 status = HikvisionAlarmPanelDriver.GetString(search, "responseStatusStrg") ?? "OK";
                 matches = HikvisionAlarmPanelDriver.GetInt(search, "numOfMatches") ?? 0;
@@ -922,7 +981,7 @@ public sealed class HikvisionAccessDriver : IAccessControlDriver
             }
 
             more = status.Equals("MORE", StringComparison.OrdinalIgnoreCase) && matches > 0;
-            if (!more) break;
+            if (!more || events.Count >= maxRead || enough?.Invoke(events) == true) break;
             // Se avanza lo que el equipo ENTREGÓ, no lo que se pidió: puede
             // devolver menos (su tope) y avanzar de a página saltaría eventos.
             position += matches;

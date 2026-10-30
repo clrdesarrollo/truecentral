@@ -345,6 +345,18 @@ public interface IAccessControlDriver
         throw new DriverException("Este equipo no entrega el historial de accesos.");
 
     /// <summary>
+    /// Lo mismo que <see cref="FetchEventsAsync"/>, y además (en
+    /// <see cref="AccessEventPage.LastSerial"/>) el número de serie más alto
+    /// que entregó el equipo entre lo descartado por anterior a
+    /// <paramref name="sinceUtc"/>. Con eso la primera lectura deja fijada la
+    /// marca por número aunque no haya traído nada nuevo. Los drivers que no lo
+    /// saben dar devuelven null.
+    /// </summary>
+    async Task<AccessEventPage> FetchEventsSinceAsync(AccessConnectionInfo info, DateTime sinceUtc, int max,
+        CancellationToken ct = default) =>
+        new(await FetchEventsAsync(info, sinceUtc, max, ct), null);
+
+    /// <summary>
     /// Eventos con número de serie mayor que <paramref name="afterSerial"/>, a
     /// lo sumo <paramref name="max"/>. Es la forma preferida de ponerse al día:
     /// no pierde dos eventos del mismo segundo ni se confunde si el reloj del
