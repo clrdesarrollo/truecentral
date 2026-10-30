@@ -71,8 +71,8 @@ public static class SystemApi
             return Results.Ok(PublishedInstallers.Describe(FindClientInstaller(config, env)));
         });
 
-        // La descarga acepta el token por query: la inicia el navegador (no
-        // fetch) y no puede mandar la cabecera Authorization.
+        // La descarga la inicia el navegador (no fetch) y no puede mandar la
+        // cabecera Authorization: acepta un ticket de descarga (UrlTicketService).
         // ?update=x.y.z: la pide el propio cliente para actualizarse (ícono de la barra de título).
         app.MapGet("/api/system/client-installer", async (HttpContext ctx, IConfiguration config, IWebHostEnvironment env,
             AuditService audit, Services.Https.ServerCertificateManager certificates, Services.Https.WebPorts ports,
@@ -91,7 +91,7 @@ public static class SystemApi
                     ? $"Descargó el instalador del cliente de escritorio ({name})."
                     : $"Actualizó el cliente de escritorio desde la versión {from}: descargó el instalador ({name}).");
             return Results.File(file.FullName, "application/octet-stream", name);
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
 
         // Uso de recursos del servidor (indicadores del cliente y del panel).
         // Cualquier usuario autenticado: los operadores también monitorean.

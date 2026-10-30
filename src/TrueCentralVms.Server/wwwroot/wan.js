@@ -153,7 +153,7 @@ async function renderWan() {
 
   $("#wan-save").addEventListener("click", (e) => save(w.enabled, null, e.target, "Acceso desde Internet guardado."));
   $("#wan-export").addEventListener("click", () => {
-    window.location.href = `/api/system/wan/ports.csv?access_token=${encodeURIComponent(Api.token)}`;
+    Api.download("/api/system/wan/ports.csv");
   });
   $("#wan-off")?.addEventListener("click", (e) => {
     if (!confirm("¿Apagar el acceso desde Internet? Quienes estén conectados desde afuera dejarán de poder operar.")) return;

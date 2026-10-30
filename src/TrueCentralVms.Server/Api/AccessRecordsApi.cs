@@ -129,7 +129,7 @@ public static class AccessRecordsApi
             return pdf
                 ? Results.File(content, "application/pdf", file + ".pdf")
                 : Results.File(content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file + ".xlsx");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
     }
 
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>

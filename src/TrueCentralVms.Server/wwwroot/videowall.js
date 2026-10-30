@@ -47,7 +47,7 @@ function vwStatus(message, isError) {
 }
 
 function vwSnapshotUrl(a) {
-  return `/api/devices/${a.deviceId}/snapshot/${a.channelNumber}?access_token=${encodeURIComponent(Api.token || "")}&t=${vwPreviewBucket}`;
+  return Api.mediaUrl(`/api/devices/${a.deviceId}/snapshot/${a.channelNumber}?t=${vwPreviewBucket}`);
 }
 
 function vwSubtitle(a) {
@@ -356,7 +356,7 @@ function vwWindowTile(screen, win, { wallFull = false }) {
   tile.draggable = !!a && !wallFull;
   const preview = vwPrefs.preview && a && !a.isExternal;
   tile.innerHTML = a
-    ? `${preview ? `<img class="vw-snap" src="${vwSnapshotUrl(a)}" alt="" onerror="this.remove()">` : ""}
+    ? `${preview ? `<img class="vw-snap" src="${vwSnapshotUrl(a)}" alt="" data-img-error="remove">` : ""}
        <div class="vw-win-text ${preview ? "strip" : ""}">
          <span class="vw-win-name">${esc(a.channelName)}</span>
          <span class="vw-win-sub">${esc(vwSubtitle(a))}</span>
@@ -477,7 +477,7 @@ function vwFloatingElement(f) {
   const a = f.assignment;
   const preview = vwPrefs.preview && a && !a.isExternal;
   el.innerHTML = `
-    ${preview ? `<img class="vw-snap" src="${vwSnapshotUrl(a)}" alt="" onerror="this.remove()">` : ""}
+    ${preview ? `<img class="vw-snap" src="${vwSnapshotUrl(a)}" alt="" data-img-error="remove">` : ""}
     <div class="vw-float-head"><span class="vw-badge">FLOTANTE${f.fullscreen ? " · PANTALLA COMPLETA" : ""}</span>
       <button class="vw-x" title="Cerrar la ventana flotante">✕</button></div>
     <div class="vw-win-text ${preview ? "strip" : ""}">

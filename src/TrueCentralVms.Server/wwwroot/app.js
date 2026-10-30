@@ -1862,9 +1862,8 @@ async function channelsModal(device) {
       <div class="channel-list">
         ${channels.map((c) => `
           <div class="channel-row" data-id="${c.id}">
-            <img class="channel-thumb" loading="lazy" alt=""
-                 src="/api/devices/${device.id}/snapshot/${c.channelNumber}?access_token=${encodeURIComponent(Api.token)}"
-                 onerror="this.classList.add('hidden')">
+            <img class="channel-thumb" loading="lazy" alt="" data-img-error="hide"
+                 src="${Api.mediaUrl(`/api/devices/${device.id}/snapshot/${c.channelNumber}`)}">
             <div class="channel-info">
               <input class="ch-name" value="${esc(c.name)}" maxlength="128" ${isAdmin ? "" : "disabled"}>
               <div class="muted" style="font-size:11.5px">Canal ${c.channelNumber} · RTSP ${c.rtspChannel} ·
@@ -2330,7 +2329,7 @@ async function renderAudit() {
   $("#audit-export").addEventListener("click", () => {
     readFilters();
     const query = auditFilterQuery();
-    window.open(`/api/audit/export?${query}${query ? "&" : ""}access_token=${encodeURIComponent(Api.token)}`);
+    Api.download(`/api/audit/export${query ? "?" + query : ""}`);
   });
 
   await loadAuditPage();
@@ -2857,6 +2856,7 @@ window.addEventListener("storage", (e) => {
 async function enterApp() {
   Perms.reset();
   await Perms.load();          // qué puede hacer: el menú y las páginas se adaptan
+  await Api.ensureMediaTicket();   // las imágenes de la primera página ya salen con su ticket
   showAppShell();
   SessionWatch.start();        // avisa apenas termine la sesión, aunque nadie toque nada
   Operable.load();             // qué puede operar: lo demás se deshabilita
@@ -2870,12 +2870,20 @@ async function enterApp() {
 }
 
 // Sonda de conexión (igual que el producto videowall: /api/health periódico).
+// También mira la versión del servidor: si cambió (se actualizó), el panel se
+// recarga para no seguir corriendo el código viejo contra el servidor nuevo. La
+// actualización reinicia el servidor y eso ya cerró la sesión: no se pierde nada.
+let panelServerVersion = null;
 setInterval(async () => {
+  let health = null;
+  try { health = await Api.get("/api/health"); } catch { /* sin conexión */ }
+  if (health?.version) {
+    if (panelServerVersion && health.version !== panelServerVersion) { location.reload(); return; }
+    panelServerVersion ??= health.version;
+  }
   if ($("#app-shell").classList.contains("hidden")) return;
-  let ok = true;
-  try { await Api.get("/api/health"); } catch { ok = false; }
-  $("#conn-dot").className = "dot " + (ok ? "ok" : "bad");
-  $("#conn-text").textContent = ok ? "Conectado" : "Sin conexión";
+  $("#conn-dot").className = "dot " + (health ? "ok" : "bad");
+  $("#conn-text").textContent = health ? "Conectado" : "Sin conexión";
 }, 4000);
 
 window.addEventListener("hashchange", () => {
@@ -2939,7 +2947,7 @@ $("#btn-download-client").addEventListener("click", async () => {
     toast("El instalador del cliente no está publicado en este servidor (carpeta client-setup).", true);
     return;
   }
-  window.location.href = `/api/system/client-installer?access_token=${encodeURIComponent(Api.token)}`;
+  if (!await Api.download("/api/system/client-installer")) return;
   toast(`Descargando el cliente${info.version ? ` ${info.version}` : ""} (${info.sizeMb} MB)…`);
 });
 
@@ -2953,9 +2961,9 @@ $("#btn-download-addon").addEventListener("click", async () => {
     toast("El instalador del complemento no está publicado en este servidor (carpeta webcontrol).", true);
     return;
   }
-  // La descarga la inicia el navegador: el token va por query porque no
-  // puede mandar la cabecera Authorization.
-  window.location.href = `/api/webcontrol/installer?access_token=${encodeURIComponent(Api.token)}`;
+  // La descarga la inicia el navegador, que no puede mandar la cabecera
+  // Authorization: va con un ticket de un solo uso.
+  if (!await Api.download("/api/webcontrol/installer")) return;
   toast(`Descargando el complemento (${info.sizeMb} MB)…`);
 });
 
@@ -3042,6 +3050,7 @@ async function init() {
   catch { /* servidor caído: se muestra el login, la sonda avisará */ }
 
   $("#auth-version").textContent = status ? `v${status.serverVersion}` : "";
+  panelServerVersion ??= status?.serverVersion ?? null;   // la versión con que se cargó este panel
 
   if (status && status.setupRequired) { renderSetup(status); return; }
   if (Api.token) {

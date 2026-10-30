@@ -304,8 +304,7 @@ function wfTogglePreview(name, button) {
   wfStopPreview();
   if (playing || !name) return;   // segundo clic = detener
 
-  const audio = new Audio(
-    `/api/workflows/audio/${encodeURIComponent(name)}/file?access_token=${encodeURIComponent(Api.token || "")}`);
+  const audio = new Audio(Api.mediaUrl(`/api/workflows/audio/${encodeURIComponent(name)}/file`));
   wfPreview = { audio, button, name };
   button.dataset.playLabel ??= button.textContent;
   button.textContent = "■";
@@ -790,12 +789,11 @@ async function wfLoadAlerts({ skip = 0, pendingOnly = false, onPage = null } = {
   $$("#wf-alerts .btn-alert-photo").forEach((b) => b.addEventListener("click", (e) => {
     const id = Number(e.target.closest("tr").dataset.alert);
     const alert = data.items.find((a) => a.id === id);
-    const token = encodeURIComponent(Api.token || "");
-    const url = `/api/workflows/files/${alert.imagePath.split("/").map(encodeURIComponent).join("/")}?access_token=${token}`;
+    const path = `/api/workflows/files/${alert.imagePath.split("/").map(encodeURIComponent).join("/")}`;
     openModal(`
       <h3>${esc(alert.title)}</h3>
       <div class="muted" style="margin-bottom:10px">${esc(alert.message)}</div>
-      <div class="wf-thumbs"><a href="${url}" target="_blank"><img src="${url}" alt="Captura"></a></div>
+      <div class="wf-thumbs"><a href="${Api.mediaUrl(path)}" data-media-href="${path}" target="_blank"><img src="${Api.mediaUrl(path)}" alt="Captura"></a></div>
       <div class="modal-actions"><button class="btn ghost" type="button" id="wf-photo-close">Cerrar</button></div>`, "wider");
     $("#wf-photo-close").addEventListener("click", closeModal);
   }));
@@ -845,7 +843,6 @@ async function wfLoadRuns({ skip = 0, workflowId = null, onlyErrors = false, onP
 }
 
 function wfRunModal(run) {
-  const token = encodeURIComponent(Api.token || "");
   openModal(`
     <h3>Ejecución de «${esc(run.workflowName)}»</h3>
     <div class="audit-detail-grid">
@@ -870,9 +867,9 @@ function wfRunModal(run) {
     ${run.steps.some((s) => s.files?.length) ? `
       <div class="field" style="margin-top:12px"><label>Fotos capturadas</label>
         <div class="wf-thumbs">
-          ${run.steps.flatMap((s) => s.files || []).map((f) =>
-            `<a href="/api/workflows/files/${f.split("/").map(encodeURIComponent).join("/")}?access_token=${token}" target="_blank">
-               <img src="/api/workflows/files/${f.split("/").map(encodeURIComponent).join("/")}?access_token=${token}" alt="Captura">
+          ${run.steps.flatMap((s) => s.files || []).map((f) => `/api/workflows/files/${f.split("/").map(encodeURIComponent).join("/")}`).map((path) =>
+            `<a href="${Api.mediaUrl(path)}" data-media-href="${path}" target="_blank">
+               <img src="${Api.mediaUrl(path)}" alt="Captura">
              </a>`).join("")}
         </div>
       </div>` : ""}
@@ -1169,7 +1166,7 @@ function wfShowPreview(label) {
     if (!box.isConnected) return;
     box.querySelector(".wf-preview-body").innerHTML = `<span class="muted">El equipo no entregó imagen.</span>`;
   });
-  img.src = `/api/devices/${encodeURIComponent(deviceId)}/snapshot/${encodeURIComponent(channelNumber)}?access_token=${encodeURIComponent(Api.token || "")}&t=${Date.now()}`;
+  img.src = Api.mediaUrl(`/api/devices/${encodeURIComponent(deviceId)}/snapshot/${encodeURIComponent(channelNumber)}?t=${Date.now()}`);
 }
 
 function wfHidePreview() {

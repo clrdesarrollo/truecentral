@@ -22,6 +22,8 @@ public static class AuditCatalog
             new("login-throttled", "Inicio de sesión rechazado por bloqueo de intentos"),
             new("login-remote-denied", "Inicio de sesión desde Internet rechazado (el usuario no tiene «Entrar desde Internet»)"),
             new("request-remote-denied", "Solicitud desde Internet rechazada (el usuario no tiene «Entrar desde Internet»)"),
+            new("url-ticket-rejected", "Enlace con un ticket inválido rechazado (desconocido, ya usado o para otra dirección)"),
+            new("url-token-rejected", "Token de sesión en la dirección rechazado (solo vale en la cabecera)"),
             new("password-change-failed", "Cambio de contraseña rechazado (clave actual incorrecta)"),
             new("password-change-throttled", "Cambio de contraseña rechazado por bloqueo de intentos"),
             new("sessions-revoked", "Sesiones revocadas y conexiones en tiempo real cortadas"),

@@ -54,7 +54,7 @@ public static class CertificateApi
             return kind == "server"
                 ? Results.File(certificates.Current.Export(X509ContentType.Cert), "application/pkix-cert", $"truecentral-{machine}.cer")
                 : Results.File(certificates.Authority.Export(X509ContentType.Cert), "application/pkix-cert", $"truecentral-ca-{machine}.cer");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
 
         app.MapPost("/api/system/certificate", async (HttpContext ctx, ServerCertificateManager certificates,
             AuditService audit, CancellationToken ct) =>

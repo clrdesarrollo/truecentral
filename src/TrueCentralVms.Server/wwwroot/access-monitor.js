@@ -105,7 +105,7 @@ function accessPhoto(e, size = "") {
   const initials = (e.personName || "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
   if (e.personId && e.hasFace)
     return `<img class="acm-photo ${size}" loading="lazy" alt=""
-      src="/api/access/persons/${e.personId}/face?access_token=${encodeURIComponent(Api.token)}">`;
+      src="${Api.mediaUrl(`/api/access/persons/${e.personId}/face`)}">`;
   return `<span class="acm-photo ${size} empty">${esc(initials || "—")}</span>`;
 }
 
@@ -814,8 +814,8 @@ async function renderAccessEvents() {
 
   const exportReport = (format) => {
     readFilters();
-    const query = accessRecordsQuery({ format, report: $("#acr-report").value, access_token: Api.token });
-    window.open(`/api/access/events/export?${query}`);
+    const query = accessRecordsQuery({ format, report: $("#acr-report").value });
+    Api.download(`/api/access/events/export?${query}`);
   };
   $("#acr-xlsx")?.addEventListener("click", () => exportReport("xlsx"));
   $("#acr-pdf")?.addEventListener("click", () => exportReport("pdf"));

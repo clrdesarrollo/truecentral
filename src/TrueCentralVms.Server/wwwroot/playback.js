@@ -1142,13 +1142,8 @@ function pbExportDialog() {
     const ch = cell.channel;
     const fmt = $('input[name="pbx-fmt"]:checked').value;
     const url = `/api/playback/${ch.deviceId}/${ch.rtspChannel}/download?start=${encodeURIComponent(pbIso(start))}` +
-      `&end=${encodeURIComponent(pbIso(end))}&format=${fmt}&access_token=${encodeURIComponent(Api.token)}`;
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${lvSafeName(ch.device?.name)}_${lvSafeName(ch.name)}_${pbIso(start).replace(/[-:]/g, "").replace("T", "_")}.${fmt}`;
-    document.body.append(link);
-    link.click();
-    link.remove();
+      `&end=${encodeURIComponent(pbIso(end))}&format=${fmt}`;
+    Api.download(url, `${lvSafeName(ch.device?.name)}_${lvSafeName(ch.name)}_${pbIso(start).replace(/[-:]/g, "").replace("T", "_")}.${fmt}`);
     closeModal();
     toast(`Preparando la descarga de ${Math.round((end - start) / 60000)} min en el equipo… aparecerá en las descargas del navegador.`);
   };

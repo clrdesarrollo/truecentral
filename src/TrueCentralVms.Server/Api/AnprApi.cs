@@ -119,7 +119,7 @@ public static class AnprApi
             // Las fotos son inmutables: se pueden cachear sin miedo.
             ctx.Response.Headers.CacheControl = "private, max-age=86400";
             return Results.File(path, "image/jpeg");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Media);
 
         // ------------------------------------------------------------------
         // Fuentes: qué equipos entregan patentes y cuáles están activos
@@ -221,7 +221,7 @@ public static class AnprApi
                 detail: $"Descargó el reconocimiento {id} (patente {record.PlateNumber}, " +
                         $"capturada el {record.CapturedAt:dd-MM-yyyy HH:mm:ss}).");
             return Results.File(buffer.ToArray(), "application/zip", $"{baseName}.zip");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Download);
     }
 
     private static readonly JsonSerializerOptions ZipJson = new(JsonSerializerDefaults.Web) { WriteIndented = true };

@@ -549,7 +549,7 @@ public static class IntercomsApi
                 if (jpeg is not null) cache.Set(cacheKey, jpeg, TimeSpan.FromSeconds(2));
             }
             return jpeg is null ? Results.NotFound() : Results.File(jpeg, "image/jpeg");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Media);
 
         // ------------------------------------------------------------------
         // Llamadas

@@ -216,7 +216,7 @@ async function renderVehicleAccess() {
     Object.assign(vaState, { period: "today", from: "", to: "", directions: [], results: [], plate: "", q: "", accessPoint: "", page: 1 });
     renderVehicleAccess();
   });
-  const exportAs = (format) => { read(); window.open(`/api/vehicle-access/records/export?${vaQuery({ format, access_token: Api.token })}`); };
+  const exportAs = (format) => { read(); Api.download(`/api/vehicle-access/records/export?${vaQuery({ format })}`); };
   $("#vaf-xlsx")?.addEventListener("click", () => exportAs("xlsx"));
   $("#vaf-pdf")?.addEventListener("click", () => exportAs("pdf"));
 
@@ -248,7 +248,7 @@ async function loadVehicleAccess() {
           <td>${esc(r.accessPoint)}</td>
           <td>${esc(VA_DIRECTIONS[r.direction] ?? r.direction)}</td>
           <td style="white-space:nowrap">${r.hasPlateImage
-            ? `<img class="va-plate-img" src="/api/vehicle-access/records/${r.id}/plate?access_token=${encodeURIComponent(Api.token)}" alt="" loading="lazy" style="height:22px;vertical-align:middle;margin-right:6px;border-radius:3px">` : ""}<b>${esc(r.plate)}</b>${r.confidence != null ? ` <span class="muted" style="font-size:11px">${r.confidence}%</span>` : ""}</td>
+            ? `<img class="va-plate-img" src="${Api.mediaUrl(`/api/vehicle-access/records/${r.id}/plate`)}" alt="" loading="lazy" style="height:22px;vertical-align:middle;margin-right:6px;border-radius:3px">` : ""}<b>${esc(r.plate)}</b>${r.confidence != null ? ` <span class="muted" style="font-size:11px">${r.confidence}%</span>` : ""}</td>
           <td>${r.personName ? `${esc(r.personName)}${r.vehicleLabel ? ` <span class="muted">· ${esc(r.vehicleLabel)}</span>` : ""}
             <div class="muted" style="font-size:11px">${esc([r.employeeNo, r.department].filter(Boolean).join(" · "))}</div>` : `<span class="muted">—</span>`}</td>
           <td title="${esc(r.detail ?? "")}">${vaTag(VA_STATUS, r.plateStatus)}</td>

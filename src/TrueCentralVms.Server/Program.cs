@@ -113,6 +113,7 @@ builder.Services.AddDbContext<VmsDbContext>(o => o.UseNpgsql(EF.IsDesignTime
     : postgres.ConnectionString));
 
 builder.Services.AddSingleton<TokenService>();
+builder.Services.AddSingleton<UrlTicketService>();
 builder.Services.AddSingleton(_ => new LoginThrottle());
 // Alcance por ubicación de cada usuario (qué recursos ve y opera) y el hub
 // que entrega los eventos según ese alcance.
@@ -436,6 +437,9 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// CSP, sin Referer, sin marcos de otros sitios y sin adivinar tipos (ver WebSecurityHeaders).
+app.Use(WebSecurityHeaders.Middleware(app.Configuration));
+
 // Internet Explorer 11 y anteriores no corren el panel: se les muestra un aviso para usar Edge.
 app.Use(async (context, next) =>
 {
@@ -462,8 +466,12 @@ app.UseStaticFiles(new StaticFileOptions
 ManualSite.Map(app, app.Logger);
 
 // ---------------------------------------------------------------------------
-// Autenticación por token opaco (Authorization: Bearer <token> o
-// ?access_token= — este último para el WebSocket de SignalR)
+// Autenticación por token opaco: cabecera Authorization: Bearer <token>. En la
+// dirección (?access_token=) solo donde el navegador no puede mandar cabeceras:
+// los hubs de SignalR (/hubs/*) y los WebSocket propios (video MSE, voz). Lo
+// que pide un <img>, un <audio> o una descarga lleva un ticket de URL
+// (?ticket=, ver UrlTicketService), nunca el token: en la dirección queda en el
+// historial, en la lista de descargas y en cualquier enlace copiado.
 // ---------------------------------------------------------------------------
 app.Use(async (context, next) =>
 {
@@ -473,7 +481,58 @@ app.Use(async (context, next) =>
     string? header = context.Request.Headers.Authorization.FirstOrDefault();
     if (header is not null && header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         token = header["Bearer ".Length..].Trim();
-    token ??= context.Request.Query["access_token"].FirstOrDefault();
+    if (token is null && context.Request.Query["access_token"].FirstOrDefault() is { Length: > 0 } queryToken)
+    {
+        if (context.Request.Path.StartsWithSegments("/hubs") || context.WebSockets.IsWebSocketRequest)
+            token = queryToken;
+        else if (tokens.Validate(queryToken) is { } exposed)
+        {
+            // No vale aquí (el endpoint responde 401 si exige sesión), pero queda
+            // constancia: un token vigente anduvo en una dirección.
+            var audit = context.RequestServices.GetRequiredService<AuditService>();
+            if (audit.ShouldLog($"url-token-rejected:{exposed.UserId}", TimeSpan.FromMinutes(10)))
+                await audit.LogAsAsync(context, exposed.UserId, exposed.Username, exposed.Role, "auth", "url-token-rejected",
+                    targetType: "user", targetId: exposed.UserId.ToString(), targetName: exposed.Username,
+                    detail: $"Rechazado: el token de sesión de '{exposed.Username}' venía en la dirección de {context.Request.Path} " +
+                            "(fuera de los hubs y WebSocket solo vale en la cabecera Authorization). Pudo quedar en un historial o en un enlace copiado.",
+                    success: false);
+            // Una imagen o una descarga con el token es una pestaña con el panel de
+            // antes de la actualización: se le dice qué hacer.
+            if (context.GetEndpoint()?.Metadata.GetMetadata<UrlTicketEndpoint>() is not null)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new { error = "Esta dirección ya no acepta el token de la sesión: recargue el panel (F5) y vuelva a intentarlo." });
+                return;
+            }
+        }
+    }
+    if (token is null && context.Request.Query[UrlTicketService.QueryKey].FirstOrDefault() is { Length: > 0 } ticket)
+    {
+        var redemption = context.RequestServices.GetRequiredService<UrlTicketService>()
+            .Redeem(ticket, context.GetEndpoint()?.Metadata.GetMetadata<UrlTicketEndpoint>()?.Use, context.Request);
+        string? rejection = redemption.Rejection
+            ?? (tokens.Validate(redemption.SessionToken!) is null ? "la sesión que lo pidió terminó" : null);
+        if (rejection is not null)
+        {
+            // Lo normal (venció mientras la imagen cargaba, la sesión terminó) no
+            // es un intento fallido; un ticket desconocido, reusado o para otra
+            // dirección sí. Acelerado por IP: una página llena de imágenes rotas
+            // deja una fila, no cientos.
+            var audit = context.RequestServices.GetRequiredService<AuditService>();
+            string ip = context.Connection.RemoteIpAddress?.ToString() ?? "";
+            if (redemption.Suspicious && audit.ShouldLog($"url-ticket-rejected:{ip}", TimeSpan.FromMinutes(5)))
+            {
+                var owner = redemption.Owner;
+                await audit.LogAsAsync(context, owner?.UserId, owner?.Username ?? "", owner?.Role, "auth", "url-ticket-rejected",
+                    targetType: owner is null ? null : "user", targetId: owner?.UserId.ToString(), targetName: owner?.Username,
+                    detail: $"Rechazado un ticket de URL para {context.Request.Path}: {rejection}.", success: false);
+            }
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsJsonAsync(new { error = $"El enlace ya no vale ({rejection}): vuelva a abrirlo desde el panel." });
+            return;
+        }
+        token = redemption.SessionToken;
+    }
 
     if (token is not null && tokens.Validate(token) is { } session)
     {

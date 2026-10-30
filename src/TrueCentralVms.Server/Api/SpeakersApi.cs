@@ -492,7 +492,7 @@ public static class SpeakersApi
         });
 
         // El archivo del audio, para escucharlo en el puesto del operador o en el
-        // navegador sin hacerlo sonar en el parlante (acepta ?access_token= para <audio>).
+        // navegador sin hacerlo sonar en el parlante (acepta un ticket de URL para <audio> y la descarga).
         app.MapGet("/api/speakers/{id:int}/library/{audioId:long}/file", async (HttpContext ctx, int id, long audioId, VmsDbContext db,
             SpeakerService service, CancellationToken ct) =>
         {
@@ -506,7 +506,7 @@ public static class SpeakersApi
                 return Results.File(content, contentType, fileName);
             }
             catch (DriverException ex) { return Error(ex.Message, StatusCodes.Status502BadGateway); }
-        });
+        }).AllowUrlTicket(UrlTicketUse.Media | UrlTicketUse.Download);
 
         app.MapPost("/api/speakers/{id:int}/library", async (HttpContext ctx, int id, IFormFile file, string? name, VmsDbContext db,
             SpeakerService service, AuditService audit, CancellationToken ct) =>

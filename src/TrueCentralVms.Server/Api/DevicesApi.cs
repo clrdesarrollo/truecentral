@@ -1050,6 +1050,6 @@ public static class DevicesApi
 
             cache.Set(cacheKey, new SnapshotEntry(jpeg, DateTime.UtcNow), TimeSpan.FromSeconds(SnapshotCacheSeconds));
             return Results.File(jpeg, "image/jpeg");
-        });
+        }).AllowUrlTicket(UrlTicketUse.Media);
     }
 }

@@ -4,9 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CLR TrueCentral VMS</title>
-  <!-- Internet Explorer 11 y anteriores: el servidor ya responde un aviso; esto
-       cubre la página que haya quedado guardada. ES3 a propósito. -->
-  <script>if (document.documentMode) { document.write('<p style="font-family:Segoe UI,Arial,sans-serif;margin:40px">Internet Explorer no es compatible con este panel. Ábralo con Microsoft Edge u otro navegador actual.</p>'); document.execCommand('Stop'); }</script>
+  <!-- Internet Explorer 11 y anteriores (aviso para usar Edge): primero que todo. -->
+  <script src="legacy-check.js?v=1"></script>
   <link rel="icon" href="favicon.ico">
   <link rel="stylesheet" href="vendor/mdi/css/materialdesignicons.min.css?v=1">
   <link rel="stylesheet" href="styles.css?v=100">
@@ -209,12 +208,12 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="api.js?v=2"></script>
+  <script src="api.js?v=3"></script>
   <!-- walls.js va ANTES: app.js referencia sus funciones al armar las rutas. -->
   <script src="walls.js?v=11"></script>
   <script src="isup.js?v=3"></script>
   <script src="alarms.js?v=19"></script>
-  <script src="speakers.js?v=20"></script>
+  <script src="speakers.js?v=21"></script>
   <script src="io-modules.js?v=8"></script>
   <script src="patrol.js?v=2"></script>
   <script src="patrol-serial.js?v=1"></script>
@@ -227,38 +226,38 @@
   <script src="intercoms.js?v=13"></script>
   <script src="access.js?v=22"></script>
   <script src="maintenance.js?v=5"></script>
-  <script src="enroll.js?v=2"></script>
-  <script src="access-catalog.js?v=22"></script>
-  <script src="access-monitor.js?v=7"></script>
-  <script src="workflows.js?v=26"></script>
+  <script src="enroll.js?v=3"></script>
+  <script src="access-catalog.js?v=23"></script>
+  <script src="access-monitor.js?v=8"></script>
+  <script src="workflows.js?v=27"></script>
   <script src="mail-settings.js?v=2"></script>
   <script src="backups.js?v=2"></script>
-  <script src="certificate.js?v=2"></script>
+  <script src="certificate.js?v=3"></script>
   <script src="account.js?v=1"></script>
-  <script src="wan.js?v=1"></script>
+  <script src="wan.js?v=2"></script>
   <script src="time.js?v=1"></script>
   <script src="workflow-editor.js?v=16"></script>
   <script src="services.js?v=4"></script>
   <script src="license.js?v=7"></script>
-  <script src="anpr.js?v=9"></script>
-  <script src="vehicle-access.js?v=1"></script>
+  <script src="anpr.js?v=10"></script>
+  <script src="vehicle-access.js?v=2"></script>
   <script src="alarm-monitor.js?v=4"></script>
-  <script src="event-center.js?v=3"></script>
-  <script src="videowall.js?v=2"></script>
-  <script src="intercom-console.js?v=2"></script>
+  <script src="event-center.js?v=4"></script>
+  <script src="videowall.js?v=3"></script>
+  <script src="intercom-console.js?v=3"></script>
   <script src="signalr.min.js?v=1"></script>
   <script src="hub.js?v=2"></script>
-  <script src="cerco.js?v=15"></script>
+  <script src="cerco.js?v=16"></script>
   <script src="cerco-alarm.js?v=5"></script>
-  <script src="resources.js?v=13"></script>
+  <script src="resources.js?v=14"></script>
   <!-- live.js va DESPUÉS de resources.js: usa sus íconos de ubicación. -->
   <script src="live.js?v=16"></script>
   <script src="boards.js?v=5"></script>
   <script src="live-joystick.js?v=2"></script>
   <!-- playback.js usa LvSession y utilidades de live.js. -->
-  <script src="playback.js?v=6"></script>
+  <script src="playback.js?v=7"></script>
   <script src="roles.js?v=3"></script>
   <script src="dashboard.js?v=9"></script>
-  <script src="app.js?v=94"></script>
+  <script src="app.js?v=95"></script>
 </body>
 </html>

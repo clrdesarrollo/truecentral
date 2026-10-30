@@ -1092,8 +1092,8 @@ function accessPersonAvatar(p) {
   const initialsHtml = `<span class="person-avatar${off}" style="background:hsl(${hue} 55% 90%);color:hsl(${hue} 45% 30%)"
     aria-hidden="true">${esc(initials)}</span>`;
   if (!p.face) return initialsHtml;
-  // El token va en la query (un <img> no manda la cabecera de sesión); v= renueva la foto si se cambia.
-  const src = `/api/access/persons/${p.id}/face?access_token=${encodeURIComponent(Api.token)}&v=${encodeURIComponent(p.face.createdAt)}`;
+  // Un <img> no manda la cabecera de sesión: va con un ticket (Api.mediaUrl); v= renueva la foto si se cambia.
+  const src = Api.mediaUrl(`/api/access/persons/${p.id}/face?v=${encodeURIComponent(p.face.createdAt)}`);
   return `<button type="button" class="person-avatar person-avatar-photo${off}" title="Ver la foto de ${esc(p.fullName)}"
     data-fallback="${esc(initialsHtml)}"><img src="${src}" alt="" loading="lazy" decoding="async"></button>`;
 }
@@ -1411,9 +1411,9 @@ function accessPersonModal(person, levels) {
     const preview = draft.face.image
       ? `<img src="data:${draft.face.contentType};base64,${draft.face.image}" alt="Rostro elegido">`
       : (draft.face.has && !draft.face.clear)
-        // El token va en la query, como en los snapshots de las cámaras: un
-        // <img> no manda la cabecera de sesión y el servidor devolvería 401.
-        ? `<img src="/api/access/persons/${person.id}/face?access_token=${encodeURIComponent(Api.token)}" alt="Rostro enrolado">`
+        // Con un ticket, como los snapshots de las cámaras: un <img> no manda
+        // la cabecera de sesión y el servidor devolvería 401.
+        ? `<img src="${Api.mediaUrl(`/api/access/persons/${person.id}/face`)}" alt="Rostro enrolado">`
         : `<div class="access-face-empty">sin foto</div>`;
     const medida = draft.face.width
       ? ` <span class="muted">${draft.face.width}×${draft.face.height} px</span>` : "";

@@ -30,8 +30,9 @@ function evcSoundEnabled() {
   try { return localStorage.getItem(EVC_SOUND_KEY) === "1"; } catch { return false; }
 }
 
-function evcFileUrl(path) {
-  return `/api/workflows/files/${path.split("/").map(encodeURIComponent).join("/")}?access_token=${encodeURIComponent(Api.token || "")}`;
+/** Dirección de una foto de la alerta (sin ticket: Api.mediaUrl se lo pone al usarla). */
+function evcFilePath(path) {
+  return `/api/workflows/files/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 function evcPhotos(a) {
@@ -101,7 +102,7 @@ function evcPlaySound(alert) {
     } catch { resolve(); }
   });
   const playOnce = () => alert.sound === EVC_SYSTEM_SOUND ? beep() : new Promise((resolve) => {
-    audio = new Audio(`/api/workflows/audio/${encodeURIComponent(alert.sound)}/file?access_token=${encodeURIComponent(Api.token || "")}`);
+    audio = new Audio(Api.mediaUrl(`/api/workflows/audio/${encodeURIComponent(alert.sound)}/file`));
     audio.addEventListener("ended", resolve);
     audio.addEventListener("error", resolve);
     audio.play().catch(resolve);
@@ -365,17 +366,17 @@ function renderEvcTab(a) {
     const photos = evcPhotos(a);
     if (!photos.length) { body.innerHTML = `<div class="evc-empty muted">Esta alerta no tiene fotos.</div>`; return; }
     evcPhotoIndex = Math.min(evcPhotoIndex, photos.length - 1);
-    const url = evcFileUrl(photos[evcPhotoIndex]);
+    const path = evcFilePath(photos[evcPhotoIndex]);
     body.innerHTML = `
       <div class="evc-photo">
-        <a href="${url}" target="_blank" title="Abrir en tamaño completo"><img src="${url}" alt="Foto ${evcPhotoIndex + 1}"></a>
+        <a href="${Api.mediaUrl(path)}" data-media-href="${path}" target="_blank" title="Abrir en tamaño completo"><img src="${Api.mediaUrl(path)}" alt="Foto ${evcPhotoIndex + 1}"></a>
         ${photos.length > 1 ? `
           <button class="evc-nav prev" ${evcPhotoIndex === 0 ? "disabled" : ""}>‹</button>
           <button class="evc-nav next" ${evcPhotoIndex === photos.length - 1 ? "disabled" : ""}>›</button>
           <span class="evc-counter">${evcPhotoIndex + 1}/${photos.length}</span>` : ""}
       </div>
       ${photos.length > 1 ? `<div class="evc-thumbs">${photos.map((p, i) =>
-        `<img src="${evcFileUrl(p)}" data-i="${i}" class="${i === evcPhotoIndex ? "active" : ""}" alt="" loading="lazy">`).join("")}</div>` : ""}`;
+        `<img src="${Api.mediaUrl(evcFilePath(p))}" data-i="${i}" class="${i === evcPhotoIndex ? "active" : ""}" alt="" loading="lazy">`).join("")}</div>` : ""}`;
     const go = (i) => { evcPhotoIndex = i; renderEvcTab(a); };
     $(".evc-nav.prev", body)?.addEventListener("click", () => go(evcPhotoIndex - 1));
     $(".evc-nav.next", body)?.addEventListener("click", () => go(evcPhotoIndex + 1));
