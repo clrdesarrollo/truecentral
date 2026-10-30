@@ -172,6 +172,13 @@ Las demás columnas son *IP*, *Marca*, *Tipo*, *Modelo*, *N° serie*, *Puerto
 SDK* y *MAC*. En los equipos Hikvision activados y en los Dahua inicializados
 aparece además #boton("Cambiar IP").
 
+El interruptor *Ocultar los ya agregados*, sobre la tabla, deja en ella solo
+los equipos que todavía no están en el sistema; entre paréntesis dice cuántos
+quedan ocultos. Vale para todas las tablas de equipos en línea (video, control
+de acceso, citofonía y decodificadores) y el navegador lo recuerda. Si todos
+los encontrados ya están agregados, la tabla lo dice: «Todos los equipos
+encontrados ya están agregados.».
+
 #importante[La búsqueda solo alcanza el segmento de red del servidor. Un equipo
   que aparece en la lista pero está en otra subred (por ejemplo, con su IP de
   fábrica) no se puede agregar hasta cambiarle la IP: el botón #boton("Agregar")

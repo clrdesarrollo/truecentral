@@ -27,26 +27,35 @@ todos los paneles.
 
 #requiere("Ver cercos eléctricos")
 
-La tarjeta muestra el nombre del panel, su conexión (*En línea*, *Sin conexión*
-o *Pausado*) y su ubicación o, si no tiene, su ID de equipo. Debajo, unas
-etiquetas resumen su estado:
+La tarjeta muestra el nombre del panel, su conexión con un punto de color
+(verde *En línea*, rojo *Sin conexión*, gris *Pausado*) y su ubicación o, si no
+tiene, su ID de equipo.
+
+Debajo, un recuadro resume el estado de un vistazo: un candado (cerrado si está
+armado, abierto si no) y el estado en su color, verde *Armado*, azul
+*Armando…* (el retardo de salida antes de energizar) o blanco *Desarmado*.
+Mientras hay algo que atender, el recuadro se pone rojo con un ícono de alerta
+y dice *En alarma*, por ejemplo «En alarma · armado». Sin conexión, el recuadro
+se ve apagado y dice «Último estado conocido». La barra *Potencia* muestra la
+potencia configurada del energizador, de 7 a 21 (el panel no mide
+kilovoltios): verde con el cerco armado, gris desarmado y ámbar si falta el
+retorno del pulso.
+
+Lo que hay que atender aparece bajo el recuadro como etiquetas de color sólido:
 
 #table(
   columns: (auto, 1fr),
   table.header[Etiqueta][Significado],
-  [Armado / Desarmado], [Si el cerco está energizado. *Armando…* indica el
-    retardo de salida antes de energizar.],
   [Sirena sonando], [La sirena del panel está activa.],
   [Cerco caído], [El panel detectó una caída o un corte del cerco.],
   [Zona N en alarma], [Una zona del panel está en alarma.],
-  [Sin retorno], [El cerco está armado pero el panel no detecta el retorno
-    del pulso.],
-  [Nivel N/21], [La potencia configurada del energizador (de 7 a 21). El
-    panel no mide kilovoltios.],
-  [Señal buena / regular / débil · N dBm], [La señal WiFi del panel. Con menos
-    de −75 dBm puede perder la conexión de vez en cuando: revise la antena o
-    acerque el punto de acceso.],
+  [Sin retorno (ámbar)], [El cerco está armado pero el panel no detecta el
+    retorno del pulso.],
 )
+
+Al pie, la señal WiFi del panel en su color: «Señal buena», «regular» o
+«débil», con los dBm. Con menos de −75 dBm puede perder la conexión de vez en
+cuando: revise la antena o acerque el punto de acceso.
 
 Mientras hay algo que atender (sirena sonando, cerco caído o una zona en
 alarma), la tarjeta tiene el borde rojo.

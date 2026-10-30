@@ -178,7 +178,31 @@ public sealed partial class CercoPanelItem : ObservableObject
 
     public string StateText => _dto.Arming ? "Armando…" : _dto.Armed ? "Armado" : "Desarmado";
     public string ConnectionText => !_dto.Enabled ? "Pausado" : _dto.Connected ? "En línea" : "Sin conexión";
-    public string LevelText => _dto.Voltage is int v ? $"Nivel {v}/21" : "";
+    /// <summary>Color del punto de la conexión: Online / Offline / Paused.</summary>
+    public string ConnectionState => !_dto.Enabled ? "Paused" : _dto.Connected ? "Online" : "Offline";
+    public string LevelText => _dto.Voltage is int v ? $"Nivel {v}/{MaxPower}" : "";
+
+    // --- Recuadro de estado de la tarjeta del módulo ---
+
+    /// <summary>Color del recuadro: el de <see cref="Level"/>, u "Offline" sin conexión (lo que
+    /// muestra es lo último que informó el panel).</summary>
+    public string CardLevel => _dto.Connected ? Level : "Offline";
+    /// <summary>Glifo del recuadro: Alarm (alerta), Locked (armado o armando) o Unlocked.</summary>
+    public string GlyphKind => InAlarm ? "Alarm" : _dto.Armed || _dto.Arming ? "Locked" : "Unlocked";
+    public string Headline => InAlarm ? $"En alarma · {StateText.ToLowerInvariant()}" : StateText;
+    public string Caption => _dto.Connected ? "" : "Último estado conocido";
+    /// <summary>Hay algo que atender o revisar: van como etiquetas sólidas bajo el recuadro.</summary>
+    public bool HasIssues => Siren || FenceDown || ZoneAlarm || PulseMissing;
+
+    /// <summary>Potencia configurada del energizador (de 7 a 21; el panel no mide kilovoltios), como barra.</summary>
+    private const int MaxPower = 21;
+    private int Power => Math.Clamp(_dto.Voltage ?? 0, 0, MaxPower);
+    public bool HasPower => _dto.Voltage is not null;
+    public string PowerText => $"{Power}/{MaxPower}";
+    public System.Windows.GridLength PowerFill => new(Power, System.Windows.GridUnitType.Star);
+    public System.Windows.GridLength PowerRest => new(MaxPower - Power, System.Windows.GridUnitType.Star);
+    /// <summary>Color de la barra: Ok armado, Warn armado sin retorno, Muted desarmado (sin energía).</summary>
+    public string PowerLevel => PulseMissing ? "Warn" : _dto.Armed ? "Ok" : "Muted";
 
     // Señal WiFi del panel. Umbrales para el ESP8266: >= -67 dBm buena, -68..-75
     // regular, < -75 débil (pierde la asociación de vez en cuando).

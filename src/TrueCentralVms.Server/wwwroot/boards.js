@@ -304,12 +304,14 @@ function bdItemInfo(it) {
         sub: group ? `Grupo de parlantes · ${group.speakerIds.length}` : "Grupo de parlantes" };
     }
     case "card": {
-      // La clave puede traer opciones de la tarjeta ("card-plates?devices=3,7": las cámaras elegidas en el cliente).
+      // La clave puede traer opciones de la tarjeta ("card-plates?devices=3,7": las cámaras elegidas en el cliente;
+      // "card-alerts?pending=1": el interruptor «Solo sin confirmar»).
       const [key, options] = (it.ref || "").split("?");
       const card = BD_CARDS.find((c) => c.key === key);
       const cams = /devices=([\d,]+)/.exec(options || "")?.[1].split(",").length ?? 0;
+      const pendingOnly = /(^|&)pending=1/.test(options || "");
       return { icon: `<i class="mdi mdi-chart-bar" aria-hidden="true"></i>`, name: card?.label ?? it.ref,
-        sub: cams ? `Tarjeta · ${cams} cámara${cams === 1 ? "" : "s"}` : "Tarjeta" };
+        sub: cams ? `Tarjeta · ${cams} cámara${cams === 1 ? "" : "s"}` : pendingOnly ? "Tarjeta · solo sin confirmar" : "Tarjeta" };
     }
     default:
       return { icon: `<i class="mdi mdi-web" aria-hidden="true"></i>`, name: it.title || it.ref, sub: it.refId ? "Página de la lista" : it.ref };

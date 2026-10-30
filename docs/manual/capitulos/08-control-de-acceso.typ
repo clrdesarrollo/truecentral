@@ -798,6 +798,9 @@ fábrica (*Sin activar* o *Sin inicializar*). Según el caso, la fila ofrece:
   contraseña de administrador a un equipo de fábrica;
 - #boton("Cambiar IP"): le cambia la dirección de red sin entrar a él.
 
+Con el interruptor *Ocultar los ya agregados* la tabla deja solo los equipos
+que faltan por agregar (vea #capitulo(<cap-fuentes-de-video>)).
+
 Activar e inicializar equipos y cambiarles la IP funciona igual que con las
 cámaras; ver #capitulo(<cap-fuentes-de-video>).
 

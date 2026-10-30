@@ -636,9 +636,29 @@ public sealed class ApiClient
     public Task<AccessDoorStateDto> SendAccessDoorCommandAsync(int doorId, string command, CancellationToken ct = default) =>
         SendAsync<AccessDoorStateDto>(HttpMethod.Post, $"/api/access/doors/{doorId}/command", new AccessDoorCommandDto(command), ct);
 
+    /// <summary>Foto del rostro enrolado de una persona del padrón (null si no tiene o no se pudo).</summary>
+    public async Task<byte[]?> GetAccessPersonFaceAsync(int personId, CancellationToken ct = default)
+    {
+        if (BaseUrl is null) return null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/api/access/persons/{personId}/face");
+            if (Token is not null)
+                request.Headers.Authorization = new("Bearer", Token);
+            using var response = await _http.SendAsync(request, ct);
+            return response.IsSuccessStatusCode ? await response.Content.ReadAsByteArrayAsync(ct) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>Últimos eventos de control de acceso (la página más reciente).</summary>
-    public Task<AccessEventPageDto> GetAccessEventsAsync(int pageSize, CancellationToken ct = default) =>
-        SendAsync<AccessEventPageDto>(HttpMethod.Get, $"/api/access/events?page=1&pageSize={pageSize}", null, ct);
+    /// <param name="withPerson">Solo los de una persona del padrón (no los del equipo, como la puesta en hora).</param>
+    public Task<AccessEventPageDto> GetAccessEventsAsync(int pageSize, bool withPerson = false, CancellationToken ct = default) =>
+        SendAsync<AccessEventPageDto>(HttpMethod.Get,
+            $"/api/access/events?page=1&pageSize={pageSize}" + (withPerson ? "&withPerson=true" : ""), null, ct);
 
     /// <summary>Módulos de E/S (relés) con el estado de sus entradas y salidas.</summary>
     public Task<List<IoModuleDto>> GetIoModulesAsync(CancellationToken ct = default) =>

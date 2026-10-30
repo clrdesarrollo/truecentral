@@ -20,8 +20,9 @@ namespace TrueCentralVms.Server.Api;
 /// separadas por coma), <c>kinds</c> (Granted, Denied, DoorOpen, DoorClose,
 /// Alarm, Other), <c>credentials</c> (Card, Face, Fingerprint...),
 /// <c>personId</c>, <c>department</c>, <c>q</c> con <c>mode</c> (all, person,
-/// employee, card) y el orden con <c>sort</c>/<c>dir</c>. Por compatibilidad
-/// se aceptan también <c>deviceId</c>, <c>doorId</c> y <c>kind</c> sueltos.
+/// employee, card), <c>withPerson</c> (solo los de una persona del padrón) y
+/// el orden con <c>sort</c>/<c>dir</c>. Por compatibilidad se aceptan también
+/// <c>deviceId</c>, <c>doorId</c> y <c>kind</c> sueltos.
 /// </summary>
 public static class AccessRecordsApi
 {
@@ -35,7 +36,8 @@ public static class AccessRecordsApi
         DateTime? From, DateTime? To,
         IReadOnlyList<int> DeviceIds, IReadOnlyList<int> DoorIds,
         IReadOnlyList<AccessEventKind> Kinds, IReadOnlyList<AccessCredentialKind> Credentials,
-        int? PersonId, string? Department, string? Q, string Mode, string Sort, bool Ascending);
+        int? PersonId, string? Department, string? Q, string Mode, string Sort, bool Ascending,
+        bool WithPerson = false);
 
     public static void MapAccessRecordsApi(this WebApplication app)
     {
@@ -164,9 +166,12 @@ public static class AccessRecordsApi
             Department: q["department"].ToString() is { Length: > 0 } dep ? dep.Trim() : null,
             Q: q["q"].ToString() is { Length: > 0 } text ? text.Trim() : null,
             Mode: mode, Sort: sort,
-            Ascending: string.Equals(q["dir"], "asc", StringComparison.OrdinalIgnoreCase));
+            Ascending: string.Equals(q["dir"], "asc", StringComparison.OrdinalIgnoreCase),
+            WithPerson: bool.TryParse(q["withPerson"], out bool withPerson) && withPerson);
     }
 
+    // WithPerson no cuenta: lo pide solo la tarjeta «Últimos accesos» del cliente (quién
+    // ingresó último) cada vez que se abre, no es una búsqueda del operador.
     private static bool HasUserFilters(Filter f) =>
         f.From is not null || f.To is not null || f.PersonId is not null || f.Q is not null || f.Department is not null ||
         f.DoorIds.Count > 0 || f.DeviceIds.Count > 0 || f.Kinds.Count > 0 || f.Credentials.Count > 0;
@@ -184,6 +189,7 @@ public static class AccessRecordsApi
         if (f.To is { } end) query = query.Where(e => e.Timestamp <= end);
         if (deviceIds.Length > 0) query = query.Where(e => deviceIds.Contains(e.AccessDeviceId));
         if (f.PersonId is int person) query = query.Where(e => e.AccessPersonId == person);
+        if (f.WithPerson) query = query.Where(e => e.AccessPersonId != null);
         if (kinds.Length > 0) query = query.Where(e => kinds.Contains(e.Kind));
         if (credentials.Length > 0) query = query.Where(e => credentials.Contains(e.Credential));
 
@@ -263,6 +269,7 @@ public static class AccessRecordsApi
         if (f.Kinds.Count > 0) parts.Add("resultado: " + string.Join(", ", f.Kinds.Select(AccessReports.KindLabel)));
         if (f.Credentials.Count > 0) parts.Add("credencial: " + string.Join(", ", f.Credentials.Select(AccessReports.CredentialLabel)));
         if (f.Department is { } department) parts.Add($"área: {department}");
+        if (f.WithPerson) parts.Add("solo de personas del padrón");
         if (f.PersonId is int personId)
         {
             string? name = await db.AccessPersons.AsNoTracking().Where(p => p.Id == personId)

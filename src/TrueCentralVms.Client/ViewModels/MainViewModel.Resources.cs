@@ -100,14 +100,14 @@ public partial class MainViewModel
 
     /// <summary>El cuadro que muestra un recurso: su panel según el tipo (null si no se pudo o se canceló).</summary>
     /// <param name="cardRef">Clave guardada de una tarjeta con sus opciones (las cámaras de
-    /// «Últimas patentes»); null = la tarjeta como sale de la lista.</param>
+    /// «Últimas patentes», el «Solo sin confirmar» de «Últimas alertas»); null = la tarjeta como sale de la lista.</param>
     public CellPanel? CreatePanel(ResourceNode node, string? cardRef = null)
     {
         var panel = node.CardKind switch
         {
             CardKinds.Equipment => new EquipmentCardPanel(_api),
             CardKinds.Server => new ServerCardPanel(_api),
-            CardKinds.Alerts => new AlertsCardPanel(_api, _hub, OpenAlert),
+            CardKinds.Alerts => new AlertsCardPanel(_api, _hub, OpenAlert, CardKinds.AlertsPendingOnly(cardRef)),
             CardKinds.Plates => new PlatesCardPanel(_api, _hub, CardKinds.PlatesDevices(cardRef)),
             CardKinds.Access => new AccessCardPanel(_api, _hub),
             // Las de «Mis páginas» se guardan en el cuadro como dirección: son solo de este usuario.

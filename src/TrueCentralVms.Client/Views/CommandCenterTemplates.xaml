@@ -35,6 +35,42 @@
         <Setter Property="TextWrapping" Value="Wrap"/>
     </Style>
 
+    <!-- Interruptor de una tarjeta (como el Horizontal | Vertical de las divisiones):
+         el texto y la perilla que corre; encendido, la pista en el color de acento. -->
+    <Style x:Key="CardSwitch" TargetType="ToggleButton">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <ContentPresenter VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <Grid Width="30" Height="16" VerticalAlignment="Center">
+                            <Border x:Name="Track" CornerRadius="8" Background="{StaticResource Panel2Brush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                            <Ellipse x:Name="Knob" Width="10" Height="10" Margin="3,0" HorizontalAlignment="Left"
+                                     Fill="{StaticResource MutedBrush}"/>
+                        </Grid>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            <Setter TargetName="Track" Property="Background" Value="{StaticResource AccentBrush}"/>
+                            <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/>
+                            <Setter TargetName="Knob" Property="Fill" Value="White"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="PanelSection" TargetType="TextBlock">
         <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
         <Setter Property="FontSize" Value="11"/>
@@ -655,69 +691,75 @@
                     </Grid>
                 </Grid>
             </Border>
-            <!-- La lista: la elegida se marca con el filo de acento -->
-            <ListBox Grid.Row="1" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected, Mode=TwoWay}"
-                     Background="Transparent" BorderThickness="0" Padding="6,2,6,6"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="Margin" Value="0,2"/>
-                        <Setter Property="Cursor" Value="Hand"/>
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="ListBoxItem">
-                                    <Border x:Name="Row" CornerRadius="5" BorderThickness="1" BorderBrush="Transparent" Padding="1">
-                                        <ContentPresenter/>
-                                    </Border>
-                                    <ControlTemplate.Triggers>
-                                        <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                        </Trigger>
-                                    </ControlTemplate.Triggers>
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                    </Style>
-                </ListBox.ItemContainerStyle>
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Border CornerRadius="4" ClipToBounds="True">
-                            <Border.Style>
-                                <Style TargetType="Border">
-                                    <Setter Property="Background" Value="Transparent"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsPending}" Value="True">
-                                            <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Border.Style>
-                            <DockPanel Opacity="{Binding CardOpacity}">
-                                <Rectangle DockPanel.Dock="Left" Width="4" Fill="{Binding PriorityBrush}"/>
-                                <StackPanel Margin="9,5,6,5">
-                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Text="{Binding Source}" Style="{StaticResource PanelHint}" TextWrapping="NoWrap"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                        <TextBlock Text="{Binding Time}" FontSize="11" FontFamily="{StaticResource MonoFont}"
-                                                   Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
-                                        <TextBlock Text="{Binding PriorityText}" FontSize="10.5" FontWeight="Bold" Margin="8,0,0,0"
-                                                   Foreground="{Binding PriorityBrush}" VerticalAlignment="Center"/>
-                                        <Border Background="#B71C1C" CornerRadius="7" Padding="6,0" Margin="8,0,0,0"
-                                                Visibility="{Binding IsPending, Converter={x:Static vm:BoolToVisibility.Instance}}">
-                                            <TextBlock Text="SIN CONFIRMAR" FontSize="9.5" FontWeight="Bold" Foreground="White"/>
+            <!-- La lista: la elegida se marca con el filo de acento. Encima, el interruptor
+                 que deja solo las que faltan por confirmar. -->
+            <DockPanel Grid.Row="1">
+                <ToggleButton DockPanel.Dock="Top" Style="{StaticResource CardSwitch}" HorizontalAlignment="Right"
+                              Margin="0,2,14,2" Content="Solo sin confirmar" IsChecked="{Binding PendingOnly}"
+                              ToolTip="Mostrar en la lista solo las alertas que faltan por confirmar"/>
+                <ListBox ItemsSource="{Binding Items}" SelectedItem="{Binding Selected, Mode=TwoWay}"
+                         Background="Transparent" BorderThickness="0" Padding="6,2,6,6"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Margin" Value="0,2"/>
+                            <Setter Property="Cursor" Value="Hand"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border x:Name="Row" CornerRadius="5" BorderThickness="1" BorderBrush="Transparent" Padding="1">
+                                            <ContentPresenter/>
                                         </Border>
-                                        <TextBlock Text="✓ confirmada" FontSize="11" Foreground="{StaticResource OkBrush}" Margin="8,0,0,0"
-                                                   VerticalAlignment="Center"
-                                                   Visibility="{Binding Acknowledged, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border CornerRadius="4" ClipToBounds="True">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPending}" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <DockPanel Opacity="{Binding CardOpacity}">
+                                    <Rectangle DockPanel.Dock="Left" Width="4" Fill="{Binding PriorityBrush}"/>
+                                    <StackPanel Margin="9,5,6,5">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Source}" Style="{StaticResource PanelHint}" TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                            <TextBlock Text="{Binding Time}" FontSize="11" FontFamily="{StaticResource MonoFont}"
+                                                       Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding PriorityText}" FontSize="10.5" FontWeight="Bold" Margin="8,0,0,0"
+                                                       Foreground="{Binding PriorityBrush}" VerticalAlignment="Center"/>
+                                            <Border Background="#B71C1C" CornerRadius="7" Padding="6,0" Margin="8,0,0,0"
+                                                    Visibility="{Binding IsPending, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                                <TextBlock Text="SIN CONFIRMAR" FontSize="9.5" FontWeight="Bold" Foreground="White"/>
+                                            </Border>
+                                            <TextBlock Text="✓ confirmada" FontSize="11" Foreground="{StaticResource OkBrush}" Margin="8,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Visibility="{Binding Acknowledged, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                        </StackPanel>
                                     </StackPanel>
-                                </StackPanel>
-                            </DockPanel>
-                        </Border>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
             <TextBlock Grid.Row="1" Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="10,0,10,6"
                        VerticalAlignment="Bottom"
                        Visibility="{Binding Status, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
@@ -837,28 +879,115 @@
     </DataTemplate>
 
     <!-- Últimos accesos -->
+    <!-- Últimos accesos, con el diseño de la tarjeta de alertas: arriba quién pasó
+         —el resultado, su nombre, la puerta y la hora, su área, cargo y con qué se
+         identificó, y su foto del padrón—; abajo la lista, cada paso con la barra
+         de color de su resultado (lo que no es un paso de alguien, apagado). -->
     <DataTemplate DataType="{x:Type vm:AccessCardPanel}">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
-            <ItemsControl ItemsSource="{Binding Items}" Margin="14,10">
-                <ItemsControl.ItemTemplate>
+        <Grid Background="{StaticResource CellBgBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="3*" MinHeight="150"/>
+                <RowDefinition Height="2*" MinHeight="80"/>
+            </Grid.RowDefinitions>
+            <!-- Detalle del paso elegido -->
+            <Border Margin="8,8,8,4" Background="{StaticResource Panel2Brush}" CornerRadius="6" Padding="12,10,12,10">
+                <Grid>
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                Visibility="{Binding IsEmpty, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <TextBlock Text="&#xE8D7;" FontFamily="Segoe MDL2 Assets" FontSize="34"
+                                   Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Sin accesos recientes" FontSize="16" FontWeight="SemiBold" Margin="0,8,0,0"
+                                   Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Esperando nuevos eventos" Style="{StaticResource PanelHint}" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <Grid Visibility="{Binding Selected, Converter={x:Static vm:NotNullToVisibility.Instance}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <DockPanel>
+                            <Border DockPanel.Dock="Left" Background="{Binding Selected.ResultBrush}" CornerRadius="3" Padding="7,1"
+                                    VerticalAlignment="Center" Margin="0,0,8,0">
+                                <TextBlock Text="{Binding Selected.ResultText}" Foreground="White" FontWeight="Bold" FontSize="10.5"/>
+                            </Border>
+                            <TextBlock Text="{Binding Selected.Who}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip="{Binding Selected.Who}"/>
+                        </DockPanel>
+                        <TextBlock Grid.Row="1" Style="{StaticResource PanelHint}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"
+                                   TextWrapping="NoWrap" ToolTip="{Binding Selected.Door}">
+                            <Run Text="{Binding Selected.Door, Mode=OneWay}" Foreground="{StaticResource TextBrush}"/><Run Text="  ·  "/><Run Text="{Binding Selected.DateText, Mode=OneWay}"/>
+                        </TextBlock>
+                        <TextBlock Grid.Row="2" Text="{Binding Selected.Detail}" Style="{StaticResource PanelHint}" Margin="0,2,0,0"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding Selected.Detail}"
+                                   Visibility="{Binding Selected.HasDetail, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <!-- La foto del padrón: lo que se mira de lejos -->
+                        <Border Grid.Row="3" Margin="0,8,0,0" Background="#000000" CornerRadius="4" MinHeight="30" ClipToBounds="True">
+                            <Grid>
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                            Visibility="{Binding Selected.HasFace, Converter={x:Static vm:InverseBoolToVisibility.Instance}}">
+                                    <TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="40"
+                                               Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="{Binding Selected.NoFaceText}" Style="{StaticResource PanelHint}"
+                                               HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                                </StackPanel>
+                                <Image Source="{Binding SelectedFace}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+            <!-- La lista: el elegido se marca con el filo de acento -->
+            <ListBox Grid.Row="1" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected, Mode=TwoWay}"
+                     Background="Transparent" BorderThickness="0" Padding="6,2,6,6"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Margin" Value="0,2"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Row" CornerRadius="5" BorderThickness="1" BorderBrush="Transparent" Padding="1">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,4">
-                            <StackPanel>
-                                <DockPanel>
-                                    <TextBlock DockPanel.Dock="Left" Text="{Binding Time}" Width="64"
-                                               Foreground="{StaticResource MutedBrush}" FontFamily="{StaticResource MonoFont}"/>
-                                    <TextBlock DockPanel.Dock="Right" Text="{Binding What}" Style="{StaticResource LevelText}"/>
+                        <Border CornerRadius="4" ClipToBounds="True" Background="{StaticResource Panel2Brush}">
+                            <DockPanel Opacity="{Binding CardOpacity}">
+                                <Rectangle DockPanel.Dock="Left" Width="4" Fill="{Binding ResultBrush}"/>
+                                <StackPanel Margin="9,5,6,5">
                                     <TextBlock Text="{Binding Who}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
                                                TextTrimming="CharacterEllipsis"/>
-                                </DockPanel>
-                                <TextBlock Text="{Binding Door}" Style="{StaticResource PanelHint}" Margin="64,0,0,0"
-                                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
-                            </StackPanel>
+                                    <TextBlock Text="{Binding Door}" Style="{StaticResource PanelHint}" TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                        <TextBlock Text="{Binding Time}" FontSize="11" FontFamily="{StaticResource MonoFont}"
+                                                   Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding ResultText}" FontSize="10.5" FontWeight="Bold" Margin="8,0,0,0"
+                                                   Foreground="{Binding ResultBrush}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </DockPanel>
                         </Border>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Grid.Row="1" Text="{Binding Status}" Style="{StaticResource PanelHint}" Margin="10,0,10,6"
+                       VerticalAlignment="Bottom"
+                       Visibility="{Binding Status, Converter={x:Static vm:NonEmptyToVisibility.Instance}}"/>
+        </Grid>
     </DataTemplate>
     <!-- Página web: el navegador del cuadro y, abajo, dónde está, el zoom y Recargar -->
     <DataTemplate DataType="{x:Type vm:WebCellPanel}">
