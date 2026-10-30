@@ -110,7 +110,8 @@ public partial class MainViewModel
             CardKinds.Server => new ServerCardPanel(_api),
             CardKinds.Alerts => new AlertsCardPanel(_api, _hub, OpenAlert, CardKinds.AlertsPendingOnly(cardRef)),
             CardKinds.Plates => new PlatesCardPanel(_api, _hub, CardKinds.PlatesDevices(cardRef)),
-            CardKinds.Access => new AccessCardPanel(_api, _hub, CardKinds.AccessDevices(cardRef), CardKinds.AccessIncludesSystem(cardRef)),
+            CardKinds.Access => new AccessCardPanel(_api, _hub, CardKinds.AccessDevices(cardRef), CardKinds.AccessIncludesSystem(cardRef),
+                OpenDoorCamerasAsync),
             // Las de «Mis páginas» se guardan en el cuadro como dirección: son solo de este usuario.
             CardKinds.Web when node.Url is { } url => new WebCellPanel(url, node.Name, node.IsPersonalWeb ? null : node.Id, _api),
             CardKinds.WebCustom => AskWebPage(),

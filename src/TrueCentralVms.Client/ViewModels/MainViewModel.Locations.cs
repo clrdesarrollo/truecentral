@@ -255,6 +255,27 @@ public partial class MainViewModel
         });
     }
 
+    /// <summary>
+    /// «Ver en vivo» de la tarjeta Últimos accesos: las cámaras de la puerta del
+    /// paso (la del terminal y las de su ficha) en la ventana de verificación,
+    /// sin tocar la grilla. Devuelve el motivo si no hay qué mostrar.
+    /// </summary>
+    public async Task<string?> OpenDoorCamerasAsync(AccessEventDto e)
+    {
+        if (e.DoorNumber is not { } door) return "El paso no dice por qué puerta fue.";
+        var briefing = await _api.GetBriefingAsync($"accessDevice={e.DeviceId}&door={door}");
+        if (briefing is null || briefing.Cameras.Count == 0)
+            return "La puerta no tiene cámaras: se le asocian en su ficha (Recursos) o con la cámara del terminal.";
+        var line = new AccessEventLine(e);
+        string doorName = string.IsNullOrWhiteSpace(e.DoorName) ? $"puerta {door}" : e.DoorName!;
+        var owner = Application.Current.MainWindow is { IsLoaded: true } window ? window : null;
+        Views.VerificationWindow.Show(owner, _api, _settings, FindChannel, OpenCamerasAsync,
+            new Views.VerificationWindow.Item(briefing, $"{line.What} · {line.Who}",
+                $"{e.DeviceName} · {doorName} · {e.Timestamp.ToLocalTime():dd-MM-yyyy HH:mm:ss}",
+                Critical: e.Kind is AccessEventKind.Denied or AccessEventKind.Alarm, e.Timestamp));
+        return null;
+    }
+
     /// <summary>Consulta de la ficha para un evento de panel de alarma (la zona y, si no, su área).</summary>
     private static string AlarmQuery(AlarmEventDto dto) =>
         $"alarmPanel={dto.PanelId}" +

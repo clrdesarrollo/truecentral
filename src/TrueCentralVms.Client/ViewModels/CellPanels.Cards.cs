@@ -662,9 +662,10 @@ public sealed partial class PlatesCardPanel : CellPanel
 
 /// <summary>
 /// Un paso por cualquier puerta, con la puerta, como una tarjeta de la lista de
-/// alertas: la barra de color del resultado, quién, dónde y cuándo.
+/// alertas: la barra de color del resultado, quién, dónde y cuándo. La foto del
+/// momento puede llegar después del evento (<see cref="SetPhoto"/>).
 /// </summary>
-public sealed class AccessLine(AccessEventDto e)
+public sealed partial class AccessLine(AccessEventDto e) : ObservableObject
 {
     private static readonly System.Windows.Media.SolidColorBrush GrantedBrush = Frozen(0x2E, 0x7D, 0x32),
         DeniedBrush = Frozen(0xD3, 0x2F, 0x2F), OtherBrush = Frozen(0x60, 0x7D, 0x8B);
@@ -689,6 +690,25 @@ public sealed class AccessLine(AccessEventDto e)
     /// <summary>La persona tiene foto enrolada (se pide aparte al elegirla).</summary>
     public bool HasFace { get; } = e is { PersonId: not null, HasFace: true };
     public string NoFaceText => IsPerson ? "Sin foto en el padrón" : "Evento sin persona del padrón";
+    /// <summary>Hay foto del momento del paso (se pide aparte al elegirlo).</summary>
+    [ObservableProperty] private bool _hasPhoto = e.HasPhoto;
+    /// <summary>De dónde salió la foto del momento y cuándo, o por qué no hay.</summary>
+    [ObservableProperty] private string _photoText = PhotoTextOf(e, e.HasPhoto, e.PhotoCamera, e.PhotoAt);
+
+    /// <summary>Quedó la foto del momento (aviso del hub).</summary>
+    public void SetPhoto(string? camera, DateTime at)
+    {
+        HasPhoto = true;
+        PhotoText = PhotoTextOf(Event, true, camera, at);
+    }
+
+    private static string PhotoTextOf(AccessEventDto e, bool hasPhoto, string? camera, DateTime? at)
+    {
+        if (!hasPhoto) return "Sin foto del momento";
+        if (camera is null) return "Captura del terminal";
+        double after = at is { } taken ? (taken.ToUniversalTime() - e.Timestamp.ToUniversalTime()).TotalSeconds : 0;
+        return after < 1.5 ? $"Cámara {camera}" : $"Cámara {camera} · {after:0} s después del paso";
+    }
     /// <summary>Área, cargo y con qué se identificó.</summary>
     public string Detail { get; } = string.Join(" · ", new[] { e.Department, e.Position, CredentialOf(e) }
         .Where(s => !string.IsNullOrWhiteSpace(s)));
@@ -731,6 +751,11 @@ public sealed class AccessLine(AccessEventDto e)
 /// quedaba llena de eso. El interruptor «Eventos del sistema» los suma y el
 /// engranaje elige de qué equipos de acceso se muestran los pasos (por omisión,
 /// de todos). Las dos cosas viajan en la clave de la tarjeta.
+///
+/// Arriba se cruzan la foto del momento del paso —la captura del terminal o la
+/// de la cámara de la puerta, que llega un poco después del evento— y la foto
+/// del padrón. «Ver en vivo» abre las cámaras de la puerta en la ventana de
+/// verificación (la grilla del operador no se toca).
 /// </summary>
 public sealed partial class AccessCardPanel : CellPanel
 {
@@ -747,15 +772,23 @@ public sealed partial class AccessCardPanel : CellPanel
     private bool _includeSystem;
     /// <summary>Lecturas en curso: solo la última llena la lista (el interruptor puede ir y volver antes de que responda la primera).</summary>
     private int _reloads;
+    /// <summary>Fotos del momento ya bajadas, por evento (las de la lista).</summary>
+    private readonly Dictionary<long, System.Windows.Media.ImageSource> _photos = [];
+    private long _photoFor;
+    /// <summary>Abre las cámaras de la puerta del paso; devuelve el motivo si no se pudo.</summary>
+    private readonly Func<AccessEventDto, Task<string?>>? _openLive;
 
-    public AccessCardPanel(ApiClient api, VmsHubClient hub, IReadOnlyCollection<int>? devices = null, bool includeSystem = false)
+    public AccessCardPanel(ApiClient api, VmsHubClient hub, IReadOnlyCollection<int>? devices = null, bool includeSystem = false,
+        Func<AccessEventDto, Task<string?>>? openLive = null)
     {
         _api = api;
         _hub = hub;
         _devices = devices ?? [];
         _includeSystem = includeSystem;
+        _openLive = openLive;
         Title = TitleFor(_devices);
         _hub.AccessEventReceived += OnEvent;
+        _hub.AccessEventPhotoReady += OnPhoto;
     }
 
     private static string TitleFor(IReadOnlyCollection<int> devices) =>
@@ -772,7 +805,9 @@ public sealed partial class AccessCardPanel : CellPanel
     public ObservableCollection<AccessLine> Items { get; } = [];
     [ObservableProperty] private AccessLine? _selected;
     [ObservableProperty] private System.Windows.Media.ImageSource? _selectedFace;
+    [ObservableProperty] private System.Windows.Media.ImageSource? _selectedPhoto;
     [ObservableProperty] private bool _isEmpty;
+    public bool CanOpenLive => _openLive is not null;
 
     /// <summary>
     /// El interruptor «Eventos del sistema» sobre la lista: la puesta en hora, los
@@ -887,7 +922,52 @@ public sealed partial class AccessCardPanel : CellPanel
         if (followNewest || Selected is null || !Items.Contains(Selected)) Selected = Newest();
     });
 
-    partial void OnSelectedChanged(AccessLine? value) => _ = LoadFaceAsync(value);
+    partial void OnSelectedChanged(AccessLine? value)
+    {
+        _ = LoadFaceAsync(value);
+        _ = LoadPhotoAsync(value);
+    }
+
+    /// <summary>Llegó la foto del momento de un paso de la lista.</summary>
+    private void OnPhoto(AccessEventPhotoDto dto) => Ui.Run(() =>
+    {
+        if (Items.FirstOrDefault(l => l.Event.Id == dto.EventId) is not { } line) return;
+        line.SetPhoto(dto.Camera, dto.TakenAt);
+        if (line == Selected) _ = LoadPhotoAsync(line);
+    });
+
+    private async Task LoadPhotoAsync(AccessLine? line)
+    {
+        if (line is not { HasPhoto: true })
+        {
+            _photoFor = 0;
+            SelectedPhoto = null;
+            return;
+        }
+        long id = line.Event.Id;
+        _photoFor = id;
+        if (_photos.TryGetValue(id, out var known))
+        {
+            SelectedPhoto = known;
+            return;
+        }
+        SelectedPhoto = null;
+        var photo = PlatesCardPanel.Decode(await _api.GetAccessEventPhotoAsync(id), 1280);
+        if (photo is not null)
+        {
+            if (_photos.Count >= 32) _photos.Clear();
+            _photos[id] = photo;
+        }
+        if (_photoFor == id) SelectedPhoto = photo;
+    }
+
+    /// <summary>«Ver en vivo»: las cámaras de la puerta del paso elegido.</summary>
+    [RelayCommand]
+    private async Task OpenLiveAsync()
+    {
+        if (_openLive is null || Selected?.Event is not { } e) return;
+        Status = await _openLive(e) ?? "";
+    }
 
     private async Task LoadFaceAsync(AccessLine? line)
     {
@@ -913,5 +993,9 @@ public sealed partial class AccessCardPanel : CellPanel
         if (_faceFor == person) SelectedFace = face;
     }
 
-    public override void Dispose() => _hub.AccessEventReceived -= OnEvent;
+    public override void Dispose()
+    {
+        _hub.AccessEventReceived -= OnEvent;
+        _hub.AccessEventPhotoReady -= OnPhoto;
+    }
 }

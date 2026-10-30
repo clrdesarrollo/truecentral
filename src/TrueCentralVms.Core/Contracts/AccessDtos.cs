@@ -524,9 +524,18 @@ public sealed record AccessEventDto(
     string? Department = null,
     string? Position = null,
     /// <summary>La persona tiene foto enrolada (se pide a /api/access/persons/{id}/face).</summary>
-    bool HasFace = false);
+    bool HasFace = false,
+    /// <summary>Hay foto del momento del paso (se pide a /api/access/events/{id}/photo).</summary>
+    bool HasPhoto = false,
+    /// <summary>Cámara de la que salió la foto; null = la tomó el propio terminal.</summary>
+    string? PhotoCamera = null,
+    /// <summary>Cuándo se tomó la foto (UTC).</summary>
+    DateTime? PhotoAt = null);
 
 public sealed record AccessEventPageDto(int Total, int Page, int PageSize, IReadOnlyList<AccessEventDto> Items);
+
+/// <summary>La foto del momento de un paso quedó lista (llega después del evento: hay que pedírsela al equipo).</summary>
+public sealed record AccessEventPhotoDto(long EventId, string? Camera, DateTime TakenAt);
 
 /// <summary>Resumen del módulo para la portada de Control de acceso.</summary>
 /// <summary>

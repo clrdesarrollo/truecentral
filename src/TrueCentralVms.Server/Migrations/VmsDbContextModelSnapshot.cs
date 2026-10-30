@@ -355,6 +355,17 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<DateTime?>("PhotoAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PhotoCamera")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("PhotoPath")
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
                     b.Property<string>("RawJson")
                         .HasColumnType("text");
 

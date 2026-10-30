@@ -55,6 +55,9 @@ public sealed class VmsHubClient : IAsyncDisposable
     /// Por el hub los enums viajan como número; System.Text.Json los lee igual.</summary>
     public event Action<AccessEventDto>? AccessEventReceived;
 
+    /// <summary>Quedó la foto del momento de un paso (llega después del evento).</summary>
+    public event Action<AccessEventPhotoDto>? AccessEventPhotoReady;
+
     /// <summary>Cambió el estado de un panel de cerco eléctrico (armado, sirena, cerco, conexión).</summary>
     public event Action<CercoPanelDto>? CercoPanelStateChanged;
 
@@ -125,6 +128,7 @@ public sealed class VmsHubClient : IAsyncDisposable
         _connection.On<AlarmPanelDto>(VmsHubContract.AlarmPanelStateChanged, dto => AlarmPanelStateChanged?.Invoke(dto));
         _connection.On<AlarmEventDto>(VmsHubContract.AlarmEventReceived, dto => AlarmEventReceived?.Invoke(dto));
         _connection.On<AccessEventDto>(VmsHubContract.AccessEventReceived, dto => AccessEventReceived?.Invoke(dto));
+        _connection.On<AccessEventPhotoDto>(VmsHubContract.AccessEventPhotoReady, dto => AccessEventPhotoReady?.Invoke(dto));
         _connection.On<CercoPanelDto>(VmsHubContract.CercoPanelStateChanged, dto => CercoPanelStateChanged?.Invoke(dto));
         _connection.On<CercoEventDto>(VmsHubContract.CercoEventReceived, dto => CercoEventReceived?.Invoke(dto));
         _connection.On<WorkflowNotificationDto>(VmsHubContract.WorkflowNotification, dto => WorkflowNotification?.Invoke(dto));
