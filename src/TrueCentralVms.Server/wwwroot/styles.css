@@ -3056,3 +3056,21 @@ tr.pt-voided td:last-child, tr.pt-voided td:nth-last-child(2) { opacity: 1; }
 .acd-parts-title { font-weight: 600; margin-bottom: 4px; }
 .acd-parts .checkbox-row { margin: 6px 0 0; }
 .acd-parts .acd-part-hint { margin: -2px 0 2px 26px; }
+
+/* Sistema → Respaldos: el respaldo en curso (paso, barra y bytes) y el aviso si deja de avanzar. */
+.bk-run { margin-bottom: 14px; padding: 14px 16px; }
+.bk-run-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; }
+.bk-run-head b { color: var(--text); }
+.bk-run-head .muted, .bk-run-meta { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.bk-run-stage { font-size: 13px; margin-bottom: 8px; }
+.bk-bar { position: relative; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; margin-bottom: 6px; }
+.bk-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .6s ease-out; }
+/* Sin porcentaje (primer respaldo, o ya pesa más que el anterior): una franja que recorre la barra. */
+.bk-bar.indeterminate span { position: absolute; width: 30%; animation: bk-bar 1.4s ease-in-out infinite; }
+@keyframes bk-bar { from { left: -30%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .bk-bar span { transition: none; }
+  .bk-bar.indeterminate span { animation: none; left: 0; width: 100%; opacity: .35; }
+}
+.bk-run-stall { margin: 10px 0 0; }
+.bk-run-done .bk-run-warn { margin-top: 4px; color: var(--warn-text); }

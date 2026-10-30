@@ -12,9 +12,10 @@ using TrueCentralVms.Server.Services.Supervisor;
 namespace TrueCentralVms.Server.Services.Backup;
 
 /// <summary>
-/// Avance de un respaldo: etapa ("dump" = base de datos, "files" = archivos,
-/// "verify" = relectura completa), bytes de la base ya escritos y los que se
-/// esperan (el tamaño del respaldo anterior; 0 = no se sabe).
+/// Avance de un respaldo: etapa y bytes de esa etapa contra los que se esperan (0 = no se sabe).
+/// "dump" (base de datos) y "files" (llave, automatizaciones, licencia, patentes) suman juntos lo escrito en el
+/// respaldo, contra el tamaño del respaldo anterior (una estimación); "verify" (relectura completa) y "secondary"
+/// (copia al segundo destino) cuentan contra el tamaño exacto del archivo; "retention" no tiene bytes.
 /// </summary>
 public sealed record BackupProgress(string Stage, long Bytes, long ExpectedBytes);
 
@@ -41,6 +42,8 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly DateTime _startedUtc = DateTime.UtcNow;
+    private RunTracker? _run;        // el respaldo en curso o el último (para el panel)
+    private string? _testing;        // el respaldo que se está probando, si hay uno
     // Lo que pasa ANTES de migrar (respaldo previo a la actualización) se registra en la bitácora después: la tabla
     // de auditoría todavía puede no tener las columnas que espera el modelo nuevo.
     private readonly List<(string Action, string? Target, string Detail, bool Success)> _pendingAudit = [];
@@ -110,6 +113,8 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
 
     // ------------------------------------------------------------------ crear
 
+    private const string BusyMessage = "Ya hay un respaldo o una prueba de restauración en curso.";
+
     /// <summary>
     /// Hace un respaldo completo (uno a la vez). Lanza si falla; el estado queda guardado igual. El diario y el a pedido
     /// corren en un proceso aparte (<see cref="BackupWorker"/>): el servidor sigue atendiendo pase lo que pase con el
@@ -118,15 +123,54 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
     public async Task<BackupFileDto> CreateAsync(string kind, CancellationToken ct, IProgress<BackupProgress>? progress = null)
     {
         if (!await _gate.WaitAsync(0, ct))
-            throw new InvalidOperationException("Ya hay un respaldo o una prueba de restauración en curso.");
+            throw new InvalidOperationException(BusyMessage);
+        return await CreateHeldAsync(BeginRun(kind, startedBy: null), ct, progress);
+    }
+
+    /// <summary>
+    /// Respaldo a pedido: lo lanza y vuelve enseguida (false si ya hay un respaldo o una prueba en curso). El panel sigue
+    /// el avance con <see cref="Progress"/>, también si se recarga, y el resultado queda en la bitácora a nombre de quien
+    /// lo pidió.
+    /// </summary>
+    public bool StartManual(BackupActor actor)
+    {
+        if (!_gate.Wait(0)) return false;
+        var run = BeginRun(BackupKinds.Manual, actor.Username);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var file = await CreateHeldAsync(run, CancellationToken.None, progress: null);
+                string? secondary = _state.LastSecondaryError;
+                await actor.LogAsync(audit, "backup-created", file.Name,
+                    $"Respaldo a pedido: {Size(file.Size)} en {Duration(run.ToDto(DateTime.UtcNow).ElapsedSeconds)}" +
+                    (secondary is null ? "." : $". OJO: {secondary}"), true);
+                if (secondary is not null)
+                    await actor.LogAsync(audit, "backup-secondary-failed", file.Name, secondary, false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Respaldo a pedido fallido.");
+                await actor.LogAsync(audit, "backup-failed", null, $"Falló el respaldo a pedido: {ex.Message}", false);
+            }
+        });
+        return true;
+    }
+
+    /// <summary>Con el turno ya tomado (<see cref="_gate"/>): respalda, anota el resultado en el seguimiento y lo suelta.</summary>
+    private async Task<BackupFileDto> CreateHeldAsync(RunTracker run, CancellationToken ct, IProgress<BackupProgress>? progress)
+    {
         var watch = Stopwatch.StartNew();
         DateTime attempt = DateTime.UtcNow;
+        string kind = run.Kind;
         try
         {
             var job = await NewJobAsync(kind, ct);
+            run.Prepared(job.ExpectedBytes, !string.IsNullOrWhiteSpace(job.Settings.SecondaryPath));
+            var tracking = new RunProgress(run, progress);
             var result = kind == BackupKinds.PreUpdate
-                ? await BackupJobRunner.RunAsync(job, ct, progress)
-                : await BackupWorker.RunAsync(job, WorkerTimeout, ct, progress, logger);
+                ? await BackupJobRunner.RunAsync(job, ct, tracking)
+                : await BackupWorker.RunAsync(job, WorkerTimeout, ct, tracking, logger);
             foreach (string warning in result.Warnings) logger.LogWarning("Respaldos: {Warning}", warning);
             var file = result.File;
             string? secondaryError = result.SecondaryError;
@@ -141,14 +185,22 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
                 LastSecondaryUtc = secondaryError is null && !string.IsNullOrWhiteSpace(_settings.SecondaryPath)
                     ? DateTime.UtcNow : _state.LastSecondaryUtc,
             });
-            logger.LogInformation("Respaldo {Name} creado ({Size:N0} bytes, {Seconds:0.0} s; {Removed} respaldo(s) viejo(s) borrado(s)).",
-                file.Name, file.Size, watch.Elapsed.TotalSeconds, result.Removed);
+            // Recién con el estado guardado: el panel, al verlo terminado, vuelve a pedir la lista y la salud.
+            run.Finish(file, secondaryError, error: null);
+            logger.LogInformation("Respaldo {Name} creado ({Size:N0} bytes, {Seconds:0.0} s: {Stages}; {Removed} respaldo(s) viejo(s) borrado(s)).",
+                file.Name, file.Size, watch.Elapsed.TotalSeconds, run.StageTimes(), result.Removed);
             if (secondaryError is not null) logger.LogWarning("Respaldos: {Error}", secondaryError);
             return file;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             await SaveStateAsync(_state with { LastAttemptUtc = attempt, LastError = ex.Message });
+            run.Finish(null, null, ex.Message);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            run.Finish(null, null, "Se interrumpió: se detuvo el servidor o el servicio de respaldos.");
             throw;
         }
         finally
@@ -156,6 +208,142 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
             _gate.Release();
         }
     }
+
+    // ------------------------------------------------------------------ avance (Sistema → Respaldos)
+
+    /// <summary>Sin avance (ni bytes ni cambio de etapa) por este lapso, el panel avisa que el respaldo parece detenido.</summary>
+    public static readonly TimeSpan StallAfter = TimeSpan.FromMinutes(2);
+
+    /// <summary>Lo que el panel muestra de un respaldo ya terminado: después de esto queda solo la lista y la salud.</summary>
+    private static readonly TimeSpan ShowFinishedFor = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Avance para el panel, sin tocar la base: el respaldo en curso (o el último, si terminó hace menos de una hora),
+    /// la prueba de restauración que esté corriendo y los umbrales con que el panel avisa.
+    /// </summary>
+    public BackupProgressDto Progress()
+    {
+        var now = DateTime.UtcNow;
+        var run = Volatile.Read(ref _run)?.ToDto(now);
+        if (run is { Running: false, FinishedUtc: { } done } && now - done > ShowFinishedFor) run = null;
+        return new BackupProgressDto(Busy, run, Volatile.Read(ref _testing), (int)StallAfter.TotalSeconds, (int)WorkerTimeout.TotalMinutes);
+    }
+
+    private RunTracker BeginRun(string kind, string? startedBy)
+    {
+        var run = new RunTracker(kind, startedBy);
+        Volatile.Write(ref _run, run);
+        return run;
+    }
+
+    /// <summary>
+    /// Seguimiento de un respaldo, de principio a fin. Lo escribe el progreso (el hilo que lee al proceso aparte, o el
+    /// propio respaldo previo a una actualización) y lo lee el panel. Vive en memoria: si el servidor se reinicia a mitad
+    /// de camino, el proceso del respaldo muere con él y queda lo que guarda <see cref="BackupState"/>.
+    /// </summary>
+    private sealed class RunTracker(string kind, string? startedBy)
+    {
+        private readonly Lock _sync = new();
+        private readonly List<(string Stage, double Seconds)> _stages = [];
+        private readonly DateTime _startedUtc = DateTime.UtcNow;
+        private string _stage = "prepare";
+        private long _bytes, _expected;
+        private bool _hasSecondary;
+        private DateTime _stageUtc = DateTime.UtcNow, _progressUtc = DateTime.UtcNow;
+        private DateTime? _finishedUtc;
+        private string? _error, _secondaryError;
+        private BackupFileDto? _file;
+
+        public string Kind => kind;
+
+        /// <summary>Lo que se sabe al armar el trabajo: cuánto pesó el anterior y si hay segundo destino.</summary>
+        public void Prepared(long expected, bool hasSecondary)
+        {
+            lock (_sync)
+            {
+                _expected = expected;
+                _hasSecondary = hasSecondary;
+            }
+        }
+
+        public void Report(BackupProgress p)
+        {
+            lock (_sync)
+            {
+                var now = DateTime.UtcNow;
+                if (p.Stage != _stage)
+                {
+                    _stages.Add((_stage, (now - _stageUtc).TotalSeconds));
+                    _stage = p.Stage;
+                    _stageUtc = now;
+                    _progressUtc = now;
+                }
+                if (p.Bytes != _bytes) _progressUtc = now;
+                _bytes = p.Bytes;
+                _expected = p.ExpectedBytes;
+            }
+        }
+
+        public void Finish(BackupFileDto? file, string? secondaryError, string? error)
+        {
+            lock (_sync)
+            {
+                var now = DateTime.UtcNow;
+                _stages.Add((_stage, (now - _stageUtc).TotalSeconds));
+                _finishedUtc = now;
+                _file = file;
+                _secondaryError = secondaryError;
+                _error = error;
+            }
+        }
+
+        public BackupRunDto ToDto(DateTime now)
+        {
+            lock (_sync)
+            {
+                var end = _finishedUtc ?? now;
+                return new BackupRunDto(kind, startedBy, _startedUtc, _finishedUtc is null, _stage, _bytes, _expected, _hasSecondary,
+                    Math.Round((end - _startedUtc).TotalSeconds, 1), Math.Round((end - _stageUtc).TotalSeconds, 1),
+                    Math.Round((end - _progressUtc).TotalSeconds, 1),
+                    _finishedUtc, _finishedUtc is null ? null : _error is null, _error, _file, _secondaryError);
+            }
+        }
+
+        /// <summary>Cuánto tardó cada etapa, para el log: "prepare 1.2 s, dump 151.0 s, …".</summary>
+        public string StageTimes()
+        {
+            lock (_sync)
+                return string.Join(", ", _stages.Select(s => FormattableString.Invariant($"{s.Stage} {s.Seconds:0.0} s")));
+        }
+    }
+
+    private static string StageLabel(string stage) => stage switch
+    {
+        "dump" => "base de datos",
+        "files" => "archivos",
+        "verify" => "verificación",
+        "retention" => "retención",
+        "secondary" => "segundo destino",
+        _ => "preparando",
+    };
+
+    /// <summary>Progreso que anota en el seguimiento y sigue de largo al de afuera (el estado del arranque, en una actualización).</summary>
+    private sealed class RunProgress(RunTracker run, IProgress<BackupProgress>? next) : IProgress<BackupProgress>
+    {
+        public void Report(BackupProgress value)
+        {
+            run.Report(value);
+            next?.Report(value);
+        }
+    }
+
+    /// <summary>"45 s", "3 min 12 s", "1 h 05 min".</summary>
+    public static string Duration(double seconds) => seconds switch
+    {
+        < 60 => $"{Math.Max(0, seconds):0} s",
+        < 3600 => $"{(int)seconds / 60} min {(int)seconds % 60:00} s",
+        _ => $"{(int)seconds / 3600} h {(int)seconds % 3600 / 60:00} min",
+    };
 
     /// <summary>Tope del proceso aparte: si se cuelga (p. ej. una carpeta de red que no responde), se mata.</summary>
     private TimeSpan WorkerTimeout => TimeSpan.FromMinutes(Math.Clamp(config.GetValue("Backup:TimeoutMinutes", 180), 5, 1440));
@@ -287,7 +475,8 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
     {
         string path = PathOf(name) ?? throw new FileNotFoundException("No existe ese respaldo.");
         if (!await _gate.WaitAsync(0, ct))
-            throw new InvalidOperationException("Ya hay un respaldo o una prueba de restauración en curso.");
+            throw new InvalidOperationException(BusyMessage);
+        Volatile.Write(ref _testing, name);
         string work = Path.Combine(Directory, $".prueba-{Guid.NewGuid():N}");
         try
         {
@@ -317,6 +506,7 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
         finally
         {
             try { System.IO.Directory.Delete(work, recursive: true); } catch { /* mejor esfuerzo */ }
+            Volatile.Write(ref _testing, null);
             _gate.Release();
         }
     }
@@ -518,12 +708,18 @@ public sealed class BackupService(EmbeddedPostgres pg, IConfiguration config, IS
     }
 
     /// <summary>
-    /// Salud para el panel de servicios: false si no hay un respaldo bueno reciente o si el segundo destino falla. Es una
-    /// advertencia (<see cref="Supervisor.BackupManagedService"/>), no una caída: reiniciar el programador no la arregla.
+    /// Salud para el panel de servicios: false si no hay un respaldo bueno reciente, si el segundo destino falla o si el
+    /// respaldo en curso dejó de avanzar. Es una advertencia (<see cref="Supervisor.BackupManagedService"/>), no una
+    /// caída: reiniciar el programador no la arregla. Con <paramref name="current"/> = false, solo lo guardado (la
+    /// página de Respaldos muestra el respaldo en curso en su propio cuadro, con <see cref="Progress"/>).
     /// </summary>
-    public (bool Healthy, string Detail) Health()
+    public (bool Healthy, string Detail) Health(bool current = true)
     {
-        if (Busy) return (true, "Respaldando…");
+        if (current && Busy && Volatile.Read(ref _run)?.ToDto(DateTime.UtcNow) is { Running: true } run)
+            return run.IdleSeconds >= StallAfter.TotalSeconds
+                ? (false, $"El respaldo en curso lleva {Duration(run.IdleSeconds)} sin avanzar ({StageLabel(run.Stage)}).")
+                : (true, $"Respaldando… ({StageLabel(run.Stage)}, {Duration(run.ElapsedSeconds)}).");
+        if (current && Busy) return (true, "Probando un respaldo…");
         if (_state.LastSuccessUtc is not { } ok)
             return DateTime.UtcNow - _startedUtc < TimeSpan.FromHours(26) && _state.LastError is null
                 ? (true, "Todavía no hay respaldos: el primero se hace al minuto de arrancar.")
