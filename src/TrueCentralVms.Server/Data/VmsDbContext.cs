@@ -92,6 +92,8 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     public DbSet<AccessFingerprint> AccessFingerprints => Set<AccessFingerprint>();
     public DbSet<AccessFace> AccessFaces => Set<AccessFace>();
     public DbSet<AccessPersonDevice> AccessPersonDevices => Set<AccessPersonDevice>();
+    public DbSet<AccessPersonField> AccessPersonFields => Set<AccessPersonField>();
+    public DbSet<AccessPersonFieldValue> AccessPersonFieldValues => Set<AccessPersonFieldValue>();
     public DbSet<AccessEvent> AccessEvents => Set<AccessEvent>();
 
     // Automatizaciones (workflows): disparador + acciones, y su historial
@@ -767,6 +769,34 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Ignore(p => p.FullName);
             e.HasIndex(p => p.EmployeeNo).IsUnique();
             e.HasIndex(p => new { p.LastName, p.FirstName });
+        });
+
+        modelBuilder.Entity<AccessPersonField>(e =>
+        {
+            e.Property(f => f.Name).HasMaxLength(64);
+            e.Property(f => f.Kind).HasConversion<string>().HasMaxLength(16);
+            e.Property(f => f.Options).HasMaxLength(4000);
+            e.Property(f => f.Description).HasMaxLength(256);
+            e.Ignore(f => f.OptionList);
+            e.HasIndex(f => f.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<AccessPersonFieldValue>(e =>
+        {
+            e.HasKey(v => new { v.AccessPersonId, v.AccessPersonFieldId });
+            e.Property(v => v.Value).HasMaxLength(512);
+            e.HasOne(v => v.AccessPerson)
+                .WithMany(p => p.FieldValues)
+                .HasForeignKey(v => v.AccessPersonId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Borrar un campo borra sus valores: el campo es la pregunta, sin
+            // ella las respuestas no significan nada.
+            e.HasOne(v => v.Field)
+                .WithMany(f => f.Values)
+                .HasForeignKey(v => v.AccessPersonFieldId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Filtrar la lista por un campo ("Colacion = 2") busca por campo y valor.
+            e.HasIndex(v => new { v.AccessPersonFieldId, v.Value });
         });
 
         modelBuilder.Entity<AccessVehicle>(e =>

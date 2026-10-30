@@ -107,6 +107,8 @@ public sealed class PackagePerson
     public string? DepartmentName { get; set; }
     /// <summary>Campos personalizados de HikCentral (nombre → valor), p. ej. «Colacion».</summary>
     public Dictionary<string, string> CustomFields { get; set; } = [];
+    /// <summary>Cargo, si HikCentral lo entregó (HCP 3.1 no lo hace por la OpenAPI).</summary>
+    public string? Position { get; set; }
     /// <summary>
     /// Clave de teclado, leída de los terminales (HikCentral no la entrega).
     /// Va en claro en el paquete, como las huellas: el paquete es un dato
@@ -165,6 +167,11 @@ public sealed class MigrationPackage
     public List<PackageTerminal> Terminals { get; set; } = [];
     /// <summary>Niveles de acceso de HikCentral (vacío si la versión de HCP no los entrega por OpenAPI).</summary>
     public List<PackageLevel> Levels { get; set; } = [];
+    /// <summary>
+    /// Tipo de cada campo personalizado según HikCentral (nombre → <c>customFieldType</c>).
+    /// Vacío en paquetes de versiones anteriores: el tipo se deduce de los valores.
+    /// </summary>
+    public Dictionary<string, int> CustomFieldTypes { get; set; } = [];
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 

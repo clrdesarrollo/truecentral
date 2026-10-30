@@ -191,7 +191,51 @@ public class AccessPerson
     public List<AccessLevelPerson> Levels { get; set; } = [];
     public List<AccessPersonDevice> Devices { get; set; } = [];
 
+    /// <summary>Valores de los campos personalizados (solo los que tienen valor).</summary>
+    public List<AccessPersonFieldValue> FieldValues { get; set; } = [];
+
     public string FullName => $"{FirstName} {LastName}".Trim();
+}
+
+/// <summary>
+/// Campo personalizado de las personas, definido por el administrador: un dato
+/// propio de la instalación (turno de colación, contratista…). No viaja a los
+/// equipos; es información del padrón que se ve en la ficha, se filtra en la
+/// lista y la leen las integraciones.
+/// </summary>
+public class AccessPersonField
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public AccessPersonFieldKind Kind { get; set; } = AccessPersonFieldKind.Text;
+
+    /// <summary>Opciones de un campo <see cref="AccessPersonFieldKind.Choice"/>, una por línea.</summary>
+    public string? Options { get; set; }
+
+    public bool Required { get; set; }
+    public bool ShowInList { get; set; } = true;
+    public int SortOrder { get; set; }
+    public string? Description { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public List<AccessPersonFieldValue> Values { get; set; } = [];
+
+    public IReadOnlyList<string> OptionList => (Options ?? "")
+        .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+}
+
+/// <summary>Valor de un campo personalizado para una persona. Sin fila = sin valor.</summary>
+public class AccessPersonFieldValue
+{
+    public int AccessPersonId { get; set; }
+    public AccessPerson? AccessPerson { get; set; }
+    public int AccessPersonFieldId { get; set; }
+    public AccessPersonField? Field { get; set; }
+
+    /// <summary>Normalizado según el tipo: número con punto, "true"/"false", "yyyy-MM-dd".</summary>
+    public string Value { get; set; } = "";
 }
 
 /// <summary>Tarjeta de una persona. El número es el que leen los equipos.</summary>

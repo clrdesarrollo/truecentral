@@ -34,6 +34,15 @@ public sealed record HcpPerson(
     /// cada integración.
     /// </summary>
     public IReadOnlyDictionary<string, string> CustomFields { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Tipo de cada campo personalizado según HikCentral (<c>customFieldType</c>;
+    /// en HCP 3.1 el numérico es 1). Vacío si la versión no lo informa.
+    /// </summary>
+    public IReadOnlyDictionary<string, int> CustomFieldTypes { get; init; } = new Dictionary<string, int>();
+
+    /// <summary>Cargo de la persona, si la versión de HikCentral lo entrega por la OpenAPI (HCP 3.1 no).</summary>
+    public string Position { get; init; } = "";
 }
 
 /// <summary>Terminal de control de acceso registrado en HikCentral.</summary>
@@ -420,11 +429,14 @@ public sealed class HikCentralClient : IDisposable
 
         // HCP 3.1 escribe "customFiledName" (con la errata); otras versiones, "customFieldName".
         var custom = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var customTypes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (p.TryGetProperty("customFieldList", out var fields) && fields.ValueKind == JsonValueKind.Array)
             foreach (var f in fields.EnumerateArray())
             {
                 string? name = Str(f, "customFieldName") ?? Str(f, "customFiledName");
-                if (!string.IsNullOrWhiteSpace(name)) custom[name.Trim()] = (Str(f, "customFieldValue") ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                custom[name.Trim()] = (Str(f, "customFieldValue") ?? "").Trim();
+                if (Int(f, "customFieldType") is int type) customTypes[name.Trim()] = type;
             }
 
         return new HcpPerson(
@@ -442,7 +454,14 @@ public sealed class HikCentralClient : IDisposable
             Date(p, "endTime"),
             picUri,
             cards,
-            fingers) { CustomFields = custom };
+            fingers)
+        {
+            CustomFields = custom,
+            CustomFieldTypes = customTypes,
+            // HCP 3.1 no entrega el cargo por la OpenAPI (verificado el 30-10-2026 en
+            // personList, personInfo y advance/personList); se lee si alguna versión lo trae.
+            Position = (Str(p, "positionName") ?? Str(p, "position") ?? Str(p, "jobTitle") ?? "").Trim(),
+        };
     }
 
     private static string? Str(JsonElement obj, string name)

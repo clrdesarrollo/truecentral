@@ -165,7 +165,7 @@ public static class Permissions
         new(PersonsView, "Personas", "Ver personas",
             "Ver las personas registradas, sus fotos, tarjetas y niveles de acceso.", []),
         new(PersonsManage, "Personas", "Administrar personas",
-            "Crear, modificar y borrar personas, sus credenciales, niveles de acceso y horarios.", [PersonsView]),
+            "Crear, modificar y borrar personas, sus credenciales, niveles de acceso, horarios y campos personalizados.", [PersonsView]),
 
         new(DevicesManage, "Configuración", "Fuentes de video",
             "Agregar y configurar cámaras, grabadores, decodificadores y muros; buscar equipos en la red.", []),

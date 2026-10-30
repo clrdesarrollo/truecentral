@@ -279,7 +279,9 @@ Abra #menu("Control de acceso", "Personas") para ver el padrón.
 
 Para encontrar a alguien, use los filtros *Buscar* (nombre, identificador o
 tarjeta), *Departamento*, *Nivel de acceso* y *En los equipos*, y haga clic en
-#boton("Buscar"). #boton("Limpiar") los quita.
+#boton("Buscar"). #boton("Limpiar") los quita. Si hay campos personalizados,
+aparecen también *Campo personalizado* y *Valor* (ver _Campos personalizados_,
+más adelante).
 
 La tabla muestra 50 personas por página:
 
@@ -291,6 +293,7 @@ La tabla muestra 50 personas por página:
     etiqueta _desactivada_.],
   [*Identificador*], [Número con que la reconocen los equipos.],
   [*Departamento*], [Su área.],
+  [Un campo personalizado], [Su valor, en los campos marcados para mostrarse en la lista.],
   [*Credenciales*], [Lo que tiene cargado, por ejemplo _1 tarjeta · 2 huellas · rostro · clave_.],
   [*Niveles de acceso*], [Sus niveles. La etiqueta roja _ninguno_ advierte que no entra por ninguna puerta.],
   [*Vigencia*], [Fecha en que termina su vigencia (al pasar el puntero se ve desde cuándo rige).],
@@ -308,6 +311,64 @@ La tabla muestra 50 personas por página:
 
 Cuando la persona tiene equipos, el estado es un enlace: haga clic en él para
 ver qué pasó en cada equipo (ver _Escritura en los equipos_, más adelante).
+
+== Campos personalizados
+
+#requiere("Administrar personas")
+
+Los campos personalizados guardan datos de su instalación que la ficha no trae:
+el turno de colación, la empresa contratista, el número de casillero… Se
+completan en la ficha de cada persona, pueden mostrarse como columnas en la
+lista y sirven para filtrarla. No se escriben en los equipos: no cambian por
+dónde entra nadie.
+
+Para administrarlos, haga clic en #boton("Campos personalizados") en
+#menu("Control de acceso", "Personas"). La ventana muestra cada campo con su
+tipo y cuántas personas tienen un valor en él.
+
++ Haga clic en #boton("Agregar campo"), o en #boton("Editar") en la fila del
+  campo.
++ Escriba el *Nombre* y elija el *Tipo*.
++ Si el tipo es *Lista de opciones*, escriba las *Opciones*, una por línea.
++ Complete, si quiere, la *Descripción* (aparece bajo el campo en la ficha) y
+  el *Orden en la ficha y en la lista*.
++ Marque o desmarque *Obligatorio* y *Mostrar como columna en la lista de
+  personas*.
++ Haga clic en #boton("Agregar") (o #boton("Guardar cambios")).
+
+#table(
+  columns: (auto, 1fr),
+  table.header[Tipo][Admite],
+  [*Texto*], [Cualquier texto, hasta 512 caracteres.],
+  [*Número*], [Un número, con coma o con punto decimal: _2_, _2,5_.],
+  [*Lista de opciones*], [Una de las opciones definidas.],
+  [*Sí o no*], [Sí o No.],
+  [*Fecha*], [Una fecha del calendario.],
+)
+
+Un campo *obligatorio* se exige al agregar o editar una persona desde el panel.
+
+Para cambiar el tipo o las opciones de un campo que ya tiene valores, esos
+valores tienen que servir con el tipo nuevo: si alguno no sirve (un texto en un
+campo que pasa a ser número, una opción que se quita), no se cambia nada y el
+mensaje dice cuántas personas hay que corregir antes.
+
+#boton("Eliminar") borra el campo y su valor en todas las personas, sin vuelta
+atrás.
+
+Para filtrar la lista por un campo, elíjalo en *Campo personalizado* y escriba
+o elija el *Valor*:
+
+- en un campo de texto se buscan las personas cuyo valor contenga lo escrito;
+- en los demás tipos, las que tienen exactamente ese valor (_2_ y _2,0_ son lo
+  mismo);
+- con el *Valor* vacío se ven todas las que tienen algún valor;
+- con *sin valor* (o la opción *Sin valor* en las listas) se ven las que no lo
+  tienen.
+
+#nota[El migrador desde HikCentral trae los campos personalizados de
+  HikCentral, por ejemplo el turno de colación: crea en TrueCentral un campo con
+  el mismo nombre, o usa el que ya exista, y carga el valor de cada persona.]
 
 == Agregar o editar una persona
 
@@ -344,6 +405,7 @@ en segundo plano (_Persona agregada. Se está escribiendo en los equipos._).
   [*Cargo*, *Teléfono*, *Correo*, *Notas*], [Opcionales.],
   [*Vigencia*], [Fecha y hora de inicio y de término. Los equipos la respetan solos: fuera de ese período no la dejan pasar. Una persona nueva parte vigente desde hoy a las 00:00:00 hasta el 31-12-2099 a las 23:59:59.],
   [*Activa*], [Al desmarcarla, la persona se borra de los equipos, pero se conserva su historial.],
+  [*Campos personalizados*], [Los que haya definido el administrador (ver _Campos personalizados_). Los obligatorios no pueden quedar vacíos.],
 )
 
 #importante[Los terminales Hikvision aceptan vigencias solo hasta el
