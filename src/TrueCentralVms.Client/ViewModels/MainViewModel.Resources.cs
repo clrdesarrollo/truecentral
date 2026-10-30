@@ -54,7 +54,7 @@ public partial class MainViewModel
                 "Reconocimientos de patente en vivo"));
         if (PermissionScope.Current.Has(Permissions.AccessMonitor))
             cards.Children.Add(ResourceNode.Card(CardKinds.Access, "Últimos accesos", "\uE8D7",
-                "Pasos por todas las puertas en vivo"));
+                "Pasos por las puertas en vivo, sin eventos del sistema"));
         ResourceGroups.Add(cards);
 
         // Grupos de parlantes (los arma el administrador en el panel web).
@@ -100,7 +100,8 @@ public partial class MainViewModel
 
     /// <summary>El cuadro que muestra un recurso: su panel según el tipo (null si no se pudo o se canceló).</summary>
     /// <param name="cardRef">Clave guardada de una tarjeta con sus opciones (las cámaras de
-    /// «Últimas patentes», el «Solo sin confirmar» de «Últimas alertas»); null = la tarjeta como sale de la lista.</param>
+    /// «Últimas patentes», el «Solo sin confirmar» de «Últimas alertas», los equipos y los eventos
+    /// del sistema de «Últimos accesos»); null = la tarjeta como sale de la lista.</param>
     public CellPanel? CreatePanel(ResourceNode node, string? cardRef = null)
     {
         var panel = node.CardKind switch
@@ -109,7 +110,7 @@ public partial class MainViewModel
             CardKinds.Server => new ServerCardPanel(_api),
             CardKinds.Alerts => new AlertsCardPanel(_api, _hub, OpenAlert, CardKinds.AlertsPendingOnly(cardRef)),
             CardKinds.Plates => new PlatesCardPanel(_api, _hub, CardKinds.PlatesDevices(cardRef)),
-            CardKinds.Access => new AccessCardPanel(_api, _hub),
+            CardKinds.Access => new AccessCardPanel(_api, _hub, CardKinds.AccessDevices(cardRef), CardKinds.AccessIncludesSystem(cardRef)),
             // Las de «Mis páginas» se guardan en el cuadro como dirección: son solo de este usuario.
             CardKinds.Web when node.Url is { } url => new WebCellPanel(url, node.Name, node.IsPersonalWeb ? null : node.Id, _api),
             CardKinds.WebCustom => AskWebPage(),

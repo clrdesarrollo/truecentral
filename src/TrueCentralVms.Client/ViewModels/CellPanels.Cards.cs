@@ -31,28 +31,55 @@ public static class CardKinds
 
     /// <summary>«Últimas patentes» con las cámaras ANPR elegidas en su engranaje: "card-plates?devices=3,7"
     /// (sin cámaras = todas, la clave sola). Así lo guardan los tableros y la última sesión.</summary>
-    public static string PlatesRef(IEnumerable<int> devices)
-    {
-        var ids = devices.Distinct().Order().ToList();
-        return ids.Count == 0 ? Plates : $"{Plates}?devices={string.Join(',', ids)}";
-    }
+    public static string PlatesRef(IEnumerable<int> devices) => WithOptions(Plates, DevicesOption(devices));
 
     /// <summary>Las cámaras ANPR de una clave de «Últimas patentes» (vacío = todas).</summary>
-    public static IReadOnlyCollection<int> PlatesDevices(string? reference)
-    {
-        int q = reference?.IndexOf("?devices=", StringComparison.Ordinal) ?? -1;
-        if (q < 0) return [];
-        return reference![(q + "?devices=".Length)..].Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .Select(s => int.TryParse(s, out int id) ? id : 0).Where(id => id > 0).ToHashSet();
-    }
+    public static IReadOnlyCollection<int> PlatesDevices(string? reference) => Ids(Option(reference, "devices"));
 
     /// <summary>«Últimas alertas» con el interruptor «Solo sin confirmar» encendido: "card-alerts?pending=1"
     /// (apagado = la clave sola).</summary>
     public static string AlertsRef(bool pendingOnly) => pendingOnly ? $"{Alerts}?pending=1" : Alerts;
 
     /// <summary>La clave de «Últimas alertas» trae el interruptor «Solo sin confirmar» encendido.</summary>
-    public static bool AlertsPendingOnly(string? reference) =>
-        reference?.Contains("?pending=1", StringComparison.Ordinal) == true;
+    public static bool AlertsPendingOnly(string? reference) => Option(reference, "pending") == "1";
+
+    /// <summary>«Últimos accesos» con los equipos de acceso elegidos en su engranaje y el interruptor
+    /// «Eventos del sistema»: "card-access?devices=3,7&amp;system=1" (todos los equipos y sin eventos
+    /// del sistema = la clave sola).</summary>
+    public static string AccessRef(IEnumerable<int> devices, bool includeSystem) =>
+        WithOptions(Access, DevicesOption(devices), includeSystem ? "system=1" : null);
+
+    /// <summary>Los equipos de acceso de una clave de «Últimos accesos» (vacío = todos).</summary>
+    public static IReadOnlyCollection<int> AccessDevices(string? reference) => Ids(Option(reference, "devices"));
+
+    /// <summary>La clave de «Últimos accesos» trae encendido «Eventos del sistema».</summary>
+    public static bool AccessIncludesSystem(string? reference) => Option(reference, "system") == "1";
+
+    private static string? DevicesOption(IEnumerable<int> devices)
+    {
+        var ids = devices.Distinct().Order().ToList();
+        return ids.Count == 0 ? null : $"devices={string.Join(',', ids)}";
+    }
+
+    private static string WithOptions(string key, params string?[] options)
+    {
+        var present = options.OfType<string>().ToList();
+        return present.Count == 0 ? key : $"{key}?{string.Join('&', present)}";
+    }
+
+    /// <summary>El valor de una opción de la clave ("devices" de "card-access?devices=3,7&amp;system=1"
+    /// es "3,7"); null si no la trae.</summary>
+    private static string? Option(string? reference, string name)
+    {
+        int q = reference?.IndexOf('?') ?? -1;
+        if (q < 0) return null;
+        return reference![(q + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(p => p.StartsWith(name + "=", StringComparison.Ordinal))?[(name.Length + 1)..];
+    }
+
+    private static IReadOnlyCollection<int> Ids(string? list) =>
+        (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => int.TryParse(s, out int id) ? id : 0).Where(id => id > 0).ToHashSet();
 }
 
 /// <summary>Base de las tarjetas que se releen solas cada cierto tiempo.</summary>
@@ -517,6 +544,20 @@ public sealed partial class PlatesCardPanel : CellPanel
     public override bool CanConfigure => true;
     public override string ConfigureHint => "Elegir de qué cámaras ANPR se reciben los reconocimientos";
 
+    private static readonly Views.CardSourcesWindow.Texts SourcesTexts = new(
+        Glyph: "\uE804",
+        Header: "Cámaras de «Últimas patentes»",
+        Intro: "Reconocimientos que muestra esta tarjeta",
+        All: "De todas las cámaras ANPR",
+        Some: "Solo de las cámaras marcadas",
+        Empty: "No hay cámaras ANPR a su alcance: se configuran en el panel web (Fuentes de video → ANPR).",
+        NoneChecked: "Marque al menos una cámara, o elija «De todas las cámaras ANPR».");
+
+    /// <summary>Dueña de los diálogos de los engranajes: la ventana activa (la grilla puede estar en otra pantalla).</summary>
+    internal static System.Windows.Window? ActiveWindow() =>
+        System.Windows.Application.Current.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive)
+        ?? System.Windows.Application.Current.MainWindow;
+
     /// <summary>
     /// El engranaje: la lista de cámaras ANPR que ve esta sesión (su alcance),
     /// para marcar de cuáles mostrar las lecturas. Lo elegido viaja en la
@@ -531,9 +572,10 @@ public sealed partial class PlatesCardPanel : CellPanel
             Status = ex.Message;
             return;
         }
-        var owner = System.Windows.Application.Current.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive)
-                    ?? System.Windows.Application.Current.MainWindow;
-        if (Views.PlateSourcesWindow.Ask(owner, sources, _devices) is not { } chosen) return;
+        var items = sources.Select(s => new Views.CardSourcesWindow.Source(s.DeviceId, s.DeviceName, s.Live,
+            !s.Enabled ? "Apagada como fuente de patentes"
+            : s.LastEventAt is { } at ? $"Última lectura {at.ToLocalTime():dd-MM HH:mm}" : "Sin lecturas todavía")).ToList();
+        if (Views.CardSourcesWindow.Ask(ActiveWindow(), SourcesTexts, items, _devices) is not { } chosen) return;
         _devices = chosen;
         Title = TitleFor(_devices);
         if (Content is { } content)
@@ -683,6 +725,12 @@ public sealed class AccessLine(AccessEventDto e)
 /// eventos del equipo, como la puesta en hora, solo entran a la lista) y sigue
 /// al que llega, salvo que el operador esté mirando otro. Si los más nuevos son
 /// todos del equipo, el último que ingresó (pedido aparte) queda al pie de la lista.
+///
+/// Por omisión no muestra los eventos del sistema (<see cref="AccessEventRelevance"/>):
+/// con HikCentral conectado, cada terminal se pone en hora cada minuto y la lista
+/// quedaba llena de eso. El interruptor «Eventos del sistema» los suma y el
+/// engranaje elige de qué equipos de acceso se muestran los pasos (por omisión,
+/// de todos). Las dos cosas viajan en la clave de la tarjeta.
 /// </summary>
 public sealed partial class AccessCardPanel : CellPanel
 {
@@ -694,14 +742,29 @@ public sealed partial class AccessCardPanel : CellPanel
     private int _faceFor;
     /// <summary>El último paso de una persona: no sale de la lista aunque lleguen muchos eventos del equipo.</summary>
     private AccessLine? _lastPerson;
+    /// <summary>Equipos de acceso elegidos en el engranaje; vacío = todos.</summary>
+    private IReadOnlyCollection<int> _devices;
+    private bool _includeSystem;
+    /// <summary>Lecturas en curso: solo la última llena la lista (el interruptor puede ir y volver antes de que responda la primera).</summary>
+    private int _reloads;
 
-    public AccessCardPanel(ApiClient api, VmsHubClient hub)
+    public AccessCardPanel(ApiClient api, VmsHubClient hub, IReadOnlyCollection<int>? devices = null, bool includeSystem = false)
     {
         _api = api;
         _hub = hub;
-        Title = "Últimos accesos";
+        _devices = devices ?? [];
+        _includeSystem = includeSystem;
+        Title = TitleFor(_devices);
         _hub.AccessEventReceived += OnEvent;
     }
+
+    private static string TitleFor(IReadOnlyCollection<int> devices) =>
+        devices.Count == 0 ? "Últimos accesos"
+        : devices.Count == 1 ? "Últimos accesos · 1 equipo" : $"Últimos accesos · {devices.Count} equipos";
+
+    private bool Accepts(AccessEventDto e) =>
+        (_devices.Count == 0 || _devices.Contains(e.DeviceId)) &&
+        (_includeSystem || !AccessEventRelevance.IsSystem(e.Kind, e.Credential));
 
     public override string Glyph => "\uE8D7";
     public override string Kind => CardKinds.Access;
@@ -711,14 +774,87 @@ public sealed partial class AccessCardPanel : CellPanel
     [ObservableProperty] private System.Windows.Media.ImageSource? _selectedFace;
     [ObservableProperty] private bool _isEmpty;
 
+    /// <summary>
+    /// El interruptor «Eventos del sistema» sobre la lista: la puesta en hora, los
+    /// avisos del equipo y la cerradura y el sensor de la puerta. Viaja en la clave
+    /// de la tarjeta, así que el tablero y la última sesión lo recuerdan.
+    /// </summary>
+    public bool IncludeSystem
+    {
+        get => _includeSystem;
+        set
+        {
+            if (!SetProperty(ref _includeSystem, value)) return;
+            SaveOptions();
+            _ = ReloadSafeAsync();
+        }
+    }
+
+    public override bool CanConfigure => true;
+    public override string ConfigureHint => "Elegir de qué equipos de acceso se muestran los pasos";
+
+    private static readonly Views.CardSourcesWindow.Texts SourcesTexts = new(
+        Glyph: "\uE8D7",
+        Header: "Equipos de «Últimos accesos»",
+        Intro: "Pasos que muestra esta tarjeta",
+        All: "De todos los equipos de acceso",
+        Some: "Solo de los equipos marcados",
+        Empty: "No hay puertas a su alcance: los equipos se agregan en el panel web (Dispositivos → Control de acceso).",
+        NoneChecked: "Marque al menos un equipo, o elija «De todos los equipos de acceso».");
+
+    /// <summary>
+    /// El engranaje: los equipos de acceso de las puertas que ve esta sesión (su
+    /// alcance), para marcar de cuáles mostrar los pasos.
+    /// </summary>
+    protected override async Task ConfigureAsync()
+    {
+        List<AccessDoorStateDto> doors;
+        try { doors = await _api.GetAccessDoorsAsync(); }
+        catch (ApiException ex)
+        {
+            Status = ex.Message;
+            return;
+        }
+        var items = doors.GroupBy(d => d.DeviceId).Select(g =>
+        {
+            var first = g.First();
+            string doorText = g.Count() == 1 ? first.Name : $"{g.Count()} puertas";
+            return new Views.CardSourcesWindow.Source(g.Key, first.DeviceName,
+                first.DeviceStatus == AccessDeviceStatus.Online,
+                string.IsNullOrWhiteSpace(first.Location) ? doorText : $"{doorText} · {first.Location}");
+        }).ToList();
+        if (Views.CardSourcesWindow.Ask(PlatesCardPanel.ActiveWindow(), SourcesTexts, items, _devices) is not { } chosen) return;
+        _devices = chosen;
+        Title = TitleFor(_devices);
+        SaveOptions();
+        await ReloadSafeAsync();
+    }
+
+    /// <summary>El cuadro avisa y se guarda la sesión con las opciones como quedaron.</summary>
+    private void SaveOptions()
+    {
+        if (Content is not { } content) return;
+        Content = content with { Ref = CardKinds.AccessRef(_devices, _includeSystem) };
+        OnPropertyChanged(nameof(Content));
+    }
+
+    private async Task ReloadSafeAsync()
+    {
+        try { await LoadAsync(); }
+        catch (ApiException ex) { Status = ex.Message; }
+    }
+
     public override async Task LoadAsync()
     {
+        int reload = ++_reloads;
         // El último que ingresó se pide aparte: entre los más nuevos puede no haber ninguno.
-        var latest = _api.GetAccessEventsAsync(Size);
-        var person = _api.GetAccessEventsAsync(1, withPerson: true);
-        var lines = (await latest).Items.Select(e => new AccessLine(e)).ToList();
-        // Un servidor sin el filtro withPerson devuelve el último de cualquiera: se descarta.
-        var lastPerson = (await person).Items.FirstOrDefault(e => e.PersonId is not null);
+        var latest = _api.GetAccessEventsAsync(Size, devices: _devices, noSystem: !_includeSystem);
+        var person = _api.GetAccessEventsAsync(1, withPerson: true, devices: _devices, noSystem: !_includeSystem);
+        // Un servidor sin los filtros noSystem o withPerson devuelve de todo: lo que no va se descarta.
+        var lines = (await latest).Items.Where(Accepts).Select(e => new AccessLine(e)).ToList();
+        var lastPerson = (await person).Items.FirstOrDefault(e => e.PersonId is not null && Accepts(e));
+        if (reload != _reloads) return;
+        Status = "";
         _lastPerson = lastPerson is null ? null
             : lines.FirstOrDefault(l => l.Event.Id == lastPerson.Id) ?? new AccessLine(lastPerson);
         Items.Clear();
@@ -740,6 +876,7 @@ public sealed partial class AccessCardPanel : CellPanel
 
     private void OnEvent(AccessEventDto e) => Ui.Run(() =>
     {
+        if (!Accepts(e)) return;
         // Si el operador miraba el último, pasa a mostrarse quien acaba de pasar.
         bool followNewest = Selected is null || Selected == Newest();
         var line = new AccessLine(e);

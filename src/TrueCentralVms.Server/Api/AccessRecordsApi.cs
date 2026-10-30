@@ -20,8 +20,10 @@ namespace TrueCentralVms.Server.Api;
 /// separadas por coma), <c>kinds</c> (Granted, Denied, DoorOpen, DoorClose,
 /// Alarm, Other), <c>credentials</c> (Card, Face, Fingerprint...),
 /// <c>personId</c>, <c>department</c>, <c>q</c> con <c>mode</c> (all, person,
-/// employee, card), <c>withPerson</c> (solo los de una persona del padrón) y
-/// el orden con <c>sort</c>/<c>dir</c>. Por compatibilidad se aceptan también
+/// employee, card), <c>withPerson</c> (solo los de una persona del padrón),
+/// <c>noSystem</c> (sin los eventos del sistema, <see cref="AccessEventRelevance"/>),
+/// <c>live</c> (lo pide la tarjeta «Últimos accesos»: lo más nuevo, como el
+/// Monitoreo) y el orden con <c>sort</c>/<c>dir</c>. Por compatibilidad se aceptan también
 /// <c>deviceId</c>, <c>doorId</c> y <c>kind</c> sueltos.
 /// </summary>
 public static class AccessRecordsApi
@@ -37,7 +39,7 @@ public static class AccessRecordsApi
         IReadOnlyList<int> DeviceIds, IReadOnlyList<int> DoorIds,
         IReadOnlyList<AccessEventKind> Kinds, IReadOnlyList<AccessCredentialKind> Credentials,
         int? PersonId, string? Department, string? Q, string Mode, string Sort, bool Ascending,
-        bool WithPerson = false);
+        bool WithPerson = false, bool NoSystem = false, bool Live = false);
 
     public static void MapAccessRecordsApi(this WebApplication app)
     {
@@ -167,14 +169,20 @@ public static class AccessRecordsApi
             Q: q["q"].ToString() is { Length: > 0 } text ? text.Trim() : null,
             Mode: mode, Sort: sort,
             Ascending: string.Equals(q["dir"], "asc", StringComparison.OrdinalIgnoreCase),
-            WithPerson: bool.TryParse(q["withPerson"], out bool withPerson) && withPerson);
+            WithPerson: bool.TryParse(q["withPerson"], out bool withPerson) && withPerson,
+            NoSystem: bool.TryParse(q["noSystem"], out bool noSystem) && noSystem,
+            Live: bool.TryParse(q["live"], out bool live) && live);
     }
 
-    // WithPerson no cuenta: lo pide solo la tarjeta «Últimos accesos» del cliente (quién
-    // ingresó último) cada vez que se abre, no es una búsqueda del operador.
+    // WithPerson y NoSystem no cuentan: los pide la tarjeta «Últimos accesos» del cliente
+    // (quién ingresó último, sin la puesta en hora) cada vez que se abre, no es una búsqueda
+    // del operador. Con live=true tampoco cuentan los equipos ni las puertas (los equipos
+    // del engranaje de la tarjeta, la puerta de su cuadro): es lo más nuevo de ellos, lo
+    // mismo que ve en el Monitoreo (y paginar sin filtros tampoco se anota). Las fechas,
+    // la persona, el texto, el resultado y la credencial cuentan siempre.
     private static bool HasUserFilters(Filter f) =>
         f.From is not null || f.To is not null || f.PersonId is not null || f.Q is not null || f.Department is not null ||
-        f.DoorIds.Count > 0 || f.DeviceIds.Count > 0 || f.Kinds.Count > 0 || f.Credentials.Count > 0;
+        (!f.Live && (f.DoorIds.Count > 0 || f.DeviceIds.Count > 0)) || f.Kinds.Count > 0 || f.Credentials.Count > 0;
 
     public static async Task<(IQueryable<AccessEvent>? Query, string? Error)> BuildAsync(VmsDbContext db, Filter f,
         CancellationToken ct)
@@ -192,6 +200,11 @@ public static class AccessRecordsApi
         if (f.WithPerson) query = query.Where(e => e.AccessPersonId != null);
         if (kinds.Length > 0) query = query.Where(e => kinds.Contains(e.Kind));
         if (credentials.Length > 0) query = query.Where(e => credentials.Contains(e.Credential));
+        // Lo mismo que AccessEventRelevance.IsSystem, en la consulta.
+        if (f.NoSystem)
+            query = query.Where(e => e.Kind == AccessEventKind.Granted || e.Kind == AccessEventKind.Denied ||
+                                     e.Kind == AccessEventKind.Alarm ||
+                                     (e.Kind == AccessEventKind.DoorOpen && e.Credential != AccessCredentialKind.Unknown));
 
         if (f.DoorIds.Count > 0)
         {
@@ -270,6 +283,7 @@ public static class AccessRecordsApi
         if (f.Credentials.Count > 0) parts.Add("credencial: " + string.Join(", ", f.Credentials.Select(AccessReports.CredentialLabel)));
         if (f.Department is { } department) parts.Add($"área: {department}");
         if (f.WithPerson) parts.Add("solo de personas del padrón");
+        if (f.NoSystem) parts.Add("sin eventos del sistema");
         if (f.PersonId is int personId)
         {
             string? name = await db.AccessPersons.AsNoTracking().Where(p => p.Id == personId)

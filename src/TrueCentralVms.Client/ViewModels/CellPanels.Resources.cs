@@ -76,7 +76,9 @@ public sealed partial class DoorCellPanel : CellPanel
         if (!ShowsRecent) return;
         try
         {
-            var page = await _api.GetAccessEventsAsync(200);
+            // Los de esta puerta: los últimos 200 de todas, con HikCentral poniendo en hora cada
+            // terminal cada minuto, eran apenas el último cuarto de hora.
+            var page = await _api.GetAccessEventsAsync(6, doors: [_doorId]);
             foreach (var e in page.Items.Where(Mine).Take(6)) Recent.Add(new AccessEventLine(e));
         }
         catch (ApiException) { /* sin historial: la puerta igual se opera */ }
