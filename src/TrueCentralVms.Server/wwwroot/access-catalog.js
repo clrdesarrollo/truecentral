@@ -1073,6 +1073,41 @@ async function resendAccessPadron(button, levels) {
   }
 }
 
+/** Iniciales de la persona para su avatar sin foto: nombre y apellido. */
+function accessPersonInitials(p) {
+  const first = (p.firstName || "").trim(), last = (p.lastName || "").trim();
+  const words = (first && last ? [first, last] : (p.fullName || "").trim().split(/\s+/)).filter(Boolean);
+  return words.slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+}
+
+/**
+ * Avatar de la lista de personas: la foto enrolada (se baja al verse la fila; un
+ * clic la amplía) o, sin foto, sus iniciales sobre un color que sale del nombre
+ * (siempre el mismo para la misma persona). Desactivada, en gris.
+ */
+function accessPersonAvatar(p) {
+  const initials = accessPersonInitials(p);
+  const hue = [...(p.fullName || "")].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+  const off = p.enabled ? "" : " off";
+  const initialsHtml = `<span class="person-avatar${off}" style="background:hsl(${hue} 55% 90%);color:hsl(${hue} 45% 30%)"
+    aria-hidden="true">${esc(initials)}</span>`;
+  if (!p.face) return initialsHtml;
+  // El token va en la query (un <img> no manda la cabecera de sesión); v= renueva la foto si se cambia.
+  const src = `/api/access/persons/${p.id}/face?access_token=${encodeURIComponent(Api.token)}&v=${encodeURIComponent(p.face.createdAt)}`;
+  return `<button type="button" class="person-avatar person-avatar-photo${off}" title="Ver la foto de ${esc(p.fullName)}"
+    data-fallback="${esc(initialsHtml)}"><img src="${src}" alt="" loading="lazy" decoding="async"></button>`;
+}
+
+/** La foto de la persona en grande. */
+function accessPersonPhotoModal(p, src) {
+  openModal(`
+    <h3>${esc(p.fullName)}</h3>
+    <img class="person-photo-big" src="${src}" alt="Foto de ${esc(p.fullName)}">
+    <div class="muted person-photo-meta">${esc([p.employeeNo, p.department, p.position].filter(Boolean).join(" · "))}</div>
+    <div class="modal-actions"><button class="btn" type="button" id="person-photo-close">Cerrar</button></div>`);
+  $("#person-photo-close").addEventListener("click", closeModal);
+}
+
 async function loadAccessPersons(levels) {
   const box = $("#access-person-results");
   if (!box) return;
@@ -1102,8 +1137,13 @@ async function loadAccessPersons(levels) {
       <tbody>
         ${data.items.map((p) => `
           <tr data-id="${p.id}">
-            <td>${esc(p.fullName)}${p.enabled ? "" : ` <span class="tag operator">desactivada</span>`}
-              ${p.position ? `<div class="muted" style="font-size:11px">${esc(p.position)}</div>` : ""}</td>
+            <td><div class="person-cell">
+              ${accessPersonAvatar(p)}
+              <div>
+                <div class="person-name">${esc(p.fullName)}${p.enabled ? "" : ` <span class="tag operator">desactivada</span>`}</div>
+                ${p.position ? `<div class="person-sub">${esc(p.position)}</div>` : ""}
+              </div>
+            </div></td>
             <td class="muted">${esc(p.employeeNo)}</td>
             <td class="muted">${esc(p.department ?? "—")}</td>
             <td class="muted">${esc(accessCredentialSummary(p)) || "—"}</td>
@@ -1132,6 +1172,12 @@ async function loadAccessPersons(levels) {
     </div>`;
 
   const byRow = (e) => data.items.find((p) => p.id === Number(e.target.closest("tr").dataset.id));
+  $$("#access-person-results .person-avatar-photo").forEach((b) => {
+    const img = b.querySelector("img");
+    // Foto que no llega (borrada en el padrón, sin permiso): quedan las iniciales.
+    img.addEventListener("error", () => { b.outerHTML = b.dataset.fallback; });
+    b.addEventListener("click", (e) => accessPersonPhotoModal(byRow(e), img.src));
+  });
   $("#person-prev")?.addEventListener("click", () => { accessPersonState.page--; loadAccessPersons(levels); });
   $("#person-next")?.addEventListener("click", () => { accessPersonState.page++; loadAccessPersons(levels); });
   $$("#access-person-results .btn-person-edit").forEach((b) =>

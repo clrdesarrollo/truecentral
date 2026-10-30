@@ -286,7 +286,9 @@ La tabla muestra 50 personas por página:
 #table(
   columns: (auto, 1fr),
   table.header[Columna][Contenido],
-  [*Persona*], [Nombre y cargo. La etiqueta _desactivada_ indica que no está activa.],
+  [*Persona*], [Su foto del rostro (o, si no tiene, sus iniciales en un círculo de color), el nombre y el
+    cargo. Haga clic en la foto para verla en grande. Una persona desactivada se ve en gris y con la
+    etiqueta _desactivada_.],
   [*Identificador*], [Número con que la reconocen los equipos.],
   [*Departamento*], [Su área.],
   [*Credenciales*], [Lo que tiene cargado, por ejemplo _1 tarjeta · 2 huellas · rostro · clave_.],
