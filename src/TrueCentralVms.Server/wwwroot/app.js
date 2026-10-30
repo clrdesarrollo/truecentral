@@ -2870,12 +2870,20 @@ async function enterApp() {
 }
 
 // Sonda de conexión (igual que el producto videowall: /api/health periódico).
+// También mira la versión del servidor: si cambió (se actualizó), el panel se
+// recarga para no seguir corriendo el código viejo contra el servidor nuevo. La
+// actualización reinicia el servidor y eso ya cerró la sesión: no se pierde nada.
+let panelServerVersion = null;
 setInterval(async () => {
+  let health = null;
+  try { health = await Api.get("/api/health"); } catch { /* sin conexión */ }
+  if (health?.version) {
+    if (panelServerVersion && health.version !== panelServerVersion) { location.reload(); return; }
+    panelServerVersion ??= health.version;
+  }
   if ($("#app-shell").classList.contains("hidden")) return;
-  let ok = true;
-  try { await Api.get("/api/health"); } catch { ok = false; }
-  $("#conn-dot").className = "dot " + (ok ? "ok" : "bad");
-  $("#conn-text").textContent = ok ? "Conectado" : "Sin conexión";
+  $("#conn-dot").className = "dot " + (health ? "ok" : "bad");
+  $("#conn-text").textContent = health ? "Conectado" : "Sin conexión";
 }, 4000);
 
 window.addEventListener("hashchange", () => {
@@ -3042,6 +3050,7 @@ async function init() {
   catch { /* servidor caído: se muestra el login, la sonda avisará */ }
 
   $("#auth-version").textContent = status ? `v${status.serverVersion}` : "";
+  panelServerVersion ??= status?.serverVersion ?? null;   // la versión con que se cargó este panel
 
   if (status && status.setupRequired) { renderSetup(status); return; }
   if (Api.token) {

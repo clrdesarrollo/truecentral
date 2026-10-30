@@ -496,6 +496,14 @@ app.Use(async (context, next) =>
                     detail: $"Rechazado: el token de sesión de '{exposed.Username}' venía en la dirección de {context.Request.Path} " +
                             "(fuera de los hubs y WebSocket solo vale en la cabecera Authorization). Pudo quedar en un historial o en un enlace copiado.",
                     success: false);
+            // Una imagen o una descarga con el token es una pestaña con el panel de
+            // antes de la actualización: se le dice qué hacer.
+            if (context.GetEndpoint()?.Metadata.GetMetadata<UrlTicketEndpoint>() is not null)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new { error = "Esta dirección ya no acepta el token de la sesión: recargue el panel (F5) y vuelva a intentarlo." });
+                return;
+            }
         }
     }
     if (token is null && context.Request.Query[UrlTicketService.QueryKey].FirstOrDefault() is { Length: > 0 } ticket)
