@@ -46,6 +46,19 @@ public static class MonitorPlacement
         window.DpiChanged += (_, _) => Apply();
     }
 
+    /// <summary>
+    /// MinWidth × MinHeight en píxeles del monitor, para el <c>ptMinTrackSize</c>
+    /// de WM_GETMINMAXINFO. Las ventanas sin marco atienden ese mensaje (el
+    /// maximizado que no tapa la barra de tareas) y lo marcan como resuelto: así
+    /// WPF ya no aplica MinWidth/MinHeight por su cuenta y la ventana se podía
+    /// achicar sin límite.
+    /// </summary>
+    public static (int Width, int Height) MinimumTrackSize(Window window)
+    {
+        var dpi = VisualTreeHelper.GetDpi(window);
+        return ((int)Math.Ceiling(window.MinWidth * dpi.DpiScaleX), (int)Math.Ceiling(window.MinHeight * dpi.DpiScaleY));
+    }
+
     /// <summary>Abre la ventana donde quedó (lugar anotado con <paramref name="placementKey"/>) o en un monitor libre.</summary>
     public static void ShowOnFreeMonitor(Window window, IReadOnlyList<Window> occupied, string placementKey, int cascade)
     {

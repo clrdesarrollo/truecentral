@@ -244,11 +244,20 @@ public sealed partial class ServerCardPanel : PollingCardPanel
     [ObservableProperty] private string _servicesText = "—";
     [ObservableProperty] private string _servicesLevel = "Unknown";
     [ObservableProperty] private string _problems = "";
+    [ObservableProperty] private string _versionText = "";
+    // Tiempo encendido: desde el último reinicio del servicio (y del equipo, en el detalle).
     [ObservableProperty] private string _uptimeText = "";
+    [ObservableProperty] private string _uptimeDetail = "";
     // Clientes conectados: puestos de escritorio y sesiones del panel web con el canal en vivo abierto.
     [ObservableProperty] private bool _hasClients;
     [ObservableProperty] private string _clientsText = "";
     [ObservableProperty] private string _clientsDetail = "";
+    // Ingresos rechazados en 24 h: fallos sueltos y ataques (solo con permiso de bitácora).
+    [ObservableProperty] private bool _hasLogins;
+    [ObservableProperty] private string _loginsText = "";
+    [ObservableProperty] private string _loginsDetail = "";
+    [ObservableProperty] private string _attacksDetail = "";
+    [ObservableProperty] private string _loginsLevel = "Ok";
 
     protected override async Task RefreshAsync()
     {
@@ -292,10 +301,38 @@ public sealed partial class ServerCardPanel : PollingCardPanel
                             (s.ClientsLimit is > 0 and { } limit ? $" (de {limit} puesto{(limit == 1 ? "" : "s")})" : "") +
                             $" · {web} en el panel web";
         }
-        var up = TimeSpan.FromSeconds(s.UptimeSeconds);
-        UptimeText = $"Versión {s.Version} · encendido hace " +
-                     (up.TotalDays >= 1 ? $"{(int)up.TotalDays} d {up.Hours} h" : $"{up.Hours} h {up.Minutes} min");
+        VersionText = $"Versión {s.Version}";
+        UptimeText = Duration(TimeSpan.FromSeconds(s.UptimeSeconds));
+        UptimeDetail = string.Join(" · ", new[]
+        {
+            s.StartedAt is { } started ? $"desde el {started.ToLocalTime():dd-MM-yyyy HH:mm}" : null,
+            s.OsUptimeSeconds is { } os ? $"Windows encendido hace {Duration(TimeSpan.FromSeconds(os))}" : null,
+        }.Where(p => p is not null));
+
+        HasLogins = s.Logins is not null;
+        if (s.Logins is { } l)
+        {
+            LoginsText = l.Failed.ToString();
+            LoginsDetail = l.Failed == 0 ? "ninguno en 24 h"
+                : $"en las últimas 24 h · {l.FailedLastHour} en la última hora";
+            int lockedNow = l.LockedAccountsNow + l.LockedIpsNow;
+            AttacksDetail = l.Locks == 0 && l.RejectedWhileLocked == 0 ? "Sin ataques (intentos repetidos)"
+                : $"Ataques: {l.Locks} bloqueo{(l.Locks == 1 ? "" : "s")} desde {l.AttackIps} IP" +
+                  (l.LastAttackAt is { } at ? $" · último {at.ToLocalTime():dd-MM HH:mm}" : "") +
+                  (lockedNow > 0 ? $" · {lockedNow} bloqueado{(lockedNow == 1 ? "" : "s")} ahora" : "");
+            // Rojo: un ataque en curso (algo bloqueado ahora o en la última hora); ámbar: hubo
+            // un ataque en el día o muchos fallos sueltos.
+            bool recentAttack = l.LastAttackAt is { } last && DateTime.UtcNow - last.ToUniversalTime() < TimeSpan.FromHours(1);
+            LoginsLevel = lockedNow > 0 || recentAttack ? "Alarm"
+                : l.Locks > 0 || l.RejectedWhileLocked > 0 || l.FailedLastHour >= 5 ? "Warning" : "Ok";
+        }
     }
+
+    /// <summary>"3 d 4 h", "5 h 12 min" o "8 min".</summary>
+    private static string Duration(TimeSpan t) =>
+        t.TotalDays >= 1 ? $"{(int)t.TotalDays} d {t.Hours} h"
+        : t.TotalHours >= 1 ? $"{t.Hours} h {t.Minutes} min"
+        : $"{Math.Max(0, t.Minutes)} min";
 }
 
 /// <summary>

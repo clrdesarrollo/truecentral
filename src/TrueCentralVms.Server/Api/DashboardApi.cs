@@ -32,7 +32,7 @@ public static class DashboardApi
     {
         app.MapGet("/api/dashboard", async (HttpContext ctx, VmsDbContext db, SystemMetrics metrics,
             ServiceSupervisor supervisor, CercoConnectionManager cercoConns, TokenService tokens,
-            Services.Licensing.LicenseService license, CancellationToken ct) =>
+            Services.Licensing.LicenseService license, LoginThrottle throttle, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
             var scope = await ctx.ScopeAsync(session);
@@ -49,6 +49,10 @@ public static class DashboardApi
             var clients = tokens.ConnectedClients();
             var server = new
             {
+                // Ingresos rechazados de las últimas 24 h (solo para quien ve la bitácora).
+                logins = scope.Has(Permissions.AuditView) ? await LoginFailuresAsync(db, throttle, now, ct) : null,
+                // Desde cuándo está encendido el equipo (Windows), además del servicio.
+                osUptimeSeconds = Environment.TickCount64 / 1000.0,
                 // Clientes conectados ahora: puestos de escritorio (y los que permite la licencia) y panel web.
                 clientsDesktop = clients.Desktop,
                 clientsWeb = clients.Web,
@@ -334,6 +338,42 @@ public static class DashboardApi
                 hotspots = activity is null ? null : hotspots.OrderByDescending(h => h.Count).Take(ListSize).ToList(),
             });
         });
+    }
+
+    /// <summary>
+    /// Ingresos rechazados de las últimas 24 horas, separando el error suelto
+    /// (una clave mal escrita) del ataque: intentos repetidos que llegaron a
+    /// bloquear una cuenta o una IP (<see cref="LoginThrottle"/>) y los que
+    /// siguieron llegando mientras estaba bloqueada. Sale de la bitácora, que
+    /// sobrevive a los reinicios; los bloqueos vigentes, de la memoria.
+    /// </summary>
+    private static async Task<object> LoginFailuresAsync(VmsDbContext db, LoginThrottle throttle, DateTime now,
+        CancellationToken ct)
+    {
+        var since = now.AddHours(-Hours);
+        var hourAgo = now.AddHours(-1);
+        var auth = db.AuditEvents.AsNoTracking().Where(a => a.Timestamp >= since && a.Category == "auth");
+        var counts = await auth
+            .Where(a => a.Action == "login-failed" || a.Action == "login-locked" || a.Action == "login-throttled")
+            .GroupBy(a => a.Action)
+            .Select(g => new { Action = g.Key, Count = g.Count(), Last = g.Max(a => a.Timestamp) })
+            .ToListAsync(ct);
+        var attacks = auth.Where(a => a.Action == "login-locked" || a.Action == "login-throttled");
+        int attackIps = await attacks.Where(a => a.ClientIp != "").Select(a => a.ClientIp).Distinct().CountAsync(ct);
+        int failedLastHour = await auth.CountAsync(a => a.Action == "login-failed" && a.Timestamp >= hourAgo, ct);
+        var locked = throttle.LockedNow();
+        int CountOf(string action) => counts.FirstOrDefault(c => c.Action == action)?.Count ?? 0;
+        return new
+        {
+            failed = CountOf("login-failed"),
+            failedLastHour,
+            locks = CountOf("login-locked"),
+            rejectedWhileLocked = CountOf("login-throttled"),
+            attackIps,
+            lastAttackAt = counts.Where(c => c.Action != "login-failed").Select(c => (DateTime?)c.Last).Max(),
+            lockedAccountsNow = locked.Accounts,
+            lockedIpsNow = locked.Ips,
+        };
     }
 
     private static string Join(params string?[] parts) =>

@@ -59,6 +59,15 @@ public sealed class LoginThrottle(TimeProvider clock)
         return locked;
     }
 
+    /// <summary>Cuentas e IP bloqueadas en este momento por intentos fallidos (para el estado del servidor).</summary>
+    public (int Accounts, int Ips) LockedNow()
+    {
+        var now = clock.GetUtcNow();
+        int Count(ConcurrentDictionary<string, Counter> map) =>
+            map.Values.Count(c => { lock (c) return c.LockedUntil is { } until && until > now; });
+        return (Count(_accounts), Count(_ips));
+    }
+
     /// <summary>Ingreso correcto: la cuenta parte de cero (los fallos de la IP siguen contando).</summary>
     public void RecordSuccess(string? username) => _accounts.TryRemove(AccountKey(username), out _);
 

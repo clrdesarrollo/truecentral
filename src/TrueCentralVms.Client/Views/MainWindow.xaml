@@ -382,20 +382,31 @@
                         <TextBlock Style="{StaticResource MetricIcon}" Text="&#xEDA2;"
                                    Tag="{Binding DiskLevel}" ToolTip="{Binding DiskTooltip}"/>
                     </StackPanel>
-                    <Ellipse Width="9" Height="9" Margin="0,0,7,0" VerticalAlignment="Center">
-                        <Ellipse.Style>
-                            <Style TargetType="Ellipse">
-                                <Setter Property="Fill" Value="{StaticResource OkBrush}"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsConnected}" Value="False">
-                                        <Setter Property="Fill" Value="{StaticResource DangerBrush}"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Ellipse.Style>
-                    </Ellipse>
-                    <TextBlock Text="{Binding ConnectionStatus}" Foreground="{StaticResource MutedBrush}"
-                               FontSize="11.5" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                    <!-- Estado de la conexión; al pasar el mouse, la dirección del servidor. Está en el
+                         área de arrastre del WindowChrome: sin IsHitTestVisibleInChrome no hay tooltip. -->
+                    <StackPanel Orientation="Horizontal" Background="Transparent" Margin="0,0,16,0"
+                                WindowChrome.IsHitTestVisibleInChrome="True" ToolTipService.InitialShowDelay="150">
+                        <StackPanel.ToolTip>
+                            <StackPanel>
+                                <TextBlock Text="{Binding ConnectionStatus}" FontSize="10.5" Opacity="0.75"/>
+                                <TextBlock Text="{Binding ServerLabel}" FontWeight="SemiBold" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </StackPanel.ToolTip>
+                        <Ellipse Width="9" Height="9" Margin="0,0,7,0" VerticalAlignment="Center">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="{StaticResource OkBrush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsConnected}" Value="False">
+                                            <Setter Property="Fill" Value="{StaticResource DangerBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="{Binding ConnectionStatus}" Foreground="{StaticResource MutedBrush}"
+                                   FontSize="11.5" VerticalAlignment="Center"/>
+                    </StackPanel>
                     <!-- Usuario: abre el menú de la sesión (servidor + cerrar sesión) -->
                     <Grid VerticalAlignment="Center">
                         <ToggleButton x:Name="UserMenuToggle" Style="{StaticResource UserMenuToggle}"

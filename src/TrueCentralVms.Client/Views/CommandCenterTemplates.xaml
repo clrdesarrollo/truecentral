@@ -502,7 +502,7 @@
     <DataTemplate DataType="{x:Type vm:ServerCardPanel}">
         <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource CellBgBrush}">
             <StackPanel Margin="14,12">
-                <TextBlock Text="{Binding UptimeText}" Style="{StaticResource PanelHint}" Margin="0,0,0,10"/>
+                <TextBlock Text="{Binding VersionText}" Style="{StaticResource PanelHint}" Margin="0,0,0,10"/>
                 <!-- Throughput: medidor de aguja + entrada / salida y la curva de los últimos minutos -->
                 <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,12"
                         Visibility="{Binding HasNetwork, Converter={x:Static vm:BoolToVisibility.Instance}}">
@@ -573,6 +573,44 @@
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="CLIENTES CONECTADOS" Style="{StaticResource GaugeLabel}" HorizontalAlignment="Left"/>
                         <TextBlock Text="{Binding ClientsDetail}" Style="{StaticResource PanelHint}"/>
+                    </StackPanel>
+                </DockPanel>
+                <!-- Tiempo encendido: desde el último reinicio del servidor (y del equipo, en el detalle) -->
+                <DockPanel Margin="0,0,0,10">
+                    <Grid DockPanel.Dock="Left" Width="30" Height="30" Margin="0,0,10,0" VerticalAlignment="Center">
+                        <Border CornerRadius="7" Background="{StaticResource AccentBrush}" Opacity="0.15"/>
+                        <TextBlock Text="&#xE916;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="{StaticResource AccentBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding UptimeText}" FontSize="18" FontWeight="SemiBold"
+                               FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="TIEMPO ENCENDIDO" Style="{StaticResource GaugeLabel}" HorizontalAlignment="Left"/>
+                        <TextBlock Text="{Binding UptimeDetail}" Style="{StaticResource PanelHint}"/>
+                    </StackPanel>
+                </DockPanel>
+                <!-- Ingresos rechazados en 24 h: fallos sueltos y ataques (intentos repetidos que bloquearon una cuenta o una IP) -->
+                <DockPanel Margin="0,0,0,10" Visibility="{Binding HasLogins, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                    <DockPanel.Resources>
+                        <Style x:Key="LoginsLevelText" TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{StaticResource OkBrush}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding LoginsLevel}" Value="Warning"><Setter Property="Foreground" Value="{StaticResource WarnBrush}"/></DataTrigger>
+                                <DataTrigger Binding="{Binding LoginsLevel}" Value="Alarm"><Setter Property="Foreground" Value="{StaticResource DangerBrush}"/></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DockPanel.Resources>
+                    <Grid DockPanel.Dock="Left" Width="30" Height="30" Margin="0,0,10,0" VerticalAlignment="Center">
+                        <Border CornerRadius="7" Background="{Binding Foreground, ElementName=LoginsIcon}" Opacity="0.15"/>
+                        <TextBlock x:Name="LoginsIcon" Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                                   Style="{StaticResource LoginsLevelText}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding LoginsText}" FontSize="22" FontWeight="SemiBold"
+                               FontFamily="{StaticResource MonoFont}" Style="{StaticResource LoginsLevelText}" VerticalAlignment="Center"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="INGRESOS FALLIDOS" Style="{StaticResource GaugeLabel}" HorizontalAlignment="Left"/>
+                        <TextBlock Text="{Binding LoginsDetail}" Style="{StaticResource PanelHint}"/>
+                        <TextBlock Text="{Binding AttacksDetail}" FontSize="11.5" TextWrapping="Wrap" Style="{StaticResource LoginsLevelText}"/>
                     </StackPanel>
                 </DockPanel>
                 <TextBlock Text="{Binding ServicesText}" FontWeight="SemiBold" Margin="0,4,0,0">
@@ -807,21 +845,24 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     <!-- La patente leída bajo el recorte, como en la página ANPR: verde sobre negro, roja si no es una PPU chilena válida -->
+                    <!-- Se achica (nunca crece) para que la patente se vea completa aunque la columna sea angosta -->
                     <Border Grid.Row="1" Background="#000000" CornerRadius="4" Padding="16,2" Margin="0,6,0,0" HorizontalAlignment="Center"
                             ToolTip="{Binding Selected.PlateHint}"
                             Visibility="{Binding Selected, Converter={x:Static vm:NotNullToVisibility.Instance}}">
-                        <TextBlock Text="{Binding Selected.Plate}" FontSize="28" FontWeight="Bold" FontFamily="{StaticResource MonoFont}">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="#39FF14"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding Selected.InvalidChile}" Value="True">
-                                            <Setter Property="Foreground" Value="#FF3B30"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
+                        <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
+                            <TextBlock Text="{Binding Selected.Plate}" FontSize="28" FontWeight="Bold" FontFamily="{StaticResource MonoFont}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#39FF14"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Selected.InvalidChile}" Value="True">
+                                                <Setter Property="Foreground" Value="#FF3B30"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Viewbox>
                     </Border>
                 </Grid>
             </Grid>
