@@ -29,6 +29,7 @@ public sealed class CercoReceiverService(
     CredentialProtector protector,
     ScopedHub hub,
     IConfiguration config,
+    LiveEventFeed liveEvents,
     ILogger<CercoReceiverService> logger) : BackgroundService
 {
     private const int MaxFrameBytes = 8 * 1024;
@@ -557,6 +558,7 @@ public sealed class CercoReceiverService(
         panel.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         await hub.SendAsync(VmsHubContract.CercoEventReceived, CercoMapper.ToDto(entity), s => s.CanViewCerco(panel.Id), ct);
+        liveEvents.OfferCerco(entity);
         await hub.SendAsync(VmsHubContract.CercoPanelStateChanged, CercoMapper.ToDto(panel, true), s => s.CanViewCerco(panel.Id), ct);
         return seq;
     }

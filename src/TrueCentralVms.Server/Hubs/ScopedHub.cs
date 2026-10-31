@@ -30,6 +30,7 @@ public sealed class ScopedHub(IHubContext<VmsHub> hub, UserScopeService scopes, 
         [VmsHubContract.FleetPositions] = Permissions.FleetView,
         [VmsHubContract.FleetEvent] = Permissions.FleetView,
         [VmsHubContract.FleetEventAcknowledged] = Permissions.FleetView,
+        [VmsHubContract.LiveEvent] = Permissions.LiveView,
     };
 
     /// <summary>El permiso que exige el mensaje y si algún usuario no lo tiene (si todos lo tienen, no hay que filtrar por él).</summary>
@@ -93,6 +94,25 @@ public sealed class ScopedHub(IHubContext<VmsHub> hub, UserScopeService scopes, 
         if (await SnapshotAsync(ct) is not { } snapshot) return;
         var groups = snapshot.Users.Values.Where(recipient).Select(s => VmsHub.UserGroup(s.UserId)).ToList();
         if (groups.Count > 0) await hub.Clients.Groups(groups).SendAsync(method, payload, ct);
+    }
+
+    /// <summary>
+    /// Cada usuario conectado recibe su propia versión, SIEMPRE calculada (aunque
+    /// nadie tenga la vista filtrada): para mensajes que dependen además de
+    /// permisos por tipo o de destinatarios, como los eventos en vivo. null = ese
+    /// usuario no recibe nada. El permiso del mensaje (si tiene) se exige antes.
+    /// </summary>
+    public async Task SendEachAsync<T>(string method, T payload, Func<UserScope, T, T?> make, CancellationToken ct = default)
+        where T : class
+    {
+        if (await SnapshotAsync(ct) is not { } snapshot) return;
+        MethodPermission.TryGetValue(method, out var permission);
+        foreach (var scope in snapshot.Users.Values)
+        {
+            if (permission is not null && !scope.Has(permission)) continue;
+            if (make(scope, payload) is { } mine)
+                await hub.Clients.Group(VmsHub.UserGroup(scope.UserId)).SendAsync(method, mine, ct);
+        }
     }
 
     /// <summary>Solo a quienes tienen el permiso (lo que su API solo les entrega a ellos).</summary>

@@ -158,6 +158,11 @@ public partial class LiveView : UserControl
         if (LocationOf(sender) is { } location) await Vm.OpenLocationAsync(location);
     }
 
+    private async void OnLocationWatch(object sender, RoutedEventArgs e)
+    {
+        if (LocationOf(sender) is { } location) await Vm.WatchLocationAsync(location);
+    }
+
     private async void OnLocationArmAway(object sender, RoutedEventArgs e)
     {
         if (LocationOf(sender) is { } location) await Vm.RunLocationCommandAsync(location, "arm-away");

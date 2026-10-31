@@ -36,6 +36,21 @@ public abstract partial class CellPanel : ObservableObject, IDisposable
     /// quien crea el panel); null = no se guarda.</summary>
     public CellContentRef? Content { get; set; }
 
+    /// <summary>
+    /// El panel convive con el video del cuadro (el Cuadro vigía: una franja
+    /// arriba y la cámara del evento abajo). Los demás tapan el cuadro entero.
+    /// </summary>
+    public virtual bool KeepsVideo => false;
+
+    /// <summary>
+    /// El cuadro donde quedó el panel. Se llama también al intercambiar o mover
+    /// cuadros: el panel viaja con su contenido.
+    /// </summary>
+    public virtual void AttachTo(VideoCellViewModel cell) { }
+
+    /// <summary>Ese cuadro soltó el panel (si en el intercambio ya lo tomó otro, no cambia nada).</summary>
+    public virtual void DetachFrom(VideoCellViewModel cell) { }
+
     /// <summary>Carga el estado inicial (lo llama el cuadro al recibir el panel).</summary>
     public virtual Task LoadAsync() => Task.CompletedTask;
 

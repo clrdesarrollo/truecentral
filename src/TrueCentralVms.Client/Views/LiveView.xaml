@@ -650,6 +650,9 @@
                                 <StackPanel.ContextMenu>
                                     <ContextMenu Style="{StaticResource DarkContextMenu}">
                                         <MenuItem Header="Abrir sus cámaras" Click="OnLocationOpenCameras"/>
+                                        <MenuItem Header="Vigilar esta ubicación en el cuadro seleccionado" Click="OnLocationWatch"
+                                                  ToolTip="Un Cuadro vigía que cambia solo a la cámara de los eventos de esta ubicación"
+                                                  Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                         <!-- "Sin ubicación" y sus equipos no son ubicaciones: sin órdenes -->
                                         <Separator Visibility="{Binding IsRealLocation, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                                         <MenuItem Header="Armar total sus áreas de alarma…" Click="OnLocationArmAway"
@@ -1221,6 +1224,10 @@
                             </DockPanel>
                             <!-- Cuerpo: video (o estado vacío clickeable) -->
                             <Grid Grid.Row="1">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
                                 <!-- El video se pinta en ventanas WPF propias de FlyleafLib
                                      ("Surface"/"Overlay") superpuestas al árbol normal: un clic ahí
                                      jamás llega a este template. La selección con clic sobre el video
@@ -1229,12 +1236,43 @@
                                                 KeyBindings="None" OpenOnDrop="None" SwapOnDrop="None"
                                                 ToggleFullScreenOnDoubleClick="None"
                                                 Loaded="OnFlyleafHostLoaded"
-                                                Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                                Visibility="{Binding HasVideo, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                    <fl:FlyleafHost.Style>
+                                        <!-- Con un panel que convive con el video (el Cuadro vigía) el video
+                                             va debajo de su franja; si no, ocupa todo el cuerpo. -->
+                                        <Style TargetType="fl:FlyleafHost">
+                                            <Setter Property="Grid.Row" Value="0"/>
+                                            <Setter Property="Grid.RowSpan" Value="2"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Panel.KeepsVideo, FallbackValue=False}" Value="True">
+                                                    <Setter Property="Grid.Row" Value="1"/>
+                                                    <Setter Property="Grid.RowSpan" Value="1"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </fl:FlyleafHost.Style>
+                                </fl:FlyleafHost>
                                 <!-- Contenido que no es video (puerta, panel, cerco, tarjeta, página web):
                                      cada tipo trae su DataTemplate en Views/CellPanelTemplates.xaml. -->
                                 <ContentControl Content="{Binding Panel}" Focusable="False"
-                                                Visibility="{Binding HasPanel, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
-                                <TextBlock Text="Clic para seleccionar este cuadro y doble clic en un canal"
+                                                Visibility="{Binding HasPanel, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                                    <ContentControl.Style>
+                                        <Style TargetType="ContentControl">
+                                            <Setter Property="Grid.RowSpan" Value="2"/>
+                                            <Style.Triggers>
+                                                <!-- Solo mientras muestra video: en espera, el panel ocupa el cuadro entero -->
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding Panel.KeepsVideo, FallbackValue=False}" Value="True"/>
+                                                        <Condition Binding="{Binding HasVideo}" Value="True"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Grid.RowSpan" Value="1"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ContentControl.Style>
+                                </ContentControl>
+                                <TextBlock Text="Clic para seleccionar este cuadro y doble clic en un canal" Grid.RowSpan="2"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"
                                            Foreground="{StaticResource FaintTextBrush}" FontSize="11.5" TextWrapping="Wrap"
                                            TextAlignment="Center" Margin="14"

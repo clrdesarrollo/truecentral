@@ -62,4 +62,6 @@ public interface ICommandCenter
     Task OpenResourceAsync(ResourceNode node);
     Task OpenResourceInCellAsync(ResourceNode node, VideoCellViewModel cell);
     Task RunLocationCommandAsync(LocationNode node, string command);
+    /// <summary>«Vigilar esta ubicación»: un Cuadro vigía filtrado a ella en el cuadro seleccionado.</summary>
+    Task WatchLocationAsync(LocationNode location);
 }

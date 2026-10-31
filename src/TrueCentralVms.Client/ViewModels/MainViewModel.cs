@@ -976,6 +976,7 @@ public partial class MainViewModel : ObservableObject
         _ = Cerco.InitializeAsync();
 
         Speakers = new SpeakersViewModel(api, hub, _settings);
+        InitializeLiveEvents();
         _ = Speakers.InitializeAsync();
 
         Intercom = new IntercomsViewModel(api, hub);

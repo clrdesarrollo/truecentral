@@ -22,6 +22,8 @@ public static class CardKinds
     public const string Alerts = "card-alerts";
     public const string Plates = "card-plates";
     public const string Access = "card-access";
+    /// <summary>Cuadro vigía: cambia solo a la cámara del último evento (opciones en la clave, ver <see cref="WatchOptions"/>).</summary>
+    public const string Watch = "card-watch";
     /// <summary>Página web de la lista del servidor (no es tarjeta: es lo que pide la lista).</summary>
     public const string Web = "web";
     /// <summary>«Otra dirección…»: se escribe al abrirla.</summary>
@@ -69,7 +71,7 @@ public static class CardKinds
 
     /// <summary>El valor de una opción de la clave ("devices" de "card-access?devices=3,7&amp;system=1"
     /// es "3,7"); null si no la trae.</summary>
-    private static string? Option(string? reference, string name)
+    internal static string? Option(string? reference, string name)
     {
         int q = reference?.IndexOf('?') ?? -1;
         if (q < 0) return null;
@@ -77,7 +79,7 @@ public static class CardKinds
             .FirstOrDefault(p => p.StartsWith(name + "=", StringComparison.Ordinal))?[(name.Length + 1)..];
     }
 
-    private static IReadOnlyCollection<int> Ids(string? list) =>
+    internal static IReadOnlyCollection<int> Ids(string? list) =>
         (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
             .Select(s => int.TryParse(s, out int id) ? id : 0).Where(id => id > 0).ToHashSet();
 }

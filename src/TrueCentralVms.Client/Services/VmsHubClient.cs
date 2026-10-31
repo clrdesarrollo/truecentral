@@ -85,6 +85,9 @@ public sealed class VmsHubClient : IAsyncDisposable
     /// <summary>Una llamada de citofonía empezó a sonar, fue contestada o terminó.</summary>
     public event Action<IntercomCallDto>? IntercomCallChanged;
 
+    /// <summary>Evento en vivo para el Cuadro vigía, ya resuelto a su recurso y cámaras.</summary>
+    public event Action<LiveEventDto>? LiveEventReceived;
+
     /// <summary>true = conectado al hub; false = reconectando/caído.</summary>
     public event Action<bool>? ConnectionStateChanged;
 
@@ -138,6 +141,7 @@ public sealed class VmsHubClient : IAsyncDisposable
         _connection.On<IoModuleDto>(VmsHubContract.IoModuleChanged, dto => IoModuleChanged?.Invoke(dto));
         _connection.On<IntercomDto>(VmsHubContract.IntercomStatusChanged, dto => IntercomStatusChanged?.Invoke(dto));
         _connection.On<IntercomCallDto>(VmsHubContract.IntercomCallChanged, dto => IntercomCallChanged?.Invoke(dto));
+        _connection.On<LiveEventDto>(VmsHubContract.LiveEvent, dto => LiveEventReceived?.Invoke(dto));
 
         _connection.Reconnecting += _ => { ConnectionStateChanged?.Invoke(false); return Task.CompletedTask; };
         _connection.Reconnected += _ => { ConnectionStateChanged?.Invoke(true); return Task.CompletedTask; };

@@ -97,8 +97,9 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     [NotifyPropertyChangedFor(nameof(HasPanel))]
     private CellPanel? _panel;
 
-    /// <summary>El cuadro muestra video: el host de Flyleaf y los botones de video de la barra.</summary>
-    public bool HasVideo => !IsEmpty && Panel is null;
+    /// <summary>El cuadro muestra video: el host de Flyleaf y los botones de video de la barra
+    /// (también con un panel que convive con el video, como el Cuadro vigía, si tiene cámara).</summary>
+    public bool HasVideo => !IsEmpty && (Panel is null || (Panel.KeepsVideo && AssignedChannel is not null));
 
     public bool HasPanel => Panel is not null;
 
@@ -128,7 +129,9 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     /// <summary>Número del cuadro en la grilla (1..N), visible en su barra.</summary>
     [ObservableProperty] private int _index;
     /// <summary>Canal asignado al cuadro (null = libre). Lo usa el panel PTZ.</summary>
-    [ObservableProperty] private ChannelNode? _assignedChannel;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasVideo))]
+    private ChannelNode? _assignedChannel;
     /// <summary>Audio del cuadro. Exclusivo: la grilla silencia los demás.</summary>
     [ObservableProperty] private bool _isAudioOn;
     /// <summary>Stream en uso (Main/Sub). El botón P/S de la barra lo alterna.</summary>
@@ -232,10 +235,12 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     }
 
     /// <summary>Abre un canal en esta celda (perfil main/sub según el tamaño de la grilla).</summary>
-    public async Task OpenAsync(ChannelNode node, StreamProfile profile)
+    /// <param name="keepPanel">La abre el propio panel (el Cuadro vigía): el panel se queda y el
+    /// título del cuadro sigue siendo el suyo.</param>
+    public async Task OpenAsync(ChannelNode node, StreamProfile profile, bool keepPanel = false)
     {
         // Una cámara reemplaza lo que el cuadro mostraba (página, puerta, tarjeta…).
-        if (Panel is { } previous)
+        if (!keepPanel && Panel is { } previous)
         {
             Panel = null;
             previous.Dispose();
@@ -250,7 +255,7 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         Profile = profile;
         AssignedChannel = node;
         IsEmpty = false;
-        Title = $"{node.Device.Name} · {node.Channel.Name}";
+        if (!keepPanel || Panel is null) Title = $"{node.Device.Name} · {node.Channel.Name}";
         Status = "Conectando…";
         IsConnecting = true;
         await ConnectAsync(sequence);
@@ -848,8 +853,16 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
     partial void OnAssignedChannelChanged(ChannelNode? value) => AssignedChannelChanged?.Invoke();
     partial void OnPanelChanged(CellPanel? oldValue, CellPanel? newValue)
     {
-        if (oldValue is not null) oldValue.PropertyChanged -= OnPanelPropertyChanged;
-        if (newValue is not null) newValue.PropertyChanged += OnPanelPropertyChanged;
+        if (oldValue is not null)
+        {
+            oldValue.PropertyChanged -= OnPanelPropertyChanged;
+            oldValue.DetachFrom(this);
+        }
+        if (newValue is not null)
+        {
+            newValue.PropertyChanged += OnPanelPropertyChanged;
+            newValue.AttachTo(this);
+        }
         AssignedChannelChanged?.Invoke();
     }
 
@@ -871,6 +884,25 @@ public partial class VideoCellViewModel : ObservableObject, IZoomTarget, IDispos
         // apagado no se decodifica (ahorra CPU en grillas grandes).
         if (Player is { } player) player.Config.Audio.Enabled = value;
         if (value) AudioActivated?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Suelta la cámara pero deja el panel (el Cuadro vigía vuelve a «esperando
+    /// eventos» sin dejar de ser vigía).
+    /// </summary>
+    public void StopVideo()
+    {
+        _openSequence++;
+        StopClipRecording(notify: true);
+        ResetDigitalZoom();
+        ReleaseParked();
+        _assigned = null;
+        _grantSource = null;
+        AssignedChannel = null;
+        IsAudioOn = false;
+        Player?.Stop();
+        Status = "";
+        IsConnecting = false;
     }
 
     [RelayCommand]

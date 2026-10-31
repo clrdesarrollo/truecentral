@@ -1116,4 +1116,99 @@
         </DockPanel>
     </DataTemplate>
 
+    <!-- Cuadro vigía: una franja arriba (qué pasó, dónde, hace cuánto, la cola y los
+         botones) y la cámara del evento debajo, en el host de video del propio cuadro.
+         Flyleaf pinta encima de todo lo que se le ponga sobre el video: por eso la franja
+         es una fila aparte. En espera (o sin cámara) el panel ocupa el cuadro entero. -->
+    <DataTemplate DataType="{x:Type vm:WatchCellPanel}">
+        <DockPanel Background="{StaticResource CellBgBrush}">
+            <Border DockPanel.Dock="Top" BorderThickness="4,0,0,1" Padding="8,4,4,4">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="{StaticResource CellBarBrush}"/>
+                        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Level}" Value="Alarm">
+                                <Setter Property="Background" Value="#3DEF4444"/>
+                                <Setter Property="BorderBrush" Value="{StaticResource DangerBrush}"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Level}" Value="Warning">
+                                <Setter Property="Background" Value="#33F59E0B"/>
+                                <Setter Property="BorderBrush" Value="{StaticResource WarnBrush}"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Level}" Value="Ok">
+                                <Setter Property="Background" Value="#2210B981"/>
+                                <Setter Property="BorderBrush" Value="{StaticResource OkBrush}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <DockPanel>
+                    <!-- Botones: fijar siempre; con un evento, ver aviso, cámaras, siguiente y listo -->
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding QueueText}" Foreground="{StaticResource TextBrush}" FontSize="11"
+                                   FontWeight="SemiBold" VerticalAlignment="Center" Margin="4,0,6,0"
+                                   ToolTip="Eventos esperando su turno en este vigía"
+                                   Visibility="{Binding HasQueue, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <StackPanel Orientation="Horizontal"
+                                    Visibility="{Binding HasManyCameras, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                            <Button Style="{StaticResource CellBarIconButton}" Content="&#xE76B;" Command="{Binding PreviousCameraCommand}"
+                                    ToolTip="Cámara anterior de este evento"/>
+                            <TextBlock Text="{Binding CameraText}" Foreground="{StaticResource MutedBrush}" FontSize="10.5"
+                                       VerticalAlignment="Center"/>
+                            <Button Style="{StaticResource CellBarIconButton}" Content="&#xE76C;" Command="{Binding NextCameraCommand}"
+                                    ToolTip="Cámara siguiente de este evento"/>
+                        </StackPanel>
+                        <Button Style="{StaticResource GhostButton}" Content="Ver aviso" FontSize="11" Padding="8,2" Margin="4,0,0,0"
+                                Command="{Binding OpenAlertCommand}" ToolTip="Abre la ventana de alarma de este aviso"
+                                Visibility="{Binding CanOpenAlert, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <Button Style="{StaticResource GhostButton}" Content="Siguiente" FontSize="11" Padding="8,2" Margin="4,0,0,0"
+                                Command="{Binding NextCommand}" ToolTip="Muestra ya el próximo evento de la cola"
+                                Visibility="{Binding HasQueue, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <Button Style="{StaticResource GhostButton}" Content="Listo" FontSize="11" Padding="8,2" Margin="4,0,0,0"
+                                Command="{Binding DoneCommand}" ToolTip="Ya lo vi: pasa al siguiente o vuelve a esperar"
+                                Visibility="{Binding HasEvent, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <Button Style="{StaticResource CellBarIconButton}" Content="{Binding PinGlyph}" FontSize="13" Margin="2,0,0,0"
+                                Command="{Binding TogglePinCommand}" ToolTip="{Binding PinHint}"/>
+                    </StackPanel>
+                    <!-- Con un evento: qué pasó y hace cuánto; debajo, dónde -->
+                    <StackPanel VerticalAlignment="Center"
+                                Visibility="{Binding HasEvent, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Current.Title}" FontSize="12.5" FontWeight="Bold"
+                                       Style="{StaticResource LevelText}" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding RepeatsText}" Foreground="{StaticResource TextBrush}" FontSize="11"
+                                       FontWeight="SemiBold" Margin="6,0,0,0" VerticalAlignment="Center"
+                                       ToolTip="Veces que se repitió el evento"/>
+                        </StackPanel>
+                        <!-- Hace cuánto (siempre a la vista) y dónde -->
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding AgoText}" Foreground="{StaticResource TextBrush}"
+                                       FontSize="11" FontWeight="SemiBold" Margin="0,0,6,0"/>
+                            <TextBlock Text="{Binding WhereText}" ToolTip="{Binding WhereText}" Foreground="{StaticResource MutedBrush}"
+                                       FontSize="11" TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                    </StackPanel>
+                    <!-- En espera -->
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                Visibility="{Binding IsIdle, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                        <TextBlock Text="&#xE890;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                   Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="{Binding IdleText}" Foreground="{StaticResource MutedBrush}" FontSize="11.5"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <!-- Cuerpo: solo cuando no hay video (en espera o un evento sin cámaras que usted vea) -->
+            <Grid Visibility="{Binding ShowsBody, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16">
+                    <TextBlock Text="&#xE890;" FontFamily="Segoe MDL2 Assets" FontSize="30" HorizontalAlignment="Center"
+                               Foreground="{StaticResource FaintTextBrush}"/>
+                    <TextBlock Text="{Binding BodyText}" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                               TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0" MaxWidth="320"/>
+                </StackPanel>
+            </Grid>
+        </DockPanel>
+    </DataTemplate>
+
 </ResourceDictionary>
