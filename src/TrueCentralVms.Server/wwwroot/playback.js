@@ -516,13 +516,13 @@ async function pbLoadTree() {
   }).filter((d) => d.channels.length);
   const nodes = new Map(locations.map((l) => [l.id, { loc: l, children: [], channels: [] }]));
   const roots = [];
-  for (const l of [...locations].sort((a, b) => lvCollator.compare(a.name, b.name))) {
+  for (const l of [...locations].sort(compareLocations)) {
     const node = nodes.get(l.id);
     const parent = l.parentId != null ? nodes.get(l.parentId) : null;
     (parent ? parent.children : roots).push(node);
   }
   const unassigned = { loc: null, children: [], channels: [] };
-  for (const ch of [...pb.channels.values()].sort((a, b) => lvCollator.compare(a.name, b.name)))
+  for (const ch of [...pb.channels.values()].sort(compareInLocation))
     (nodes.get(ch.locationId)?.channels ?? unassigned.channels).push(ch);
   if (unassigned.channels.length) roots.push(unassigned);
   const count = (n) => (n.total = n.channels.length + n.children.reduce((s, c) => s + count(c), 0));

@@ -127,7 +127,7 @@ function prLocationOptions(locations, selected) {
   }
   const out = [];
   const walk = (parent, depth) => {
-    for (const l of (children.get(parent) || []).sort((a, b) => a.name.localeCompare(b.name, "es"))) {
+    for (const l of (children.get(parent) || []).sort(compareLocations)) {
       out.push(`<option value="${l.id}" ${String(selected) === String(l.id) ? "selected" : ""}>${"  ".repeat(depth)}${esc(l.name)}</option>`);
       if (depth < 20) walk(l.id, depth + 1);
     }

@@ -5,7 +5,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// <see cref="ChannelNumber"/> es el número interno del SDK;
 /// <see cref="RtspChannel"/> es el índice que usan las URL RTSP del fabricante.
 /// </summary>
-public class Channel : ILocatable
+public class Channel : IOrderedResource
 {
     public int Id { get; set; }
     public int DeviceId { get; set; }
@@ -43,4 +43,6 @@ public class Channel : ILocatable
 
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
+    /// <summary>Posición dentro de su ubicación (Recursos); null = sin orden propio.</summary>
+    public int? LocationOrder { get; set; }
 }

@@ -941,12 +941,54 @@ main#view.view-editor { padding: 0; overflow: hidden; display: flex; flex-direct
 .access-segment input { width: auto; min-width: 118px; }
 .access-segment .btn { padding: 2px 8px; font-size: 12px; line-height: 1.4; }
 
-/* Puertas agrupadas por el equipo que las administra. */
-.access-door-group { margin-bottom: 12px; }
-.access-door-group-name {
-  font-size: 12px; color: var(--muted); text-transform: uppercase;
-  letter-spacing: .4px; margin-bottom: 4px;
+/* Listas que se arman con «Agregar» (puertas y personas de un nivel): una caja
+   con lo elegido y su ✕ para quitarlo; el buscador del modal agrega con un clic. */
+.pick-boxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 4px; }
+@media (max-width: 1180px) { .pick-boxes { grid-template-columns: minmax(0, 1fr); } }
+.pick-box {
+  display: flex; flex-direction: column; min-width: 0;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--field);
 }
+.pick-box-head { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.pick-box-head .grow { flex: 1; min-width: 0; }
+.pick-box-head .btn { flex: none; }
+.pick-box-title { font-weight: 600; font-size: 14px; color: var(--text); }
+.pick-box-count { color: var(--muted); font-weight: 500; }
+.pick-box-hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.pick-box-tools { display: flex; gap: 8px; align-items: center; padding: 10px 14px 0; }
+.pick-box-tools[hidden] { display: none; }
+.pick-box-tools input { flex: 1; min-width: 0; }
+.pick-box-tools .btn { flex: none; }
+.pick-box-list { max-height: 420px; overflow: auto; padding: 6px; }
+.pick-list { max-height: 52vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
+.pick-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 7px;
+  text-align: left; font: inherit; color: var(--text); background: none; border: 0;
+}
+.pick-row .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pick-row-name { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-row-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-box-list .pick-row:hover { background: var(--panel-2); }
+button.pick-add { cursor: pointer; }
+button.pick-add:hover, button.pick-add:focus-visible { background: rgba(var(--accent-rgb), .08); }
+.pick-plus { flex: none; font-size: 18px; line-height: 1; color: var(--accent); font-weight: 600; }
+.pick-x {
+  flex: none; width: 26px; height: 26px; border-radius: 6px; border: 0; background: none;
+  color: var(--muted); cursor: pointer; font-size: 13px;
+}
+.pick-x:hover, .pick-x:focus-visible { background: rgba(var(--danger-rgb), .12); color: var(--danger-text); }
+.pick-group {
+  display: flex; align-items: center; gap: 8px; padding: 8px 8px 4px; margin-top: 4px;
+  font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px;
+}
+.pick-group .grow { flex: 1; min-width: 0; }
+.pick-group .btn { text-transform: none; letter-spacing: 0; }
+.pick-empty { padding: 18px 12px; text-align: center; font-size: 13px; color: var(--muted); }
+.pick-status { flex: 1; font-size: 12.5px; }
+/* Formularios que usan todo el ancho (formPageRoute con wide). */
+.form-page.wide { max-width: 1480px; }
+.form-page.wide .form-page-layout { grid-template-columns: 220px minmax(0, 1fr); }
+@media (max-width: 980px) { .form-page.wide .form-page-layout { grid-template-columns: minmax(0, 1fr); } }
 
 /* Asistente por pasos (alta y edición de personas). La cabecera es
    navegable: cada paso es un botón, y el que todavía no se visitó va
@@ -1806,6 +1848,9 @@ label.with-ico .ico { width: 14px; height: 14px; color: var(--muted); }
 .res-node:hover { background: var(--panel-2); }
 .res-node.active { background: rgba(var(--accent-rgb), .15); color: var(--accent); }
 .res-node.drop { outline: 1px dashed var(--accent); background: rgba(var(--accent-rgb), .10); }
+/* Ordenar arrastrando: una línea marca si queda antes o después. */
+.res-node.drop-before { box-shadow: inset 0 2px 0 var(--accent); border-radius: 0; }
+.res-node.drop-after { box-shadow: inset 0 -2px 0 var(--accent); border-radius: 0; }
 .res-node .res-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .res-caret-btn { display: inline-flex; flex: none; color: var(--muted); }
 .res-caret { transition: transform .12s; }
@@ -1857,6 +1902,8 @@ label.with-ico .ico { width: 14px; height: 14px; color: var(--muted); }
 .res-bulk .grow { flex: 1; }
 table.grid th.res-check, table.grid td.res-check { width: 34px; padding-right: 0; }
 table.grid tr.res-row[draggable="true"] { cursor: grab; }
+table.grid tr.res-row.drop-before td { box-shadow: inset 0 2px 0 var(--accent); }
+table.grid tr.res-row.drop-after td { box-shadow: inset 0 -2px 0 var(--accent); }
 .res-cell-name { display: flex; align-items: center; gap: 7px; }
 .res-cell-name .res-ico { color: var(--muted); }
 .res-sub { font-size: 11.5px; color: var(--muted); margin-left: 22px; }

@@ -575,10 +575,12 @@ async function renderAccessLevels() {
     </table></div>`}`;
 
   const byRow = (e) => levels.find((l) => l.id === Number(e.target.closest("tr").dataset.id));
-  $("#btn-level-new")?.addEventListener("click", () => accessLevelModal(null, doors, schedules));
+  $("#btn-level-new")?.addEventListener("click", () => { location.hash = "#/access-levels/new"; });
   $$("#view .btn-level-edit").forEach((b) =>
-    b.addEventListener("click", (e) => accessLevelModal(byRow(e), doors, schedules)));
-  $$("#view .btn-level-assign").forEach((b) => b.addEventListener("click", (e) => accessAssignModal(byRow(e))));
+    b.addEventListener("click", (e) => { location.hash = `#/access-levels/edit?id=${byRow(e).id}`; }));
+  $$("#view .btn-level-assign").forEach((b) => b.addEventListener("click", (e) => {
+    location.hash = `#/access-levels/edit?id=${byRow(e).id}&focus=persons`;
+  }));
   $$("#view .btn-level-delete").forEach((b) => b.addEventListener("click", async (e) => {
     const level = byRow(e);
     const warning = level.personCount > 0
@@ -593,154 +595,269 @@ async function renderAccessLevels() {
   }));
 }
 
-/** Selector de puertas agrupadas por equipo (así se ven como están en terreno). */
-function accessDoorPicker(doors, selected) {
-  const groups = new Map();
-  for (const door of doors) {
-    if (!groups.has(door.deviceId)) groups.set(door.deviceId, { name: door.deviceName, location: door.location, doors: [] });
-    groups.get(door.deviceId).doors.push(door);
+/** Todo el padrón: la API lo entrega de a 500. */
+async function accessAllPersons() {
+  const all = [];
+  for (let page = 1; ; page++) {
+    const data = await Api.get(`/api/access/persons?page=${page}&pageSize=500`);
+    all.push(...data.items);
+    if (!data.items.length || all.length >= data.total) return all;
   }
-  return [...groups.values()].map((group) => `
-    <div class="access-door-group">
-      <div class="access-door-group-name">${esc(group.name)}${group.location ? ` <span class="muted">· ${esc(group.location)}</span>` : ""}</div>
-      <div class="wf-check-grid" style="max-height:none">
-        ${group.doors.map((d) => `
-          <label class="checkbox-row" ${d.enabled ? "" : `title="Puerta pausada: no da permiso aunque se la incluya"`}>
-            <input type="checkbox" class="al-door" value="${d.id}" ${selected.has(d.id) ? "checked" : ""}>
-            ${esc(d.name)}${d.enabled ? "" : ` <span class="muted">(pausada)</span>`}
-          </label>`).join("")}
-      </div>
-    </div>`).join("");
 }
 
-function accessLevelModal(level, doors, schedules) {
+const accessCollator = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
+
+/** Texto para buscar sin tildes ni mayúsculas. */
+const accessFold = (s) => String(s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+
+/** Caja de una lista que se arma con «Agregar» (ver accessBindPickBox). */
+function accessPickBoxHtml(id, title, hint, addLabel) {
+  return `
+    <section class="pick-box" id="${id}">
+      <header class="pick-box-head">
+        <div class="grow">
+          <div class="pick-box-title">${esc(title)} <span class="pick-box-count"></span></div>
+          <div class="pick-box-hint">${esc(hint)}</div>
+        </div>
+        <button class="btn small" type="button" data-pick-add>+ ${esc(addLabel)}</button>
+      </header>
+      <div class="pick-box-tools" hidden>
+        <input type="search" data-pick-filter placeholder="Filtrar esta lista…" autocomplete="off">
+        <button class="btn ghost small" type="button" data-pick-clear></button>
+      </div>
+      <div class="pick-box-list" data-pick-list></div>
+    </section>`;
+}
+
+/**
+ * Lista que se arma con «Agregar» en vez de casillas (las puertas y las
+ * personas de un nivel). La caja muestra lo elegido, cada uno con su ✕ para
+ * quitarlo; «Agregar…» abre un buscador con lo que falta y un clic lo agrega.
+ * La selección vive en `opts.chosen` (Set de ids), no en el DOM: filtrar o
+ * redibujar no puede perder nada.
+ *
+ * opts: items, chosen, noun ([singular, plural], femenino), pickTitle, search
+ * (texto de ayuda del buscador), empty (caja vacía), name(item), sub(item),
+ * tag(item) opcional (HTML), group(item) opcional → { key, label }: en el
+ * buscador agrupa y permite agregar el grupo entero.
+ */
+function accessBindPickBox(id, opts) {
+  const box = $(`#${id}`);
+  const byId = new Map(opts.items.map((item) => [item.id, item]));
+  const groupOf = (item) => opts.group?.(item) ?? { key: "", label: "" };
+  const sorted = (list) => [...list].sort((a, b) =>
+    accessCollator.compare(groupOf(a).label, groupOf(b).label) || accessCollator.compare(opts.name(a), opts.name(b)));
+  const matches = (term) => (item) => !term || accessFold(`${opts.name(item)} ${opts.sub(item)}`).includes(term);
+  const count = (n) => `${n} ${n === 1 ? opts.noun[0] : opts.noun[1]}`;
+  const content = (item) => `
+    <span class="grow">
+      <span class="pick-row-name">${esc(opts.name(item))}${opts.tag?.(item) ?? ""}</span>
+      <span class="pick-row-sub">${esc(opts.sub(item))}</span>
+    </span>`;
+
+  const draw = () => {
+    const chosen = sorted([...opts.chosen].map((i) => byId.get(i)).filter(Boolean));
+    $(".pick-box-count", box).textContent = `(${chosen.length})`;
+    const term = accessFold($("[data-pick-filter]", box).value.trim());
+    const shown = chosen.filter(matches(term));
+    $(".pick-box-tools", box).hidden = chosen.length < 6;
+    $("[data-pick-clear]", box).textContent = term ? `Quitar las ${shown.length} que se ven` : "Quitar todas";
+    $("[data-pick-clear]", box).disabled = !shown.length;
+    $("[data-pick-list]", box).innerHTML = !chosen.length ? `<div class="pick-empty">${opts.empty}</div>`
+      : !shown.length ? `<div class="pick-empty">Ninguna coincide con el filtro.</div>`
+      : shown.map((item) => `
+        <div class="pick-row" data-id="${item.id}">
+          ${content(item)}
+          <button class="pick-x" type="button" data-remove title="Quitar de la lista"
+            aria-label="Quitar ${esc(opts.name(item))}">✕</button>
+        </div>`).join("");
+  };
+
+  /** Buscador de «Agregar…»: lo que todavía no está en la lista. Queda abierto para seguir agregando. */
+  const openPicker = () => {
+    const LIMIT = 300;
+    let added = 0;
+    openModal(`
+      <h3>${esc(opts.pickTitle)}</h3>
+      <div class="field">
+        <input type="search" id="pk-search" placeholder="${esc(opts.search)}" autocomplete="off">
+      </div>
+      <div class="pick-list" id="pk-list"></div>
+      <div class="modal-actions">
+        <span class="muted pick-status" id="pk-status"></span>
+        <button class="btn ghost" type="button" id="pk-all"></button>
+        <button class="btn" type="button" id="pk-done">Listo</button>
+      </div>`, true);
+    let found = [];
+    const drawPicker = () => {
+      const available = opts.items.filter((item) => !opts.chosen.has(item.id));
+      found = sorted(available).filter(matches(accessFold($("#pk-search").value.trim())));
+      let html = "", lastGroup = null;
+      for (const item of found.slice(0, LIMIT)) {
+        const group = groupOf(item);
+        if (opts.group && group.key !== lastGroup) {
+          lastGroup = group.key;
+          html += `<div class="pick-group"><span class="grow">${esc(group.label)}</span>
+            <button class="btn ghost small" type="button" data-add-group="${esc(String(group.key))}">Agregar todas</button></div>`;
+        }
+        html += `<button class="pick-row pick-add" type="button" data-id="${item.id}" title="Agregar a la lista">
+          ${content(item)}<span class="pick-plus" aria-hidden="true">+</span></button>`;
+      }
+      $("#pk-list").innerHTML = html || `<div class="pick-empty">${available.length
+        ? "Ninguna coincide con la búsqueda." : `Ya están todas en la lista.`}</div>`;
+      $("#pk-status").textContent = [
+        `${count(found.length)} para agregar`,
+        found.length > LIMIT ? `se ven ${LIMIT}: escriba para acotar` : "",
+        added ? `${added} agregada${added === 1 ? "" : "s"}` : "",
+      ].filter(Boolean).join(" · ");
+      const all = $("#pk-all");
+      all.textContent = `Agregar las ${found.length}`;
+      all.title = "Agrega todas las que coinciden con la búsqueda";
+      all.hidden = found.length < 2;
+    };
+    const add = (items) => {
+      for (const item of items) opts.chosen.add(item.id);
+      added += items.length;
+      drawPicker();
+      draw();
+    };
+    $("#pk-list").addEventListener("click", (e) => {
+      const group = e.target.closest("[data-add-group]");
+      if (group) { add(found.filter((item) => String(groupOf(item).key) === group.dataset.addGroup)); return; }
+      const row = e.target.closest(".pick-add");
+      if (row) add([byId.get(Number(row.dataset.id))]);
+    });
+    $("#pk-search").addEventListener("input", drawPicker);
+    // Enter agrega cuando la búsqueda dejó una sola.
+    $("#pk-search").addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      if (found.length === 1) { add(found); $("#pk-search").select(); }
+    });
+    $("#pk-all").addEventListener("click", () => add(found));
+    $("#pk-done").addEventListener("click", closeModal);
+    drawPicker();
+    $("#pk-search").focus();
+  };
+
+  box.addEventListener("click", (e) => {
+    if (e.target.closest("[data-pick-add]")) { openPicker(); return; }
+    if (e.target.closest("[data-pick-clear]")) {
+      const term = accessFold($("[data-pick-filter]", box).value.trim());
+      for (const item of [...opts.chosen].map((i) => byId.get(i)).filter(Boolean).filter(matches(term)))
+        opts.chosen.delete(item.id);
+      draw();
+      return;
+    }
+    const remove = e.target.closest("[data-remove]");
+    if (remove) {
+      opts.chosen.delete(Number(remove.closest(".pick-row").dataset.id));
+      draw();
+    }
+  });
+  $("[data-pick-filter]", box).addEventListener("input", draw);
+  draw();
+}
+
+/**
+ * Página del nivel de acceso (#/access-levels/new y #/access-levels/edit?id=):
+ * sus datos, sus puertas y quiénes lo tienen, juntos. Las dos listas se arman
+ * con «Agregar»; todo se guarda una sola vez, al final.
+ */
+async function accessLevelPage(id, focus) {
+  let levels, doors, schedules, persons;
+  try {
+    [levels, doors, schedules, persons] = await Promise.all([
+      Api.get("/api/access/levels"), Api.get("/api/access/doors"), Api.get("/api/access/schedules"),
+      accessAllPersons(),
+    ]);
+  } catch (err) { toast(err.error, true); return; }
+  const level = id ? levels.find((l) => l.id === id) : null;
+  if (id && !level) { toast("Ese nivel de acceso ya no existe.", true); return; }
+
   const isNew = !level;
-  const selected = new Set(level?.doorIds ?? []);
+  const hadPersons = new Set(level ? persons.filter((p) => p.levelIds.includes(level.id)).map((p) => p.id) : []);
+  const chosenDoors = new Set(level?.doorIds ?? []);
+  const chosenPersons = new Set(hadPersons);
+  let saved = level; // creado una vez, reintentar después de un error no lo duplica
 
   openModal(`
-    <h3>${isNew ? "Crear nivel de acceso" : "Editar nivel de acceso"}</h3>
+    <h3>${isNew ? "Crear nivel de acceso" : `Nivel de acceso "${esc(level.name)}"`}</h3>
     <div id="al-error"></div>
     <form id="access-level-form">
       <div class="form-grid">
         <div class="field">
-          <label>Nombre</label>
+          <label for="al-name">Nombre</label>
           <input id="al-name" required maxlength="128" value="${esc(level?.name ?? "")}"
             placeholder="Oficinas, Bodega, Todo el edificio…">
         </div>
         <div class="field">
-          <label>Horario</label>
+          <label for="al-schedule">Horario</label>
           <select id="al-schedule">
             ${schedules.map((s) => `<option value="${s.id}" ${level?.scheduleId === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}
           </select>
         </div>
       </div>
       <div class="field">
-        <label>Descripción (opcional)</label>
+        <label for="al-description">Descripción (opcional)</label>
         <input id="al-description" maxlength="512" value="${esc(level?.description ?? "")}">
-      </div>
-      <div class="field">
-        <label>Puertas <span class="muted" id="al-count">(${selected.size} elegida${selected.size === 1 ? "" : "s"})</span></label>
-        <div id="al-doors">${accessDoorPicker(doors, selected)}</div>
       </div>
       <label class="checkbox-row"><input type="checkbox" id="al-enabled" ${level ? (level.enabled ? "checked" : "") : "checked"}>
         Activo (desactivarlo le quita el permiso a todos los que lo tengan, sin borrar la configuración)</label>
+      <div class="pick-boxes">
+        ${accessPickBoxHtml("al-doors", "Puertas", "Por dónde pasa quien tenga el nivel.", "Agregar puertas")}
+        ${accessPickBoxHtml("al-persons", "Personas", "Quiénes tienen el nivel.", "Agregar personas")}
+      </div>
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="al-cancel">Cancelar</button>
-        <button class="btn" type="submit" id="al-save">${isNew ? "Crear" : "Guardar cambios"}</button>
+        <button class="btn" type="submit" id="al-save">${isNew ? "Crear nivel" : "Guardar cambios"}</button>
       </div>
     </form>`, true);
 
-  const updateCount = () => {
-    const count = $$("#al-doors .al-door:checked").length;
-    $("#al-count").textContent = `(${count} elegida${count === 1 ? "" : "s"})`;
-  };
-  $$("#al-doors .al-door").forEach((c) => c.addEventListener("change", updateCount));
-  $("#al-cancel").addEventListener("click", closeModal);
+  accessBindPickBox("al-doors", {
+    items: doors, chosen: chosenDoors, noun: ["puerta", "puertas"],
+    pickTitle: "Agregar puertas", search: "Buscar por puerta, equipo o ubicación…",
+    empty: "Todavía no hay puertas. Use <b>Agregar puertas</b>: sin puertas, el nivel no deja pasar por ningún lado.",
+    name: (d) => d.name,
+    sub: (d) => [d.deviceName, d.location].filter(Boolean).join(" · "),
+    tag: (d) => d.enabled ? "" : ` <span class="tag off" title="Puerta pausada: no da permiso aunque esté en el nivel">pausada</span>`,
+    group: (d) => ({ key: d.deviceId, label: [d.deviceName, d.location].filter(Boolean).join(" · ") }),
+  });
+  accessBindPickBox("al-persons", {
+    items: persons, chosen: chosenPersons, noun: ["persona", "personas"],
+    pickTitle: "Agregar personas", search: "Buscar por nombre, identificador o departamento…",
+    empty: persons.length ? "Nadie tiene este nivel todavía. Use <b>Agregar personas</b>."
+      : `Todavía no hay personas en el padrón: agréguelas en <a href="#/access-persons">Personas</a>.`,
+    name: (p) => p.fullName,
+    sub: (p) => [p.employeeNo, p.department].filter(Boolean).join(" · "),
+    tag: (p) => p.enabled ? "" : ` <span class="tag off" title="Persona desactivada: no pasa aunque tenga el nivel">desactivada</span>`,
+  });
+  // «Asignar personas» abre la página en la lista de personas.
+  if (focus === "persons") $("#al-persons").scrollIntoView({ block: "start" });
 
+  $("#al-cancel").addEventListener("click", closeModal);
   $("#access-level-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = {
       name: $("#al-name").value.trim(),
       description: $("#al-description").value.trim() || null,
       scheduleId: Number($("#al-schedule").value),
-      doorIds: $$("#al-doors .al-door:checked").map((c) => Number(c.value)),
+      doorIds: [...chosenDoors],
       enabled: $("#al-enabled").checked,
     };
     const save = $("#al-save");
     save.disabled = true;
     try {
-      if (isNew) await Api.post("/api/access/levels", body);
-      else await Api.put(`/api/access/levels/${level.id}`, body);
+      if (!saved) saved = await Api.post("/api/access/levels", body);
+      else await Api.put(`/api/access/levels/${saved.id}`, body);
+      const personsChanged = chosenPersons.size !== hadPersons.size || [...chosenPersons].some((p) => !hadPersons.has(p));
+      if (personsChanged) await Api.put(`/api/access/levels/${saved.id}/persons`, { personIds: [...chosenPersons] });
       closeModal();
-      toast(isNew ? "Nivel de acceso creado." : "Nivel actualizado. Se está reescribiendo en los equipos.");
-      renderAccessLevels();
+      toast(isNew ? "Nivel de acceso creado. Se está escribiendo en los equipos."
+        : "Nivel guardado. Se está reescribiendo en los equipos.");
     } catch (err) {
       $("#al-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
-      save.disabled = false;
-    }
-  });
-}
-
-/** "Asignar nivel de acceso": marcar quiénes lo tienen, con buscador. */
-async function accessAssignModal(level) {
-  let persons;
-  try { persons = (await Api.get(`/api/access/persons?pageSize=500`)).items; }
-  catch (err) { toast(err.error, true); return; }
-
-  const selected = new Set(persons.filter((p) => p.levelIds.includes(level.id)).map((p) => p.id));
-
-  const rows = (filter) => persons
-    .filter((p) => {
-      const term = filter.trim().toLowerCase();
-      return !term || p.fullName.toLowerCase().includes(term) ||
-             p.employeeNo.toLowerCase().includes(term) ||
-             (p.department ?? "").toLowerCase().includes(term);
-    })
-    .map((p) => `
-      <label class="checkbox-row">
-        <input type="checkbox" class="ap-person" value="${p.id}" ${selected.has(p.id) ? "checked" : ""}>
-        ${esc(p.fullName)} <span class="muted">· ${esc(p.employeeNo)}${p.department ? ` · ${esc(p.department)}` : ""}</span>
-      </label>`).join("");
-
-  openModal(`
-    <h3>Quién tiene el nivel "${esc(level.name)}"</h3>
-    <div id="ap-error"></div>
-    <div class="field">
-      <label>Buscar</label>
-      <input id="ap-search" placeholder="nombre, identificador o departamento…">
-    </div>
-    <div class="field">
-      <label>Personas <span class="muted" id="ap-count">(${selected.size} elegida${selected.size === 1 ? "" : "s"})</span></label>
-      <div class="wf-check-grid" id="ap-list" style="max-height:340px">${rows("")}</div>
-      ${persons.length ? "" : `<div class="info-box">Todavía no hay personas en el padrón.</div>`}
-    </div>
-    <div class="modal-actions">
-      <button class="btn ghost" type="button" id="ap-cancel">Cancelar</button>
-      <button class="btn" type="button" id="ap-save">Guardar</button>
-    </div>`, true);
-
-  const updateCount = () => {
-    $("#ap-count").textContent = `(${selected.size} elegida${selected.size === 1 ? "" : "s"})`;
-  };
-  // La selección vive en el Set, no en el DOM: filtrar la lista no puede
-  // perder lo que el operador ya marcó fuera del filtro.
-  const bind = () => $$("#ap-list .ap-person").forEach((c) => c.addEventListener("change", () => {
-    if (c.checked) selected.add(Number(c.value)); else selected.delete(Number(c.value));
-    updateCount();
-  }));
-  bind();
-  $("#ap-search").addEventListener("input", (e) => { $("#ap-list").innerHTML = rows(e.target.value); bind(); });
-  $("#ap-cancel").addEventListener("click", closeModal);
-  $("#ap-save").addEventListener("click", async () => {
-    const save = $("#ap-save");
-    save.disabled = true;
-    try {
-      await Api.put(`/api/access/levels/${level.id}/persons`, { personIds: [...selected] });
-      closeModal();
-      toast("Asignación guardada. Se está escribiendo en los equipos.");
-      renderAccessLevels();
-    } catch (err) {
-      $("#ap-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+      $("#al-error").scrollIntoView({ block: "nearest" });
       save.disabled = false;
     }
   });
@@ -1065,7 +1182,7 @@ function accessPersonSyncModal(person, levels) {
     $("#psd-close").addEventListener("click", closeModal);
     $("#psd-edit")?.addEventListener("click", () => {
       closeModal();
-      accessPersonModal(p, levels);
+      location.hash = `#/access-persons/edit?id=${p.id}`;
     });
     $("#psd-retry")?.addEventListener("click", async (e) => {
       const button = e.currentTarget;
@@ -1177,7 +1294,7 @@ async function renderAccessPersons() {
     });
     renderAccessPersons();
   });
-  $("#btn-person-new")?.addEventListener("click", () => accessPersonModal(null, levels));
+  $("#btn-person-new")?.addEventListener("click", () => { location.hash = "#/access-persons/new"; });
   $("#btn-person-fields")?.addEventListener("click", () => accessPersonFieldsModal());
   $("#btn-person-resend")?.addEventListener("click", (e) => resendAccessPadron(e.currentTarget, levels));
   $("#btn-person-sync")?.addEventListener("click", async (e) => {
@@ -1421,7 +1538,7 @@ async function loadAccessPersons(levels) {
   $("#person-prev")?.addEventListener("click", () => { accessPersonState.page--; loadAccessPersons(levels); });
   $("#person-next")?.addEventListener("click", () => { accessPersonState.page++; loadAccessPersons(levels); });
   $$("#access-person-results .btn-person-edit").forEach((b) =>
-    b.addEventListener("click", (e) => accessPersonModal(byRow(e), levels)));
+    b.addEventListener("click", (e) => { location.hash = `#/access-persons/edit?id=${byRow(e).id}`; }));
   $$("#access-person-results .btn-person-vehicles").forEach((b) =>
     b.addEventListener("click", (e) => accessVehiclesModal(byRow(e))));
   $$("#access-person-results .btn-person-sync-detail").forEach((b) =>
@@ -1468,6 +1585,23 @@ const accessDateInput = (date) => {
 /** Vigencia por defecto de una persona nueva: hoy 00:00:00 al 31/12/2099 23:59:59. */
 const accessDefaultValidFrom = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
 const accessDefaultValidTo = () => new Date(2099, 11, 31, 23, 59, 59);
+
+/**
+ * Página de la persona (#/access-persons/new y #/access-persons/edit?id=): carga
+ * lo que necesita el asistente (sus niveles, los campos personalizados y la
+ * persona al día) y lo abre; formPageRoute lo dibuja como página.
+ */
+async function accessPersonPage(id) {
+  let levels, person = null;
+  try {
+    [levels, accessPersonFields, person] = await Promise.all([
+      Api.get("/api/access/levels"),
+      Api.get("/api/access/person-fields").catch(() => []),
+      id ? Api.get(`/api/access/persons/${id}`) : null,
+    ]);
+  } catch (err) { toast(err.status === 404 ? "Esa persona ya no existe." : err.error, true); return; }
+  accessPersonModal(person, levels);
+}
 
 /**
  * Alta y edición de una persona, en tres pasos: primero QUIÉN ES, después CON

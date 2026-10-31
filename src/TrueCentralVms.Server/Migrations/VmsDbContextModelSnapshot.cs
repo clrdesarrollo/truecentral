@@ -264,6 +264,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("LocationId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("LocationOrder")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Mode")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -969,6 +972,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("LocationId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("LocationOrder")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -1358,6 +1364,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("LocationId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("LocationOrder")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("LowBattery")
                         .HasColumnType("boolean");
 
@@ -1637,6 +1646,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("LocationId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("LocationOrder")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Mac")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
@@ -1812,6 +1824,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LocationOrder")
                         .HasColumnType("integer");
 
                     b.Property<string>("Name")
@@ -2352,6 +2367,9 @@ namespace TrueCentralVms.Server.Migrations
                     b.Property<int?>("LocationId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("LocationOrder")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Model")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -2507,6 +2525,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LocationOrder")
                         .HasColumnType("integer");
 
                     b.Property<string>("Model")
@@ -2759,6 +2780,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasColumnType("character varying(128)");
 
                     b.Property<int?>("ParentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("UpdatedAt")
@@ -4040,6 +4064,9 @@ namespace TrueCentralVms.Server.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LocationOrder")
                         .HasColumnType("integer");
 
                     b.Property<string>("Model")
