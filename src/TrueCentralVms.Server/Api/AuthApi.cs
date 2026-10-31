@@ -25,8 +25,15 @@ public static class AuthApi
                     new { error = "El sistema no está inicializado. Complete la configuración inicial desde la máquina del servidor.", setupRequired = true },
                     statusCode: StatusCodes.Status503ServiceUnavailable);
 
-            if (await ThrottledAsync(ctx, request.Username, throttle, audit, "login-throttled") is { } throttled) return throttled;
             var user = await db.Users.FirstOrDefaultAsync(u => u.Username == request.Username && u.Enabled);
+            // El superadministrador sentado en el propio servidor entra aunque su cuenta
+            // esté bloqueada: un bot que prueba claves desde la red no puede dejarlo
+            // afuera (y al entrar, el bloqueo se borra). La clave se verifica igual.
+            bool consoleSuperAdmin = user?.IsSuperAdmin == true && ctx.Connection.RemoteIpAddress is { } from
+                                     && System.Net.IPAddress.IsLoopback(from);
+            var bypassed = consoleSuperAdmin ? throttle.LockOf(request.Username, null) : null;
+            if (!consoleSuperAdmin &&
+                await ThrottledAsync(ctx, request.Username, throttle, audit, "login-throttled") is { } throttled) return throttled;
             if (!PasswordMatches(user, request.Password))
             {
                 logger.LogWarning("Auth: login rechazado para '{Username}' desde {Ip}.",
@@ -34,9 +41,14 @@ public static class AuthApi
                 await audit.LogAsAsync(ctx, user?.Id, request.Username, user?.Role, "auth", "login-failed",
                     detail: "Usuario o contraseña incorrectos.", success: false);
                 await RecordFailureAsync(ctx, request.Username, user, throttle, audit);
-                return Results.Json(new { error = "Usuario o contraseña incorrectos." }, statusCode: StatusCodes.Status401Unauthorized);
+                return Results.Json(FailureBody(request.Username, user, throttle), statusCode: StatusCodes.Status401Unauthorized);
             }
             throttle.RecordSuccess(request.Username);
+            if (bypassed is not null)
+                await audit.LogAsAsync(ctx, user!.Id, user.Username, user.Role, "auth", "login-lock-bypassed",
+                    detail: "El superadministrador entró desde el propio servidor con su cuenta bloqueada por intentos " +
+                            "fallidos (" + (bypassed.Left is { } l ? $"quedaban {LoginThrottle.Describe(l)}" : "bloqueo sin plazo") +
+                            "): el bloqueo se borró.");
 
             // Desde fuera de las redes locales solo entra quien tiene «Entrar desde Internet».
             var wan = ctx.RequestServices.GetRequiredService<Services.Network.WanAccessService>();
@@ -129,7 +141,7 @@ public static class AuthApi
                 await audit.LogAsAsync(ctx, user?.Id, request.Username, user?.Role, "auth", "password-change-failed",
                     detail: "Cambio de contraseña rechazado: usuario o contraseña actual incorrectos.", success: false);
                 await RecordFailureAsync(ctx, request.Username, user, throttle, audit);
-                return Results.Json(new { error = "Usuario o contraseña incorrectos." }, statusCode: StatusCodes.Status401Unauthorized);
+                return Results.Json(FailureBody(request.Username, user, throttle), statusCode: StatusCodes.Status401Unauthorized);
             }
             throttle.RecordSuccess(request.Username);
 
@@ -274,27 +286,58 @@ public static class AuthApi
     private static async Task<IResult?> ThrottledAsync(HttpContext ctx, string username, LoginThrottle throttle, AuditService audit,
         string action)
     {
-        if (throttle.LockedFor(username, ctx.Connection.RemoteIpAddress) is not { } left) return null;
+        if (throttle.LockOf(username, ctx.Connection.RemoteIpAddress) is not { } locked) return null;
         await audit.LogAsAsync(ctx, null, username, null, "auth", action,
-            detail: $"Intento rechazado sin probar la contraseña: hay un bloqueo vigente por intentos fallidos (quedan {LoginThrottle.Describe(left)}).",
+            detail: "Intento rechazado sin probar la contraseña: " + (locked.Left is { } l
+                ? $"hay un bloqueo vigente por intentos fallidos (quedan {LoginThrottle.Describe(l)})."
+                : "la cuenta está bloqueada hasta que un administrador la desbloquee."),
             success: false);
-        ctx.Response.Headers.RetryAfter = ((int)Math.Ceiling(left.TotalSeconds)).ToString();
-        return Results.Json(new { error = $"Demasiados intentos fallidos. Espere {LoginThrottle.Describe(left)} antes de volver a intentarlo." },
+        if (locked.Left is { } left) ctx.Response.Headers.RetryAfter = ((int)Math.Ceiling(left.TotalSeconds)).ToString();
+        string error = !locked.Account
+            ? $"Demasiados intentos fallidos desde este equipo. Espere {LoginThrottle.Describe(locked.Left)} antes de volver a intentarlo."
+            : locked.Left is { } wait
+                ? $"La cuenta está bloqueada por intentos fallidos. Espere {LoginThrottle.Describe(wait)} o pida a un administrador que la desbloquee."
+                : "La cuenta está bloqueada por intentos fallidos. Un administrador debe desbloquearla en Seguridad → Usuarios.";
+        return Results.Json(new { error, locked = true, lockedSeconds = locked.Left?.TotalSeconds, indefinite = locked.Left is null },
             statusCode: StatusCodes.Status429TooManyRequests);
     }
+
+    /// <summary>
+    /// Clave incorrecta: cuántos intentos le quedan antes del bloqueo, o que este intento la bloqueó. Se responde
+    /// igual exista o no la cuenta (el freno cuenta por nombre), así que no revela qué usuarios existen.
+    /// </summary>
+    private static object FailureBody(string username, Data.Entities.User? user, LoginThrottle throttle)
+    {
+        const string wrong = "Usuario o contraseña incorrectos.";
+        if (throttle.LockOf(username, null) is { Account: true } locked)
+            return new
+            {
+                error = $"{wrong} La cuenta quedó bloqueada {LockPhrase(locked.Left)} por demasiados intentos fallidos.",
+                remainingAttempts = 0, locked = true, lockedSeconds = locked.Left?.TotalSeconds, indefinite = locked.Left is null,
+            };
+        var (remaining, next) = throttle.AccountAttempts(username, user?.IsSuperAdmin == true);
+        string left = remaining == 1 ? "Le queda 1 intento" : $"Le quedan {remaining} intentos";
+        return new { error = $"{wrong} {left} antes de que la cuenta se bloquee {LockPhrase(next)}.", remainingAttempts = remaining };
+    }
+
+    private static string LockPhrase(TimeSpan? duration) =>
+        duration is { } d ? $"por {LoginThrottle.Describe(d)}" : "hasta que un administrador la desbloquee";
 
     private static async Task RecordFailureAsync(HttpContext ctx, string username, Data.Entities.User? user, LoginThrottle throttle,
         AuditService audit)
     {
         if (Random.Shared.Next(50) == 0) throttle.Prune();
-        if (throttle.RecordFailure(username, ctx.Connection.RemoteIpAddress) is not { } locked) return;
-        string what = locked == "IP"
-            ? $"la IP {ctx.Connection.RemoteIpAddress} ({LoginThrottle.MaxIpFailures} intentos fallidos)"
-            : locked == "cuenta"
-                ? $"la cuenta «{username}» ({LoginThrottle.MaxAccountFailures} intentos fallidos seguidos)"
-                : $"la cuenta «{username}» y la IP {ctx.Connection.RemoteIpAddress}";
+        if (throttle.RecordFailure(username, ctx.Connection.RemoteIpAddress, exempt: user?.IsSuperAdmin == true) is not { } locked)
+            return;
+        string account = "";
+        if (locked != "IP" && throttle.StateOf(username) is { } state)
+            account = $"la cuenta «{username}» ({LoginThrottle.MaxAccountFailures} intentos fallidos seguidos; bloqueo n.º {state.Streak} " +
+                      $"seguido) {(state.Indefinite ? "hasta que un administrador la desbloquee" : $"por {LoginThrottle.Describe(state.LockedUntil - DateTimeOffset.UtcNow)}")}";
+        string ip = $"la IP {ctx.Connection.RemoteIpAddress} ({LoginThrottle.MaxIpFailures} intentos fallidos) por " +
+                    LoginThrottle.Describe(LoginThrottle.LockTime);
+        string what = locked == "IP" ? ip : locked == "cuenta" ? account : $"{account} y {ip}";
         await audit.LogAsAsync(ctx, user?.Id, username, user?.Role, "auth", "login-locked",
-            detail: $"Se bloqueó {what} por {LoginThrottle.Describe(LoginThrottle.LockTime)}: posible ataque de fuerza bruta.",
+            detail: $"Se bloqueó {what}: posible ataque de fuerza bruta.",
             success: false);
     }
 }

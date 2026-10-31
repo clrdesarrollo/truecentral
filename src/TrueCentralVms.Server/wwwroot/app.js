@@ -719,7 +719,9 @@ function renderLogin(message, tone = "info") {
     } catch (err) {
       if (err.data && err.data.setupRequired) { init(); return; }
       if (err.data && err.data.mustChangePassword) { renderChangePassword(username); return; }
-      $("#login-error").innerHTML = `<div class="error-box">${esc(err.error)}</div>`;
+      // El servidor dice cuántos intentos quedan antes del bloqueo, o que la cuenta está bloqueada.
+      const lock = err.data?.locked ? `<i class="mdi mdi-lock" aria-hidden="true"></i> ` : "";
+      $("#login-error").innerHTML = `<div class="error-box">${lock}${esc(err.error)}</div>`;
     }
   });
 }
@@ -1972,20 +1974,26 @@ async function renderUsers() {
         <th>Usuario</th><th>Roles</th><th>Alcance</th><th>Estado</th><th>Creado</th><th>Última clave</th><th></th>
       </tr></thead>
       <tbody>
-        ${users.map((u) => `
+        ${users.map((u) => {
+          // Al superadministrador lo desbloquea cualquier administrador (es lo único que se le puede hacer).
+          const canUnlock = u.locked && (u.editable !== false || (u.isSuperAdmin && Perms.admin));
+          return `
           <tr data-id="${u.id}">
-            <td>${esc(u.username)}${u.isSuperAdmin ? ` <span class="tag admin" title="Creado al activar la plataforma: acceso total sin importar los roles. Solo él modifica su usuario.">Superadministrador</span>` : ""}</td>
+            <td>${u.locked ? `<i class="mdi mdi-lock" style="color:var(--danger)" aria-label="Bloqueado" title="${esc(userLockText(u))}"></i> ` : ""}${esc(u.username)}${u.isSuperAdmin ? ` <span class="tag admin" title="Creado al activar la plataforma: acceso total sin importar los roles. Solo él modifica su usuario.">Superadministrador</span>` : ""}</td>
             <td>${userRolesHtml(u)}</td>
             <td>${userScopeHtml(u)}</td>
-            <td>${u.disabledByLicense ? licenseWaitTag(u).trim() : `<span class="tag ${u.enabled ? "on" : "off"}">${u.enabled ? "Habilitado" : "Deshabilitado"}</span>`}</td>
+            <td>${u.disabledByLicense ? licenseWaitTag(u).trim() : `<span class="tag ${u.enabled ? "on" : "off"}">${u.enabled ? "Habilitado" : "Deshabilitado"}</span>`}
+              ${u.locked ? `<span class="tag off" title="${esc(userLockText(u))}">${u.lockedUntil ? `Bloqueado hasta ${esc(formatDate(u.lockedUntil))}` : "Bloqueado hasta desbloquear"}</span>` : ""}</td>
             <td class="muted">${formatDate(u.createdAt)}</td>
             <td class="muted">${formatDate(u.passwordChangedAt)}</td>
-            <td class="row-actions">${u.editable === false
+            <td class="row-actions">${canUnlock ? `<button class="btn btn-unlock" title="Quitar el bloqueo por intentos fallidos">Desbloquear</button>` : ""}
+              ${u.editable === false
               ? `<span class="muted" title="${u.isSuperAdmin ? "Solo el superadministrador modifica su usuario" : "Tiene permisos o alcance que usted no tiene"}">Sin acceso</span>`
               : `<button class="btn ghost btn-edit">Editar</button>
               ${u.isSuperAdmin ? "" : `<button class="btn danger btn-delete">Eliminar</button>`}`}
             </td>
-          </tr>`).join("")}
+          </tr>`;
+        }).join("")}
       </tbody>
     </table>`;
 
@@ -2004,6 +2012,22 @@ async function renderUsers() {
       renderUsers();
     } catch (err) { toast(err.error, true); }
   }));
+  $$("#view .btn-unlock").forEach((b) => b.addEventListener("click", async (e) => {
+    const id = Number(e.target.closest("tr").dataset.id);
+    try {
+      const result = await Api.post(`/api/users/${id}/unlock`, {});
+      toast(result.message);
+      renderUsers();
+    } catch (err) { toast(err.error, true); }
+  }));
+}
+
+/** Por qué y hasta cuándo está bloqueada la cuenta (para el candado y la etiqueta de la tabla). */
+function userLockText(u) {
+  const which = u.lockStreak > 1 ? ` (bloqueo n.º ${u.lockStreak} seguido)` : "";
+  return u.lockedUntil
+    ? `Bloqueado por intentos fallidos${which} hasta el ${formatDate(u.lockedUntil)}`
+    : `Bloqueado por intentos fallidos${which} hasta que un administrador lo desbloquee`;
 }
 
 // ---------------------------------------------------------------------------

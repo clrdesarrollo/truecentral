@@ -42,7 +42,13 @@ public sealed record UserDto(int Id, string Username, string Role, bool Enabled,
     IReadOnlyList<int>? RoleIds = null, IReadOnlyList<string>? RoleNames = null, bool Editable = true,
     bool IsSuperAdmin = false, string? EffectiveScope = null,
     /// <summary>Apagado por el cupo de la licencia: se enciende solo cuando vuelve a haber cupo.</summary>
-    bool DisabledByLicense = false);
+    bool DisabledByLicense = false,
+    /// <summary>Bloqueado por intentos fallidos de ingreso (se desbloquea con POST /api/users/{id}/unlock).</summary>
+    bool Locked = false,
+    /// <summary>Hasta cuándo dura el bloqueo; null con <paramref name="Locked"/> = hasta que un administrador lo desbloquee.</summary>
+    DateTime? LockedUntil = null,
+    /// <summary>Bloqueos seguidos por intentos fallidos (el vigente incluido); 0 = ninguno reciente.</summary>
+    int LockStreak = 0);
 
 /// <summary>
 /// Alta/edición de usuario. En edición, Password null o vacía = no cambiar; los
