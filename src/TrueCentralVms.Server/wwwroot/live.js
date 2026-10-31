@@ -1277,6 +1277,7 @@ class LvCell {
   constructor() {
     this.index = 0;
     this.feed = null;
+    this.watch = null;       // Cuadro vigía (live-watch.js): cambia solo a la cámara del último evento
     this.el = document.createElement("div");
     this.el.className = "lv-cell empty";
     this.el.innerHTML = `
@@ -1304,7 +1305,7 @@ class LvCell {
     this.body = this.el.querySelector(".lv-body");
     this.el._lvCell = this;
   }
-  get isEmpty() { return !this.feed; }
+  get isEmpty() { return !this.feed && !this.watch; }
 
   /** Pone una cámara (o ninguna) en este cuadro; la anterior se libera. */
   attach(feed) {
@@ -1329,6 +1330,7 @@ class LvCell {
     if (lv.promoted && lv.promoted === this.feed) { lv.promoted = null; lv.promotedChannel = null; }
     this.feed?.dispose();
     this.feed = null;
+    if (this.watch) lvwTake(this);
     lvRenderCell(this);
   }
 }
@@ -1336,13 +1338,14 @@ class LvCell {
 function lvRenderCell(cell) {
   const f = cell.feed;
   const el = cell.el;
-  el.classList.toggle("empty", !f);
+  el.classList.toggle("empty", !f && !cell.watch);
   el.classList.toggle("sel", lv.selected === cell);
   el.classList.toggle("drop", lv.dropCell === cell);
   el.querySelector(".lv-num").textContent = cell.index;
   const title = el.querySelector(".lv-title");
-  title.textContent = f ? f.title : "Cuadro libre";
-  title.classList.toggle("muted", !f);
+  title.textContent = cell.watch ? cell.watch.title : f ? f.title : "Cuadro libre";
+  title.classList.toggle("muted", !f && !cell.watch);
+  if (cell.watch) lvwRender(cell);
   cell.bar.draggable = !!f;
   cell.bar.title = f ? "Arrastre este cuadro sobre otro para cambiar la cámara de ubicación (si el otro tiene video, se intercambian)" : "";
   el.querySelector(".lv-spin").hidden = !(f && (f.connecting || f.pendingTarget));
@@ -1529,6 +1532,7 @@ async function renderLiveView(fleet = false) {
             </span>
             <button type="button" class="btn ghost lv-tb lv-toggle" id="lv-zoom-btn" title="Zoom digital: arrastre sobre el video para marcar el área a acercar (clic derecho vuelve a 1×). La rueda del mouse acerca en cualquier momento.">${lvSvg(LV_ICO.zoom, 14)}<span>Zoom</span></button>
             <button type="button" class="btn ghost lv-tb lv-toggle" id="lv-merge-btn" title="Unir cuadros: arrastre de un cuadro a otro para unir el rectángulo en uno solo; un clic en un cuadro unido lo separa">${lvSvg(LV_ICO.views, 14)}<span>Unir</span></button>
+            ${lv.fleet ? "" : `<button type="button" class="btn ghost lv-tb" id="lv-watch-btn" title="Cuadro vigía en el cuadro seleccionado: cambia solo a la cámara del último evento">${lvSvg(LV_ICO.views, 14)}<span>Vigía</span></button>`}
             <button type="button" class="btn ghost lv-tb" id="lv-clear-all">Limpiar todo</button>
             <span class="lv-bulk" id="lv-bulk" hidden><i></i></span>
           </div>
@@ -1595,6 +1599,7 @@ function liveViewLeave() {
   window.removeEventListener("blur", lvOnWindowBlur);
   VmsHub.off("DeviceStatusChanged", lvOnDeviceStatus);
   VmsHub.off("ConfigChanged", lvOnConfigChanged);
+  lvwLeave();
   lv.bc?.close();
   lv.bc = null;
   $("#lv-ctx")?.remove();
@@ -1645,6 +1650,7 @@ function lvWirePage() {
       : "Zoom digital desactivado (la rueda del mouse sigue acercando; clic derecho vuelve a 1×).");
   });
   $("#lv-merge-btn").addEventListener("click", () => lvSetMergeMode(!lv.mergeMode));
+  $("#lv-watch-btn")?.addEventListener("click", () => lvwAddToSelected());
   $("#lv-clear-all").addEventListener("click", () => {
     lvForgetPromotion();
     lv.maximized = -1;
@@ -1676,6 +1682,7 @@ function lvWirePage() {
   // Tiempo real: estado de equipos y cambios de configuración.
   VmsHub.on("DeviceStatusChanged", lvOnDeviceStatus);
   VmsHub.on("ConfigChanged", lvOnConfigChanged);
+  if (!lv.fleet) lvwInit();
 
   // Mover cámaras entre ventanas (principal ↔ auxiliares).
   if ("BroadcastChannel" in window) {
@@ -2088,8 +2095,10 @@ function lvMergeStart(cell, e) {
 /** Reacomoda las cámaras en la división nueva sin reabrirlas (el <video> viaja de cuadro). */
 function lvRelayout(layout, placement, keep = () => true) {
   const feeds = lv.cells.map((c) => c.detach());
+  const watches = lv.cells.map((c) => lvwTake(c));
   lvApplyLayout(layout);
   feeds.forEach((f, i) => { if (f && keep(f, i)) lv.cells[placement[i]].attach(f); });
+  watches.forEach((w, i) => { if (w && lv.cells[placement[i]]) lvwGive(lv.cells[placement[i]], w); });
   if (lvFindLayout(layout.key)) { lv.prefs.layout = layout.key; lvSavePrefs(); }
   lvRefreshTreeLive();
   lvScheduleLastSave();
@@ -2297,12 +2306,15 @@ function lvWireGrid() {
 
 /** Arrastrar un cuadro sobre otro: si el destino tiene video se intercambian; si no, la cámara se muda. */
 function lvSwapCells(source, target) {
-  if (source === target || (!source.feed && !target.feed)) return;
-  const exchange = !!target.feed;
-  const moved = source.feed?.title ?? "", displaced = target.feed?.title ?? "";
+  if (source === target || (!source.feed && !target.feed && !source.watch && !target.watch)) return;
+  const exchange = !!(target.feed || target.watch);
+  const moved = source.watch?.title ?? source.feed?.title ?? "", displaced = target.watch?.title ?? target.feed?.title ?? "";
   const a = source.detach(), b = target.detach();
+  const wa = lvwTake(source), wb = lvwTake(target);
   target.attach(a);
   source.attach(b);
+  lvwGive(target, wa);
+  lvwGive(source, wb);
   lvSelectCell(target);
   lvRefreshTreeLive();
   lvScheduleLastSave();
@@ -2369,7 +2381,8 @@ function lvOpenChannel(ch) {
   lvSelectCell(next < lv.cells.length ? lv.cells[next] : null);
 }
 
-function lvOpenInCell(ch, cell, profile) {
+function lvOpenInCell(ch, cell, profile, keepWatch = false) {
+  if (!keepWatch && cell.watch) lvwRemove(cell);
   if (lv.maximized >= 0 && lv.cells[lv.maximized] !== cell) { lv.maximized = -1; lvApplyGridGeometry(); }
   if (lv.promoted === cell.feed) lvForgetPromotion();
   const feed = new LvFeed(ch, profile);
@@ -2675,6 +2688,7 @@ function lvLocationMenu(node, x, y) {
   menu.className = "lv-ctx";
   menu.innerHTML = `
     <button type="button" data-cmd="open">Abrir sus cámaras</button>
+    ${id > 0 && !lv.fleet ? `<button type="button" data-cmd="watch">Vigilar esta ubicación en el cuadro seleccionado</button>` : ""}
     ${id > 0 ? `<hr>
     <button type="button" data-cmd="arm-away" ${canCmd ? "" : "disabled"}>Armar total sus áreas de alarma…</button>
     <button type="button" data-cmd="arm-stay" ${canCmd ? "" : "disabled"}>Armar parcial sus áreas de alarma…</button>
@@ -2689,6 +2703,7 @@ function lvLocationMenu(node, x, y) {
     if (!b || b.disabled) return;
     menu.remove();
     if (b.dataset.cmd === "open") lvOpenAll(name, lvLocationChannels(id));
+    else if (b.dataset.cmd === "watch") lvwAddToSelected(id);
     else lvLocationCommand(id, name, b.dataset.cmd);
   });
 }
@@ -2811,7 +2826,8 @@ function lvRenderViewsList() {
 function lvViewRequest(name, shared) {
   return {
     name, layoutName: lv.layout.key, columns: lv.layout.columns, rows: lv.layout.rows, shared,
-    items: lv.cells.map((c, i) => (c.feed ? { cellIndex: i, channelId: c.feed.channel.id, streamType: c.feed.profile === "Main" ? 0 : 1, kind: "camera" } : null)).filter(Boolean),
+    items: lv.cells.map((c, i) => (c.watch ? { cellIndex: i, channelId: 0, streamType: 0, kind: "card", ref: c.watch.ref }
+      : c.feed ? { cellIndex: i, channelId: c.feed.channel.id, streamType: c.feed.profile === "Main" ? 0 : 1, kind: "camera" } : null)).filter(Boolean),
     roleIds: lv.views.find((v) => v.name === name && v.shared === shared)?.roleIds ?? null,
   };
 }
@@ -2839,7 +2855,7 @@ async function lvSaveView() {
 
 async function lvUpdateView(v) {
   // Los recursos, tarjetas y páginas web del tablero no se ven aquí: reemplazarlo los borraría.
-  if (v.items.length > lvViewCameras(v).length) {
+  if (v.items.length > lvViewCameras(v).length + v.items.filter(lvwIsWatchItem).length) {
     lvViewsMsg(`"${v.name}" tiene cuadros que el panel web no muestra (recursos, tarjetas o páginas web): actualícelo desde el cliente de escritorio${v.shared ? " o en Configuración → Tableros" : ""}.`, true);
     return;
   }
@@ -2870,8 +2886,9 @@ async function lvApplyView(v) {
   let view = v;
   try { view = await Api.post(`/api/live-views/${v.id}/apply`); } // la versión vigente + bitácora
   catch (err) { lvStatus(err.error, true); return; }
-  const cameras = lvViewCameras(view), others = view.items.length - cameras.length;
-  const fit = lvFitSavedItems(lvRestoreLayout(view.layoutName, view.columns, view.rows), cameras);
+  const cameras = lvViewCameras(view), watches = view.items.filter(lvwIsWatchItem);
+  const others = view.items.length - cameras.length - watches.length;
+  const fit = lvFitSavedItems(lvRestoreLayout(view.layoutName, view.columns, view.rows), [...cameras, ...watches]);
   lvApplyLayout(fit.layout);
   if (lvFindLayout(fit.layout.key)) { lv.prefs.layout = fit.layout.key; lvSavePrefs(); }
   lv.cells.forEach((c) => c.clear());
@@ -2881,8 +2898,9 @@ async function lvApplyView(v) {
   const items = [];
   let missing = 0;
   for (const item of fit.items) {
-    const ch = lv.channels.get(item.channelId);
     const cell = lv.cells[item.cellIndex];
+    if (lvwIsWatchItem(item)) { if (cell) lvwPut(cell, item.ref); continue; }
+    const ch = lv.channels.get(item.channelId);
     if (!ch || !cell) { missing++; continue; }
     items.push({ ch, cell, profile: item.streamType === 0 ? "Main" : "Sub" });
   }
@@ -2909,7 +2927,7 @@ function lvSaveLastNow() {
   try {
     localStorage.setItem(lvLastKey(), JSON.stringify({
       layout: lv.layout.key, columns: lv.layout.columns, rows: lv.layout.rows,
-      items: lv.cells.map((c, i) => (c.feed ? { i, ch: c.feed.channel.id, p: c.feed.profile } : null)).filter(Boolean),
+      items: lv.cells.map((c, i) => (c.watch ? { i, w: c.watch.ref } : c.feed ? { i, ch: c.feed.channel.id, p: c.feed.profile } : null)).filter(Boolean),
     }));
   } catch { /* modo privado */ }
 }
@@ -2919,9 +2937,10 @@ async function lvReopenLast() {
   try { last = JSON.parse(localStorage.getItem(lvLastKey()) || "null"); } catch { /* ilegible */ }
   if (!last?.items?.length) return;
   const fit = lvFitSavedItems(lvRestoreLayout(last.layout, last.columns, last.rows),
-    last.items.map((x) => ({ cellIndex: x.i, channelId: x.ch, profile: x.p })));
+    last.items.map((x) => ({ cellIndex: x.i, channelId: x.ch, profile: x.p, watch: x.w })));
   lvApplyLayout(fit.layout);
-  const items = fit.items
+  for (const x of fit.items) if (x.watch && lv.cells[x.cellIndex]) lvwPut(lv.cells[x.cellIndex], x.watch);
+  const items = fit.items.filter((x) => !x.watch)
     .map((x) => ({ ch: lv.channels.get(x.channelId), cell: lv.cells[x.cellIndex], profile: x.profile === "Main" ? "Main" : "Sub" }))
     .filter((x) => x.ch && x.cell);
   if (items.length) await lvOpenMany("la última sesión", items);

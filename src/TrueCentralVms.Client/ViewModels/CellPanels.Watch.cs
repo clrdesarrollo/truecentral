@@ -227,6 +227,10 @@ public sealed partial class WatchCellPanel : CellPanel
     /// <summary>Muestra el evento ya.</summary>
     public void Show(LiveEventDto e)
     {
+        // Uno más grave que llega antes de que el actual cumpla su tiempo lo desplaza: el
+        // desplazado vuelve a la cola (no se pierde). «Listo» y «Siguiente» lo dan por visto.
+        if (Current is { } shown && shown.Id != e.Id && DateTime.Now - _shownAt < TimeSpan.FromSeconds(Options.HoldSeconds))
+            Enqueue(shown);
         Current = e;
         _shownAt = DateTime.Now;
         RemoveQueued(e.Id);
@@ -340,6 +344,7 @@ public sealed partial class WatchCellPanel : CellPanel
         if (Current is { Severity: AlarmSeverity.Critical } seen)
             _context.Audit("live-watch-done", Title, $"«{seen.Title}»" + (WhereText.Length > 0 ? $" ({WhereText})" : ""));
         _lastInteraction = DateTime.MinValue; // «Listo» es justamente para que siga
+        Current = null;
         if (TakeQueued() is { } next) Show(next);
         else if (WatchCoordinator.PullFor(this) is { } fromGroup) Show(fromGroup);
         else GoIdle();
@@ -350,7 +355,9 @@ public sealed partial class WatchCellPanel : CellPanel
     private void Next()
     {
         _lastInteraction = DateTime.MinValue;
-        if (TakeQueued() is { } next) Show(next);
+        if (TakeQueued() is not { } next) return;
+        Current = null; // el actual se da por visto: no vuelve a la cola
+        Show(next);
     }
 
     [RelayCommand]
