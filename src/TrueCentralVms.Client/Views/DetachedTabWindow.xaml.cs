@@ -216,6 +216,7 @@ public partial class DetachedTabWindow : Window
         mmi.ptMaxSize.Y = info.rcWork.Bottom - info.rcWork.Top;
         mmi.ptMaxTrackSize.X = Math.Max(mmi.ptMaxTrackSize.X, info.rcMonitor.Right - info.rcMonitor.Left);
         mmi.ptMaxTrackSize.Y = Math.Max(mmi.ptMaxTrackSize.Y, info.rcMonitor.Bottom - info.rcMonitor.Top);
+        (mmi.ptMinTrackSize.X, mmi.ptMinTrackSize.Y) = MonitorPlacement.MinimumTrackSize(this);
         Marshal.StructureToPtr(mmi, lParam, false);
         handled = true;
         return IntPtr.Zero;

@@ -313,6 +313,8 @@ public partial class MainWindow : Window
         // recortaba (se veía el escritorio a la derecha y abajo).
         mmi.ptMaxTrackSize.X = Math.Max(mmi.ptMaxTrackSize.X, info.rcMonitor.Right - info.rcMonitor.Left);
         mmi.ptMaxTrackSize.Y = Math.Max(mmi.ptMaxTrackSize.Y, info.rcMonitor.Bottom - info.rcMonitor.Top);
+        // El mínimo (1024×768): al atender el mensaje, WPF ya no lo pone solo.
+        (mmi.ptMinTrackSize.X, mmi.ptMinTrackSize.Y) = MonitorPlacement.MinimumTrackSize(this);
         Marshal.StructureToPtr(mmi, lParam, false);
         handled = true;
         return IntPtr.Zero;

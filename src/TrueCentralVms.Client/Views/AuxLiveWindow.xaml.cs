@@ -158,6 +158,8 @@ public partial class AuxLiveWindow : Window
         // Ídem MainWindow: el tope por defecto es el monitor principal.
         mmi.ptMaxTrackSize.X = Math.Max(mmi.ptMaxTrackSize.X, info.rcMonitor.Right - info.rcMonitor.Left);
         mmi.ptMaxTrackSize.Y = Math.Max(mmi.ptMaxTrackSize.Y, info.rcMonitor.Bottom - info.rcMonitor.Top);
+        // Ídem MainWindow: el mínimo lo pone este gancho, no WPF.
+        (mmi.ptMinTrackSize.X, mmi.ptMinTrackSize.Y) = MonitorPlacement.MinimumTrackSize(this);
         Marshal.StructureToPtr(mmi, lParam, false);
         handled = true;
         return IntPtr.Zero;

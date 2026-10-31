@@ -20,7 +20,13 @@ public sealed class DashboardSnapshot
 public sealed class DashboardServer
 {
     public string? Version { get; set; }
+    /// <summary>Desde que arrancó el servicio de TrueCentral (el último reinicio del servidor).</summary>
+    public DateTime? StartedAt { get; set; }
     public double UptimeSeconds { get; set; }
+    /// <summary>Desde que se encendió el equipo (Windows); null = servidor anterior.</summary>
+    public double? OsUptimeSeconds { get; set; }
+    /// <summary>Ingresos rechazados de las últimas 24 h; null sin permiso de bitácora o servidor anterior.</summary>
+    public DashboardLogins? Logins { get; set; }
     public double? Cpu { get; set; }
     public double? Ram { get; set; }
     public double? RamUsedGb { get; set; }
@@ -40,6 +46,25 @@ public sealed class DashboardServer
     public int? ClientsWeb { get; set; }
     /// <summary>Puestos de escritorio que permite la licencia.</summary>
     public int? ClientsLimit { get; set; }
+}
+
+/// <summary>
+/// Ingresos rechazados de las últimas 24 h: los fallos sueltos (una clave mal
+/// escrita) y los ataques (intentos repetidos que bloquearon una cuenta o una IP).
+/// </summary>
+public sealed class DashboardLogins
+{
+    public int Failed { get; set; }
+    public int FailedLastHour { get; set; }
+    /// <summary>Veces que una cuenta o una IP quedó bloqueada por intentos repetidos.</summary>
+    public int Locks { get; set; }
+    /// <summary>Intentos que llegaron mientras estaba bloqueada.</summary>
+    public int RejectedWhileLocked { get; set; }
+    /// <summary>IP distintas de esos ataques.</summary>
+    public int AttackIps { get; set; }
+    public DateTime? LastAttackAt { get; set; }
+    public int LockedAccountsNow { get; set; }
+    public int LockedIpsNow { get; set; }
 }
 
 public sealed class DashboardCount
