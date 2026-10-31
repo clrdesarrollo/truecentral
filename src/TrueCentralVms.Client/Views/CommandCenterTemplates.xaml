@@ -1165,6 +1165,9 @@
                         <Button Style="{StaticResource GhostButton}" Content="Siguiente" FontSize="11" Padding="8,2" Margin="4,0,0,0"
                                 Command="{Binding NextCommand}" ToolTip="Muestra ya el próximo evento de la cola"
                                 Visibility="{Binding HasQueue, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                        <Button Style="{StaticResource GhostButton}" Content="Repetir" FontSize="11" Padding="8,2" Margin="4,0,0,0"
+                                Command="{Binding ReplayCommand}" ToolTip="Abre Reproducción en esta cámara, unos segundos antes del evento"
+                                Visibility="{Binding CanReplay, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
                         <Button Style="{StaticResource GhostButton}" Content="Listo" FontSize="11" Padding="8,2" Margin="4,0,0,0"
                                 Command="{Binding DoneCommand}" ToolTip="Ya lo vi: pasa al siguiente o vuelve a esperar"
                                 Visibility="{Binding HasEvent, Converter={x:Static vm:BoolToVisibility.Instance}}"/>

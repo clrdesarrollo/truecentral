@@ -635,6 +635,12 @@ public sealed record WorkflowAlertDto(
     public bool HasClip => ClipPreSeconds is not null && ChannelIds.Count > 0;
 }
 
+/// <summary>
+/// Segundos de la repetición del evento que rigen cuando la acción «Avisar» no
+/// dice otros (antes 0-60, después 5-120).
+/// </summary>
+public sealed record AlertClipSettingsDto(int PreSeconds, int PostSeconds);
+
 /// <summary>Estados de la repetición del evento (<see cref="AlertClipDto.State"/>).</summary>
 public static class AlertClipStates
 {

@@ -207,7 +207,22 @@ Fase 1 hecha en la rama `feat/repeticion-evento`:
 - Probado con el DVR CLRobotics real (iDS-7232HQHI-M2/S) en un servidor aislado con copia de la base: API 14/14,
   clip listo a los ~17 s de un evento con 5 s + 10 s, 15,8 s de video entregados.
 
-Pendiente (fase 2): «Según el equipo», retraso aprendido por equipo, panel web, botón Repetir del vigía.
+Fase 2 hecha en la rama `feat/repeticion-fase2` (sin migraciones):
+
+- «Según el equipo»: `IDeviceDriver.ReadRecordWindowAsync` (Hikvision por `NET_DVR_GET_RECORDCFG_V30`, campos por
+  `Marshal.OffsetOf`; Dahua y ONVIF sin dato → valen los del servidor). La acción «Avisar» acepta `device` en
+  `clipPre`/`clipPost`; el aviso guarda -1 y el servidor lo resuelve por cámara al pedir el clip (caché de 1 h).
+  Probado con el DVR CLRobotics: 5 s de pregrabación y 30 s de posgrabación.
+- Espera aprendida: lo que tarda cada grabador desde el final del clip hasta tenerlo (promedio móvil 0,7/0,3, solo
+  con clips por los que se esperó), en SystemBlobs `alerts.clip.lag`; se consulta al grabador desde el final + 3 s y
+  la cuenta regresiva usa lo aprendido.
+- Valores del servidor editables: SystemBlobs `alerts.clip` + `GET/PUT /api/workflows/clip-settings` (bitácora
+  `workflows/alert-clip-settings-updated`), botón «Repetición del evento» en Automatizaciones; `appsettings` `Alerts:`
+  queda como valor inicial.
+- Panel web: pestaña «Repetición» en la ficha del aviso del Centro de eventos (PbSession/PbMseSession, bucle, marca).
+- Vigía del cliente: botón «Repetir» (eventos que no son avisos) que abre Reproducción unos segundos antes.
+
+Queda: «según el equipo» para Dahua, «Repetir» en el vigía web, repetición en las pantallas de alarma (no previsto).
 
 ## 13. Preguntas abiertas
 

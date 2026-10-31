@@ -78,7 +78,8 @@ public sealed record WatchContext(
     Func<long, Task> OpenAlert,
     Func<Task<IReadOnlyList<(int Id, string Path)>>> Locations,
     Func<IReadOnlyList<ChannelNode>> Channels,
-    Action<string, string, string> Audit);
+    Action<string, string, string> Audit,
+    Func<ChannelNode, DateTime, Task>? OpenPlayback = null);
 
 /// <summary>
 /// Cuadro vigía: un cuadro que cambia solo a la cámara del último evento que le
@@ -143,7 +144,7 @@ public sealed partial class WatchCellPanel : CellPanel
 
     /// <summary>Evento en pantalla; null = en espera.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasEvent), nameof(IsIdle), nameof(Level), nameof(CanOpenAlert),
+    [NotifyPropertyChangedFor(nameof(HasEvent), nameof(IsIdle), nameof(Level), nameof(CanOpenAlert), nameof(CanReplay),
         nameof(RepeatsText), nameof(WhereText), nameof(BodyText))]
     private LiveEventDto? _current;
 
@@ -160,6 +161,9 @@ public sealed partial class WatchCellPanel : CellPanel
     };
 
     public bool CanOpenAlert => Current?.AlertId is not null;
+
+    /// <summary>«Repetir»: el evento tiene cámara y el puesto puede ver grabaciones (los avisos usan «Ver aviso»).</summary>
+    public bool CanReplay => _context.OpenPlayback is not null && Current is { AlertId: null } && _cameras.Count > 0;
     public string RepeatsText => Current is { Repeats: > 0 } e ? $"×{e.Repeats + 1}" : "";
 
     public string WhereText => Current is not { } e ? "" : string.Join(" · ",
@@ -229,6 +233,7 @@ public sealed partial class WatchCellPanel : CellPanel
         _cameras = e.ChannelIds.Select(_context.FindChannel).OfType<ChannelNode>().ToList();
         _cameraIndex = 0;
         NoCameraText = _cameras.Count > 0 ? "" : "Este evento no tiene cámaras que usted pueda ver.";
+        OnPropertyChanged(nameof(CanReplay));
         OnPropertyChanged(nameof(CameraText));
         OnPropertyChanged(nameof(HasManyCameras));
         UpdateAgo();
@@ -402,6 +407,23 @@ public sealed partial class WatchCellPanel : CellPanel
                 $"{Queue.Count} evento(s) en cola");
         }
     }
+
+    /// <summary>
+    /// Repetir: abre Reproducción en la cámara que muestra, desde unos segundos
+    /// antes del evento (los de la repetición del evento del servidor).
+    /// </summary>
+    [RelayCommand]
+    private async Task ReplayAsync()
+    {
+        Touch();
+        if (_context.OpenPlayback is not { } open || Current is not { } e || _cameras.Count == 0) return;
+        var camera = _cameras[Math.Clamp(_cameraIndex, 0, _cameras.Count - 1)];
+        try { await open(camera, e.At.ToLocalTime().AddSeconds(-ReplayLeadSeconds)); }
+        catch (Exception ex) { Status = ex.Message; }
+    }
+
+    /// <summary>Segundos antes del evento desde los que «Repetir» abre la grabación.</summary>
+    public static int ReplayLeadSeconds { get; set; } = 5;
 
     /// <summary>El operador tocó el vigía: no se le cambia la cámara por unos segundos.</summary>
     public void Touch() => _lastInteraction = DateTime.Now;

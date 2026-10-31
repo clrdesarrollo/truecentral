@@ -288,8 +288,14 @@ function renderEvcDetail(a) {
   const sameAlert = a && evcDetailKey && JSON.parse(evcDetailKey).id === a.id;
   evcDetailKey = key;
   if (!a) { box.innerHTML = `<div class="evc-empty muted">Seleccione una alerta para ver el detalle.</div>`; return; }
-  // Sin fotos pero con cámaras (p. ej. las asociadas al recurso): se abre en el vivo.
-  if (!sameAlert) { evcPhotoIndex = 0; evcTab = evcPhotos(a).length || !a.channelIds?.length ? "photos" : "cameras"; }
+  // La repetición del evento va primero (responde qué pasó); si no, sus fotos o, sin
+  // fotos pero con cámaras (p. ej. las asociadas al recurso), las cámaras.
+  if (!sameAlert) {
+    evcReplayStop();
+    evcPhotoIndex = 0;
+    evcReplayCamera = 0;
+    evcTab = evcHasReplay(a) ? "replay" : evcPhotos(a).length || !a.channelIds?.length ? "photos" : "cameras";
+  }
 
   const critical = a.severity !== "Info";
   const [ackState, ackCls] = evcAckState(a);
@@ -342,6 +348,7 @@ function renderEvcDetail(a) {
       </div>
       <div class="evc-media">
         <div class="evc-tabs">
+          ${evcHasReplay(a) ? `<button class="evc-tab" data-tab="replay" title="Lo que grabó el equipo alrededor del evento, en bucle">Repetición</button>` : ""}
           <button class="evc-tab" data-tab="photos">Fotos${evcPhotos(a).length ? ` (${evcPhotos(a).length})` : ""}</button>
           <button class="evc-tab" data-tab="cameras">Cámaras${a.channelIds?.length ? ` (${a.channelIds.length})` : ""}</button>
           <button class="evc-tab" data-tab="steps">Qué hizo el sistema</button>
@@ -361,6 +368,8 @@ function renderEvcTab(a) {
   const body = $("#evc-tab-body");
   if (!body) return;
   $$(".evc-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === evcTab));
+  if (evcTab !== "replay") evcReplayStop();
+  if (evcTab === "replay") { evcRenderReplay(a, body); return; }
 
   if (evcTab === "photos") {
     const photos = evcPhotos(a);
@@ -407,3 +416,148 @@ function renderEvcTab(a) {
     if (evcTab === "steps" && $("#evc-tab-body")) body.innerHTML = `<div class="evc-empty muted">No se pudo leer el detalle de la ejecución.</div>`;
   });
 }
+
+// ---------------------------------------------------------------------------
+// Repetición del evento (réplica de la pestaña de AlertWindow): lo que grabó el
+// equipo alrededor del evento, en bucle. Mientras el equipo termina de grabar el
+// después, una cuenta regresiva; luego la reproducción por WebRTC (o MSE si el
+// navegador no recibe H.265 por WebRTC), la misma del módulo Reproducción.
+// ---------------------------------------------------------------------------
+let evcReplay = null;       // { alertId, channelId, session, video, timer, poll, clip, t0 }
+let evcReplayCamera = 0;
+
+function evcHasReplay(a) {
+  return a.clipPreSeconds != null && a.channelIds?.length > 0 &&
+    Perms.can("playback.view") && Perms.licensed("module_playback");
+}
+
+function evcReplayStop() {
+  if (!evcReplay) return;
+  clearInterval(evcReplay.timer);
+  clearTimeout(evcReplay.poll);
+  evcReplay.session?.close();
+  evcReplay.video?.remove();
+  evcReplay = null;
+}
+
+function evcRenderReplay(a, body) {
+  const ids = a.channelIds;
+  evcReplayCamera = Math.min(evcReplayCamera, ids.length - 1);
+  const channelId = ids[evcReplayCamera];
+  if (evcReplay && evcReplay.alertId === a.id && evcReplay.channelId === channelId && body.querySelector(".evc-replay")) return;
+  evcReplayStop();
+  body.innerHTML = `
+    <div class="evc-replay">
+      <div class="evc-replay-top">
+        ${ids.length > 1 ? `<select id="evc-replay-cam">${ids.map((id, i) =>
+          `<option value="${i}" ${i === evcReplayCamera ? "selected" : ""}>Cámara ${i + 1}</option>`).join("")}</select>` : ""}
+        <span class="muted evc-small" id="evc-replay-state">Buscando la grabación del evento…</span>
+      </div>
+      <div class="evc-replay-stage" id="evc-replay-stage"><div class="evc-empty muted" id="evc-replay-msg"></div></div>
+      <div class="evc-replay-bar">
+        <button class="btn ghost" id="evc-replay-restart" disabled title="Volver al comienzo del clip">↺ Desde el comienzo</button>
+        <div class="evc-replay-track"><div class="evc-replay-fill" id="evc-replay-fill"></div><div class="evc-replay-mark" id="evc-replay-mark" hidden></div></div>
+        <span class="muted evc-small" id="evc-replay-pos"></span>
+      </div>
+    </div>`;
+  $("#evc-replay-cam")?.addEventListener("change", (e) => { evcReplayCamera = Number(e.target.value); evcReplayStop(); evcRenderReplay(a, body); });
+  evcReplay = { alertId: a.id, channelId, session: null, video: null, timer: null, poll: null, clip: null, t0: 0 };
+  evcReplayPoll(a, channelId);
+}
+
+async function evcReplayPoll(a, channelId) {
+  const state = evcReplay;
+  if (!state || state.alertId !== a.id || state.channelId !== channelId) return;
+  let clip;
+  try { clip = await Api.get(`/api/workflows/alerts/${a.id}/clip?channelId=${channelId}`); }
+  catch (err) {
+    if (evcReplay !== state) return;
+    $("#evc-replay-state").textContent = "";
+    $("#evc-replay-msg").textContent = err.status === 403
+      ? "Sus roles no incluyen ver grabaciones." : `No se pudo preparar la repetición: ${err.error}`;
+    return;
+  }
+  if (evcReplay !== state) return;
+  state.clip = clip;
+  if (clip.state === "recording") {
+    $("#evc-replay-state").textContent = clip.remainingSeconds > 0
+      ? `El equipo está grabando el después del evento: la repetición estará en ${clip.remainingSeconds} s.`
+      : "Esperando que el equipo deje disponible la grabación…";
+    $("#evc-replay-msg").textContent = "La repetición empieza sola en cuanto el equipo la tenga.";
+    state.poll = setTimeout(() => evcReplayPoll(a, channelId), 3000);
+    return;
+  }
+  if (clip.state === "missing") {
+    $("#evc-replay-state").textContent = "";
+    $("#evc-replay-msg").textContent = clip.message || "El equipo no tiene grabación de ese momento.";
+    return;
+  }
+  const event = pbParse(clip.eventTime);
+  $("#evc-replay-state").textContent = (clip.state === "partial" ? `${clip.message} ` : "") +
+    `Evento a las ${pbHms(event)}${clip.exactTime ? "" : " (hora aproximada: la informó otro equipo)"}.`;
+  const start = pbParse(clip.start), end = pbParse(clip.end);
+  const mark = $("#evc-replay-mark");
+  if (event > start && event < end) { mark.hidden = false; mark.style.left = `${((event - start) / (end - start)) * 100}%`; }
+  $("#evc-replay-restart").disabled = false;
+  $("#evc-replay-restart").onclick = () => evcReplayOpen(state, start, end, event);
+  state.timer = setInterval(() => evcReplayTick(state, start, end, event), 400);
+  evcReplayOpen(state, start, end, event);
+}
+
+async function evcReplayOpen(state, start, end, event) {
+  if (evcReplay !== state) return;
+  const channel = { deviceId: state.clip.deviceId, rtspChannel: state.clip.rtspChannel, name: "" };
+  const useMse = lvMseChannels.has(pbMseKey(channel));
+  const session = useMse ? new PbMseSession(channel, start, end, 1) : new PbSession(channel, start, end, 1);
+  const video = document.createElement("video");
+  video.className = "lv-v";
+  video.autoplay = true;
+  video.playsInline = true;
+  video.muted = true;
+  video.srcObject = session.stream;
+  const stage = $("#evc-replay-stage");
+  if (!stage) { session.close(); return; }
+  $("#evc-replay-msg").textContent = "Abriendo la grabación en el equipo…";
+  stage.prepend(video);
+  try {
+    await session.open();
+    if (session.kind === "mse") video.srcObject = session.stream;
+    await lvWaitFrame(video, session, 30000);
+  } catch (err) {
+    session.close();
+    video.remove();
+    if (evcReplay !== state) return;
+    const codec = lvCodecRejected(err) || err?.codec;
+    if (codec && session.kind !== "mse" && lvHevc.mse && !lvMseChannels.has(pbMseKey(channel))) {
+      lvMarkMse(pbMseKey(channel));
+      return evcReplayOpen(state, start, end, event);
+    }
+    $("#evc-replay-msg").textContent = codec ? lvCodecMessage(err) : await pbExplain(session, err);
+    return;
+  }
+  if (evcReplay !== state) { session.close(); video.remove(); return; }
+  state.session?.close();
+  state.video?.remove();
+  state.session = session;
+  state.video = video;
+  state.t0 = video.currentTime;
+  $("#evc-replay-msg").textContent = "";
+}
+
+/** Posición en la línea del clip y bucle: al llegar al final vuelve al comienzo. */
+function evcReplayTick(state, start, end, event) {
+  if (evcReplay !== state || !state.video || state.video.readyState < 2) return;
+  const at = start + Math.max(0, state.video.currentTime - state.t0) * 1000;
+  const fill = $("#evc-replay-fill");
+  if (fill) fill.style.width = `${Math.min(100, ((at - start) / (end - start)) * 100)}%`;
+  const fromEvent = (at - event) / 1000;
+  const pos = $("#evc-replay-pos");
+  if (pos) pos.textContent = `${fromEvent < 0 ? "−" : "+"}${Math.abs(fromEvent).toFixed(1).replace(".", ",")} s del evento · ${pbHms(at)}`;
+  if (at >= end - 300 && !state.reopening) {
+    state.reopening = true;
+    evcReplayOpen(state, start, end, event).finally(() => { state.reopening = false; });
+  }
+}
+
+// Al salir del Centro de eventos se suelta la reproducción (libera la sesión en el grabador).
+window.addEventListener("hashchange", () => { if (!location.hash.startsWith("#/event-center")) evcReplayStop(); });

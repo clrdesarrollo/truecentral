@@ -340,6 +340,50 @@ public sealed class HikvisionDeviceDriver : IDeviceDriver
         return [.. days];
     }, ct);
 
+    /// <summary>
+    /// Pregrabación y posgrabación del canal, de su configuración de grabación
+    /// (NET_DVR_GET_RECORDCFG_V30). Los campos se leen por su posición en la
+    /// estructura: los Init() del SDK no calzan con todos los firmwares.
+    /// </summary>
+    public Task<RecordWindow?> ReadRecordWindowAsync(DeviceConnectionInfo info, int channelNumber,
+        CancellationToken ct = default) => Task.Run<RecordWindow?>(() =>
+    {
+        HikvisionSdk.EnsureInitialized();
+        int userId = HikvisionSessionCache.GetOrLogin(info);
+        var window = TryReadRecordWindow(userId, channelNumber);
+        if (window is null)
+        {
+            // Sesión vencida: UNA vez con login limpio. Si sigue sin responder, no lo informa.
+            HikvisionSessionCache.Invalidate(info);
+            userId = HikvisionSessionCache.GetOrLogin(info);
+            window = TryReadRecordWindow(userId, channelNumber);
+        }
+        return window;
+    }, ct);
+
+    private static RecordWindow? TryReadRecordWindow(int userId, int channel)
+    {
+        int size = System.Runtime.InteropServices.Marshal.SizeOf<CHCNetSDK.NET_DVR_RECORD_V30>();
+        IntPtr buffer = System.Runtime.InteropServices.Marshal.AllocHGlobal(size);
+        try
+        {
+            for (int i = 0; i < size; i++) System.Runtime.InteropServices.Marshal.WriteByte(buffer, i, 0);
+            uint returned = 0;
+            if (!CHCNetSDK.NET_DVR_GetDVRConfig(userId, CHCNetSDK.NET_DVR_GET_RECORDCFG_V30, channel, buffer, (uint)size, ref returned))
+                return null;
+            int OffsetOf(string field) =>
+                (int)System.Runtime.InteropServices.Marshal.OffsetOf<CHCNetSDK.NET_DVR_RECORD_V30>(field);
+            uint post = (uint)System.Runtime.InteropServices.Marshal.ReadInt32(buffer, OffsetOf(nameof(CHCNetSDK.NET_DVR_RECORD_V30.dwRecordTime)));
+            uint pre = (uint)System.Runtime.InteropServices.Marshal.ReadInt32(buffer, OffsetOf(nameof(CHCNetSDK.NET_DVR_RECORD_V30.dwPreRecordTime)));
+            // Códigos del SDK: pregrabación 0 = sin, 1-6 = 5..30 s, 7 = máxima; posgrabación
+            // 0 = 5 s, 1 = 20 s, 2 = 30 s, 3 = 1 min, 4 = 2 min, 5 = 5 min, 6 = 10 min.
+            int preSeconds = pre switch { 0 => 0, >= 1 and <= 6 => (int)pre * 5, _ => 30 };
+            int postSeconds = post switch { 0 => 5, 1 => 20, 2 => 30, 3 => 60, 4 => 120, 5 => 300, 6 => 600, _ => 30 };
+            return new RecordWindow(preSeconds, postSeconds);
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer); }
+    }
+
     private static List<RecordingSegment>? TryFindSegments(int userId, int channel, DateTime start, DateTime end)
     {
         var cond = new CHCNetSDK.NET_DVR_FILECOND_V40

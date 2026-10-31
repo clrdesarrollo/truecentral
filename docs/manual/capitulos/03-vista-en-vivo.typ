@@ -460,6 +460,10 @@ de citofonía, de gravedad advertencia o crítica.
   («Cámara 1/2»).
 - #boton("Ver aviso") (solo en los avisos de automatizaciones) abre la ventana de
   alarma de ese aviso.
+- #boton("Repetir") (en los eventos que no son avisos y tienen cámara) abre el
+  módulo Reproducción en esa cámara, unos segundos antes del evento (los «antes»
+  de la repetición del evento del servidor). En los avisos, #boton("Ver aviso")
+  ya trae la repetición en bucle.
 - #boton("Listo") da el evento por visto: pasa al siguiente de la cola o vuelve a
   esperar.
 - «+2 en cola» indica eventos esperando su turno; #boton("Siguiente") muestra ya

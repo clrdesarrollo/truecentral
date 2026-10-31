@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Core.Drivers;
 using TrueCentralVms.Server.Data;
@@ -21,13 +23,28 @@ namespace TrueCentralVms.Server.Services;
 /// que graba la cámara; si no, de la hora del servidor (con un segundo de
 /// margen por lado), y la supervisión de hora de equipos mantiene los relojes
 /// alineados.
+///
+/// Los segundos antes y después salen de la acción «Avisar», de los valores del
+/// servidor (Automatizaciones → Repetición del evento; SystemBlobs
+/// "alerts.clip") o del propio equipo («Según el equipo»: su pregrabación y
+/// posgrabación, leídas por el driver). Lo que tarda cada grabador en dejar
+/// disponible lo recién grabado se aprende (SystemBlobs "alerts.clip.lag") y
+/// sirve para la cuenta regresiva que ve el operador.
 /// </summary>
 public sealed class AlertClips(
     DriverRegistry drivers,
     CredentialProtector protector,
     AuditService audit,
+    IServiceScopeFactory scopes,
+    IConfiguration config,
     ILogger<AlertClips> logger)
 {
+    /// <summary>Valor de <c>clipPre</c>/<c>clipPost</c> en la acción «Avisar»: los del propio equipo.</summary>
+    public const string FromDevice = "device";
+    /// <summary>Lo que se guarda en el aviso cuando los segundos salen del equipo.</summary>
+    public const int FromDeviceMark = -1;
+    private const string SettingsBlob = "alerts.clip";
+    private const string LagBlob = "alerts.clip.lag";
     /// <summary>Segundos antes del evento si ni la acción ni el servidor dicen otra cosa.</summary>
     public const int DefaultPreSeconds = 5;
     /// <summary>Segundos después del evento si ni la acción ni el servidor dicen otra cosa.</summary>
@@ -39,7 +56,11 @@ public sealed class AlertClips(
     /// Espera mínima después del final del clip antes de preguntarle al
     /// grabador: casi ninguno tiene disponible lo de los últimos segundos.
     /// </summary>
-    private const int RecorderLagSeconds = 5;
+    private const int MinLagSeconds = 3;
+    /// <summary>Lo que se supone que tarda un grabador del que todavía no se aprendió nada.</summary>
+    private const double DefaultLagSeconds = 5;
+    /// <summary>Cuánto vale la pregrabación/posgrabación leída de un equipo.</summary>
+    private static readonly TimeSpan WindowCacheFor = TimeSpan.FromHours(1);
     /// <summary>Tope de espera, desde el final del clip, a que la grabación lo cubra.</summary>
     private const int GiveUpSeconds = 90;
     /// <summary>Cuánto vale una consulta de tramos (varios operadores mirando el mismo aviso).</summary>
@@ -47,14 +68,81 @@ public sealed class AlertClips(
 
     private readonly ConcurrentDictionary<string, (DateTime At, IReadOnlyList<RecordingSegment> Segments)> _segments = new();
     private readonly ConcurrentDictionary<string, byte> _missingLogged = new();
+    private readonly ConcurrentDictionary<(int Device, int Channel), (DateTime At, RecordWindow? Window)> _windows = new();
+    /// <summary>Clips (aviso:canal) que se consultaron antes de estar listos: su espera sirve para aprender.</summary>
+    private readonly ConcurrentDictionary<string, byte> _waiting = new();
+    private readonly ConcurrentDictionary<string, byte> _learned = new();
+    private readonly Lock _sync = new();
+    private AlertClipSettingsDto? _settings;
+    private Dictionary<int, double>? _lags;
+    private DateTime _lagsSavedAt = DateTime.MinValue;
 
-    /// <summary>Segundos antes: los de la acción (0-60) o, sin ellos (negativo), los del servidor.</summary>
-    public static int Pre(int configured, IConfiguration config) => Math.Clamp(
-        configured >= 0 ? configured : config.GetValue("Alerts:ClipPreSeconds", DefaultPreSeconds), 0, MaxPreSeconds);
+    // ------------------------------------------------------------------
+    // Valores del servidor
+    // ------------------------------------------------------------------
 
-    /// <summary>Segundos después: los de la acción (5-120) o, sin ellos (negativo), los del servidor.</summary>
-    public static int Post(int configured, IConfiguration config) => Math.Clamp(
-        configured >= 0 ? configured : config.GetValue("Alerts:ClipPostSeconds", DefaultPostSeconds), 5, MaxPostSeconds);
+    /// <summary>Los segundos que rigen cuando la acción «Avisar» no dice otros.</summary>
+    public AlertClipSettingsDto Settings
+    {
+        get
+        {
+            lock (_sync)
+            {
+                if (_settings is not null) return _settings;
+                try
+                {
+                    using var scope = scopes.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+                    string? data = db.SystemBlobs.AsNoTracking().Where(b => b.Name == SettingsBlob).Select(b => b.Data).FirstOrDefault();
+                    _settings = data is not null && JsonSerializer.Deserialize<AlertClipSettingsDto>(data) is { } saved
+                        ? Clean(saved)
+                        // Sin nada guardado: lo de appsettings (o los de fábrica).
+                        : Clean(new AlertClipSettingsDto(config.GetValue("Alerts:ClipPreSeconds", DefaultPreSeconds),
+                            config.GetValue("Alerts:ClipPostSeconds", DefaultPostSeconds)));
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "No se pudieron leer los valores de la repetición del evento; rigen los de fábrica.");
+                    return new AlertClipSettingsDto(DefaultPreSeconds, DefaultPostSeconds);
+                }
+                return _settings;
+            }
+        }
+    }
+
+    public static AlertClipSettingsDto Clean(AlertClipSettingsDto s) =>
+        new(Math.Clamp(s.PreSeconds, 0, MaxPreSeconds), Math.Clamp(s.PostSeconds, 5, MaxPostSeconds));
+
+    public async Task SaveSettingsAsync(AlertClipSettingsDto settings, CancellationToken ct)
+    {
+        var clean = Clean(settings);
+        using (var scope = scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var row = await db.SystemBlobs.FirstOrDefaultAsync(b => b.Name == SettingsBlob, ct);
+            if (row is null) db.SystemBlobs.Add(row = new SystemBlob { Name = SettingsBlob });
+            row.Data = JsonSerializer.Serialize(clean);
+            row.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        lock (_sync) _settings = clean;
+    }
+
+    /// <summary>
+    /// Segundos antes para un aviso nuevo, según la acción: un número (0-60),
+    /// «device» (los del equipo, se resuelven por cámara al pedir el clip) o
+    /// nada (los del servidor).
+    /// </summary>
+    public int Pre(string? configured) =>
+        configured == FromDevice ? FromDeviceMark
+        : int.TryParse(configured, out int seconds) && seconds >= 0 ? Math.Clamp(seconds, 0, MaxPreSeconds)
+        : Settings.PreSeconds;
+
+    /// <summary>Segundos después para un aviso nuevo (5-120), con las mismas reglas que <see cref="Pre"/>.</summary>
+    public int Post(string? configured) =>
+        configured == FromDevice ? FromDeviceMark
+        : int.TryParse(configured, out int seconds) && seconds >= 0 ? Math.Clamp(seconds, 5, MaxPostSeconds)
+        : Settings.PostSeconds;
 
     /// <summary>
     /// Hora de pared sin zona para las columnas <c>timestamp without time
@@ -73,6 +161,14 @@ public sealed class AlertClips(
         var device = channel.Device;
         int pre = alert.ClipPreSeconds ?? DefaultPreSeconds;
         int post = alert.ClipPostSeconds ?? DefaultPostSeconds;
+        if (pre < 0 || post < 0)
+        {
+            // «Según el equipo»: su pregrabación y posgrabación; si no las informa, las del servidor.
+            var window = await DeviceWindowAsync(device, channel.ChannelNumber, ct);
+            if (pre < 0) pre = window is { } w ? Math.Clamp(w.PreSeconds, 0, MaxPreSeconds) : Settings.PreSeconds;
+            if (post < 0) post = window is { } w2 ? Math.Clamp(w2.PostSeconds, 5, MaxPostSeconds) : Settings.PostSeconds;
+        }
+        string key = $"{alert.Id}:{channel.Id}";
 
         // Hora del evento en el reloj del equipo que GRABA. Si fue él quien
         // informó el evento, su propia hora; si no, la del servidor, y el
@@ -88,12 +184,17 @@ public sealed class AlertClips(
         AlertClipDto Result(string state, DateTime from, DateTime to, int remaining = 0, string? message = null) =>
             new(state, device.Id, channel.RtspChannel, from, to, eventTime, remaining, exact, message);
 
-        // Mientras el reloj del equipo no pase el final del clip (más lo que
-        // tarda en dejarlo disponible) no tiene sentido molestar al grabador.
+        // Mientras el reloj del equipo no pase el final del clip (más un mínimo)
+        // no tiene sentido molestar al grabador. La cuenta regresiva que ve el
+        // operador usa lo que este grabador suele tardar (aprendido).
         var deviceNow = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified) + clockOffset;
-        double untilReady = (end.AddSeconds(RecorderLagSeconds) - deviceNow).TotalSeconds;
-        if (untilReady > 0)
-            return Result(AlertClipStates.Recording, start, end, (int)Math.Ceiling(untilReady));
+        double lag = LagOf(device.Id);
+        int Remaining() => (int)Math.Max(0, Math.Ceiling((end.AddSeconds(lag) - deviceNow).TotalSeconds));
+        if ((end.AddSeconds(MinLagSeconds) - deviceNow).TotalSeconds > 0)
+        {
+            _waiting.TryAdd(key, 0);
+            return Result(AlertClipStates.Recording, start, end, Math.Max(1, Remaining()));
+        }
         bool givingUp = (deviceNow - end).TotalSeconds >= GiveUpSeconds;
 
         if (drivers.Find(device.DriverKey)?.Create() is not { } driver)
@@ -108,16 +209,24 @@ public sealed class AlertClips(
         {
             // Sin respuesta del grabador todavía se puede reintentar; pasado el
             // tope ya no: se dice por qué.
-            if (!givingUp) return Result(AlertClipStates.Recording, start, end);
+            if (!givingUp) { _waiting.TryAdd(key, 0); return Result(AlertClipStates.Recording, start, end, Remaining()); }
             return Result(AlertClipStates.Missing, start, end, message: $"El equipo no respondió la búsqueda de grabaciones: {ex.Message}");
         }
 
         // Lo que la grabación cubre del clip, uniendo tramos contiguos.
         var covered = Covered(segments, start, end);
         if (covered is { } c && c.From <= start.AddSeconds(1) && c.To >= end.AddSeconds(-1))
+        {
+            // Se esperó por él: lo que tardó desde el final del clip es lo que tarda este grabador.
+            if (_waiting.TryRemove(key, out _) && _learned.TryAdd(key, 0))
+                Learn(device.Id, (deviceNow - end).TotalSeconds);
             return Result(AlertClipStates.Ready, start, end);
+        }
         if (!givingUp)
-            return Result(AlertClipStates.Recording, start, end);
+        {
+            _waiting.TryAdd(key, 0);
+            return Result(AlertClipStates.Recording, start, end, Remaining());
+        }
 
         if (covered is { } part && part.To > part.From.AddSeconds(1))
         {
@@ -134,6 +243,83 @@ public sealed class AlertClips(
         return Result(AlertClipStates.Missing, start, end, message:
             "El equipo no tiene grabación de ese momento. Revise que la cámara grabe en forma continua o por " +
             "evento con pregrabación, que el disco no esté lleno y que el horario de grabación cubra esa hora.");
+    }
+
+    /// <summary>Pregrabación y posgrabación del equipo para el canal (una lectura por hora); null = no la informa.</summary>
+    private async Task<RecordWindow?> DeviceWindowAsync(Device device, int channelNumber, CancellationToken ct)
+    {
+        var key = (device.Id, channelNumber);
+        if (_windows.TryGetValue(key, out var cached) && DateTime.UtcNow - cached.At < WindowCacheFor) return cached.Window;
+        RecordWindow? window = null;
+        if (drivers.Find(device.DriverKey)?.Create() is { } driver)
+        {
+            try { window = await driver.ReadRecordWindowAsync(DeviceConnections.Of(device, protector), channelNumber, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogDebug(ex, "No se pudo leer la pregrabación de '{Device}' canal {Channel}.", device.Name, channelNumber);
+            }
+        }
+        _windows[key] = (DateTime.UtcNow, window);
+        return window;
+    }
+
+    /// <summary>Lo que suele tardar el grabador en dejar disponible lo recién grabado (aprendido).</summary>
+    private double LagOf(int deviceId)
+    {
+        lock (_sync)
+        {
+            _lags ??= LoadLags();
+            return _lags.TryGetValue(deviceId, out double lag) ? lag : DefaultLagSeconds;
+        }
+    }
+
+    /// <summary>Suma una medición (promedio móvil) y la guarda, a lo más una vez por minuto.</summary>
+    private void Learn(int deviceId, double seconds)
+    {
+        string? toSave = null;
+        lock (_sync)
+        {
+            _lags ??= LoadLags();
+            double measured = Math.Clamp(seconds, 0, GiveUpSeconds);
+            _lags[deviceId] = _lags.TryGetValue(deviceId, out double old) ? Math.Round(old * 0.7 + measured * 0.3, 1) : Math.Round(measured, 1);
+            if (DateTime.UtcNow - _lagsSavedAt > TimeSpan.FromMinutes(1))
+            {
+                _lagsSavedAt = DateTime.UtcNow;
+                toSave = JsonSerializer.Serialize(_lags);
+            }
+        }
+        if (toSave is not null) _ = SaveLagsAsync(toSave);
+    }
+
+    private Dictionary<int, double> LoadLags()
+    {
+        try
+        {
+            using var scope = scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            string? data = db.SystemBlobs.AsNoTracking().Where(b => b.Name == LagBlob).Select(b => b.Data).FirstOrDefault();
+            return data is null ? [] : JsonSerializer.Deserialize<Dictionary<int, double>>(data) ?? [];
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "No se pudo leer lo aprendido de los grabadores.");
+            return [];
+        }
+    }
+
+    private async Task SaveLagsAsync(string json)
+    {
+        try
+        {
+            using var scope = scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VmsDbContext>();
+            var row = await db.SystemBlobs.FirstOrDefaultAsync(b => b.Name == LagBlob);
+            if (row is null) db.SystemBlobs.Add(row = new SystemBlob { Name = LagBlob });
+            row.Data = json;
+            row.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex) { logger.LogDebug(ex, "No se pudo guardar lo aprendido de los grabadores."); }
     }
 
     private async Task<IReadOnlyList<RecordingSegment>> SegmentsAsync(IDeviceDriver driver, Device device,

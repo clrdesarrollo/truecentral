@@ -131,6 +131,15 @@ public interface IDeviceDriver
         Task.FromResult<IReadOnlyList<RecordingSegment>>([]);
 
     /// <summary>
+    /// Pregrabación y posgrabación configuradas en el equipo para un canal (lo
+    /// que graba antes y después de un evento). La usa la repetición del evento
+    /// cuando la acción «Avisar» dice «Según el equipo». null = el equipo no lo
+    /// informa (implementación por defecto).
+    /// </summary>
+    Task<RecordWindow?> ReadRecordWindowAsync(DeviceConnectionInfo info, int channelNumber, CancellationToken ct = default) =>
+        Task.FromResult<RecordWindow?>(null);
+
+    /// <summary>
     /// Días del mes (1..31) que tienen grabación en el canal. Lo usa el
     /// calendario del módulo Reproducción para marcar de un vistazo dónde
     /// buscar. Lista vacía = el equipo no sabe responderlo (el calendario
@@ -277,6 +286,9 @@ public interface IDeviceEventSubscription : IAsyncDisposable
 
 /// <summary>Tramo grabado en el equipo (horas locales del equipo).</summary>
 public sealed record RecordingSegment(DateTime Start, DateTime End, RecordingKind Kind);
+
+/// <summary>Segundos que el equipo graba antes (<paramref name="PreSeconds"/>) y después de un evento.</summary>
+public sealed record RecordWindow(int PreSeconds, int PostSeconds);
 
 /// <summary>Origen de la grabación (colorea la línea de tiempo del cliente).</summary>
 public enum RecordingKind { Continuous, Motion, Alarm, Manual, Other }
