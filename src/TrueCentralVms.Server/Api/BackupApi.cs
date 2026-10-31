@@ -182,12 +182,15 @@ public static class BackupApi
     private static async Task<IResult?> ConfirmAccountAsync(HttpContext ctx, SessionInfo session, string? password, VmsDbContext db,
         LoginThrottle throttle, AuditService audit, string what, CancellationToken ct)
     {
-        if (throttle.LockedFor(session.Username, ctx.Connection.RemoteIpAddress) is { } left)
-            return Error($"Demasiados intentos fallidos. Espere {LoginThrottle.Describe(left)}.", StatusCodes.Status429TooManyRequests);
+        if (throttle.LockOf(session.Username, ctx.Connection.RemoteIpAddress) is { } locked)
+            return Error(locked.Left is { } left
+                    ? $"Demasiados intentos fallidos. Espere {LoginThrottle.Describe(left)}."
+                    : "La cuenta está bloqueada por intentos fallidos hasta que un administrador la desbloquee.",
+                StatusCodes.Status429TooManyRequests);
         var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == session.UserId, ct);
         if (user is not null && password is not null && PasswordHasher.Verify(password, user.PasswordHash, user.PasswordSalt))
             return null;
-        throttle.RecordFailure(session.Username, ctx.Connection.RemoteIpAddress);
+        throttle.RecordFailure(session.Username, ctx.Connection.RemoteIpAddress, exempt: user?.IsSuperAdmin == true);
         await audit.LogAsync(ctx, "backup", "backup-downloaded", targetType: "backup",
             detail: $"Rechazado: contraseña de la cuenta incorrecta al intentar {what}.", success: false);
         return Error("La contraseña de su cuenta no es correcta.", StatusCodes.Status403Forbidden);

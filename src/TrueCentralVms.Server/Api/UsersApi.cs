@@ -33,12 +33,18 @@ public static class UsersApi
     internal static readonly string[] ScopeTopics =
         ["devices", "locations", "alarm-panels", "access-devices", "speakers", "intercoms", "scope"];
 
-    private static UserDto ToDto(User u, IReadOnlyDictionary<int, Role> roles, bool editable, ScopeIndex index) => new(
-        u.Id, u.Username, u.Role, u.Enabled, u.CreatedAt, u.PasswordChangedAt,
-        u.RestrictToLocations, u.ViewOutsideScope, u.Locations.Select(l => l.LocationId).Order().ToList(),
-        u.Roles.Select(r => r.RoleId).Order().ToList(),
-        u.Roles.Select(r => roles.GetValueOrDefault(r.RoleId)?.Name).OfType<string>().Order().ToList(),
-        editable, u.IsSuperAdmin, ScopeBuilder.Summary(EffectiveOf(u, roles, index)), DisabledByLicense: u.DisabledByLicense);
+    private static UserDto ToDto(User u, IReadOnlyDictionary<int, Role> roles, bool editable, ScopeIndex index,
+        LoginThrottle? throttle = null)
+    {
+        var lockState = throttle?.StateOf(u.Username);
+        return new(
+            u.Id, u.Username, u.Role, u.Enabled, u.CreatedAt, u.PasswordChangedAt,
+            u.RestrictToLocations, u.ViewOutsideScope, u.Locations.Select(l => l.LocationId).Order().ToList(),
+            u.Roles.Select(r => r.RoleId).Order().ToList(),
+            u.Roles.Select(r => roles.GetValueOrDefault(r.RoleId)?.Name).OfType<string>().Order().ToList(),
+            editable, u.IsSuperAdmin, ScopeBuilder.Summary(EffectiveOf(u, roles, index)), DisabledByLicense: u.DisabledByLicense,
+            Locked: lockState?.Locked == true, LockedUntil: lockState?.LockedUntil?.UtcDateTime, LockStreak: lockState?.Streak ?? 0);
+    }
 
     /// <summary>
     /// Con qué alcance queda (o quedaría) el usuario: sus roles más su límite
@@ -202,14 +208,44 @@ public static class UsersApi
 
     public static void MapUsersApi(this WebApplication app)
     {
-        app.MapGet("/api/users", async (HttpContext ctx, VmsDbContext db, UserScopeService scopes) =>
+        app.MapGet("/api/users", async (HttpContext ctx, VmsDbContext db, UserScopeService scopes, LoginThrottle throttle) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.UsersManage, out _) is { } failure) return failure;
             var caller = (UserScope)ctx.Items["scope"]!;
             var roles = await RolesAsync(db);
             var index = (await scopes.SnapshotAsync(ctx.RequestAborted)).Index;
             var users = await db.Users.Include(u => u.Locations).Include(u => u.Roles).OrderBy(u => u.Username).ToListAsync();
-            return Results.Ok(users.Select(u => ToDto(u, roles, CannotManage(caller, u, roles, index) is null, index)));
+            return Results.Ok(users.Select(u => ToDto(u, roles, CannotManage(caller, u, roles, index) is null, index, throttle)));
+        });
+
+        // Desbloquear una cuenta bloqueada por intentos fallidos (también borra su
+        // reincidencia: el próximo bloqueo vuelve a durar 15 min). Al
+        // superadministrador lo puede desbloquear cualquier administrador: es lo
+        // único que se le puede hacer, y sin eso esperaría la hora entera.
+        app.MapPost("/api/users/{id:int}/unlock", async (HttpContext ctx, int id, VmsDbContext db,
+            UserScopeService scopes, LoginThrottle throttle, IHubContext<VmsHub> hub, AuditService audit) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.UsersManage, out _) is { } failure) return failure;
+            var caller = (UserScope)ctx.Items["scope"]!;
+            var user = await db.Users.Include(u => u.Locations).Include(u => u.Roles).FirstOrDefaultAsync(u => u.Id == id);
+            if (user is null) return Results.NotFound();
+            var roles = await RolesAsync(db);
+            if (!(user.IsSuperAdmin && caller.IsAdmin) &&
+                CannotManage(caller, user, roles, (await scopes.SnapshotAsync()).Index) is { } reason)
+                return Error(reason, StatusCodes.Status403Forbidden);
+
+            var state = throttle.StateOf(user.Username);
+            bool wasLocked = throttle.Unlock(user.Username);
+            await audit.LogAsync(ctx, "users", "user-unlocked",
+                targetType: "user", targetId: id.ToString(), targetName: user.Username,
+                detail: wasLocked
+                    ? $"Desbloqueó la cuenta '{user.Username}', bloqueada por intentos fallidos " +
+                      (state?.Indefinite == true ? "hasta su desbloqueo" : $"(quedaban {LoginThrottle.Describe(state?.LockedUntil - DateTimeOffset.UtcNow)})") +
+                      $"; bloqueo n.º {state?.Streak ?? 1} seguido."
+                    : $"Borró los intentos fallidos de '{user.Username}' (no estaba bloqueada).",
+                success: true);
+            await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "users");
+            return Results.Ok(new { message = wasLocked ? $"Se desbloqueó la cuenta '{user.Username}'." : $"'{user.Username}' no estaba bloqueada." });
         });
 
         app.MapPost("/api/users", async (HttpContext ctx, UserWriteDto request, VmsDbContext db, LicenseService license,

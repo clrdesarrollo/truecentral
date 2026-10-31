@@ -20,6 +20,7 @@ public static class AuditCatalog
             new("login-blocked", "Login bloqueado (clave vencida)"),
             new("login-locked", "Cuenta o IP bloqueada por intentos fallidos"),
             new("login-throttled", "Inicio de sesión rechazado por bloqueo de intentos"),
+            new("login-lock-bypassed", "Superadministrador entró desde el servidor con la cuenta bloqueada"),
             new("login-remote-denied", "Inicio de sesión desde Internet rechazado (el usuario no tiene «Entrar desde Internet»)"),
             new("request-remote-denied", "Solicitud desde Internet rechazada (el usuario no tiene «Entrar desde Internet»)"),
             new("url-ticket-rejected", "Enlace con un ticket inválido rechazado (desconocido, ya usado o para otra dirección)"),
@@ -41,6 +42,7 @@ public static class AuditCatalog
             new("user-deleted", "Usuario eliminado"),
             new("user-scope-updated", "Alcance por ubicación de un usuario modificado"),
             new("user-roles-updated", "Roles de un usuario modificados"),
+            new("user-unlocked", "Cuenta desbloqueada (intentos fallidos)"),
         ]),
         new("roles", "Roles y permisos",
         [
