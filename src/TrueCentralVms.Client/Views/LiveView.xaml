@@ -829,6 +829,23 @@
                         </StackPanel>
                     </Border>
                 </Popup>
+                <!-- Cinta de eventos: lo que pasa, bajo la grilla. El número cuenta los que
+                     llegaron con la cinta plegada. -->
+                <!-- Solo ícono: la barra ya va justa de ancho en monitores de 1600 px -->
+                <ToggleButton Style="{StaticResource GhostToggle}" Padding="9,5" Margin="0,0,6,0"
+                              DataContext="{Binding EventStrip}" IsChecked="{Binding IsOpen, Mode=TwoWay}"
+                              ToolTip="Cinta de eventos: los últimos eventos bajo la grilla; clic en uno abre su cámara">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE81C;" FontFamily="Segoe MDL2 Assets" FontSize="13"
+                                   VerticalAlignment="Center"/>
+                        <Border Background="{StaticResource DangerBrush}" CornerRadius="7" Padding="5,0" Margin="6,0,0,0"
+                                MinWidth="16" VerticalAlignment="Center"
+                                Visibility="{Binding HasUnseen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+                            <TextBlock Text="{Binding UnseenText}" Foreground="White" FontSize="10.5" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center"/>
+                        </Border>
+                    </StackPanel>
+                </ToggleButton>
                 <!-- Zoom digital: recorta la imagen ya recibida (no mueve la cámara) -->
                 <ToggleButton Style="{StaticResource GhostToggle}" Padding="10,5" Margin="0,0,6,0"
                               IsChecked="{Binding IsDigitalZoomMode, Mode=TwoWay}"
@@ -993,6 +1010,86 @@
                 </Popup>
             </Grid>
             </Grid>
+        </Border>
+
+        <!-- Cinta de eventos (plegable): fichas horizontales, la más reciente a la izquierda.
+             Va fuera de la grilla porque el video de Flyleaf tapa todo lo que se le ponga encima. -->
+        <Border DockPanel.Dock="Bottom" DataContext="{Binding EventStrip}" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="6,4"
+                Visibility="{Binding IsOpen, Converter={x:Static vm:BoolToVisibility.Instance}}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Width="150" Margin="2,0,8,0" VerticalAlignment="Center">
+                    <TextBlock Text="EVENTOS" Foreground="{StaticResource MutedBrush}" FontSize="10.5" FontWeight="SemiBold"/>
+                    <ComboBox Style="{StaticResource DarkComboBox}" Height="28" FontSize="11.5" Margin="0,3,0,0"
+                              ItemsSource="{Binding SeverityOptions}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding MinSeverity, Mode=TwoWay}" ToolTip="Gravedad mínima"/>
+                    <CheckBox Style="{StaticResource DarkCheckBox}" Margin="0,3,0,0" IsChecked="{Binding OnlyBoard, Mode=TwoWay}"
+                              ToolTip="Solo los eventos de las cámaras y recursos que hay en los cuadros (o que vigilaría un vigía)">
+                        <TextBlock Text="Solo de esta grilla" Foreground="{StaticResource TextBrush}" FontSize="11"/>
+                    </CheckBox>
+                </StackPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource CellBarIconButton}" Content="&#xE894;" FontSize="12"
+                        Command="{Binding ClearCommand}" ToolTip="Vaciar la cinta (quedan solo los eventos que lleguen desde ahora)"
+                        VerticalAlignment="Center"/>
+                <Grid>
+                    <TextBlock Text="{Binding EmptyText}" Foreground="{StaticResource MutedBrush}" FontSize="11.5"
+                               VerticalAlignment="Center" Margin="6,0"
+                               Visibility="{Binding IsEmpty, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                  PreviewMouseWheel="OnEventStripWheel">
+                        <ItemsControl ItemsSource="{Binding Items}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><VirtualizingStackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="210" Height="58" Margin="0,0,6,0" Padding="8,5" CornerRadius="4"
+                                            BorderThickness="3,1,1,1" Cursor="Hand" ToolTip="{Binding ToolTip}"
+                                            Background="{StaticResource CellBarBrush}"
+                                            MouseLeftButtonDown="OnEventStripItemDown" MouseMove="OnEventStripItemMove"
+                                            MouseLeftButtonUp="OnEventStripItemUp">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Level}" Value="Alarm">
+                                                        <Setter Property="BorderBrush" Value="{StaticResource DangerBrush}"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Level}" Value="Warning">
+                                                        <Setter Property="BorderBrush" Value="{StaticResource WarnBrush}"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Level}" Value="Ok">
+                                                        <Setter Property="BorderBrush" Value="{StaticResource OkBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" FontSize="10.5"
+                                                           Foreground="{StaticResource MutedBrush}" FontFamily="{StaticResource MonoFont}"/>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding RepeatsText}" FontSize="10.5" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource TextBrush}" Margin="0,0,6,0"/>
+                                                <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
+                                            </DockPanel>
+                                            <TextBlock Text="{Binding WhereText}" FontSize="11" Foreground="{StaticResource MutedBrush}"
+                                                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                                <TextBlock Text="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                                           Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,4,0"
+                                                           Visibility="{Binding HasCamera, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                                <TextBlock Text="Aviso" FontSize="10.5" Foreground="{StaticResource AccentBrush}"
+                                                           Visibility="{Binding IsAlert, Converter={x:Static vm:BoolToVisibility.Instance}}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </DockPanel>
         </Border>
 
         <!-- Grilla de video -->
