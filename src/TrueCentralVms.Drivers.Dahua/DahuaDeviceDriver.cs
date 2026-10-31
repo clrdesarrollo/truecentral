@@ -215,6 +215,45 @@ public sealed class DahuaDeviceDriver : IDeviceDriver
     }, ct);
 
     /// <summary>
+    /// Pregrabación y posgrabación del canal por la configuración del NetSDK:
+    /// «Record» → PreRecord (segundos) y «MotionDetect» → EventHandler.RecordLatch
+    /// (lo que sigue grabando después del evento). El que no venga queda null.
+    /// </summary>
+    public Task<RecordWindow?> ReadRecordWindowAsync(DeviceConnectionInfo info, int channelNumber,
+        CancellationToken ct = default) => Task.Run<RecordWindow?>(() =>
+    {
+        DahuaSdk.EnsureInitialized();
+        long loginId = DahuaSessionCache.GetOrLogin(info);
+        int channel = channelNumber - 1;
+        int? pre = ReadConfigInt(loginId, "Record", channel, "PreRecord");
+        int? post = ReadConfigInt(loginId, "MotionDetect", channel, "EventHandler", "RecordLatch");
+        return pre is null && post is null ? null : new RecordWindow(pre, post);
+    }, ct);
+
+    /// <summary>Un número de la configuración del equipo (params.table[canal]…ruta); null si no está.</summary>
+    private static int? ReadConfigInt(long loginId, string command, int channel, params string[] path)
+    {
+        var buffer = new byte[512 * 1024];
+        if (!NetSdk.CLIENT_GetNewDevConfig(loginId, command, channel, buffer, (uint)buffer.Length, out _, 5000, IntPtr.Zero))
+            return null;
+        try
+        {
+            int end = Array.IndexOf(buffer, (byte)0);
+            using var json = System.Text.Json.JsonDocument.Parse(buffer.AsMemory(0, end < 0 ? buffer.Length : end));
+            if (!json.RootElement.TryGetProperty("params", out var parameters) ||
+                !parameters.TryGetProperty("table", out var node)) return null;
+            // Con canal concreto llega el objeto; algunos firmwares mandan la lista por canal.
+            if (node.ValueKind == System.Text.Json.JsonValueKind.Array && node.GetArrayLength() > 0) node = node[0];
+            foreach (string key in path)
+            {
+                if (node.ValueKind != System.Text.Json.JsonValueKind.Object || !node.TryGetProperty(key, out node)) return null;
+            }
+            return node.ValueKind == System.Text.Json.JsonValueKind.Number && node.TryGetInt32(out int value) ? value : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    /// <summary>
     /// RTSP de reproducción de Dahua. El rango viaja en la propia URL con el
     /// formato del fabricante (YYYY_MM_DD_HH_MM_SS) y en HORA LOCAL del
     /// equipo, la misma en la que responde la búsqueda de grabaciones.

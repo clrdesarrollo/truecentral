@@ -165,8 +165,8 @@ public sealed class AlertClips(
         {
             // «Según el equipo»: su pregrabación y posgrabación; si no las informa, las del servidor.
             var window = await DeviceWindowAsync(device, channel.ChannelNumber, ct);
-            if (pre < 0) pre = window is { } w ? Math.Clamp(w.PreSeconds, 0, MaxPreSeconds) : Settings.PreSeconds;
-            if (post < 0) post = window is { } w2 ? Math.Clamp(w2.PostSeconds, 5, MaxPostSeconds) : Settings.PostSeconds;
+            if (pre < 0) pre = window?.PreSeconds is { } p ? Math.Clamp(p, 0, MaxPreSeconds) : Settings.PreSeconds;
+            if (post < 0) post = window?.PostSeconds is { } q ? Math.Clamp(q, 5, MaxPostSeconds) : Settings.PostSeconds;
         }
         string key = $"{alert.Id}:{channel.Id}";
 

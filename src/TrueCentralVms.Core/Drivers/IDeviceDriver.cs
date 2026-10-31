@@ -287,8 +287,9 @@ public interface IDeviceEventSubscription : IAsyncDisposable
 /// <summary>Tramo grabado en el equipo (horas locales del equipo).</summary>
 public sealed record RecordingSegment(DateTime Start, DateTime End, RecordingKind Kind);
 
-/// <summary>Segundos que el equipo graba antes (<paramref name="PreSeconds"/>) y después de un evento.</summary>
-public sealed record RecordWindow(int PreSeconds, int PostSeconds);
+/// <summary>Segundos que el equipo graba antes (<paramref name="PreSeconds"/>) y después de un evento;
+/// null en el que el equipo no informa (rige el del servidor).</summary>
+public sealed record RecordWindow(int? PreSeconds, int? PostSeconds);
 
 /// <summary>Origen de la grabación (colorea la línea de tiempo del cliente).</summary>
 public enum RecordingKind { Continuous, Motion, Alarm, Manual, Other }

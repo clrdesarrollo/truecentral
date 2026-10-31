@@ -583,8 +583,8 @@ recibo»).
   - _Valor del servidor_ (la lista muestra cuántos segundos son): los de
     #boton("Repetición del evento"), en la barra de Automatizaciones.
   - _Según el equipo_: la pregrabación y la posgrabación configuradas en el
-    grabador para esa cámara (hoy se leen de los equipos Hikvision; si el equipo
-    no las informa, valen las del servidor).
+    grabador para esa cámara (se leen de los equipos Hikvision y Dahua; si el
+    equipo no las informa, valen las del servidor).
   - Un valor fijo, de 0 a 60 s antes y de 5 a 120 s después.
 
   Cuanto más largo el después, más tarda en estar lista la repetición: el
