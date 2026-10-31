@@ -274,7 +274,7 @@ function closeModal() {
 // botones en una barra que queda a la vista al bajar. Guardar o Cancelar
 // vuelven a la lista; un diálogo que el formulario abra encima sigue siendo modal.
 // ---------------------------------------------------------------------------
-let formPage = null;         // { hash, back, icon, hint, drawn, left }
+let formPage = null;         // { hash, back, icon, hint, wide, drawn, left }
 let formPagePrefill = null;  // { base, data }: el equipo elegido en Equipos en línea
 
 /** Abre el alta como página; `prefill` = los datos del equipo encontrado en la red. */
@@ -283,14 +283,15 @@ function openFormPage(newHash, prefill) {
   location.hash = newHash;
 }
 
-/** Ruta de un alta: `back` = su lista, `icon`/`hint` = la columna de al lado; `open(prefill, query)` llama al formulario de siempre. */
-function formPageRoute({ back, icon, hint }, open) {
+/** Ruta de un alta: `back` = su lista, `icon`/`hint` = la columna de al lado; `open(prefill, query)` llama al formulario de siempre.
+ *  `wide`: el formulario usa todo el ancho (listas lado a lado, asistentes con tablas). */
+function formPageRoute({ back, icon, hint, wide = false }, open) {
   return async () => {
     const hash = location.hash;
     const base = hash.split("?")[0];
     const prefill = formPagePrefill?.base === base ? formPagePrefill.data : null;
     formPagePrefill = null;
-    const me = { hash, back, icon, hint, drawn: false, left: false };
+    const me = { hash, back, icon, hint, wide, drawn: false, left: false };
     formPage = me;
     $("#view").innerHTML = `<div class="muted">Cargando el formulario…</div>`;
     await open(prefill, new URLSearchParams(hash.split("?")[1] ?? ""));
@@ -333,7 +334,7 @@ function drawFormPage(html) {
   }
   // Al lado del formulario, de qué sección es y qué hace el sistema al guardar.
   const page = document.createElement("div");
-  page.className = "form-page";
+  page.className = "form-page" + (formPage.wide ? " wide" : "");
   page.innerHTML = `
     <a class="form-page-back" href="${esc(formPage.back)}"><span aria-hidden="true">←</span> Volver a ${esc(listName)}</a>
     <div class="form-page-layout">
@@ -2460,6 +2461,19 @@ const routes = {
   "#/access-monitor": renderAccessMonitor,
   "#/access-persons": renderAccessPersons,
   "#/access-levels": renderAccessLevels,
+  // Personas y niveles de acceso se agregan y editan en su página.
+  "#/access-persons/new": formPageRoute({ back: "#/access-persons", icon: "mdi-account-plus", wide: true,
+    hint: "Se guarda una sola vez, al final. Después se escribe sola en los equipos de sus niveles de acceso." },
+    () => accessPersonPage(null)),
+  "#/access-persons/edit": formPageRoute({ back: "#/access-persons", icon: "mdi-account-edit", wide: true,
+    hint: "Los cambios se guardan juntos al final y se reescriben solos en sus equipos." },
+    (_, query) => accessPersonPage(Number(query.get("id")))),
+  "#/access-levels/new": formPageRoute({ back: "#/access-levels", icon: "mdi-account-key", wide: true,
+    hint: "Un nivel junta puertas con un horario. Arme las dos listas con «Agregar» y guarde: se escribe solo en los equipos." },
+    () => accessLevelPage(null)),
+  "#/access-levels/edit": formPageRoute({ back: "#/access-levels", icon: "mdi-account-key", wide: true,
+    hint: "Puertas, horario y personas del nivel en una sola página. Al guardar se reescribe en los equipos." },
+    (_, query) => accessLevelPage(Number(query.get("id")), query.get("focus"))),
   "#/access-schedules": renderAccessSchedules,
   "#/access-events": renderAccessEvents,
   "#/speakers": renderSpeakers,
