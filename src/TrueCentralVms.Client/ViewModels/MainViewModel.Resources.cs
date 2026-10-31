@@ -44,8 +44,10 @@ public partial class MainViewModel
         var cards = new ResourceGroupNode("Tarjetas", "\uE9D2");
         cards.Children.Add(ResourceNode.Card(CardKinds.Equipment, "Estado de los equipos", "\uE9D9",
             "En línea por tipo de equipo y los que están sin conexión"));
-        cards.Children.Add(ResourceNode.Card(CardKinds.Server, "Servidor", "\uE977",
-            "CPU, memoria, disco y servicios del servidor"));
+        // El servidor solo manda su estado a quien puede ver Sistema \u2192 Servicios.
+        if (PermissionScope.Current.Has(Permissions.SystemServices))
+            cards.Children.Add(ResourceNode.Card(CardKinds.Server, "Servidor", "\uE977",
+                "CPU, memoria, disco y servicios del servidor"));
         if (CanEvents)
             cards.Children.Add(ResourceNode.Card(CardKinds.Alerts, "Últimas alertas", "\uE7BA",
                 "Alertas de las automatizaciones, con las pendientes de confirmar"));

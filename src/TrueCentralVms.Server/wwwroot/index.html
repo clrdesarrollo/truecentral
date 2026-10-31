@@ -120,7 +120,7 @@
             </div>
           </div>
         </div>
-        <a href="#/resources" data-route="resources" data-needs-license><i class="mdi mdi-file-tree" aria-hidden="true"></i><span class="nav-text">Recursos</span></a>
+        <a href="#/resources" data-route="resources" data-needs-license data-perm="resources.manage|locations.command"><i class="mdi mdi-file-tree" aria-hidden="true"></i><span class="nav-text">Recursos</span></a>
         <a href="#/boards" data-route="boards" data-needs-license data-perm="dashboards.manage"><i class="mdi mdi-view-dashboard" aria-hidden="true"></i><span class="nav-text">Tableros</span></a>
 
         <div class="nav-group" data-group="access">
@@ -161,7 +161,7 @@
             <i class="mdi mdi-settings" aria-hidden="true"></i><span class="nav-text">Sistema</span><span class="caret" aria-hidden="true"></span>
           </button>
           <div class="nav-children">
-            <a href="#/services" data-route="services">Servicios</a>
+            <a href="#/services" data-route="services" data-perm="system.services">Servicios</a>
             <div class="nav-group" data-group="network">
               <button type="button" class="nav-toggle">
                 <span class="nav-text">Red</span><span class="caret" aria-hidden="true"></span>
@@ -169,14 +169,14 @@
               <div class="nav-children">
                 <a href="#/time" data-route="time" data-perm="system.network">Hora (NTP)</a>
                 <a href="#/wan" data-route="wan" data-perm="system.network">Acceso desde Internet</a>
-                <a href="#/certificate" data-route="certificate">Certificado HTTPS</a>
+                <a href="#/certificate" data-route="certificate" data-perm="system.certificate">Certificado HTTPS</a>
                 <a href="#/isup" data-route="isup" data-needs-license data-perm="system.services">Conexión ISUP</a>
                 <a href="#/mail" data-route="mail" data-module="module_automation" data-perm="workflows.manage">Correo saliente</a>
               </div>
             </div>
             <a href="#/backups" data-route="backups" data-perm="system.backup">Respaldos</a>
             <a href="#/integrations" data-route="integrations" data-module="module_integration_api" data-perm="system.integrations">Integraciones</a>
-            <a href="#/license" data-route="license">Licencia</a>
+            <a href="#/license" data-route="license" data-perm="system.license">Licencia</a>
           </div>
         </div>
       </nav>
@@ -259,7 +259,7 @@
   <!-- playback.js usa LvSession y utilidades de live.js. -->
   <script src="playback.js?v=8"></script>
   <script src="roles.js?v=3"></script>
-  <script src="dashboard.js?v=9"></script>
+  <script src="dashboard.js?v=10"></script>
   <script src="app.js?v=99"></script>
 </body>
 </html>
