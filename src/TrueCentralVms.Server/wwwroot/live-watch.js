@@ -361,7 +361,7 @@ async function lvwShowAlert(id) {
     <p>${esc(a.message)}</p>
     <p class="muted">${a.acknowledgedAt ? `Confirmada por ${esc(a.acknowledgedBy)} el ${new Date(a.acknowledgedAt).toLocaleString("es-CL")}.`
       : a.requiresAck ? "Pendiente: nadie se ha dado por enterado todavía." : "Informativa: no pide confirmación."}</p>
-    <p><a href="#/events" target="_blank" rel="noopener">Abrir en el Centro de eventos (en otra pestaña) ↗</a></p>
+    <p><a href="#/event-center" target="_blank" rel="noopener">Abrir en el Centro de eventos (en otra pestaña) ↗</a></p>
     <div class="modal-actions">
       <button type="button" class="btn ghost" id="lvw-alert-close">Cerrar</button>
       ${pending ? `<button type="button" class="btn primary" id="lvw-alert-ack">Enterado</button>` : ""}
