@@ -425,6 +425,18 @@ public partial class AuxScreenViewModel : ObservableObject
         SelectedCell = cell;
     }
 
+    /// <summary>«Vigilar esta ubicación» en un cuadro de esta pantalla.</summary>
+    public async Task WatchLocationAsync(LocationNode location)
+    {
+        if (location.Location is not { } place) return;
+        var panel = _shell.CreateWatchPanel(WatchOptions.Default with { LocationIds = [place.Id] });
+        var cell = SelectedCell ?? Cells.FirstOrDefault(c => c.IsEmpty) ?? Cells.FirstOrDefault();
+        if (cell is null) return;
+        await cell.ShowPanelAsync(panel);
+        SelectedCell = cell;
+        StatusMessage = $"El cuadro {cell.Index} vigila «{place.Name}».";
+    }
+
     /// <summary>Doble clic en un recurso: en el cuadro seleccionado, o en el primero libre.</summary>
     public async Task OpenResourceAsync(ResourceNode node)
     {

@@ -1,0 +1,124 @@
+<!-- Engranaje del Cuadro vigía: qué eventos, de dónde, con qué gravedad, cuánto
+     queda cada uno en pantalla y qué muestra en espera. Misma receta de ventana que
+     los demás diálogos: sin marco de Windows y ✕ propio. -->
+<Window x:Class="TrueCentralVms.Client.Views.WatchSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Cuadro vigía — CLR TrueCentral VMS"
+        Width="660" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None" ShowInTaskbar="False"
+        Icon="/TrueCentralVms.Client;component/Assets/logo.png"
+        Background="{StaticResource BgBrush}">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="44" ResizeBorderThickness="0"
+                      GlassFrameThickness="0,0,0,1" CornerRadius="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    <Window.Resources>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,12,0,4"/>
+        </Style>
+        <DataTemplate x:Key="CheckRow">
+            <CheckBox Style="{StaticResource DarkCheckBox}" IsChecked="{Binding IsChecked}" Margin="0,2">
+                <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextBrush}" FontSize="12.5"/>
+            </CheckBox>
+        </DataTemplate>
+    </Window.Resources>
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Height="44" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource TitleBarCloseButton}" Content="&#xE8BB;"
+                        Width="44" Click="OnCancelClick" ToolTip="Cancelar"
+                        WindowChrome.IsHitTestVisibleInChrome="True"/>
+                <StackPanel Orientation="Horizontal" Margin="14,0">
+                    <TextBlock Text="&#xE890;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                               Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Text="Cuadro vigía" Foreground="{StaticResource TextBrush}"
+                               FontSize="13" FontWeight="SemiBold" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,10">
+            <DockPanel>
+                <TextBlock x:Name="ErrorText" Foreground="{StaticResource DangerBrush}" FontSize="11.5"
+                           VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="300"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Style="{StaticResource GhostButton}" Padding="14,6" Content="Cancelar" Click="OnCancelClick"/>
+                    <Button Style="{StaticResource PrimaryButton}" Padding="14,6" Margin="8,0,0,0" Content="Aplicar"
+                            IsDefault="True" Click="OnApplyClick"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+        <StackPanel Margin="16,6,16,14">
+            <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11.5" TextWrapping="Wrap" Margin="0,8,0,0"
+                       Text="El cuadro cambia solo a la cámara del último evento que cumpla lo de abajo. No reemplaza a los avisos: solo muestra."/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="QUÉ VIGILA" Style="{StaticResource FieldLabel}"/>
+                    <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="4" Padding="8,6">
+                        <ScrollViewer MaxHeight="250" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl x:Name="CategoryList" ItemTemplate="{StaticResource CheckRow}"/>
+                        </ScrollViewer>
+                    </Border>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="DÓNDE" Style="{StaticResource FieldLabel}"/>
+                    <RadioButton x:Name="AllPlacesRadio" GroupName="WatchPlaces" Content="Todo lo que veo"
+                                 Foreground="{StaticResource TextBrush}" Margin="0,2" Checked="OnPlacesChanged"/>
+                    <RadioButton x:Name="SomePlacesRadio" GroupName="WatchPlaces" Content="Solo estas ubicaciones (y lo que contienen)"
+                                 Foreground="{StaticResource TextBrush}" Margin="0,2" Checked="OnPlacesChanged"/>
+                    <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,6,0,0">
+                        <ScrollViewer MaxHeight="190" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl x:Name="LocationList" ItemTemplate="{StaticResource CheckRow}"/>
+                        </ScrollViewer>
+                    </Border>
+                    <TextBlock x:Name="NoLocationsText" Foreground="{StaticResource MutedBrush}" FontSize="11.5"
+                               TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed"
+                               Text="No hay ubicaciones creadas: el vigía mira todo lo que usted ve."/>
+                </StackPanel>
+            </Grid>
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="GRAVEDAD MÍNIMA" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="SeverityBox" Style="{StaticResource DarkComboBox}" Height="28" FontSize="12"
+                              DisplayMemberPath="Label" SelectedValuePath="Value"/>
+                    <TextBlock Text="TIEMPO MÍNIMO EN PANTALLA" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="HoldBox" Style="{StaticResource DarkComboBox}" Height="28" FontSize="12"
+                              DisplayMemberPath="Label" SelectedValuePath="Value"
+                              ToolTip="Un evento nuevo igual de grave espera este tiempo; uno más grave interrumpe"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="EN ESPERA MUESTRA" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="IdleBox" Style="{StaticResource DarkComboBox}" Height="28" FontSize="12"
+                              DisplayMemberPath="Label" SelectedValuePath="Value"/>
+                    <TextBlock Text="«FIJAR» SE SUELTA SOLO" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="PinBox" Style="{StaticResource DarkComboBox}" Height="28" FontSize="12"
+                              DisplayMemberPath="Label" SelectedValuePath="Value"
+                              ToolTip="Para que nadie deje un vigía detenido sin darse cuenta"/>
+                </StackPanel>
+            </Grid>
+            <CheckBox x:Name="MainStreamCheck" Style="{StaticResource DarkCheckBox}" Margin="0,12,0,0">
+                <TextBlock Foreground="{StaticResource TextBrush}" FontSize="12.5"
+                           Text="Stream principal (más calidad; el secundario cambia de cámara más rápido)"/>
+            </CheckBox>
+        </StackPanel>
+    </DockPanel>
+</Window>

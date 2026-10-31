@@ -25,7 +25,7 @@ public static class DashboardItemKinds
 
     /// <summary>Tarjetas de reporte que puede llevar un cuadro.</summary>
     public static readonly IReadOnlyList<string> Cards =
-        ["card-equipment", "card-server", "card-alerts", "card-plates", "card-access"];
+        ["card-equipment", "card-server", "card-alerts", "card-plates", "card-access", "card-watch"];
 
     public static bool IsCamera(string? kind) => string.IsNullOrEmpty(kind) || kind == Camera;
 

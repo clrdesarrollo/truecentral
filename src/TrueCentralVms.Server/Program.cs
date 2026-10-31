@@ -286,6 +286,8 @@ builder.Services.AddSingleton<IWorkflowActionExecutor, VehicleAccessAction>();
 builder.Services.AddSingleton<AlarmScreenService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AlarmScreenService>());
 builder.Services.AddSingleton<WorkflowEngine>();
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.LiveEventFeed>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrueCentralVms.Server.Services.LiveEventFeed>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkflowEngine>());
 // Eventos de analítica de las cámaras (movimiento, cruce de línea, intrusión...):
 // el servicio se suscribe SOLO a los equipos que piden las automatizaciones.
@@ -675,6 +677,7 @@ app.MapAccessCatalogApi();
 app.MapAccessRecordsApi();
 app.MapDeviceMaintenanceApi();
 app.MapWorkflowsApi();
+app.MapLiveEventsApi();
 app.MapAlarmScreensApi();
 app.MapDashboardApi();
 app.MapIntegrationAppsApi();

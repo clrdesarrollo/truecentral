@@ -50,6 +50,7 @@ public sealed class NotifyAction(
     LicenseService license,
     IServiceScopeFactory scopeFactory,
     IConfiguration config,
+    LiveEventFeed liveEvents,
     ILogger<NotifyAction> logger) : IWorkflowActionExecutor
 {
     public string Type => WorkflowActionTypes.Notify;
@@ -261,6 +262,8 @@ public sealed class NotifyAction(
         }
 
         if (alert.ShowPopup) await PushAsync(context, alert, recipients, alert.Id, requireAck, ct);
+        // Y al Cuadro vigía, con sus cámaras (solo los que van a la ventana de alarma).
+        if (alert.ShowPopup) liveEvents.OfferAlert(alert, channels);
         // Persistir primero, difundir después: una pantalla desconectada lo
         // recupera al resincronizar.
         if (alert.ShowOnScreens) await screens.PublishRaisedAsync(alert, ct);

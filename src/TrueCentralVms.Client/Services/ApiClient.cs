@@ -177,6 +177,10 @@ public sealed class ApiClient
         SendAsync<List<VehicleDto>>(HttpMethod.Get, "/api/fleet/vehicles", null, ct);
 
     /// <summary>Árbol de ubicaciones de Recursos (lista plana: se arma por ParentId).</summary>
+    /// <summary>Últimos eventos en vivo que este usuario puede ver (Cuadro vigía), el más reciente primero.</summary>
+    public Task<List<LiveEventDto>> GetRecentLiveEventsAsync(int take = 100, CancellationToken ct = default) =>
+        SendAsync<List<LiveEventDto>>(HttpMethod.Get, $"/api/live-events/recent?take={take}", null, ct);
+
     public Task<List<LocationDto>> GetLocationsAsync(CancellationToken ct = default) =>
         SendAsync<List<LocationDto>>(HttpMethod.Get, "/api/locations", null, ct);
 

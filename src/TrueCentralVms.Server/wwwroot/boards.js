@@ -16,6 +16,7 @@ const BD_CARDS = [
   { key: "card-alerts", label: "Últimas alertas", detail: "Alertas de las automatizaciones" },
   { key: "card-plates", label: "Últimas patentes", detail: "Reconocimientos de patente en vivo" },
   { key: "card-access", label: "Últimos accesos", detail: "Pasos por las puertas, sin eventos del sistema" },
+  { key: "card-watch", label: "Cuadro vigía", detail: "Cambia solo a la cámara del último evento (se configura en el cliente)" },
 ];
 /** Tipos de recurso que puede llevar un cuadro (las zonas se ven dentro de su panel). */
 const BD_RESOURCE_KINDS = ["Camera", "Door", "Partition", "Fence", "Intercom", "Speaker", "IoModule"];
@@ -314,6 +315,8 @@ function bdItemInfo(it) {
       if (devices) notes.push(key === "card-access" ? `${devices} equipo${devices === 1 ? "" : "s"}` : `${devices} cámara${devices === 1 ? "" : "s"}`);
       if (/(^|&)pending=1/.test(options)) notes.push("solo sin confirmar");
       if (/(^|&)system=1/.test(options)) notes.push("con eventos del sistema");
+      const places = /(^|&)loc=([\d,]+)/.exec(options)?.[2].split(",").length ?? 0;
+      if (places) notes.push(`${places} ubicaci${places === 1 ? "ón" : "ones"}`);
       return { icon: `<i class="mdi mdi-chart-bar" aria-hidden="true"></i>`, name: card?.label ?? it.ref,
         sub: ["Tarjeta", ...notes].join(" · ") };
     }

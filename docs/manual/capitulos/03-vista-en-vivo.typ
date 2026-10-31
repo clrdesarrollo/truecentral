@@ -227,6 +227,9 @@ se abre:
     de la barra del cuadro se eligen los equipos de acceso (ver _Elegir los
     equipos de Últimos accesos_). Ver _La tarjeta Últimos accesos_. Pide *Ver
     control de acceso*.],
+  [*Cuadro vigía*], [No es un resumen: es un cuadro que cambia solo a la
+    cámara del último evento (alarmas, accesos denegados, analíticas, avisos de
+    las automatizaciones…). Ver _El Cuadro vigía_.],
 )
 
 === La tarjeta Últimas alertas
@@ -426,6 +429,99 @@ antes de hacer clic en #boton("Abrir").
 Para que una página la vean todos los puestos, pídale al administrador que la
 agregue a la lista del servidor (ver _Tableros compartidos y páginas web_, al
 final de este capítulo).
+
+=== El Cuadro vigía
+
+Un Cuadro vigía cambia solo a la cámara del último evento que le interesa, para
+que no tenga que buscarla en la lista. Arriba del video muestra una franja con
+qué pasó, hace cuánto y dónde. No reemplaza a los avisos: solo muestra, no hay
+nada que confirmar.
+
+Para ponerlo:
+
+- Desde la lista: grupo *Tarjetas* → *Cuadro vigía*, con doble clic (va al
+  cuadro seleccionado) o arrastrándolo a un cuadro.
+- Desde una ubicación: clic derecho en la ubicación → *Vigilar esta ubicación en
+  el cuadro seleccionado*. El vigía queda filtrado a esa ubicación y a lo que
+  contiene, y su barra dice, por ejemplo, «Vigía · Bodegas».
+
+Por omisión vigila todo lo que usted ve: avisos de automatizaciones, alarmas de
+paneles y de puertas, accesos denegados, analíticas de video, pérdida de video,
+patentes no autorizadas, cerco eléctrico, entradas de módulos de E/S y llamadas
+de citofonía, de gravedad advertencia o crítica.
+
+==== La franja
+
+- En espera dice «Esperando eventos» y el cuadro explica que cambiará solo.
+- Con un evento, la franja toma el color de su gravedad (rojo crítica, ámbar
+  advertencia) y muestra el título, «×3» si se repitió, hace cuánto («ahora»,
+  «hace 12 s», «hace 2 min») y el recurso y su ubicación.
+- Si el evento trae varias cámaras, las flechas ◀ ▶ pasan de una a otra
+  («Cámara 1/2»).
+- #boton("Ver aviso") (solo en los avisos de automatizaciones) abre la ventana de
+  alarma de ese aviso.
+- #boton("Listo") da el evento por visto: pasa al siguiente de la cola o vuelve a
+  esperar.
+- «+2 en cola» indica eventos esperando su turno; #boton("Siguiente") muestra ya
+  el próximo.
+- El alfiler fija el vigía: deja de cambiar y los eventos nuevos quedan en cola.
+  Se suelta con otro clic o solo a los 5 minutos (la barra muestra cuánto
+  falta), para que nadie deje un vigía detenido sin darse cuenta.
+
+Los botones de video de la barra (audio, captura, stream, grabación) y el PTZ
+funcionan sobre la cámara que muestra el vigía, como en cualquier cuadro.
+
+Fijar y soltar un vigía, y dar por visto con #boton("Listo") un evento crítico,
+quedan en la bitácora de auditoría.
+
+==== Cuándo cambia
+
+- Un evento queda al menos 20 segundos. Uno que llega antes, igual de grave,
+  espera en la cola; uno más grave lo reemplaza de inmediato.
+- No cambia mientras usted usa el cuadro: con zoom digital, o durante unos
+  segundos después de tocar sus botones.
+- Varios vigías con la misma configuración se reparten los eventos: el evento
+  va al vigía libre de número más bajo; si todos muestran algo, al que muestra
+  algo menos grave o ya cumplió su tiempo; si no, a la cola del que tenga menos.
+  Con cuatro vigías se ven los cuatro últimos eventos.
+- Los eventos que se repiten (la misma puerta, la misma zona) no cambian la
+  cámara: suben el contador.
+
+Soltar una cámara de la lista sobre un vigía lo reemplaza por esa cámara, igual
+que con cualquier otro contenido. Arrastrar el vigía a otro cuadro lo mueve con
+lo que está mostrando.
+
+==== Configurar el vigía
+
+El engranaje de la barra del cuadro abre *Cuadro vigía*:
+
+#table(
+  columns: (auto, 1fr),
+  table.header[Opción][Qué hace],
+  [Qué vigila], [Los tipos de evento. *Detección de movimiento*, *Accesos
+    concedidos* y *Patentes autorizadas* vienen desmarcados porque llegan muy
+    seguido.],
+  [Dónde], [*Todo lo que veo* o *Solo estas ubicaciones (y lo que contienen)*.
+    Un evento de un recurso sin ubicación solo llega a los vigías de «Todo lo
+    que veo».],
+  [Gravedad mínima], [Informativa (todo), Advertencia y crítica, o Solo
+    crítica.],
+  [Tiempo mínimo en pantalla], [De 5 a 120 segundos.],
+  [En espera muestra], [Nada (queda esperando) o una cámara de reposo.],
+  [«Fijar» se suelta solo], [De 1 a 30 minutos, o nunca.],
+  [Stream principal], [Más calidad; el secundario, que es el de omisión,
+    cambia de cámara más rápido.],
+)
+
+Lo elegido se guarda con el cuadro en los tableros y en la última sesión. Un
+administrador también puede poner un Cuadro vigía en un tablero compartido
+desde el panel web; sus opciones se eligen en el cliente.
+
+#nota[Cada usuario ve solo lo suyo: un evento llega a un vigía si su rol
+  permite verlo (por ejemplo, los accesos piden *Ver control de acceso* y las
+  alarmas *Ver alarmas*) y si el recurso está dentro de su
+  alcance; las cámaras que no puede ver no se abren. Los avisos llegan a los
+  mismos usuarios que su ventana de alarma.]
 
 == Los cuadros de video
 
@@ -999,7 +1095,8 @@ vuelve a abrirse en esa ventana, en el monitor y la posición donde quedó.
 #requiere("Órdenes por ubicación")
 
 En la lista de recursos, el clic derecho sobre una ubicación ofrece, además
-de *Abrir sus cámaras*, órdenes para todas las áreas de alarma de esa
+de *Abrir sus cámaras* y *Vigilar esta ubicación en el cuadro seleccionado*
+(ver _El Cuadro vigía_), órdenes para todas las áreas de alarma de esa
 ubicación y de sus sububicaciones:
 
 + Haga clic derecho en la ubicación y elija *Armar total sus áreas de

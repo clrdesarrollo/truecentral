@@ -54,6 +54,8 @@ public partial class MainViewModel
         if (CanLpr)
             cards.Children.Add(ResourceNode.Card(CardKinds.Plates, "Últimas patentes", "\uE804",
                 "Reconocimientos de patente en vivo"));
+        cards.Children.Add(ResourceNode.Card(CardKinds.Watch, "Cuadro vigía", "\uE890",
+            "Cambia solo a la cámara del último evento: alarmas, accesos, analíticas, avisos…"));
         if (PermissionScope.Current.Has(Permissions.AccessMonitor))
             cards.Children.Add(ResourceNode.Card(CardKinds.Access, "Últimos accesos", "\uE8D7",
                 "Pasos por las puertas en vivo, sin eventos del sistema"));
@@ -109,6 +111,7 @@ public partial class MainViewModel
         var panel = node.CardKind switch
         {
             CardKinds.Equipment => new EquipmentCardPanel(_api),
+            CardKinds.Watch => CreateWatchPanel(WatchOptions.FromRef(cardRef)),
             CardKinds.Server => new ServerCardPanel(_api),
             CardKinds.Alerts => new AlertsCardPanel(_api, _hub, OpenAlert, CardKinds.AlertsPendingOnly(cardRef)),
             CardKinds.Plates => new PlatesCardPanel(_api, _hub, CardKinds.PlatesDevices(cardRef)),
@@ -208,11 +211,12 @@ public partial class MainViewModel
     }
 
     /// <summary>Lo que hay en un cuadro, en el formato de los tableros (null = libre o no se guarda).</summary>
+    /// <remarks>El panel va primero: un Cuadro vigía muestra una cámara, pero lo que se guarda es el vigía.</remarks>
     public static LiveViewItemDto? DashboardItemOf(VideoCellViewModel cell, int index) =>
-        cell.AssignedChannel is { } channel
-            ? new LiveViewItemDto(index, channel.Channel.Id, (int)cell.Profile, DashboardItemKinds.Camera)
-            : cell.Panel?.Content is { } content
-                ? new LiveViewItemDto(index, 0, 0, content.Kind, content.RefId, content.Ref, content.Title, content.Zoom)
+        cell.Panel?.Content is { } content
+            ? new LiveViewItemDto(index, 0, 0, content.Kind, content.RefId, content.Ref, content.Title, content.Zoom)
+            : cell.AssignedChannel is { } channel
+                ? new LiveViewItemDto(index, channel.Channel.Id, (int)cell.Profile, DashboardItemKinds.Camera)
                 : null;
 
     private CellPanel? CreateResourcePanel(ResourceNode node) => node.Kind switch

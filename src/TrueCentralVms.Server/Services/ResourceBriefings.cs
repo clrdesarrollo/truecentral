@@ -18,7 +18,8 @@ public static class ResourceBriefings
         int? CercoPanelId = null,
         int? AccessDeviceId = null, int? DoorNumber = null,
         int? IntercomId = null,
-        int? ChannelId = null, int? DeviceId = null, int? ChannelNumber = null);
+        int? ChannelId = null, int? DeviceId = null, int? ChannelNumber = null,
+        int? IoModuleId = null);
 
     /// <summary>Recursos a los que apunta el evento, del más específico al más general (la zona antes que su área).</summary>
     public static async Task<List<ResourceRef>> CandidatesAsync(VmsDbContext db, EventRef e, CancellationToken ct)
@@ -61,6 +62,9 @@ public static class ResourceBriefings
 
         if (e.IntercomId is { } intercom && await db.Intercoms.AnyAsync(i => i.Id == intercom, ct))
             list.Add(new ResourceRef(ResourceKind.Intercom, intercom));
+
+        if (e.IoModuleId is { } ioModule && await db.IoModules.AnyAsync(m => m.Id == ioModule, ct))
+            list.Add(new ResourceRef(ResourceKind.IoModule, ioModule));
 
         int? channelId = e.ChannelId;
         if (channelId is null && e.DeviceId is { } device && e.ChannelNumber is { } number)

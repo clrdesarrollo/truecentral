@@ -44,6 +44,8 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
     private readonly AuditService _audit;
     private readonly IConfiguration _config;
     private readonly ILogger<WorkflowEngine> _logger;
+    /// <summary>Eventos en vivo del Cuadro vigía (se resuelve al primer uso: evita un ciclo de dependencias).</summary>
+    private LiveEventFeed? _liveEvents;
 
     public WorkflowEngine(
         IServiceScopeFactory scopeFactory,
@@ -139,6 +141,8 @@ public sealed class WorkflowEngine : SupervisedBackgroundService
     /// </summary>
     public void Publish(WorkflowTrigger trigger)
     {
+        // El Cuadro vigía ve lo que pasa aunque las automatizaciones estén apagadas.
+        (_liveEvents ??= _services.GetService<LiveEventFeed>())?.Offer(trigger);
         if (!_config.GetValue("Workflows:Enabled", true)) return;
         if (!_incoming.Writer.TryWrite(trigger))
             _logger.LogWarning("Cola de automatizaciones llena: se descartó el disparo '{Summary}'.", trigger.Summary);

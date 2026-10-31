@@ -265,7 +265,23 @@ actualiza tableros con cuadros no-video: se amplía para `watch`). Video por WHE
 | 2 | Cinta de eventos | Mediano |
 | 3 | Vigía y cinta en el panel web | Mediano |
 
-## 11. Preguntas abiertas
+## 11. Estado (31/10/2026)
+
+Fases 1a y 1b hechas en la rama `feat/cuadro-vigia`:
+
+- Servidor: `Services/LiveEventFeed` (derivación en `WorkflowEngine.Publish` antes del corte por `Workflows:Enabled`,
+  más cerco, citofonía y la acción «Avisar»), antirrebote 10 s / 30 s, caché de resolución 60 s, anillo de 300,
+  `ScopedHub.SendEachAsync` (permiso del tipo de evento + alcance + cámaras recortadas; los avisos con los mismos
+  destinatarios que su ventana), `GET /api/live-events/recent`. `ResourceBriefings.EventRef` ganó `IoModuleId`.
+- Cliente: `LiveEventHub`, `WatchCellPanel` + `WatchCoordinator` (reparto por grupo, cola, fijar, no interrumpir con
+  zoom o recién tocado), `CellPanel.KeepsVideo` / `AttachTo` / `DetachFrom`, `VideoCellViewModel.OpenAsync(keepPanel)`
+  y `StopVideo`, `WatchSettingsWindow`, tarjeta «Cuadro vigía» (`card-watch?…` en tableros y sesión), clic derecho en
+  una ubicación → «Vigilar esta ubicación». Web: la tarjeta se puede poner en un tablero compartido (boards.js).
+- **Diferencias con el diseño:** el filtro «Dónde» es solo por ubicaciones (sin recursos sueltos); arrastrar el vigía
+  lo mueve entero (no deja una copia fija de la cámara); la foto del evento queda para después (la bitácora de
+  «Fijar» y de «Listo» en eventos críticos sí está); la cinta de eventos (fase 2) y el vigía en el panel web (fase 3) siguen pendientes.
+
+## 12. Preguntas abiertas
 
 1. ~~Licencia~~: decidido, incluido en la base.
 2. **Nombre**: «Cuadro vigía» y «Cinta de eventos» (propuestos, propios; no usar «monitoreo de cuadros» de Genetec).

@@ -251,6 +251,9 @@ public static class VmsHubContract
     /// <summary>Una llamada de citofonía empezó a sonar, fue contestada o terminó (payload: IntercomCallDto).</summary>
     public const string IntercomCallChanged = nameof(IntercomCallChanged);
 
+    /// <summary>Evento en vivo para el Cuadro vigía, ya resuelto a su recurso y cámaras (payload: LiveEventDto).</summary>
+    public const string LiveEvent = nameof(LiveEvent);
+
     /// <summary>Un servicio supervisado cambió de estado (payload: ManagedServiceDto).</summary>
     public const string ServiceStateChanged = nameof(ServiceStateChanged);
 

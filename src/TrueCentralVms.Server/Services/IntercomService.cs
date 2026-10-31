@@ -40,6 +40,7 @@ public sealed class IntercomService(
     IConfiguration config,
     Isup.IsupService isup,
     Isup.IsupHostManager isupHost,
+    LiveEventFeed liveEvents,
     ILogger<IntercomService> logger) : SupervisedBackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
@@ -504,6 +505,7 @@ public sealed class IntercomService(
         line.Call = call;
         line.LineSeenBusy = false;
         await PublishAsync(line, ct);
+        liveEvents.OfferIntercomCall(line.Intercom.Id, line.Intercom.Name, line.Intercom.ChannelId);
         await audit.LogSystemAsync("intercom", "call-ringing", targetType: "intercom", targetId: line.Intercom.Id.ToString(),
             targetName: line.Intercom.Name,
             detail: $"Tocaron el timbre en '{line.Intercom.Name}'{(origin is null ? "" : $" ({origin})")}; llamada {how}.",
