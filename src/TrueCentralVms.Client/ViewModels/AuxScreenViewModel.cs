@@ -425,6 +425,11 @@ public partial class AuxScreenViewModel : ObservableObject
         SelectedCell = cell;
     }
 
+    private EventStripViewModel? _eventStrip;
+
+    /// <summary>Cinta de eventos de esta pantalla.</summary>
+    public EventStripViewModel EventStrip => _eventStrip ??= _shell.CreateEventStrip(() => Cells, OpenChannelAsync);
+
     /// <summary>«Vigilar esta ubicación» en un cuadro de esta pantalla.</summary>
     public async Task WatchLocationAsync(LocationNode location)
     {

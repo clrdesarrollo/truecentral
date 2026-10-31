@@ -523,6 +523,32 @@ desde el panel web; sus opciones se eligen en el cliente.
   alcance; las cámaras que no puede ver no se abren. Los avisos llegan a los
   mismos usuarios que su ventana de alarma.]
 
+=== La cinta de eventos
+
+La cinta es una franja plegable bajo la grilla con los últimos eventos en vivo
+(los mismos que reciben los Cuadros vigía), el más reciente a la izquierda. Se
+abre y se cierra con el botón del reloj de la barra inferior, junto a la
+división; con la cinta cerrada, un número rojo en ese botón cuenta los eventos
+que llegaron. La cinta queda abierta o cerrada como la dejó.
+
+Cada ficha muestra el título del evento, la hora, «×3» si se repitió, el
+recurso y su ubicación, el ícono de cámara si tiene una que usted puede ver y
+«Aviso» si viene de una automatización. El borde va en el color de la
+gravedad: rojo crítica, ámbar advertencia, verde informativa.
+
+- Clic en una ficha: abre su cámara en el cuadro seleccionado (o en el primero
+  libre).
+- Arrastrar una ficha a un cuadro: abre ahí su cámara, igual que una cámara de
+  la lista.
+- Doble clic en un aviso: abre su ventana de alarma.
+- La rueda del mouse recorre la cinta de lado.
+- La ✕ de la derecha la vacía: quedan solo los eventos que lleguen desde ahora.
+
+A la izquierda de la cinta se elige la gravedad mínima (*Todo*, *Advertencia y
+crítica* o *Solo crítica*) y *Solo de esta grilla*: muestra solo los eventos de
+las cámaras y recursos que hay en los cuadros, o los que tomaría alguno de sus
+vigías. Cada Centro de mando abierto con «+» tiene su propia cinta.
+
 == Los cuadros de video
 
 Cada cuadro tiene arriba una barra y debajo el video. Un cuadro sin cámara

@@ -281,6 +281,11 @@ Fases 1a y 1b hechas en la rama `feat/cuadro-vigia`:
   lo mueve entero (no deja una copia fija de la cámara); la foto del evento queda para después (la bitácora de
   «Fijar» y de «Listo» en eventos críticos sí está); la cinta de eventos (fase 2) y el vigía en el panel web (fase 3) siguen pendientes.
 
+Fase 2 (cinta de eventos) hecha en la rama `feat/cinta-eventos`: `EventStripViewModel` por Centro de mando (la grilla
+principal y cada uno abierto con «+»), franja plegable bajo la grilla con botón de reloj y contador en la barra,
+gravedad mínima y «Solo de esta grilla», clic / arrastre / doble clic, vaciar; preferencias en `ClientSettings`
+(`EventStripOpen`, `EventStripOnlyBoard`, `EventStripMinSeverity`). Solo cliente: usa el `LiveEvent` de la fase 1.
+
 ## 12. Preguntas abiertas
 
 1. ~~Licencia~~: decidido, incluido en la base.
