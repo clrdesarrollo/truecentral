@@ -82,7 +82,8 @@ export default [
         .dispatchEvent(new MouseEvent("click", { bubbles: true })));
       await p.esperarTexto("#pw-finger-detail", "Índice derecho");
     },
-    recorte: "#modal",
+    // La ficha de la persona es una página: se recorta su tarjeta.
+    recorte: ".form-page-card",
     marcas: [
       { sel: '#pw-steps .wizard-step[data-step="1"]', etiqueta: "Pasos del asistente" },
       { sel: "#pw-card-add", etiqueta: "+ tarjeta y Leer tarjeta en un lector" },

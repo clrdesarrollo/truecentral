@@ -379,7 +379,7 @@ es), *Credenciales* (con qué se identifica) y *Accesos* (por dónde y cuándo
 pasa).
 
 + Haga clic en #boton("Agregar persona"), o en #boton("Editar") en la fila de
-  la persona.
+  la persona. La ficha se abre en su propia página.
 + Complete el paso *Datos de la persona* y haga clic en #boton("Siguiente »").
 + Cargue sus credenciales y haga clic en #boton("Siguiente »").
 + Marque sus niveles de acceso.
@@ -780,35 +780,40 @@ puerta le llega por ambos, vale la suma de sus horarios.
 
 #requiere("Administrar personas")
 
+Un nivel se arma en una sola página: sus datos, sus puertas y quiénes lo
+tienen. Las puertas y las personas van en dos cajas que se llenan con
+«Agregar».
+
 + Haga clic en #boton("Crear nivel"), o en #boton("Editar") en la fila del
   nivel. El botón se habilita cuando hay al menos una puerta.
 + Escriba el *Nombre* (por ejemplo, _Bodega_), elija el *Horario* y, si quiere,
   una *Descripción*.
-+ En *Puertas*, marque las del nivel. Están agrupadas por equipo. Una puerta
-  pausada aparece como _(pausada)_ y no da permiso aunque se la incluya.
 + Deje marcado *Activo*. Desmarcarlo le quita el permiso a todos los que tienen
   el nivel, sin borrar su configuración.
-+ Haga clic en #boton("Crear") (o #boton("Guardar cambios")).
++ En la caja *Puertas*, haga clic en #boton("+ Agregar puertas"). El buscador
+  muestra las que faltan, agrupadas por equipo: haga clic en cada una para
+  agregarla, o en #boton("Agregar todas") junto al nombre de un equipo. Al
+  terminar, haga clic en #boton("Listo").
++ En la caja *Personas*, haga lo mismo con #boton("+ Agregar personas"). Puede
+  buscar por nombre, identificador o departamento; #boton("Agregar las N")
+  agrega de una vez todas las que coinciden con la búsqueda.
++ Haga clic en #boton("Crear nivel") (o #boton("Guardar cambios")).
+
+Para sacar una puerta o una persona del nivel, haga clic en la cruz de su fila.
+Con muchas, escriba en *Filtrar esta lista* y use #boton("Quitar todas") (con
+un filtro escrito, quita solo las que se ven). Nada se guarda hasta el final:
+#boton("Cancelar") descarta los cambios.
+
+Una puerta pausada lleva la etiqueta _pausada_ y no da permiso aunque esté en
+el nivel. Una persona desactivada lleva la etiqueta _desactivada_ y no pasa
+aunque lo tenga.
+
+#boton("Asignar personas"), en la fila del nivel, abre la misma página en la
+caja *Personas*. También puede asignar niveles a una persona desde su ficha, en
+el paso *Accesos*.
 
 Al eliminar un nivel, las personas que lo tenían pierden ese permiso y se les
 quita de los equipos; el mensaje de confirmación indica cuántas son.
-
-=== Asignar personas a un nivel
-
-#requiere("Administrar personas")
-
-+ En la fila del nivel, haga clic en #boton("Asignar personas").
-+ En *Buscar*, escriba parte del nombre, identificador o departamento para
-  acortar la lista.
-+ Marque a quienes deben tener el nivel y desmarque a quienes no. Lo marcado se
-  conserva aunque cambie la búsqueda.
-+ Haga clic en #boton("Guardar").
-
-También puede asignar niveles a una persona desde su ficha, en el paso
-*Accesos*.
-
-#nota[Esta lista muestra hasta 500 personas, ordenadas por apellido. Con un
-  padrón más grande, asigne el nivel desde la ficha de cada persona.]
 
 #modulo("automation")[
   #consejo[Las automatizaciones también pueden reaccionar a los accesos y dar
