@@ -524,8 +524,17 @@ public static class LocationsApi
             else
                 filter = new();
             var resources = await ResourceCatalog.ListAsync(db, filter, ct);
+            // Permiso Y alcance: cada tipo solo con un permiso de su módulo (un rol que
+            // solo ve video recibe solo cámaras, aunque su ubicación tenga una alarma).
+            // Quien arma recursos, alcances de roles y usuarios o tableros los ve todos.
+            bool everyKind = new[] { Permissions.ResourcesManage, Permissions.RolesManage, Permissions.UsersManage,
+                Permissions.DashboardsManage }.Any(scope.Has);
+            var kinds = Enum.GetValues<ResourceKind>()
+                .Where(kind => everyKind || ResourcePermissions(kind).Any(scope.Has)).ToHashSet();
             // Alcance limitado: recurso por recurso (sus roles pueden dar recursos sueltos).
-            return Results.Ok(scope.FiltersView ? resources.Where(r => scope.CanViewResource(r.Kind, r.Id)).ToList() : resources);
+            return Results.Ok(resources
+                .Where(r => kinds.Contains(r.Kind) && (!scope.FiltersView || scope.CanViewResource(r.Kind, r.Id)))
+                .ToList());
         });
 
         // Ubicar recursos en bloque (LocationId null = devolverlos a "por ubicar").
@@ -628,6 +637,20 @@ public static class LocationsApi
                 (toCreate > 0 ? $" ({toCreate} nueva(s))." : "."), plan));
         });
     }
+
+    /// <summary>Permisos que dejan ver un tipo de recurso (basta uno): los de su módulo, como en el cliente.</summary>
+    private static string[] ResourcePermissions(ResourceKind kind) => kind switch
+    {
+        ResourceKind.Camera => [Permissions.LiveView, Permissions.PlaybackView, Permissions.DevicesManage],
+        ResourceKind.Door => [Permissions.AccessMonitor, Permissions.AccessDoors, Permissions.AccessConfigure],
+        ResourceKind.Partition or ResourceKind.Zone =>
+            [Permissions.AlarmsMonitor, Permissions.AlarmsOperate, Permissions.AlarmsConfigure, Permissions.LocationsCommand],
+        ResourceKind.Fence => [Permissions.CercoMonitor, Permissions.CercoOperate, Permissions.CercoConfigure],
+        ResourceKind.Speaker => [Permissions.SpeakersPlay, Permissions.SpeakersConfigure],
+        ResourceKind.Intercom => [Permissions.IntercomAnswer, Permissions.IntercomConfigure],
+        ResourceKind.IoModule => [Permissions.IoOperate, Permissions.IoConfigure],
+        _ => [],
+    };
 
     /// <summary>
     /// El equipo de un recurso, para «una ubicación por equipo»: el grabador de
