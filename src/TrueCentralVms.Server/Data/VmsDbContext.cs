@@ -182,11 +182,13 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
     /// </summary>
     private void ClearLocationOrderOnMove()
     {
+        // Por nombre y no con lambdas: EF no resuelve una propiedad a través de
+        // una interfaz (ArgumentException "'this' type cannot be an interface").
         foreach (var entry in ChangeTracker.Entries<IOrderedResource>())
         {
             if (entry.State != EntityState.Modified) continue;
-            var order = entry.Property(r => r.LocationOrder);
-            if (entry.Property(r => r.LocationId).IsModified && !order.IsModified && order.CurrentValue is not null)
+            var order = entry.Property<int?>(nameof(IOrderedResource.LocationOrder));
+            if (entry.Property<int?>(nameof(ILocatable.LocationId)).IsModified && !order.IsModified && order.CurrentValue is not null)
                 order.CurrentValue = null;
         }
     }
