@@ -267,6 +267,12 @@ actualiza tableros con cuadros no-video: se amplía para `watch`). Video por WHE
 
 ## 11. Estado (31/10/2026)
 
+Fase 3 (vigía en el panel web) hecha en la rama `feat/vigia-web`: `wwwroot/live-watch.js` sobre `live.js` (el vigía
+es `LvCell.watch`; abre la cámara con `lvOpenInCell(…, keepWatch)`), mensaje `LiveEvent` del hub, mismas opciones en
+`card-watch?…` (tableros compartidos con el cliente y última sesión del navegador), botón «Vigía», «Vigilar esta
+ubicación», engranaje y «Ver aviso» con acuse. De paso, en web y cliente: el evento desplazado por uno más grave antes
+de cumplir su tiempo vuelve a la cola (antes se perdía).
+
 Fases 1a y 1b hechas en la rama `feat/cuadro-vigia`:
 
 - Servidor: `Services/LiveEventFeed` (derivación en `WorkflowEngine.Publish` antes del corte por `Workflows:Enabled`,
@@ -280,12 +286,6 @@ Fases 1a y 1b hechas en la rama `feat/cuadro-vigia`:
 - **Diferencias con el diseño:** el filtro «Dónde» es solo por ubicaciones (sin recursos sueltos); arrastrar el vigía
   lo mueve entero (no deja una copia fija de la cámara); la foto del evento queda para después (la bitácora de
   «Fijar» y de «Listo» en eventos críticos sí está); la cinta de eventos (fase 2) y el vigía en el panel web (fase 3) siguen pendientes.
-
-Fase 3 (vigía en el panel web) hecha en la rama `feat/vigia-web`: `wwwroot/live-watch.js` sobre `live.js` (el vigía
-es `LvCell.watch`; abre la cámara con `lvOpenInCell(…, keepWatch)`), mensaje `LiveEvent` del hub, mismas opciones en
-`card-watch?…` (tableros compartidos con el cliente y última sesión del navegador), botón «Vigía», «Vigilar esta
-ubicación», engranaje y «Ver aviso» con acuse. De paso, en web y cliente: el evento desplazado por uno más grave antes
-de cumplir su tiempo vuelve a la cola (antes se perdía).
 
 ## 12. Preguntas abiertas
 
