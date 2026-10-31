@@ -42,12 +42,25 @@ public static class DashboardApi
             var from = hourStart.AddHours(-(Hours - 1));
             var prevFrom = from.AddHours(-Hours);
 
-            // ---------------- Servidor ----------------
+            // Cada tipo de equipo cuenta solo con un permiso de su módulo (el que abre su
+            // página), además del alcance: un rol que solo ve video no ve paneles de
+            // alarma, puertas ni el servidor aunque estén en su ubicación.
+            bool Sees(params string[] permissions) => permissions.Any(scope.Has);
+            bool seesServer = scope.Has(Permissions.SystemServices);
+            bool seesVideo = Sees(Permissions.LiveView, Permissions.PlaybackView, Permissions.DevicesManage);
+            bool seesAccess = Sees(Permissions.AccessMonitor, Permissions.AccessDoors, Permissions.AccessConfigure);
+            bool seesAlarms = Sees(Permissions.AlarmsMonitor, Permissions.AlarmsOperate, Permissions.AlarmsConfigure);
+            bool seesFence = Sees(Permissions.CercoMonitor, Permissions.CercoOperate, Permissions.CercoConfigure);
+            bool seesIntercoms = Sees(Permissions.IntercomAnswer, Permissions.IntercomConfigure);
+            bool seesSpeakers = Sees(Permissions.SpeakersPlay, Permissions.SpeakersConfigure);
+            bool seesIo = Sees(Permissions.IoOperate, Permissions.IoConfigure);
+
+            // ---------------- Servidor (permiso de Sistema → Servicios) ----------------
             var overview = supervisor.Snapshot();
             var supervised = overview.Services.Where(s => s.State != ManagedServiceState.Disabled).ToList();
             var m = metrics.Read();
             var clients = tokens.ConnectedClients();
-            var server = new
+            var server = !seesServer ? null : new
             {
                 // Ingresos rechazados de las últimas 24 h (solo para quien ve la bitácora).
                 logins = scope.Has(Permissions.AuditView) ? await LoginFailuresAsync(db, throttle, now, ct) : null,
@@ -75,26 +88,26 @@ public static class DashboardApi
                 .Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt,
                     Channels = d.Channels.Where(c => c.Enabled).Select(c => new { c.Id, c.Name, c.IsOnline }).ToList() })
                 .ToListAsync(ct);
-            videoRows = videoRows.Where(d => scope.CanViewDevice(d.Id)).ToList();
+            videoRows = videoRows.Where(d => seesVideo && scope.CanViewDevice(d.Id)).ToList();
             // Un canal queda marcado en línea aunque su grabador se caiga: sin el equipo, la cámara no transmite.
             var cameras = videoRows.SelectMany(d => d.Channels.Select(c => new
                     { c.Id, c.Name, IsOnline = c.IsOnline && d.Status == DeviceStatus.Online, Device = d }))
                 .Where(c => scope.CanViewChannel(c.Id)).ToList();
 
             var accessRows = (await db.AccessDevices.AsNoTracking().Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt }).ToListAsync(ct))
-                .Where(d => scope.CanViewAccessDevice(d.Id)).ToList();
+                .Where(d => seesAccess && scope.CanViewAccessDevice(d.Id)).ToList();
             var intercomRows = (await db.Intercoms.AsNoTracking().Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt }).ToListAsync(ct))
-                .Where(d => scope.CanViewIntercom(d.Id)).ToList();
+                .Where(d => seesIntercoms && scope.CanViewIntercom(d.Id)).ToList();
             var speakerRows = (await db.Speakers.AsNoTracking().Where(s => s.Enabled).Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt }).ToListAsync(ct))
-                .Where(d => scope.CanViewSpeaker(d.Id)).ToList();
+                .Where(d => seesSpeakers && scope.CanViewSpeaker(d.Id)).ToList();
             var ioRows = (await db.IoModules.AsNoTracking().Where(s => s.Enabled).Select(d => new { d.Id, d.Name, d.Status, d.LastSeenAt }).ToListAsync(ct))
-                .Where(d => scope.CanViewIoModule(d.Id)).ToList();
+                .Where(d => seesIo && scope.CanViewIoModule(d.Id)).ToList();
 
             // ---------------- Intrusión (paneles de alarma) ----------------
             var panels = await db.AlarmPanels.AsNoTracking().Where(p => p.Enabled && !p.DisabledByLicense)
                 .Include(p => p.Areas).Include(p => p.Zones).AsSplitQuery()
                 .ToListAsync(ct);
-            panels = panels.Where(p => scope.CanViewPanel(p.Id)).ToList();
+            panels = panels.Where(p => seesAlarms && scope.CanViewPanel(p.Id)).ToList();
             var areas = panels.SelectMany(p => p.Areas.Where(a => a.Enabled && scope.CanViewArea(p.Id, a.Number))).ToList();
             var zones = panels.SelectMany(p => p.Zones.Where(z => scope.CanViewZone(p.Id, z.Number))).ToList();
             var intrusion = new
@@ -118,7 +131,7 @@ public static class DashboardApi
             // ---------------- Cerco eléctrico ----------------
             var fences = (await db.CercoPanels.AsNoTracking().Where(p => p.Enabled && !p.DisabledByLicense)
                     .Include(p => p.Zones).ToListAsync(ct))
-                .Where(p => scope.CanViewCerco(p.Id)).ToList();
+                .Where(p => seesFence && scope.CanViewCerco(p.Id)).ToList();
             bool FenceOnline(Data.Entities.CercoPanel p) => cercoConns.IsConnected(p.DeviceId);
             var fence = new
             {
@@ -133,7 +146,7 @@ public static class DashboardApi
             // ---------------- Puertas ----------------
             var doorRows = (await db.AccessDoors.AsNoTracking().Where(d => d.Enabled)
                     .Select(d => new { d.Id, d.IsOpen, d.Mode }).ToListAsync(ct))
-                .Where(d => scope.CanViewDoor(d.Id)).ToList();
+                .Where(d => seesAccess && scope.CanViewDoor(d.Id)).ToList();
             var doors = new
             {
                 total = doorRows.Count,

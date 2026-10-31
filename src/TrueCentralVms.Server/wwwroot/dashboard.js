@@ -40,17 +40,19 @@ async function renderDashboard() {
   await dashboardRefresh(true);
   dashboardTimer = setInterval(() => dashboardRefresh(false), 30000);
   dashboardClock = setInterval(dashboardTick, 1000);
-  // El throughput se mueve en vivo: su propia consulta liviana cada 3 s.
+  // El throughput se mueve en vivo: su propia consulta liviana cada 3 s (solo
+  // si el panel muestra el servidor, que exige el permiso de Servicios).
   dashboardNetTimer = setInterval(async () => {
+    if (!dashboardData?.server) return;
     const net = await Api.get("/api/system/network").catch(() => null);
-    if (net && dashboardData) { dashboardData.server.network = net; dbNetUpdate(net); }
+    if (net && dashboardData?.server) { dashboardData.server.network = net; dbNetUpdate(net); }
   }, 3000);
 }
 
 async function dashboardRefresh(first) {
   const [data, license, sessions] = await Promise.all([
     Api.get("/api/dashboard").catch(() => null),
-    Api.get("/api/system/license").catch(() => null),
+    Perms.can("system.license") ? Api.get("/api/system/license").catch(() => null) : null,
     Perms.can("sessions.manage") ? Api.get("/api/streams/active").catch(() => null) : null,
   ]);
   // El usuario pudo cambiar de página mientras se consultaba.
@@ -63,7 +65,7 @@ async function dashboardRefresh(first) {
   $("#view").innerHTML = dashboardHtml(dashboardData);
   dashboardBind();
   dashboardTick();
-  if (dashboardData.server.network) requestAnimationFrame(() => requestAnimationFrame(() => dbNetUpdate(dashboardData.server.network)));
+  if (dashboardData.server?.network) requestAnimationFrame(() => requestAnimationFrame(() => dbNetUpdate(dashboardData.server.network)));
   // El anillo se llena con animación: se dibuja vacío y se completa en el cuadro siguiente.
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const bar = $("#view .db-ring .bar");
@@ -78,7 +80,7 @@ function dashboardTick() {
   time.textContent = now.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   $("#db-date").textContent = now.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const up = $("#db-uptime");
-  if (up && dashboardData) {
+  if (up && dashboardData?.server) {
     const seconds = dashboardData.server.uptimeSeconds + (Date.now() - new Date(dashboardData.generatedAt).getTime()) / 1000;
     up.textContent = dbDuration(seconds);
   }
@@ -95,8 +97,9 @@ function dbAssess(d) {
   if (f.inAlarm) alarms.push({ text: `Cerco en alarma (${f.inAlarm})`, href: "#/cerco", icon: "mdi-flash" });
   if (d.pendingAlerts) alarms.push({ text: `${d.pendingAlerts} ${dbPlural(d.pendingAlerts, "alerta", "alertas")} sin atender`, href: "#/event-center", icon: "mdi-bell-ring" });
 
-  if (s.servicesFailed.length) warnings.push({ text: `Servicio caído: ${s.servicesFailed.join(", ")}`, href: "#/services", icon: "mdi-server-off" });
-  if (s.servicesWarning.length) warnings.push({ text: `Servicio con advertencia: ${s.servicesWarning.join(", ")}`, href: "#/services", icon: "mdi-alert" });
+  // Sin el permiso de Servicios el servidor no manda su bloque (s = null).
+  if (s?.servicesFailed.length) warnings.push({ text: `Servicio caído: ${s.servicesFailed.join(", ")}`, href: "#/services", icon: "mdi-server-off" });
+  if (s?.servicesWarning.length) warnings.push({ text: `Servicio con advertencia: ${s.servicesWarning.join(", ")}`, href: "#/services", icon: "mdi-alert" });
   const offline = [
     [e.cameras, "cámara", "cámaras", "#/devices"],
     [e.access, "equipo de acceso", "equipos de acceso", "#/access"],
@@ -186,10 +189,10 @@ function dashboardHtml(d) {
       <div class="db-clock">
         <div class="time" id="db-time"></div>
         <div class="date" id="db-date"></div>
-        <div class="meta">
+        ${d.server ? `<div class="meta">
           <span>Servidor <b>v${esc(d.server.version)}</b></span>
           <span>En marcha hace <b id="db-uptime"></b></span>
-        </div>
+        </div>` : ""}
       </div>
     </section>
 
@@ -329,7 +332,9 @@ function dbNiceMax(v) {
 function dbPerimeterHtml(d, span) {
   const i = d.intrusion, f = d.fence, doors = d.doors, cams = d.equipment.cameras;
   const rows = [];
-  if (i.panels || Perms.licensed("module_alarms") && Perms.modules) {
+  // El renglón vacío («Sin paneles…») solo para quien podría tenerlos: el servidor
+  // no cuenta los paneles de quien no tiene permiso de ese módulo.
+  if (i.panels || Perms.licensed("module_alarms") && Perms.modules && Perms.can("alarms.monitor|alarms.operate|alarms.configure")) {
     const state = !i.panels ? "idle" : i.inAlarm || i.zonesAlarm ? "alarm" : i.panelsOnline < i.panels || i.tamper || i.acLoss ? "warn" : "ok";
     rows.push({ cls: state, icon: "mdi-security-home", href: "#/alarms", title: "Intrusión",
       text: !i.panels ? "Sin paneles de alarma" : i.inAlarm ? `${i.inAlarm} ${dbPlural(i.inAlarm, "área", "áreas")} en alarma`
@@ -337,7 +342,7 @@ function dbPerimeterHtml(d, span) {
       num: i.areas ? `${i.armed}/${i.areas}` : "—", numLabel: "armadas",
       bar: i.areas ? [[i.inAlarm, "var(--danger)"], [i.armed - Math.min(i.armed, i.inAlarm), "var(--ok)"], [i.disarmed, "rgba(var(--muted-rgb), .45)"]].map(([v, c]) => [v / i.areas, c]) : null });
   }
-  if (f.panels || Perms.licensed("module_fence") && Perms.modules) {
+  if (f.panels || Perms.licensed("module_fence") && Perms.modules && Perms.can("cerco.monitor|cerco.operate|cerco.configure")) {
     const state = !f.panels ? "idle" : f.inAlarm ? "alarm" : f.online < f.panels || f.faults || f.onBattery ? "warn" : "ok";
     rows.push({ cls: state, icon: "mdi-flash", href: "#/cerco", title: "Cerco eléctrico",
       text: !f.panels ? "Sin paneles de cerco" : f.inAlarm ? `${f.inAlarm} en alarma` : f.faults ? `${f.faults} con falla de alta tensión` : `${f.online} de ${f.panels} conectados`,
@@ -374,6 +379,7 @@ function dbPerimeterHtml(d, span) {
 // ---------------------------------------------------------------------------
 function dbHealthHtml(d) {
   const s = d.server, lic = d.license;
+  if (!s) return "";   // sin el permiso de Servicios
   const gauge = (pct, label, sub) => {
     const v = Math.max(0, Math.min(100, pct || 0));
     const color = v >= 90 ? "var(--danger)" : v >= 75 ? "var(--warn)" : "var(--ok)";
@@ -523,7 +529,7 @@ function dbEquipmentHtml(d, a) {
   const onLen = a.total ? (a.online / a.total) * C : 0;
   return `
   <section class="db-card span-4">
-    <div class="db-card-head"><h4><i class="mdi mdi-monitor-multiple" aria-hidden="true"></i>Equipos</h4><a href="#/devices">Ver equipos →</a></div>
+    <div class="db-card-head"><h4><i class="mdi mdi-monitor-multiple" aria-hidden="true"></i>Equipos</h4>${Perms.can("devices.manage") ? `<a href="#/devices">Ver equipos →</a>` : ""}</div>
     ${rows.length ? `<div class="db-donut-wrap">
       <div class="db-donut">
         <svg viewBox="0 0 120 120" aria-label="${a.online} de ${a.total} equipos en línea">
