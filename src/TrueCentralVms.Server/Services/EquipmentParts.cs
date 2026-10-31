@@ -35,12 +35,17 @@ public static class EquipmentParts
 
     /// <summary>
     /// Drivers (de acceso o de video) cuyas partes sabe ver el VMS, con el driver
-    /// de parlante y el de E/S con que se usan: todos por ISAPI.
+    /// de parlante y el de E/S con que se usan: ISAPI en Hikvision, VAPIX en Axis
+    /// y SUNAPI (más el audio de vuelta por RTSP) en Hanwha.
     /// </summary>
     private static readonly Dictionary<string, (string Speaker, string Io)> PartDriversOf = new(StringComparer.OrdinalIgnoreCase)
     {
         ["hikvision-isapi"] = ("hikvision-isapi", HikvisionIoDriver.DriverKey),
         ["hikvision-netsdk"] = ("hikvision-isapi", HikvisionIoDriver.DriverKey),
+        [TrueCentralVms.Drivers.Axis.AxisDeviceDriverFactory.Key] =
+            (TrueCentralVms.Drivers.Axis.AxisSpeakerDriver.DriverKey, TrueCentralVms.Drivers.Axis.AxisIoDriver.DriverKey),
+        [TrueCentralVms.Drivers.Hanwha.HanwhaDeviceDriverFactory.Key] =
+            (TrueCentralVms.Drivers.Hanwha.HanwhaSpeakerDriver.DriverKey, TrueCentralVms.Drivers.Hanwha.HanwhaIoDriver.DriverKey),
     };
 
     /// <summary>Puerto de gestión del SDK de Hikvision (el de fábrica de los terminales).</summary>

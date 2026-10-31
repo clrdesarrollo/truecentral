@@ -136,6 +136,18 @@ public sealed class HanwhaDeviceDriver : IDeviceDriver
         }
     }
 
+    /// <summary>
+    /// Su salida de audio y sus entradas y salidas de alarma, que el VMS ofrece
+    /// como un parlante y un módulo de E/S del equipo.
+    /// </summary>
+    public async Task<DeviceParts?> ReadPartsAsync(DeviceConnectionInfo info, int httpPort, CancellationToken ct = default)
+    {
+        using var client = new SunapiClient(info with { Port = httpPort > 0 ? httpPort : info.Port });
+        var (inputs, outputs) = await HanwhaIoDriver.CountAsync(client, ct);
+        return new DeviceParts(Camera: null, HasSpeaker: await HanwhaSpeakerDriver.HasSpeakerAsync(client, ct),
+            Io: inputs + outputs > 0 ? new DeviceIoInfo(inputs, outputs) : null);
+    }
+
     // ------------------------------------------------------------------
     // PTZ (ptzcontrol.cgi / ptzconfig.cgi): velocidades normalizadas −100..100.
     // ------------------------------------------------------------------

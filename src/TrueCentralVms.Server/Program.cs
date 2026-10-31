@@ -220,6 +220,8 @@ builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSpeakerDriverFacto
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionPaSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionIsupSpeakerDriverFactory>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, HikvisionSdkSpeakerDriverFactory>();
+builder.Services.AddSingleton<ISpeakerDriverFactory, TrueCentralVms.Drivers.Axis.AxisSpeakerDriverFactory>();
+builder.Services.AddSingleton<ISpeakerDriverFactory, TrueCentralVms.Drivers.Hanwha.HanwhaSpeakerDriverFactory>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.SpeakerAgents.SpeakerAgentHub>();
 builder.Services.AddSingleton<ISpeakerDriverFactory, TrueCentralVms.Server.Services.SpeakerAgents.AgentSpeakerDriverFactory>();
 builder.Services.AddSingleton<SpeakerDriverRegistry>();
@@ -232,6 +234,8 @@ builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.ZkT
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionIoDriverFactory>();
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionSdkIoDriverFactory>();
 builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hikvision.HikvisionAcsIoDriverFactory>();
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Axis.AxisIoDriverFactory>();
+builder.Services.AddSingleton<IIoModuleDriverFactory, TrueCentralVms.Drivers.Hanwha.HanwhaIoDriverFactory>();
 builder.Services.AddSingleton<IoModuleDriverRegistry>();
 builder.Services.AddSingleton<IoModuleService>();
 builder.Services.AddSingleton<TrueCentralVms.Server.Services.Patrol.PatrolService>();

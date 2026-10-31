@@ -149,6 +149,20 @@ public sealed class AxisDeviceDriver : IDeviceDriver
         }
     }
 
+    /// <summary>
+    /// Su altavoz (salida de audio) y sus entradas y salidas, que el VMS ofrece
+    /// como un parlante y un módulo de E/S del equipo.
+    /// </summary>
+    public async Task<DeviceParts?> ReadPartsAsync(DeviceConnectionInfo info, int httpPort, CancellationToken ct = default)
+    {
+        var connection = info with { Port = httpPort > 0 ? httpPort : info.Port };
+        using var client = new AxisVapixClient(connection);
+        var properties = await client.GetParamsAsync("Properties", ct);
+        var map = await AxisIoDriver.ReadMapAsync(client, ct);
+        var io = map.InputPorts.Count + map.OutputPorts.Count > 0 ? new DeviceIoInfo(map.InputPorts.Count, map.OutputPorts.Count) : null;
+        return new DeviceParts(Camera: null, HasSpeaker: AxisSpeakerDriver.HasSpeaker(properties), Io: io);
+    }
+
     // ------------------------------------------------------------------
     // PTZ (ptz.cgi): velocidades −100..100 por eje.
     // ------------------------------------------------------------------

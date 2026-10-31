@@ -2,7 +2,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace TrueCentralVms.Server.Services.Rtsp;
+namespace TrueCentralVms.Core.Rtsp;
 
 /// <summary>Respuesta RTSP ya separada en estado, cabeceras y cuerpo.</summary>
 public sealed record RtspResponse(int Status, IReadOnlyDictionary<string, string> Headers, string Body)
@@ -88,6 +88,22 @@ public sealed class RtspConnection : IAsyncDisposable
     private async Task<RtspResponse> SendOnceAsync(string method, string url, (string Name, string Value)[] headers,
         string? body, string? contentType, CancellationToken ct)
     {
+        await WriteRequestAsync(method, url, headers, body, contentType, ct);
+        return await ReadResponseAsync(ct);
+    }
+
+    /// <summary>
+    /// Envía una solicitud sin esperar la respuesta: para mantener viva la
+    /// sesión (GET_PARAMETER) mientras se transmite, cuando otro lazo está
+    /// leyendo la conexión y descarta lo que no sea un paquete entrelazado.
+    /// </summary>
+    public Task SendWithoutReplyAsync(string method, string url, CancellationToken ct,
+        IEnumerable<(string Name, string Value)>? headers = null) =>
+        WriteRequestAsync(method, url, headers?.ToArray() ?? [], null, null, ct);
+
+    private async Task WriteRequestAsync(string method, string url, (string Name, string Value)[] headers,
+        string? body, string? contentType, CancellationToken ct)
+    {
         var request = new StringBuilder();
         request.Append($"{method} {url} RTSP/1.0\r\n");
         request.Append($"CSeq: {++_sequence}\r\n");
@@ -103,8 +119,10 @@ public sealed class RtspConnection : IAsyncDisposable
         request.Append("\r\n");
         if (body is not null) request.Append(body);
 
-        await Stream.WriteAsync(Encoding.UTF8.GetBytes(request.ToString()), ct);
-        return await ReadResponseAsync(ct);
+        // Con el mismo candado que los paquetes: una solicitud no puede caer en medio de uno.
+        await _writeLock.WaitAsync(ct);
+        try { await Stream.WriteAsync(Encoding.UTF8.GetBytes(request.ToString()), ct); }
+        finally { _writeLock.Release(); }
     }
 
     private string? Authorization(string method, string url)
