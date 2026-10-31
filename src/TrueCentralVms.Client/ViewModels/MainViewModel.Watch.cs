@@ -11,10 +11,14 @@ public partial class MainViewModel
 
     private (DateTime At, IReadOnlyList<(int Id, string Path)> List)? _locationPaths;
 
+    /// <summary>Cinta de eventos de la grilla principal.</summary>
+    public EventStripViewModel EventStrip { get; private set; } = null!;
+
     private void InitializeLiveEvents()
     {
         LiveEvents = new LiveEventHub(_api, _hub);
         WatchCoordinator.Initialize(LiveEvents);
+        EventStrip = CreateEventStrip(() => Cells, OpenChannelAsync);
         _ = LoadReplayLeadAsync();
     }
 
@@ -24,6 +28,12 @@ public partial class MainViewModel
         try { WatchCellPanel.ReplayLeadSeconds = (await _api.GetClipSettingsAsync()).PreSeconds; }
         catch (ApiException) { /* sin permiso de ver automatizaciones o servidor anterior: 5 s */ }
     }
+
+    /// <summary>Una cinta de eventos para la grilla que la muestra.</summary>
+    internal EventStripViewModel CreateEventStrip(Func<IReadOnlyList<VideoCellViewModel>> cells,
+        Func<ChannelNode, Task> openCamera) => new(LiveEvents, _settings,
+        id => Devices.SelectMany(d => d.Channels).FirstOrDefault(c => c.Channel.Id == id),
+        cells, OpenAlertByIdAsync, openCamera);
 
     /// <summary>Un Cuadro vigía con estas opciones (la clave guardada, o las de omisión).</summary>
     public WatchCellPanel CreateWatchPanel(WatchOptions options) => new(options, new WatchContext(

@@ -53,6 +53,8 @@ public sealed class LiveEventHub
             // Del más viejo al más nuevo, sin avisar: solo completan la lista.
             for (int i = list.Count - 1; i >= 0; i--)
                 if (_recent.All(e => e.Id != list[i].Id)) Add(list[i], notify: false);
+            // Lo que llegó por el hub mientras tanto y lo recuperado, en orden de hora.
+            _recent.Sort((a, b) => b.At.CompareTo(a.At));
         }
         catch (ApiException) { /* servidor anterior al vigía: solo lo que llegue por el hub */ }
     }

@@ -183,6 +183,13 @@ public sealed class ClientSettings
     /// uno a propósito— no obligue a cargar cámara por cámara de nuevo.
     /// </summary>
     public bool RestoreLastSession { get; set; }
+
+    /// <summary>Cinta de eventos del Centro de mando desplegada.</summary>
+    public bool EventStripOpen { get; set; }
+    /// <summary>La cinta muestra solo lo de las cámaras y recursos de la grilla.</summary>
+    public bool EventStripOnlyBoard { get; set; }
+    /// <summary>Gravedad mínima de la cinta (0 informativa, 1 advertencia, 2 crítica).</summary>
+    public int EventStripMinSeverity { get; set; } = 1;
     /// <summary>Lo que había en pantalla la última vez (se guarda a medida que cambia).</summary>
     public LiveSession? LastSession { get; set; }
 

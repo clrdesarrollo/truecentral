@@ -30,6 +30,9 @@ public interface ICommandCenter
     /// <summary>Ventana donde está la grilla (los avisos de apertura masiva salen ahí).</summary>
     Window? LiveWindow { get; set; }
 
+    /// <summary>Cinta de eventos bajo la grilla (cada grilla tiene la suya).</summary>
+    EventStripViewModel EventStrip { get; }
+
     /// <summary>Parlantes IP: el mismo panel en todas las grillas.</summary>
     SpeakersViewModel Speakers { get; }
 
