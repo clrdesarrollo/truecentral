@@ -783,6 +783,28 @@ public static class WorkflowsApi
             return alert is null ? Results.NotFound() : Results.Ok(ScopedDto(alert, await ctx.ScopeAsync(session)));
         });
 
+        // Repetición del evento: los segundos antes y después que rigen cuando la
+        // acción «Avisar» no dice otros (Automatizaciones → Repetición del evento).
+        app.MapGet("/api/workflows/clip-settings", (HttpContext ctx, AlertClips clips) =>
+        {
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.WorkflowsView, Permissions.WorkflowsManage) is { } failure) return failure;
+            return Results.Ok(clips.Settings);
+        });
+
+        app.MapPut("/api/workflows/clip-settings", async (HttpContext ctx, AlertClipSettingsDto request, AlertClips clips,
+            AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.WorkflowsManage, out _) is { } failure) return failure;
+            var before = clips.Settings;
+            var clean = AlertClips.Clean(request);
+            await clips.SaveSettingsAsync(clean, ct);
+            await audit.LogAsync(ctx, "workflows", "alert-clip-settings-updated",
+                detail: $"Repetición del evento por omisión: {clean.PreSeconds} s antes y {clean.PostSeconds} s después " +
+                        $"(antes {before.PreSeconds} s y {before.PostSeconds} s).",
+                data: new { before, after = clean });
+            return Results.Ok(clean);
+        });
+
         // Repetición del evento: si la grabación de esa cámara ya cubre el
         // clip. El cliente vuelve a preguntar mientras diga "recording" y,
         // cuando está listo, pide la reproducción normal con ese rango.

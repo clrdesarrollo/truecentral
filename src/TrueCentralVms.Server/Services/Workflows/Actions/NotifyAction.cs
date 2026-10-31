@@ -29,7 +29,7 @@ namespace TrueCentralVms.Server.Services.Workflows.Actions;
 /// Repetición del evento (<c>clip</c>, encendida por omisión): la ventana de
 /// alarma reproduce la grabación de esas cámaras desde <c>clipPre</c> segundos
 /// antes del evento hasta <c>clipPost</c> después. Sin esos números (o vacíos)
-/// valen los del servidor (<see cref="AlertClips"/>).
+/// valen los del servidor (<see cref="AlertClips"/>); «device», los del propio equipo.
 ///
 /// Si el recurso que disparó tiene ficha en Recursos, la alerta guarda su
 /// ubicación y sus consignas: la ventana del operador las muestra (así el
@@ -49,7 +49,7 @@ public sealed class NotifyAction(
     AlarmScreenService screens,
     LicenseService license,
     IServiceScopeFactory scopeFactory,
-    IConfiguration config,
+    AlertClips clips,
     LiveEventFeed liveEvents,
     ILogger<NotifyAction> logger) : IWorkflowActionExecutor
 {
@@ -115,8 +115,9 @@ public sealed class NotifyAction(
         // quedan fijos en la alerta (cambiar la acción después no cambia los
         // avisos que ya salieron).
         bool withClip = channels.Count > 0 && context.Flag("clip", true);
-        int? clipPre = withClip ? AlertClips.Pre(context.Number("clipPre", -1), config) : null;
-        int? clipPost = withClip ? AlertClips.Post(context.Number("clipPost", -1), config) : null;
+        // «device» = los del equipo (se resuelven por cámara al pedir el clip); vacío = los del servidor.
+        int? clipPre = withClip ? clips.Pre(context.Text("clipPre").Trim()) : null;
+        int? clipPost = withClip ? clips.Post(context.Text("clipPost").Trim()) : null;
 
         title = ResourceMarks(title, briefing);
         message = ResourceMarks(message, briefing);

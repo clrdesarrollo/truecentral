@@ -140,7 +140,9 @@ después del evento. Mientras tanto, la pestaña muestra el video en vivo de la
 misma cámara y arriba dice «El equipo está grabando el después del evento: la
 repetición estará en N s». Cuando la grabación está disponible, la pestaña pasa
 sola a la repetición. En una alerta antigua (abierta desde el Centro de
-eventos) la repetición empieza de inmediato.
+eventos) la repetición empieza de inmediato. La cuenta regresiva usa lo que suele tardar ese
+grabador en dejar disponible lo recién grabado: el servidor lo aprende con cada
+repetición.
 
 Debajo del video:
 
@@ -261,8 +263,14 @@ seleccionada, con el mismo contenido que la ventana de alarma del cliente.
   #boton("Siguiente »") cambian de página.
 - La ficha agrega *Dirigida a* (los destinatarios, o «todos los operadores») y,
   si el recurso que la originó tiene ficha, el enlace *ficha del recurso*.
-- Las pestañas son *Fotos*, *Cámaras* y *Qué hizo el sistema*. Un clic en la
-  foto la abre en tamaño completo en otra pestaña del navegador.
+- Las pestañas son *Repetición* (si la alerta la tiene y sus roles permiten ver
+  grabaciones), *Fotos*, *Cámaras* y *Qué hizo el sistema*. Un clic en la foto
+  la abre en tamaño completo en otra pestaña del navegador.
+- *Repetición* hace lo mismo que en el cliente: cuenta regresiva mientras el
+  equipo graba el después, el clip en bucle con la marca roja del instante y
+  #boton("↺ Desde el comienzo"). Si el navegador no reproduce el formato de la
+  cámara (H.265 sin decodificación por hardware), lo dice; la repetición se ve
+  en el cliente de escritorio.
 - #boton("Enterado") está en la tarjeta de la lista y en la ficha. Al confirmar
   aparece «Alerta confirmada; quedó registrado a su nombre.»; si otro operador
   se le adelantó, el aviso dice quién la había confirmado.

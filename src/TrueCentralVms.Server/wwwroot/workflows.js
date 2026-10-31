@@ -13,7 +13,14 @@ let workflowsTimer = null;
 let wfCatalogCache = null;
 let wfCamerasCache = null;
 
+/** Segundos por omisión de la repetición del evento (los del servidor): rotulan «Valor del servidor (N s)». */
+const wfClip = { pre: 5, post: 15 };
+
 async function wfCatalog() {
+  // Los segundos del servidor se releen con cada catálogo (cambian desde «Repetición del evento»).
+  Api.get("/api/workflows/clip-settings")
+    .then((c) => { wfClip.pre = c.preSeconds; wfClip.post = c.postSeconds; })
+    .catch(() => { /* servidor anterior: quedan los de fábrica */ });
   if (!wfCatalogCache) {
     const catalog = await Api.get("/api/workflows/catalog");
     // Disparador de Control de rondas: si el servidor todavía no lo publica en
@@ -237,13 +244,17 @@ const WF_FIELDS = {
       help: "La ventana de alarma reproduce en bucle lo que grabó el equipo (DVR/NVR o tarjeta de la cámara) alrededor del evento. Mientras el equipo termina de grabar el después, muestra el video en vivo. Requiere que la cámara grabe y que el operador pueda ver grabaciones." },
     { k: "clipPre", t: "select", label: "Segundos antes del evento", def: "",
       when: (c) => wfShowsPopup(c) && c.clip !== false,
-      options: [["", "Valor del servidor (5 s)"], ["0", "0 s"], ["3", "3 s"], ["5", "5 s"], ["10", "10 s"], ["15", "15 s"],
-        ["20", "20 s"], ["30", "30 s"], ["60", "60 s"]] },
+      get options() {
+        return [["", `Valor del servidor (${wfClip.pre} s)`], ["device", "Según el equipo (su pregrabación)"], ["0", "0 s"], ["3", "3 s"],
+          ["5", "5 s"], ["10", "10 s"], ["15", "15 s"], ["20", "20 s"], ["30", "30 s"], ["60", "60 s"]];
+      } },
     { k: "clipPost", t: "select", label: "Segundos después del evento", def: "",
       when: (c) => wfShowsPopup(c) && c.clip !== false,
-      options: [["", "Valor del servidor (15 s)"], ["5", "5 s"], ["10", "10 s"], ["15", "15 s"], ["20", "20 s"], ["30", "30 s"],
-        ["45", "45 s"], ["60", "60 s"], ["90", "90 s"], ["120", "120 s"]],
-      help: "Cuanto más largo el después, más tarda en estar lista la repetición: el equipo tiene que terminar de grabarlo." },
+      get options() {
+        return [["", `Valor del servidor (${wfClip.post} s)`], ["device", "Según el equipo (su posgrabación)"], ["5", "5 s"], ["10", "10 s"],
+          ["15", "15 s"], ["20", "20 s"], ["30", "30 s"], ["45", "45 s"], ["60", "60 s"], ["90", "90 s"], ["120", "120 s"]];
+      },
+      help: "Cuanto más largo el después, más tarda en estar lista la repetición: el equipo tiene que terminar de grabarlo. «Según el equipo» usa la pregrabación y la posgrabación configuradas en el grabador para esa cámara (si no las informa, valen las del servidor)." },
     { k: "sound", t: "audio", label: "Alarma sonora", optional: true, system: true,
       def: "", rerender: true,
       help: "Los sonidos son los mismos que se cargan con el botón «Sonidos». En las pantallas de alarma suena este (el pitido del sistema usa el tono de la pantalla) y después el recordatorio que se configura en Pantallas de alarma." },
@@ -422,7 +433,8 @@ async function renderWorkflows() {
   $("#view").innerHTML = `
     <div class="toolbar page-toolbar">
       <div class="row-actions">
-        ${isAdmin ? `<button class="btn ghost" id="btn-wf-audio">Sonidos</button>
+        ${isAdmin ? `<button class="btn ghost" id="btn-wf-clip" title="Segundos antes y después del evento que muestra la ventana de alarma cuando la acción «Avisar» no dice otros">Repetición del evento</button>
+        <button class="btn ghost" id="btn-wf-audio">Sonidos</button>
         <button class="btn" id="btn-wf-new">Nueva automatización</button>` : ""}
       </div>
     </div>
@@ -572,6 +584,7 @@ async function renderWorkflows() {
     location.hash = only && only !== "*" && only !== WF_NO_GROUP ? `#/workflows/edit?group=${encodeURIComponent(only)}` : "#/workflows/edit";
   });
   $("#btn-wf-audio")?.addEventListener("click", () => { location.hash = "#/sounds"; });
+  $("#btn-wf-clip")?.addEventListener("click", wfClipSettingsModal);
   $$("#view .btn-wf-edit").forEach((b) => b.addEventListener("click", (e) => {
     const id = Number(e.target.closest("tr").dataset.id);
     location.hash = `#/workflows/edit?id=${id}`;
@@ -1230,6 +1243,42 @@ function wfReadField(action, input) {
       break;
     default: action.config[key] = input.value; break;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Repetición del evento: segundos por omisión del servidor
+// ---------------------------------------------------------------------------
+
+async function wfClipSettingsModal() {
+  let current;
+  try { current = await Api.get("/api/workflows/clip-settings"); } catch (err) { toast(err.error, true); return; }
+  const opt = (v, sel) => `<option value="${v}" ${sel ? "selected" : ""}>${v} s</option>`;
+  openModal(`
+    <h3>Repetición del evento</h3>
+    <div class="info-box">La ventana de alarma reproduce en bucle lo que grabó el equipo alrededor del evento. Estos son los
+      segundos que se usan cuando la acción «Avisar» deja <b>Valor del servidor</b>. Los avisos que ya salieron no cambian.</div>
+    <div class="form-grid">
+      <div class="field"><label>Segundos antes del evento</label>
+        <select id="wf-clip-pre">${[0, 3, 5, 10, 15, 20, 30, 45, 60].map((v) => opt(v, v === current.preSeconds)).join("")}</select></div>
+      <div class="field"><label>Segundos después del evento</label>
+        <select id="wf-clip-post">${[5, 10, 15, 20, 30, 45, 60, 90, 120].map((v) => opt(v, v === current.postSeconds)).join("")}</select>
+        <div class="muted">Cuanto más largo, más tarda en estar lista la repetición: el equipo tiene que terminar de grabarlo.</div></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="wf-clip-cancel">Cancelar</button>
+      <button class="btn" id="wf-clip-save">Guardar</button>
+    </div>`);
+  $("#wf-clip-cancel").addEventListener("click", closeModal);
+  $("#wf-clip-save").addEventListener("click", async () => {
+    try {
+      const saved = await Api.put("/api/workflows/clip-settings", {
+        preSeconds: Number($("#wf-clip-pre").value), postSeconds: Number($("#wf-clip-post").value) });
+      wfClip.pre = saved.preSeconds;
+      wfClip.post = saved.postSeconds;
+      closeModal();
+      toast(`Repetición del evento: ${saved.preSeconds} s antes y ${saved.postSeconds} s después.`);
+    } catch (err) { toast(err.error, true); }
+  });
 }
 
 // ---------------------------------------------------------------------------

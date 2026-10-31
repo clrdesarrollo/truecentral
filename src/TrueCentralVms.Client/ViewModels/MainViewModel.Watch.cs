@@ -19,6 +19,14 @@ public partial class MainViewModel
         LiveEvents = new LiveEventHub(_api, _hub);
         WatchCoordinator.Initialize(LiveEvents);
         EventStrip = CreateEventStrip(() => Cells, OpenChannelAsync);
+        _ = LoadReplayLeadAsync();
+    }
+
+    /// <summary>«Repetir» del vigía abre la grabación con los segundos «antes» de la repetición del servidor.</summary>
+    private async Task LoadReplayLeadAsync()
+    {
+        try { WatchCellPanel.ReplayLeadSeconds = (await _api.GetClipSettingsAsync()).PreSeconds; }
+        catch (ApiException) { /* sin permiso de ver automatizaciones o servidor anterior: 5 s */ }
     }
 
     /// <summary>Una cinta de eventos para la grilla que la muestra.</summary>
@@ -34,7 +42,8 @@ public partial class MainViewModel
         LocationPathsAsync,
         () => Devices.SelectMany(d => d.Channels).ToList(),
         (action, title, detail) => _ = _api.ReportAuditEventAsync(
-            new ClientAuditEventDto(action, null, title, null, null, null, detail))));
+            new ClientAuditEventDto(action, null, title, null, null, null, detail)),
+        CanPlayback ? OpenPlaybackAtAsync : null));
 
     /// <summary>«Ver aviso» desde un vigía: la ventana de alarma con ese aviso.</summary>
     private async Task OpenAlertByIdAsync(long id)

@@ -771,6 +771,10 @@ public sealed class ApiClient
         SendAsync<StreamGrantDto>(HttpMethod.Post, "/api/playback/request",
             new PlaybackRequestDto(deviceId, rtspChannel, startLocal, endLocal, speed, alertId), ct);
 
+    /// <summary>Segundos por omisión de la repetición del evento (los del servidor).</summary>
+    public Task<AlertClipSettingsDto> GetClipSettingsAsync(CancellationToken ct = default) =>
+        SendAsync<AlertClipSettingsDto>(HttpMethod.Get, "/api/workflows/clip-settings", null, ct);
+
     /// <summary>
     /// Repetición del evento de un aviso para una de sus cámaras: si la
     /// grabación ya cubre el clip, con el rango a pedir (hora local del equipo).

@@ -579,11 +579,23 @@ recibo»).
   por omisión): la ventana de alarma reproduce en bucle lo que grabó el equipo
   con esas cámaras alrededor del evento (#capitulo(<cap-centro-de-eventos>)).
   Requiere que la cámara grabe y que el operador pueda ver grabaciones.
-- *Segundos antes del evento* y *Segundos después del evento*: _Valor del
-  servidor_ (5 s antes y 15 s después, salvo que el administrador del servidor
-  los cambie en `appsettings.json`, sección `Alerts`) o un valor fijo, de 0 a
-  60 s antes y de 5 a 120 s después. Cuanto más largo el después, más tarda en
-  estar lista la repetición: el equipo tiene que terminar de grabarlo.
+- *Segundos antes del evento* y *Segundos después del evento*:
+  - _Valor del servidor_ (la lista muestra cuántos segundos son): los de
+    #boton("Repetición del evento"), en la barra de Automatizaciones.
+  - _Según el equipo_: la pregrabación y la posgrabación configuradas en el
+    grabador para esa cámara (se leen de los equipos Hikvision y Dahua; si el
+    equipo no las informa, valen las del servidor).
+  - Un valor fijo, de 0 a 60 s antes y de 5 a 120 s después.
+
+  Cuanto más largo el después, más tarda en estar lista la repetición: el
+  equipo tiene que terminar de grabarlo.
+
+=== Segundos por omisión de la repetición del evento
+
+#boton("Repetición del evento"), en la barra de Automatizaciones, fija los
+segundos antes y después que usan las acciones «Avisar» que dejan _Valor del
+servidor_ (de fábrica, 5 s antes y 15 s después). Los avisos que ya salieron no
+cambian. El cambio queda en la bitácora de auditoría.
 - *Alarma sonora*: _(sin sonido)_, _Pitido del sistema del equipo_ o uno de
   los sonidos de la biblioteca. El botón ▶ lo hace sonar en su navegador. En
   las pantallas de alarma suena este sonido (el pitido del sistema usa el tono

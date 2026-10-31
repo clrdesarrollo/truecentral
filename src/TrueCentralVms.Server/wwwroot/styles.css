@@ -3122,6 +3122,18 @@ tr.pt-voided td:last-child, tr.pt-voided td:nth-last-child(2) { opacity: 1; }
 .bk-run-stall { margin: 10px 0 0; }
 .bk-run-done .bk-run-warn { margin-top: 4px; color: var(--warn-text); }
 
+/* Repetición del evento en la ficha del aviso (event-center.js). */
+.evc-replay { display: flex; flex-direction: column; gap: 8px; height: 100%; }
+.evc-replay-top { display: flex; align-items: center; gap: 10px; }
+.evc-replay-stage { position: relative; background: #000; border-radius: 6px; min-height: 260px; flex: 1; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; }
+.evc-replay-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.evc-replay-stage .evc-empty { position: relative; z-index: 1; color: #bbb; text-align: center; padding: 0 16px; }
+.evc-replay-bar { display: flex; align-items: center; gap: 10px; }
+.evc-replay-track { position: relative; flex: 1; height: 6px; border-radius: 3px; background: var(--panel-2); }
+.evc-replay-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px; background: var(--accent); }
+.evc-replay-mark { position: absolute; top: -5px; width: 3px; height: 16px; margin-left: -1.5px; border-radius: 1px; background: var(--danger); }
+
 /* Cuadro vigía en la vista en vivo (live-watch.js): franja arriba del video con el evento,
    la cola y los botones. Va como fila propia del cuadro, igual que en el cliente. */
 .lv-watch { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px 6px 4px 8px;
