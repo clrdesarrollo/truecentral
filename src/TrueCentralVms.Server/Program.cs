@@ -200,6 +200,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessControlServi
 // cambios del operador, el otro sondea cada 15 s).
 builder.Services.AddSingleton<AccessSyncService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessSyncService>());
+// Huellas repetidas (el mismo dedo enrolado dos veces, o el de otra persona).
+builder.Services.AddSingleton<FingerprintMatcher>();
 builder.Services.AddSingleton<AccessEventPhotos>();
 builder.Services.AddSingleton<AccessEventService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AccessEventService>());

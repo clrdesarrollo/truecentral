@@ -129,8 +129,12 @@ function bindEnrollDownload(root) {
  * @param {number} fingerNumber  Dedo elegido (1 a 10).
  * @param {string} fingerName  Su nombre ("Índice derecho").
  * @param {(result: {template: string, quality: number, source: string}) => void} onCaptured
+ * @param {(template: string) => Promise<string|null>} [validate]  Se consulta antes de
+ *   ofrecer «Usar esta huella»: devuelve por qué no se puede usar (el mismo dedo ya
+ *   enrolado como otro, la huella de otra persona) o null. Si la consulta falla se
+ *   deja usar: el servidor la vuelve a revisar al guardar.
  */
-function fingerprintCaptureDialog(personName, fingerNumber, fingerName, onCaptured) {
+function fingerprintCaptureDialog(personName, fingerNumber, fingerName, onCaptured, validate = null) {
   const root = document.createElement("div");
   root.className = "modal-backdrop enroll-backdrop";
   root.innerHTML = `<div class="modal enroll-modal"><div id="en-body"></div></div>`;
@@ -361,11 +365,14 @@ function fingerprintCaptureDialog(personName, fingerNumber, fingerName, onCaptur
             : "Calidad baja: conviene repetir la captura con el dedo limpio y bien centrado."}</p>
         </div>
       </div>
+      <div id="en-check" class="muted" style="font-size:12px;margin-top:10px"></div>
       <div class="modal-actions">
+        <button class="btn ghost" id="en-dismiss" hidden>Cancelar</button>
         <button class="btn ghost" id="en-again">Repetir captura</button>
         <button class="btn" id="en-save">Usar esta huella</button>
       </div>`;
 
+    $("#en-dismiss", root).addEventListener("click", close);
     $("#en-again", root).addEventListener("click", startCapture);
     $("#en-save", root).addEventListener("click", () => {
       onCaptured({
@@ -375,6 +382,35 @@ function fingerprintCaptureDialog(personName, fingerNumber, fingerName, onCaptur
       });
       close();
     });
+    if (validate) checkCapture(session.template);
+  }
+
+  /** ¿La huella recién capturada ya está enrolada (otro dedo de la persona u otra persona)? */
+  async function checkCapture(template) {
+    const save = $("#en-save", root);
+    const note = $("#en-check", root);
+    save.disabled = true;
+    note.textContent = "Comprobando que esta huella no esté ya enrolada…";
+    let problem;
+    try {
+      problem = await validate(template);
+    } catch (err) {
+      if (!note.isConnected) return;
+      note.textContent = `No se pudo comprobar si la huella está repetida (${err.error ?? err.message}); se vuelve a revisar al guardar.`;
+      save.disabled = false;
+      return;
+    }
+    if (!note.isConnected) return;   // se repitió la captura o se cerró el diálogo
+    if (!problem) {
+      note.textContent = "";
+      save.disabled = false;
+      return;
+    }
+    note.className = "error-box";
+    note.style.fontSize = "";
+    note.textContent = problem;
+    save.hidden = true;
+    $("#en-dismiss", root).hidden = false;
   }
 
   function renderError(error) {

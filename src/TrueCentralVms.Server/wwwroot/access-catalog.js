@@ -126,6 +126,20 @@ function accessFingerDetailHtml(fingerprints, number) {
     </div>`;
 }
 
+/**
+ * Antes de usar una captura: ¿es la huella de otro dedo de la persona (el índice
+ * apoyado de nuevo como pulgar) o la de otra persona? La compara el servidor, que
+ * tiene las plantillas guardadas. Devuelve el aviso, o null si se puede usar.
+ */
+async function accessFingerprintCheck(personId, number, template, fingerprints) {
+  const result = await Api.post("/api/access/fingerprints/check", {
+    personId, number, template,
+    // Las ya guardadas van sin plantilla (el panel no las tiene): el servidor usa las suyas.
+    fingerprints: fingerprints.map((f) => ({ number: f.number, template: f.template ?? null, quality: f.quality ?? null, source: f.source ?? null })),
+  });
+  return result.duplicate ? result.message : null;
+}
+
 const ACCESS_SYNC_STATES = {
   Synced: { label: "Al día", tag: "on" },
   Pending: { label: "Pendiente", tag: "operator" },
@@ -1948,7 +1962,7 @@ function accessPersonModal(person, levels) {
       if (result.quality >= 60) selectedFinger = accessSuggestedFinger(draft.fingerprints, number) ?? number;
       redrawFingers();
       toast(`${name} capturada (calidad ${result.quality}/100).`);
-    });
+    }, (template) => accessFingerprintCheck(person?.id ?? null, number, template, draft.fingerprints));
   };
 
   /** Cambia el dedo elegido sin redibujar las manos (así el doble clic llega al mismo dedo). */
