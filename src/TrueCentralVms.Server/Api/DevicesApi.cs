@@ -76,7 +76,7 @@ public static class DevicesApi
     private static ChannelDto ToDto(Channel c, DeviceStatus deviceStatus) =>
         new(c.Id, c.DeviceId, c.ChannelNumber, c.RtspChannel, c.Name, c.Enabled,
             c.IsOnline && deviceStatus == DeviceStatus.Online, c.SupportsPtz, c.UseFfmpegProxy, c.DisabledByLicense,
-            c.LocationId);
+            c.LocationId, c.LocationOrder);
 
     private static IResult Error(string message, int statusCode = StatusCodes.Status422UnprocessableEntity) =>
         Results.Json(new { error = message }, statusCode: statusCode);

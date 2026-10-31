@@ -71,7 +71,7 @@ public class AlarmPanel : IIsupEquipment
 }
 
 /// <summary>Área (partición / subsistema) de un panel, con su estado de armado.</summary>
-public class AlarmArea : ILocatable
+public class AlarmArea : IOrderedResource
 {
     public int Id { get; set; }
     public int AlarmPanelId { get; set; }
@@ -87,11 +87,13 @@ public class AlarmArea : ILocatable
     public int ExitDelaySeconds { get; set; }
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
+    /// <summary>Posición dentro de su ubicación (Recursos); null = sin orden propio.</summary>
+    public int? LocationOrder { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
 /// <summary>Zona (detector) de un panel, con su último estado conocido.</summary>
-public class AlarmZone : ILocatable
+public class AlarmZone : IOrderedResource
 {
     public int Id { get; set; }
     public int AlarmPanelId { get; set; }
@@ -112,6 +114,8 @@ public class AlarmZone : ILocatable
     public string? Model { get; set; }
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
+    /// <summary>Posición dentro de su ubicación (Recursos); null = sin orden propio.</summary>
+    public int? LocationOrder { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 

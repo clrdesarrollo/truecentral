@@ -2512,13 +2512,13 @@ const lvCollator = new Intl.Collator("es", { numeric: true, sensitivity: "base" 
 function lvBuildLocationTree(locations) {
   const nodes = new Map(locations.map((l) => [l.id, { loc: l, children: [], channels: [] }]));
   const roots = [];
-  for (const l of [...locations].sort((a, b) => lvCollator.compare(a.name, b.name))) {
+  for (const l of [...locations].sort(compareLocations)) {
     const node = nodes.get(l.id);
     const parent = l.parentId != null ? nodes.get(l.parentId) : null;
     (parent ? parent.children : roots).push(node);
   }
   const unassigned = { loc: null, children: [], channels: [] };
-  const all = [...lv.channels.values()].sort((a, b) => lvCollator.compare(a.name, b.name));
+  const all = [...lv.channels.values()].sort(compareInLocation);
   for (const ch of all) (nodes.get(ch.locationId)?.channels ?? unassigned.channels).push(ch);
   if (unassigned.channels.length) roots.push(unassigned);
   // Solo las ubicaciones con alguna cámara en su subárbol (este árbol es para ver video).

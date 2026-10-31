@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
@@ -30,7 +31,26 @@ public static class LocationsApi
         Results.Json(new { error = message }, statusCode: statusCode);
 
     private static LocationDto ToDto(Location l, int resourceCount) => new(
-        l.Id, l.ParentId, l.Name, l.Kind, l.Description, l.Address, l.Latitude, l.Longitude, resourceCount);
+        l.Id, l.ParentId, l.Name, l.Kind, l.Description, l.Address, l.Latitude, l.Longitude, resourceCount, l.SortOrder);
+
+    /// <summary>Orden de lectura de las hermanas nunca ordenadas a mano: "Bodega 2" antes que "Bodega 10".</summary>
+    private static readonly StringComparer NaturalOrder =
+        StringComparer.Create(CultureInfo.InvariantCulture, CompareOptions.IgnoreCase | CompareOptions.NumericOrdering);
+
+    /// <summary>
+    /// Posición de una ubicación que llega a la rama <paramref name="parentId"/>
+    /// (nueva o movida): al final si sus hermanas ya se ordenaron a mano; si no
+    /// (todas en 0), 0, y sigue yendo por nombre como las demás.
+    /// </summary>
+    private static int NextSortOrder(IEnumerable<Location> all, int? parentId, int? exceptId = null)
+    {
+        var siblings = all.Where(l => l.ParentId == parentId && l.Id != exceptId).Select(l => l.SortOrder).ToList();
+        return siblings.Any(order => order != 0) ? siblings.Max() + 1 : 0;
+    }
+
+    /// <summary>Hasta diez nombres entre comillas, para la bitácora.</summary>
+    private static string NameList(IReadOnlyCollection<string> names) =>
+        string.Join(", ", names.Take(10).Select(n => $"\"{n}\"")) + (names.Count > 10 ? $" y {names.Count - 10} más" : "");
 
     private static string KindLabel(LocationKind kind) => kind switch
     {
@@ -127,7 +147,7 @@ public static class LocationsApi
         app.MapGet("/api/locations", async (HttpContext ctx, VmsDbContext db, CancellationToken ct) =>
         {
             if (ApiSecurity.RequireUser(ctx, out var session) is { } failure) return failure;
-            var locations = await db.Locations.AsNoTracking().OrderBy(l => l.Name).ToListAsync(ct);
+            var locations = await db.Locations.AsNoTracking().OrderBy(l => l.SortOrder).ThenBy(l => l.Name).ToListAsync(ct);
             var counts = await ResourceCatalog.CountByLocationAsync(db, ct);
             var scope = await ctx.ScopeAsync(session);
             if (scope.FiltersView)
@@ -168,6 +188,7 @@ public static class LocationsApi
                 ParentId = request.ParentId,
                 Name = name,
                 Kind = request.Kind,
+                SortOrder = NextSortOrder(all, request.ParentId),
                 Description = Clean(request.Description),
                 Address = Clean(request.Address),
                 Latitude = request.Latitude,
@@ -247,6 +268,7 @@ public static class LocationsApi
 
             location.Name = name;
             location.Kind = request.Kind;
+            if (moving) location.SortOrder = NextSortOrder(all, request.ParentId, id);
             location.ParentId = request.ParentId;
             location.Description = Clean(request.Description);
             location.Address = Clean(request.Address);
@@ -268,6 +290,72 @@ public static class LocationsApi
             }
             int count = (await ResourceCatalog.CountByLocationAsync(db, ct)).GetValueOrDefault(id);
             return Results.Ok(ToDto(location, count));
+        });
+
+        // Orden de las ubicaciones de una rama (arrastrarlas en el árbol de
+        // Recursos). Lo respetan todos los árboles: panel, cliente y vista en vivo.
+        // No cambia qué contiene cada alcance: solo se avisa a los puestos.
+        app.MapPut("/api/locations/order", async (HttpContext ctx, LocationOrderRequest request, VmsDbContext db,
+            IHubContext<VmsHub> hub, AuditService audit, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
+            if (request.Ids is not { Count: > 0 }) return Error("No se indicó ninguna ubicación.");
+
+            var all = await db.Locations.ToListAsync(ct);
+            var byId = all.ToDictionary(l => l.Id);
+            if (request.ParentId is { } parentId && !byId.ContainsKey(parentId))
+                return Error("La ubicación superior ya no existe.", StatusCodes.Status404NotFound);
+            var siblings = all.Where(l => l.ParentId == request.ParentId)
+                .OrderBy(l => l.SortOrder).ThenBy(l => l.Name, NaturalOrder).ToList();
+            if (request.Ids.Any(id => siblings.All(s => s.Id != id)))
+                return Error("El árbol cambió mientras lo ordenaba: recargue la página.", StatusCodes.Status409Conflict);
+
+            var ordered = request.Ids.Distinct().Select(id => byId[id]).ToList();
+            ordered.AddRange(siblings.Where(s => !ordered.Contains(s)));
+            bool changed = false;
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                if (ordered[i].SortOrder == i) continue;
+                ordered[i].SortOrder = i;
+                changed = true;
+            }
+            string path = PathOf(request.ParentId, byId);
+            if (!changed) return Results.Ok(new { message = "No hubo cambios: ya estaban en ese orden." });
+            await db.SaveChangesAsync(ct);
+
+            await audit.LogAsync(ctx, "locations", "locations-reordered",
+                targetType: "location", targetId: request.ParentId?.ToString(),
+                targetName: request.ParentId is null ? null : path,
+                detail: $"Cambió el orden de las ubicaciones de {path}: {NameList(ordered.Select(l => l.Name).ToList())}.");
+            await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "locations", cancellationToken: ct);
+            return Results.Ok(new { message = $"Se guardó el orden de las ubicaciones de {path}." });
+        });
+
+        // Orden de los recursos ubicados directamente en una ubicación (arrastrar
+        // las filas en Recursos): el árbol del cliente y la vista en vivo lo siguen.
+        app.MapPut("/api/locations/{id:int}/resources/order", async (HttpContext ctx, int id,
+            ResourceOrderRequest request, VmsDbContext db, IHubContext<VmsHub> hub, AuditService audit,
+            CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.ResourcesManage, out _) is { } failure) return failure;
+            if (request.Resources is not { Count: > 0 }) return Error("No se indicó ningún recurso.");
+            if (request.Resources.Count > MaxBatch)
+                return Error($"Demasiados recursos en una sola operación (máximo {MaxBatch}).");
+
+            var byId = await db.Locations.AsNoTracking().ToDictionaryAsync(l => l.Id, ct);
+            if (!byId.ContainsKey(id)) return Results.NotFound();
+            var (changed, names, missing) = await ResourceCatalog.SetOrderAsync(db, id, request.Resources, ct);
+            if (missing > 0)
+                return Error("Algunos recursos ya no están en esta ubicación: recargue la página.", StatusCodes.Status409Conflict);
+            string path = PathOf(id, byId);
+            if (!changed) return Results.Ok(new { message = "No hubo cambios: ya estaban en ese orden." });
+            await db.SaveChangesAsync(ct);
+
+            await audit.LogAsync(ctx, "locations", "resources-reordered",
+                targetType: "location", targetId: id.ToString(), targetName: path,
+                detail: $"Cambió el orden de los recursos de {path}: {NameList(names)}.");
+            await hub.Clients.All.SendAsync(VmsHubContract.ConfigChanged, "locations", cancellationToken: ct);
+            return Results.Ok(new { message = $"Se guardó el orden de los recursos de {path}." });
         });
 
         // Solo vacía de sububicaciones; sus recursos quedan por ubicar (FK SET NULL).
@@ -570,7 +658,10 @@ public static class LocationsApi
         if (existing is not null) return (existing, false);
         if (DepthOf(parentId, byId) + 1 > MaxDepth) return (null, false);
 
-        var location = new Location { ParentId = parentId, Name = name, Kind = LocationKind.Sector };
+        var location = new Location
+        {
+            ParentId = parentId, Name = name, Kind = LocationKind.Sector, SortOrder = NextSortOrder(all, parentId),
+        };
         db.Locations.Add(location);
         await db.SaveChangesAsync(ct);
         all.Add(location);

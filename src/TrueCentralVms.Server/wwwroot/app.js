@@ -124,13 +124,33 @@ function channelCountCell(d) {
 }
 
 // ---------------------------------------------------------------------------
+// Orden de los árboles por ubicación: el que el administrador da en Recursos
+// (arrastrando ubicaciones y recursos). Lo que nunca se ordenó a mano va por
+// nombre, en orden de lectura ("Cámara 2" antes que "Cámara 10").
+// ---------------------------------------------------------------------------
+
+const locationCollator = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
+
+/** Ubicaciones hermanas: por su posición (sortOrder) y, a igual posición, por nombre. */
+function compareLocations(a, b) {
+  return (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || locationCollator.compare(a.name, b.name);
+}
+
+/** Recursos (o canales) de una misma ubicación: primero los ordenados a mano,
+ *  por su posición (locationOrder); después los demás, por nombre. */
+function compareInLocation(a, b) {
+  const none = Number.MAX_SAFE_INTEGER;
+  return (a.locationOrder ?? none) - (b.locationOrder ?? none) || locationCollator.compare(a.name, b.name);
+}
+
+// ---------------------------------------------------------------------------
 // Ubicación de un equipo en su formulario de alta o edición. Sus recursos
 // (canales, áreas y zonas, puertas) la heredan; los que se ubicaron aparte en
 // Recursos se quedan donde están.
 // ---------------------------------------------------------------------------
 
-/** El árbol en orden de lectura (padres antes que hijos, hermanos por nombre),
- *  o null si no se pudo leer: el formulario conserva entonces la ubicación actual. */
+/** El árbol en orden de lectura (padres antes que hijos, hermanos en el orden de
+ *  Recursos), o null si no se pudo leer: el formulario conserva entonces la ubicación actual. */
 async function loadLocationChoices() {
   let list;
   try { list = await Api.get("/api/locations"); } catch { return null; }
@@ -142,7 +162,7 @@ async function loadLocationChoices() {
   }
   const out = [], seen = new Set();
   const walk = (parent, depth) => {
-    for (const l of (byParent.get(parent) || []).sort((x, y) => x.name.localeCompare(y.name, "es"))) {
+    for (const l of (byParent.get(parent) || []).sort(compareLocations)) {
       if (seen.has(l.id)) continue;
       seen.add(l.id);
       out.push({ id: l.id, name: l.name, depth });
@@ -2031,8 +2051,7 @@ function userScopeTreeHtml(locations, selected) {
     if (!children.has(key)) children.set(key, []);
     children.get(key).push(l);
   }
-  const collator = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
-  for (const list of children.values()) list.sort((a, b) => collator.compare(a.name, b.name));
+  for (const list of children.values()) list.sort(compareLocations);
   const branch = (key) => {
     const list = children.get(key) || [];
     if (!list.length) return "";

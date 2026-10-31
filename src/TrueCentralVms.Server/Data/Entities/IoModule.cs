@@ -9,7 +9,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// un parlante): tiene UNA ubicación y el alcance de los usuarios se mide por
 /// módulo. Modbus no tiene usuario ni contraseña.
 /// </summary>
-public class IoModule : ILocatable
+public class IoModule : IOrderedResource
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -50,6 +50,8 @@ public class IoModule : ILocatable
 
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
+    /// <summary>Posición dentro de su ubicación (Recursos); null = sin orden propio.</summary>
+    public int? LocationOrder { get; set; }
 
     /// <summary>El servidor mantiene la conexión y lo ofrece a operadores y automatizaciones.</summary>
     public bool Enabled { get; set; } = true;
