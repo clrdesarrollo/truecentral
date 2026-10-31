@@ -785,9 +785,11 @@ public static class WorkflowsApi
 
         // Repetición del evento: los segundos antes y después que rigen cuando la
         // acción «Avisar» no dice otros (Automatizaciones → Repetición del evento).
+        // Quien ve grabaciones también los lee: «Repetir» del vigía parte con los «antes».
         app.MapGet("/api/workflows/clip-settings", (HttpContext ctx, AlertClips clips) =>
         {
-            if (ApiSecurity.RequireAny(ctx, out _, Permissions.WorkflowsView, Permissions.WorkflowsManage) is { } failure) return failure;
+            if (ApiSecurity.RequireAny(ctx, out _, Permissions.WorkflowsView, Permissions.WorkflowsManage,
+                    Permissions.PlaybackView) is { } failure) return failure;
             return Results.Ok(clips.Settings);
         });
 

@@ -31,7 +31,7 @@ const LVW_DEFAULT_CATS = ["alert", "alarm", "door-alarm", "access-denied", "vide
 const LVW_SEVERITY = { Info: 0, Warning: 1, Critical: 2 };
 const LVW_DEFAULTS = { sev: 1, hold: 20, pin: 5 };
 
-const lvw = { timer: null, locations: null, locationsAt: 0 };
+const lvw = { timer: null, locations: null, locationsAt: 0, replayLead: 5 };
 
 /** Bitácora del vigía (fijar/soltar, «Listo» en un crítico): a nombre del cuadro, sin cámara. */
 function lvwAudit(action, title, detail) {
@@ -295,6 +295,7 @@ function lvwRender(cell) {
       ${pinText ? `<span class="lv-watch-pin muted">${esc(pinText)}</span>` : ""}
       ${w.queue.length ? `<span class="lv-watch-queue" title="Eventos esperando su turno en este vigía">+${w.queue.length} en cola</span>` : ""}
       ${w.cams.length > 1 ? `<button type="button" data-w="prev" title="Cámara anterior de este evento">‹</button><span class="muted">${w.camIdx + 1}/${w.cams.length}</span><button type="button" data-w="next-cam" title="Cámara siguiente de este evento">›</button>` : ""}
+      ${e && w.cams.length && lvwCanReplay() ? `<button type="button" data-w="replay" title="Abre en otra pestaña la grabación de esta cámara, ${lvw.replayLead} s antes del evento (el vigía sigue vigilando)">Repetir</button>` : ""}
       ${e?.alertId ? `<button type="button" data-w="alert" title="Ver el aviso y confirmarlo">Ver aviso</button>` : ""}
       ${w.queue.length ? `<button type="button" data-w="next" title="Muestra ya el próximo evento de la cola">Siguiente</button>` : ""}
       ${e ? `<button type="button" data-w="done" title="Ya lo vi: pasa al siguiente o vuelve a esperar">Listo</button>` : ""}
@@ -336,6 +337,7 @@ function lvwOnClick(ev) {
     case "prev": w.camIdx = (w.camIdx - 1 + w.cams.length) % w.cams.length; lvwOpenCamera(cell); lvwRender(cell); break;
     case "next-cam": w.camIdx = (w.camIdx + 1) % w.cams.length; lvwOpenCamera(cell); lvwRender(cell); break;
     case "alert": lvwShowAlert(w.current?.alertId); break;
+    case "replay": lvwReplay(cell); break;
     case "gear": lvwSettings(cell); break;
     case "remove":
       lvwRemove(cell);
@@ -343,6 +345,21 @@ function lvwOnClick(ev) {
       lvScheduleLastSave();
       break;
   }
+}
+
+function lvwCanReplay() { return Perms.can("playback.view") && Perms.licensed("module_playback"); }
+
+/**
+ * «Repetir»: la grabación de la cámara que se está mostrando, unos segundos antes
+ * del evento (los «antes» de la repetición del evento del servidor). Va a otra
+ * pestaña para que este cuadro siga vigilando.
+ */
+function lvwReplay(cell) {
+  const w = cell.watch;
+  const ch = w.cams[w.camIdx];
+  if (!w.current || !ch) return;
+  const at = new Date(w.current.at).getTime() - lvw.replayLead * 1000;
+  window.open(`#/playback?ch=${ch.id}&at=${at}`, "_blank", "noopener");
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +461,10 @@ function lvwInit() {
   VmsHub.on("LiveEvent", lvwOnEvent);
   $("#lv-grid")?.addEventListener("click", lvwOnClick, true);
   lvwEnsureTimer();
+  if (lvwCanReplay())
+    Api.get("/api/workflows/clip-settings")
+      .then((c) => { lvw.replayLead = c.preSeconds; })
+      .catch(() => { /* sin permiso de ver automatizaciones o servidor anterior: 5 s */ });
 }
 
 function lvwLeave() {

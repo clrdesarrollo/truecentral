@@ -468,6 +468,22 @@ async function renderPlayback() {
   pb.timers.push(setInterval(pbTick, 250));
   new ResizeObserver(() => pbDraw()).observe($("#pb-timeline"));
   await pbLoadTree();
+  pbOpenFromHash();
+}
+
+/**
+ * «Repetir» del vigía web (abre otra pestaña): #/playback?ch=<canal>&at=<ms> deja
+ * ese canal solo, en ese día y posicionado en ese instante.
+ */
+function pbOpenFromHash() {
+  const q = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  if (!pb.active || !q.has("ch")) return;
+  const ch = pb.channels?.get(Number(q.get("ch")));
+  const at = Number(q.get("at"));
+  if (!ch || !at) { pbStatus("Esa cámara no está entre las que usted puede reproducir.", true); return; }
+  pb.day = pbDayStart(at);
+  pb.playhead = at;
+  pbAddChannel(ch, { only: true, at });
 }
 
 function playbackLeave() {
@@ -612,7 +628,7 @@ function pbMoveChannel(from, to) {
   pbRenderCell(to);
 }
 
-async function pbAddChannel(ch, { only = false, target = null } = {}) {
+async function pbAddChannel(ch, { only = false, target = null, at = null } = {}) {
   if (!only && pb.cells.some((c) => c.channel?.id === ch.id && c.index < pb.gridSize)) {
     toast(`"${ch.name}" ya está en la grilla.`);
     return;
@@ -639,7 +655,8 @@ async function pbAddChannel(ch, { only = false, target = null } = {}) {
   if (!pb.active || cell.channel !== ch) return;
   // Se suma a la hora que se está viendo; si no hay nada andando parte en el
   // instante marcado o en su primera grabación del día.
-  if (pb.playing) cell.openAt(pb.playhead, pb.seq);
+  if (at != null) { if (cell.segments.length) pbSeek(at); }
+  else if (pb.playing) cell.openAt(pb.playhead, pb.seq);
   else if (cell.segments.length) {
     const inside = cell.segments.some((s) => pb.playhead >= s.s && pb.playhead < s.e);
     pbSeek(inside ? pb.playhead : cell.segments[0].s);
