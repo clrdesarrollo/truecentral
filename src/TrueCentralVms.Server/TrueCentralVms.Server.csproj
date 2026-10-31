@@ -23,6 +23,9 @@
     <None Include="..\..\native\dahua\**\*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
     <!-- SDK de SADP (Hikvision): cambio de IP desde la búsqueda. Lleva OpenSSL 3, distinta de la 1.1 de HCNetSDK. -->
     <None Include="..\..\native\hikvision-sadp\**\*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- SDK del lector USB de huellas (el mismo del Complemento): el servidor solo usa
+         su comparación de plantillas, para no enrolar dos veces la misma huella. -->
+    <None Include="..\..\native\hikvision-fp\*.dll" CopyToOutputDirectory="PreserveNewest" TargetPath="%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

@@ -239,6 +239,7 @@ public static class AuditCatalog
             new("person-field-updated", "Campo personalizado de personas modificado"),
             new("person-field-deleted", "Campo personalizado de personas eliminado"),
             new("person-fingerprints-imported", "Huellas traídas desde un equipo"),
+            new("fingerprint-duplicate", "Huella repetida rechazada"),
             new("sync-requested", "Escritura de lo pendiente"),
             new("sync-forced", "Reenvío forzado del padrón"),
             new("webcontrol-downloaded", "Instalador del complemento descargado"),

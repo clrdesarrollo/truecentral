@@ -375,6 +375,24 @@ public sealed record AccessFingerprintWriteDto(
     string? Source);
 
 /// <summary>
+/// Comprobar una huella recién capturada antes de usarla: que no sea la de
+/// otro dedo de la misma persona ni la de otra persona. <paramref name="Fingerprints"/>
+/// es la lista del formulario tal como va (con plantilla las capturadas ahora,
+/// sin ella las que ya estaban); <paramref name="PersonId"/> null = persona nueva.
+/// </summary>
+public sealed record AccessFingerprintCheckDto(
+    int? PersonId,
+    int Number,
+    string Template,
+    List<AccessFingerprintWriteDto>? Fingerprints);
+
+/// <summary>Resultado de <see cref="AccessFingerprintCheckDto"/>.</summary>
+/// <param name="Checked">false = no se pudo comparar (el servidor no tiene el SDK
+/// del lector o la plantilla es de otro formato): la valida el equipo al escribirla.</param>
+/// <param name="Message">Si está repetida: con qué dedo y de quién.</param>
+public sealed record AccessFingerprintCheckResultDto(bool Checked, bool Duplicate, string? Message);
+
+/// <summary>
 /// Rostro enrolado. A diferencia de la huella, la foto SÍ se puede mirar —para
 /// eso está: para que quien administra vea a quién le está dando acceso— pero
 /// no viaja en las listas: se pide aparte, por su propia dirección.

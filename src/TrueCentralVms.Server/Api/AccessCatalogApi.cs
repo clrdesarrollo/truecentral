@@ -922,12 +922,16 @@ public static class AccessCatalogApi
         });
 
         app.MapPost("/api/access/persons", async (HttpContext ctx, AccessPersonWriteDto request, VmsDbContext db,
-            CredentialProtector protector, AccessSyncService sync, AuditService audit, CancellationToken ct) =>
+            CredentialProtector protector, FingerprintMatcher matcher, AccessSyncService sync, AuditService audit,
+            CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             if (await ValidatePersonAsync(db, request, null, ct) is { } invalid) return Error(invalid);
             var (fieldValues, fieldError) = await AccessPersonFieldsApi.ValidateValuesAsync(db, request.Fields, null, ct);
             if (fieldError is not null) return Error(fieldError);
+            if (await RejectRepeatedFingerprintAsync(ctx, db, protector, matcher, audit, null,
+                    $"{request.FirstName.Trim()} {request.LastName.Trim()}", request.Fingerprints, ct) is { } repeated)
+                return repeated;
 
             string employeeNo = string.IsNullOrWhiteSpace(request.EmployeeNo)
                 ? await NextEmployeeNoAsync(db, ct)
@@ -980,8 +984,8 @@ public static class AccessCatalogApi
         });
 
         app.MapPut("/api/access/persons/{id:int}", async (HttpContext ctx, int id, AccessPersonWriteDto request,
-            VmsDbContext db, CredentialProtector protector, AccessSyncService sync, AuditService audit,
-            CancellationToken ct) =>
+            VmsDbContext db, CredentialProtector protector, FingerprintMatcher matcher, AccessSyncService sync,
+            AuditService audit, CancellationToken ct) =>
         {
             if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
             var person = await db.AccessPersons.Include(p => p.Cards).Include(p => p.Fingerprints)
@@ -991,6 +995,9 @@ public static class AccessCatalogApi
             if (await ValidatePersonAsync(db, request, id, ct) is { } invalid) return Error(invalid);
             var (fieldValues, fieldError) = await AccessPersonFieldsApi.ValidateValuesAsync(db, request.Fields, person, ct);
             if (fieldError is not null) return Error(fieldError);
+            if (await RejectRepeatedFingerprintAsync(ctx, db, protector, matcher, audit, id, person.FullName,
+                    request.Fingerprints, ct) is { } repeated)
+                return repeated;
 
             var changes = new List<string>();
             if (fieldValues is not null)
@@ -1107,6 +1114,37 @@ public static class AccessCatalogApi
                 ? Results.Ok()
                 : Error("La persona se eliminó del VMS, pero no se pudo borrar de estos equipos y podría seguir " +
                         $"entrando por ellos: {string.Join("; ", failed)}. Revíselos.", StatusCodes.Status502BadGateway);
+        });
+
+        // Justo después de capturar una huella, antes de «Usar esta huella»: que
+        // no sea otro dedo de la persona ni la huella de otra. Al guardar se
+        // vuelve a comprobar; esto es para avisar con el dedo todavía en el lector.
+        app.MapPost("/api/access/fingerprints/check", async (HttpContext ctx, AccessFingerprintCheckDto request,
+            VmsDbContext db, CredentialProtector protector, FingerprintMatcher matcher, AuditService audit,
+            CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.PersonsManage, out _) is { } failure) return failure;
+            if (!AccessFingers.IsValid(request.Number))
+                return Error($"Número de dedo inválido: {request.Number} (van del 1 al {AccessFingers.Count}).");
+            if (string.IsNullOrEmpty(request.Template) || !IsBase64(request.Template, out int bytes) ||
+                bytes is < 64 or > MaxTemplateBytes)
+                return Error("La captura no es una plantilla de huella válida.");
+
+            var fingers = (request.Fingerprints ?? [])
+                .Where(f => f.Number != request.Number && AccessFingers.IsValid(f.Number))
+                .Append(new AccessFingerprintWriteDto(request.Number, request.Template, null, null))
+                .ToList();
+            var (clash, compared) = await matcher.FindDuplicateAsync(db, protector, request.PersonId, fingers,
+                request.Number, ct);
+            if (clash is null) return Results.Ok(new AccessFingerprintCheckResultDto(compared, false, null));
+
+            string personName = request.PersonId is { } personId
+                ? await db.AccessPersons.Where(p => p.Id == personId).Select(p => p.FirstName + " " + p.LastName)
+                    .FirstOrDefaultAsync(ct) ?? "una persona"
+                : "una persona nueva";
+            string message = FingerprintMatcher.Describe(clash);
+            await AuditRepeatedFingerprintAsync(ctx, audit, request.PersonId, personName, clash, message, "al capturar");
+            return Results.Ok(new AccessFingerprintCheckResultDto(true, true, message));
         });
 
         // Reintentar la escritura de UNA persona (la típica: se arregló el
@@ -1309,6 +1347,32 @@ public static class AccessCatalogApi
         bytes = written;
         return true;
     }
+
+    /// <summary>
+    /// Rechaza el guardado si una huella nueva ya está enrolada en otro dedo de
+    /// la persona o en otra persona (el terminal la rechazaría al escribirla,
+    /// después de guardar). Queda en la bitácora. Null = se puede guardar.
+    /// </summary>
+    private static async Task<IResult?> RejectRepeatedFingerprintAsync(HttpContext ctx, VmsDbContext db,
+        CredentialProtector protector, FingerprintMatcher matcher, AuditService audit, int? personId,
+        string personName, IReadOnlyList<AccessFingerprintWriteDto>? fingerprints, CancellationToken ct)
+    {
+        if (fingerprints is null || fingerprints.All(f => f.Template is null)) return null;
+        var (clash, _) = await matcher.FindDuplicateAsync(db, protector, personId, fingerprints, null, ct);
+        if (clash is null) return null;
+        string message = FingerprintMatcher.Describe(clash);
+        await AuditRepeatedFingerprintAsync(ctx, audit, personId, personName, clash, message, "al guardar");
+        return Error(message, StatusCodes.Status409Conflict);
+    }
+
+    private static Task AuditRepeatedFingerprintAsync(HttpContext ctx, AuditService audit, int? personId,
+        string personName, FingerprintMatcher.Clash clash, string message, string when) =>
+        audit.LogAsync(ctx, "access", "fingerprint-duplicate",
+            targetType: "access-person", targetId: personId?.ToString(), targetName: personName,
+            detail: $"Rechazó {when} la huella de '{personName}' capturada como " +
+                    $"{AccessFingers.NameOf(clash.Number)}: {message}",
+            success: false,
+            data: new { clash.Number, clash.OtherNumber, clash.OtherPersonId, clash.OtherEmployeeNo });
 
     /// <summary>
     /// Deja en la persona exactamente las huellas que mandó el panel. Una que
