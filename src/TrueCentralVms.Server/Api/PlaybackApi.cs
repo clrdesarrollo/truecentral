@@ -368,7 +368,13 @@ public static class PlaybackApi
                 arguments.AddRange(["-fflags", "+genpts", "-probesize", "400000", "-analyzeduration", "1000000",
                     "-f", "mpeg", "-i", source + "&pace=0"]);
             else
-                arguments.AddRange(["-rtsp_transport", "tcp", "-i", source]);
+            {
+                // Equipos que se posicionan por Range (Axis): -ss antes de -i hace que FFmpeg lo pida en el PLAY.
+                var (url, offset) = PlaybackSource.Split(source);
+                if (offset is { } seek)
+                    arguments.AddRange(["-ss", seek.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)]);
+                arguments.AddRange(["-rtsp_transport", "tcp", "-i", url]);
+            }
             arguments.AddRange(
             [
                 "-t", ((int)(end - start).TotalSeconds).ToString(),

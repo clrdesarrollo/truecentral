@@ -840,16 +840,28 @@ public sealed partial class MediaMtxManager(
         if (!IsRunning) return false;
         await SweepPlaybackPathsAsync(TimeSpan.FromHours(2), ct);
         await ReleaseSiblingPathsAsync(name, ct);
-        object payload = new
-        {
-            source = sourceUrl,
-            sourceOnDemand = true,
-            sourceOnDemandStartTimeout = "15s",
-            // De un solo uso: cada salto crea otra ruta y nadie vuelve a esta,
-            // así que en cuanto el espectador se va sobra la sesión contra el
-            // equipo (en el vivo, en cambio, conviene dejarla tibia 30 s).
-            sourceOnDemandCloseAfter = "1s",
-        };
+        // Equipos que se posicionan por la cabecera Range (Axis): MediaMTX la manda en su PLAY.
+        var (cleanUrl, offset) = PlaybackSource.Split(sourceUrl);
+        object payload = offset is { } start
+            ? new
+            {
+                source = cleanUrl,
+                sourceOnDemand = true,
+                sourceOnDemandStartTimeout = "15s",
+                sourceOnDemandCloseAfter = "1s",
+                rtspRangeType = "npt",
+                rtspRangeStart = $"{(long)start.TotalMilliseconds}ms",
+            }
+            : new
+            {
+                source = cleanUrl,
+                sourceOnDemand = true,
+                sourceOnDemandStartTimeout = "15s",
+                // De un solo uso: cada salto crea otra ruta y nadie vuelve a esta,
+                // así que en cuanto el espectador se va sobra la sesión contra el
+                // equipo (en el vivo, en cambio, conviene dejarla tibia 30 s).
+                sourceOnDemandCloseAfter = "1s",
+            };
         // Grabación de un equipo ISUP: la entrega el servicio ISUP en MPEG-PS y la publica FFmpeg (sin reintentos: al terminar
         // el tramo pedido, termina).
         if (Core.Isup.IsupGateway.IsMediaSource(sourceUrl))

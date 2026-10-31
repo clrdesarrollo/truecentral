@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using TrueCentralVms.Core.Drivers;
 
 namespace TrueCentralVms.Server.Services.Rtsp;
 
@@ -28,6 +29,8 @@ public sealed class RtspScaleRelay : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly string _pathName;
     private Task? _pump;
+    /// <summary>Desde dónde pedir la grabación (equipos que se posicionan por Range, ver <see cref="PlaybackSource"/>).</summary>
+    private TimeSpan? _startOffset;
 
     private RtspScaleRelay(RtspConnection source, RtspConnection sink, string pathName, ILogger logger)
     {
@@ -48,9 +51,10 @@ public sealed class RtspScaleRelay : IAsyncDisposable
     public static async Task<RtspScaleRelay> StartAsync(string deviceUrl, double scale, string publishUrl,
         string pathName, ILogger logger, CancellationToken ct)
     {
-        var source = new RtspConnection(deviceUrl);
+        var (cleanUrl, offset) = PlaybackSource.Split(deviceUrl);
+        var source = new RtspConnection(cleanUrl);
         var sink = new RtspConnection(publishUrl);
-        var relay = new RtspScaleRelay(source, sink, pathName, logger);
+        var relay = new RtspScaleRelay(source, sink, pathName, logger) { _startOffset = offset };
         try
         {
             await relay.OpenAsync(scale, ct);
@@ -109,7 +113,7 @@ public sealed class RtspScaleRelay : IAsyncDisposable
         // ---- Recién ahora se le pide al equipo que empiece, y a qué ritmo ----
         var play = await _source.SendAsync("PLAY", _source.BaseUrl, ct,
         [
-            ("Range", "npt=0-"),
+            ("Range", PlaybackSource.RangeHeader(_startOffset)),
             ("Scale", scale.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)),
         ]);
         if (play.Status != 200)
