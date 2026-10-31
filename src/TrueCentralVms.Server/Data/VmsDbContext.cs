@@ -175,15 +175,33 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
         }
     }
 
+    /// <summary>
+    /// Un recurso que cambia de ubicación (desde Recursos, la ficha, el alta de
+    /// un equipo o al seguir a su equipo) pierde la posición que tenía en la
+    /// anterior: llega al final de la nueva, después de los ya ordenados.
+    /// </summary>
+    private void ClearLocationOrderOnMove()
+    {
+        foreach (var entry in ChangeTracker.Entries<IOrderedResource>())
+        {
+            if (entry.State != EntityState.Modified) continue;
+            var order = entry.Property(r => r.LocationOrder);
+            if (entry.Property(r => r.LocationId).IsModified && !order.IsModified && order.CurrentValue is not null)
+                order.CurrentValue = null;
+        }
+    }
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ClearLicenseMarksOnManualChange();
+        ClearLocationOrderOnMove();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         ClearLicenseMarksOnManualChange();
+        ClearLocationOrderOnMove();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 

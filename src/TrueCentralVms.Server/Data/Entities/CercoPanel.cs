@@ -9,7 +9,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// generó (modelo tipo ISUP: se crea ID + clave y se le asignan al panel). El
 /// PSK se guarda cifrado con AES-256-GCM (ver <see cref="CredentialProtector"/>).
 /// </summary>
-public class CercoPanel : ILocatable
+public class CercoPanel : IOrderedResource
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -34,6 +34,8 @@ public class CercoPanel : ILocatable
 
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar (reemplazó al texto libre "Sitio").</summary>
     public int? LocationId { get; set; }
+    /// <summary>Posición dentro de su ubicación (Recursos); null = sin orden propio.</summary>
+    public int? LocationOrder { get; set; }
 
     /// <summary>El servidor acepta la conexión de este panel.</summary>
     public bool Enabled { get; set; } = true;

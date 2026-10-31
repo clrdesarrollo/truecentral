@@ -40,10 +40,21 @@ public enum ResourceHealth { Unknown, Ok, Warning, Alarm, Offline, Disabled }
 /// arma por <paramref name="ParentId"/>).</summary>
 /// <param name="ResourceCount">Recursos ubicados directamente en este nodo
 /// (sin contar los de sus sububicaciones).</param>
+/// <param name="SortOrder">Posición entre sus hermanas (la que se le da en
+/// Recursos); a igual valor, por nombre. Todos los árboles la respetan.</param>
 public sealed record LocationDto(
     int Id, int? ParentId, string Name, LocationKind Kind,
     string? Description, string? Address, double? Latitude, double? Longitude,
-    int ResourceCount);
+    int ResourceCount, int SortOrder = 0);
+
+/// <summary>Orden de las ubicaciones de una rama (<paramref name="ParentId"/>
+/// null = la raíz): todas sus hijas, en el orden deseado. Las que falten
+/// quedan después, en el orden que tenían.</summary>
+public sealed record LocationOrderRequest(int? ParentId, List<int> Ids);
+
+/// <summary>Orden de los recursos de una ubicación (solo los ubicados
+/// directamente en ella). Los que falten quedan después, en el orden que tenían.</summary>
+public sealed record ResourceOrderRequest(List<ResourceRef> Resources);
 
 /// <summary>Alta o modificación de una ubicación. Cambiar
 /// <paramref name="ParentId"/> la mueve con todo lo que tiene adentro.</summary>
@@ -63,10 +74,12 @@ public sealed record LocationSaveRequest(
 /// <param name="State">Estado en palabras ("En línea", "Armada", "Anulada").</param>
 /// <param name="Enabled">Visible para los operadores (canales y puertas se
 /// pueden deshabilitar sin borrarlos).</param>
+/// <param name="LocationOrder">Posición dentro de su ubicación; null = sin
+/// orden propio (después de los ordenados, por tipo y nombre).</param>
 public sealed record ResourceDto(
     ResourceKind Kind, int Id, string Name, int? LocationId,
     string Source, string SourceModule, int SourceId, string? Detail,
-    ResourceHealth Health, string State, bool Enabled);
+    ResourceHealth Health, string State, bool Enabled, int? LocationOrder = null);
 
 /// <summary>Referencia a un recurso de cualquier tipo.</summary>
 public sealed record ResourceRef(ResourceKind Kind, int Id);

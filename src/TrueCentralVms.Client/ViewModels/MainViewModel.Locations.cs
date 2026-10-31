@@ -105,7 +105,8 @@ public partial class MainViewModel
     {
         var nodes = locations.ToDictionary(l => l.Id, l => new LocationNode(l));
         var roots = new List<LocationNode>();
-        foreach (var location in locations.OrderBy(l => l.Name, NaturalOrder))
+        // Hermanas en el orden que se les dio en Recursos; las nunca ordenadas, por nombre.
+        foreach (var location in locations.OrderBy(l => l.SortOrder).ThenBy(l => l.Name, NaturalOrder))
         {
             var node = nodes[location.Id];
             if (location.ParentId is { } parentId && nodes.TryGetValue(parentId, out var parent))
@@ -139,6 +140,7 @@ public partial class MainViewModel
             else
                 loose.Add(resource);
         }
+        foreach (var node in nodes.Values) SortItems(node);
 
         target.Clear();
         foreach (var root in roots)
@@ -165,6 +167,26 @@ public partial class MainViewModel
 
         static bool HasResources(LocationNode node) =>
             node.Children.OfType<ResourceNode>().Any() || node.Children.OfType<LocationNode>().Any(HasResources);
+
+        // Dentro de cada ubicación (después de sus sububicaciones), cámaras y
+        // demás recursos en el orden que se les dio en Recursos, el mismo del
+        // panel web; lo que no tiene orden propio va después, por tipo y nombre.
+        static void SortItems(LocationNode node)
+        {
+            var items = node.Children.Where(c => c is not LocationNode)
+                .OrderBy(c => c switch
+                {
+                    ChannelNode channel => channel.Channel.LocationOrder,
+                    ResourceNode resource => resource.LocationOrder,
+                    _ => null,
+                } ?? int.MaxValue)
+                .ThenBy(c => c is ResourceNode resource ? resource.Kind : ResourceKind.Camera)
+                .ThenBy(c => c is ResourceNode resource ? resource.Name : (c as ChannelNode)?.Header ?? "", NaturalOrder)
+                .ToList();
+            if (items.Count < 2) return;
+            foreach (var item in items) node.Children.Remove(item);
+            foreach (var item in items) node.Children.Add(item);
+        }
     }
 
     /// <summary>Buscador en los árboles por ubicación: una cámara se ve si calza
