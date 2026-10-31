@@ -12,7 +12,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// puede mostrar otra cámara (<see cref="ChannelId"/>).
 /// La contraseña se guarda cifrada con AES-256-GCM (ver <see cref="CredentialProtector"/>).
 /// </summary>
-public class Intercom : ILocatable, IIsupEquipment
+public class Intercom : IOrderedResource, IIsupEquipment
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -39,6 +39,8 @@ public class Intercom : ILocatable, IIsupEquipment
 
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
+    /// <summary>Posición dentro de su ubicación (Recursos); null = sin orden propio.</summary>
+    public int? LocationOrder { get; set; }
 
     /// <summary>Otra cámara (canal de Fuentes de video) en lugar de la propia del frente; null = la propia.</summary>
     public int? ChannelId { get; set; }

@@ -174,7 +174,7 @@ public class AccessDevice : IIsupEquipment
 /// el equipo (tantas como declare) y se identifica por su número EN EL EQUIPO,
 /// que es el que usan sus órdenes. Es la unidad que cuenta la licencia.
 /// </summary>
-public class AccessDoor : ILocatable
+public class AccessDoor : IOrderedResource
 {
     public int Id { get; set; }
     public int AccessDeviceId { get; set; }
@@ -208,6 +208,8 @@ public class AccessDoor : ILocatable
 
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
+    /// <summary>Posición dentro de su ubicación (Recursos); null = sin orden propio.</summary>
+    public int? LocationOrder { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

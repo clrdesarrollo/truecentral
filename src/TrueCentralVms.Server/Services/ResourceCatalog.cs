@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using TrueCentralVms.Core.Contracts;
 using TrueCentralVms.Server.Data;
@@ -32,7 +33,7 @@ public static class ResourceCatalog
             var channels = await Scope(db.Channels, filter)
                 .Select(c => new
                 {
-                    c.Id, c.Name, c.LocationId, c.ChannelNumber, c.Enabled, c.IsOnline,
+                    c.Id, c.Name, c.LocationId, c.LocationOrder, c.ChannelNumber, c.Enabled, c.IsOnline,
                     c.DeviceId, Device = c.Device.Name, DeviceStatus = c.Device.Status,
                 })
                 .ToListAsync(ct);
@@ -47,7 +48,7 @@ public static class ResourceCatalog
                         _ => (ResourceHealth.Offline, "Equipo sin conexión"),
                     };
                 result.Add(new ResourceDto(ResourceKind.Camera, c.Id, c.Name, c.LocationId,
-                    c.Device, "devices", c.DeviceId, $"Canal {c.ChannelNumber}", health, state, c.Enabled));
+                    c.Device, "devices", c.DeviceId, $"Canal {c.ChannelNumber}", health, state, c.Enabled, c.LocationOrder));
             }
         }
 
@@ -56,7 +57,7 @@ public static class ResourceCatalog
             var doors = await Scope(db.AccessDoors, filter)
                 .Select(d => new
                 {
-                    d.Id, d.Name, d.LocationId, d.Number, d.Enabled, d.Mode, d.IsOpen,
+                    d.Id, d.Name, d.LocationId, d.LocationOrder, d.Number, d.Enabled, d.Mode, d.IsOpen,
                     d.AccessDeviceId, Device = d.AccessDevice!.Name,
                     DeviceEnabled = d.AccessDevice!.Enabled, DeviceStatus = d.AccessDevice!.Status,
                 })
@@ -75,7 +76,7 @@ public static class ResourceCatalog
                     : d.DeviceStatus == AccessDeviceStatus.Online ? (ResourceHealth.Ok, "En línea")
                     : (ResourceHealth.Unknown, "—");
                 result.Add(new ResourceDto(ResourceKind.Door, d.Id, d.Name, d.LocationId,
-                    d.Device, "access", d.AccessDeviceId, $"Puerta {d.Number}", health, state, d.Enabled));
+                    d.Device, "access", d.AccessDeviceId, $"Puerta {d.Number}", health, state, d.Enabled, d.LocationOrder));
             }
         }
 
@@ -84,7 +85,7 @@ public static class ResourceCatalog
             var areas = await Scope(db.AlarmAreas, filter)
                 .Select(a => new
                 {
-                    a.Id, a.Name, a.LocationId, a.Number, a.Enabled, a.ArmState, a.InAlarm,
+                    a.Id, a.Name, a.LocationId, a.LocationOrder, a.Number, a.Enabled, a.ArmState, a.InAlarm,
                     a.AlarmPanelId, Panel = a.AlarmPanel.Name,
                     PanelEnabled = a.AlarmPanel.Enabled, PanelStatus = a.AlarmPanel.Status,
                 })
@@ -107,7 +108,7 @@ public static class ResourceCatalog
                         _ => (ResourceHealth.Unknown, "—"),
                     };
                 result.Add(new ResourceDto(ResourceKind.Partition, a.Id, a.Name, a.LocationId,
-                    a.Panel, "alarm-panels", a.AlarmPanelId, $"Área {a.Number}", health, state, a.Enabled));
+                    a.Panel, "alarm-panels", a.AlarmPanelId, $"Área {a.Number}", health, state, a.Enabled, a.LocationOrder));
             }
         }
 
@@ -116,7 +117,7 @@ public static class ResourceCatalog
             var zones = await Scope(db.AlarmZones, filter)
                 .Select(z => new
                 {
-                    z.Id, z.Name, z.LocationId, z.Number, z.Status, z.Bypassed, z.InAlarm, z.Tamper, z.LowBattery,
+                    z.Id, z.Name, z.LocationId, z.LocationOrder, z.Number, z.Status, z.Bypassed, z.InAlarm, z.Tamper, z.LowBattery,
                     z.AlarmPanelId, Panel = z.AlarmPanel.Name,
                     PanelEnabled = z.AlarmPanel.Enabled, PanelStatus = z.AlarmPanel.Status,
                 })
@@ -142,7 +143,7 @@ public static class ResourceCatalog
                     };
                 result.Add(new ResourceDto(ResourceKind.Zone, z.Id, z.Name, z.LocationId,
                     z.Panel, "alarm-panels", z.AlarmPanelId, $"Zona {z.Number}", health, state,
-                    z.Status != AlarmZoneStatus.NotConfigured));
+                    z.Status != AlarmZoneStatus.NotConfigured, z.LocationOrder));
             }
         }
 
@@ -151,7 +152,7 @@ public static class ResourceCatalog
             var fences = await Scope(db.CercoPanels, filter)
                 .Select(p => new
                 {
-                    p.Id, p.Name, p.LocationId, p.DeviceId, p.Model, p.Enabled, p.Enrolled, p.Status,
+                    p.Id, p.Name, p.LocationId, p.LocationOrder, p.DeviceId, p.Model, p.Enabled, p.Enrolled, p.Status,
                     p.Armed, p.Siren, p.HvOk, p.ArcFault,
                 })
                 .ToListAsync(ct);
@@ -168,14 +169,14 @@ public static class ResourceCatalog
                     : p.Armed ? (ResourceHealth.Ok, "Armado")
                     : (ResourceHealth.Ok, "Desarmado");
                 result.Add(new ResourceDto(ResourceKind.Fence, p.Id, p.Name, p.LocationId,
-                    p.Model ?? "Panel de cerco", "cerco-panels", p.Id, $"ID {p.DeviceId}", health, state, p.Enabled));
+                    p.Model ?? "Panel de cerco", "cerco-panels", p.Id, $"ID {p.DeviceId}", health, state, p.Enabled, p.LocationOrder));
             }
         }
 
         if (filter.Wants(ResourceKind.Speaker))
         {
             var speakers = await Scope(db.Speakers, filter)
-                .Select(s => new { s.Id, s.Name, s.LocationId, s.Host, s.Model, s.Enabled, s.Status })
+                .Select(s => new { s.Id, s.Name, s.LocationId, s.LocationOrder, s.Host, s.Model, s.Enabled, s.Status })
                 .ToListAsync(ct);
             foreach (var s in speakers)
             {
@@ -188,14 +189,14 @@ public static class ResourceCatalog
                         _ => (ResourceHealth.Unknown, "—"),
                     };
                 result.Add(new ResourceDto(ResourceKind.Speaker, s.Id, s.Name, s.LocationId,
-                    s.Model ?? "Parlante IP", "speakers", s.Id, s.Host, health, state, s.Enabled));
+                    s.Model ?? "Parlante IP", "speakers", s.Id, s.Host, health, state, s.Enabled, s.LocationOrder));
             }
         }
 
         if (filter.Wants(ResourceKind.Intercom))
         {
             var intercoms = await Scope(db.Intercoms, filter)
-                .Select(i => new { i.Id, i.Name, i.LocationId, i.Host, i.Model, i.Enabled, i.Status })
+                .Select(i => new { i.Id, i.Name, i.LocationId, i.LocationOrder, i.Host, i.Model, i.Enabled, i.Status })
                 .ToListAsync(ct);
             foreach (var i in intercoms)
             {
@@ -208,14 +209,14 @@ public static class ResourceCatalog
                         _ => (ResourceHealth.Unknown, "—"),
                     };
                 result.Add(new ResourceDto(ResourceKind.Intercom, i.Id, i.Name, i.LocationId,
-                    i.Model ?? "Frente de citofonía", "intercoms", i.Id, i.Host, health, state, i.Enabled));
+                    i.Model ?? "Frente de citofonía", "intercoms", i.Id, i.Host, health, state, i.Enabled, i.LocationOrder));
             }
         }
 
         if (filter.Wants(ResourceKind.IoModule))
         {
             var modules = await Scope(db.IoModules, filter)
-                .Select(m => new { m.Id, m.Name, m.LocationId, m.Host, m.Model, m.Enabled, m.Status })
+                .Select(m => new { m.Id, m.Name, m.LocationId, m.LocationOrder, m.Host, m.Model, m.Enabled, m.Status })
                 .ToListAsync(ct);
             foreach (var m in modules)
             {
@@ -227,7 +228,7 @@ public static class ResourceCatalog
                         _ => (ResourceHealth.Unknown, "—"),
                     };
                 result.Add(new ResourceDto(ResourceKind.IoModule, m.Id, m.Name, m.LocationId,
-                    m.Model ?? "Módulo de E/S", "io-modules", m.Id, m.Host, health, state, m.Enabled));
+                    m.Model ?? "Módulo de E/S", "io-modules", m.Id, m.Host, health, state, m.Enabled, m.LocationOrder));
             }
         }
 
@@ -299,6 +300,62 @@ public static class ResourceCatalog
             }
         }
         return changed;
+    }
+
+    /// <summary>Orden de lectura para lo que no tiene orden propio: "Cámara 2" antes que "Cámara 10".</summary>
+    private static readonly StringComparer NaturalOrder =
+        StringComparer.Create(CultureInfo.InvariantCulture, CompareOptions.IgnoreCase | CompareOptions.NumericOrdering);
+
+    /// <summary>
+    /// Ordena los recursos ubicados directamente en <paramref name="locationId"/>:
+    /// primero los de <paramref name="order"/>, en ese orden; después los demás,
+    /// en el orden que ya tenían. Los numera a todos desde 0 y devuelve si algo
+    /// cambió, sus nombres en el orden nuevo y cuántos de los pedidos no están en
+    /// esa ubicación. No guarda: el llamador hace SaveChanges.
+    /// </summary>
+    public static async Task<(bool Changed, List<string> Names, int Missing)> SetOrderAsync(
+        VmsDbContext db, int locationId, IReadOnlyList<ResourceRef> order, CancellationToken ct)
+    {
+        var items = new List<(ResourceKind Kind, IOrderedResource Item, string Name)>();
+        async Task LoadAsync<T>(DbSet<T> set, ResourceKind kind, Func<T, string> nameOf) where T : class, IOrderedResource
+        {
+            foreach (var item in await set.Where(x => x.LocationId == locationId).ToListAsync(ct))
+                items.Add((kind, item, nameOf(item)));
+        }
+        await LoadAsync(db.Channels, ResourceKind.Camera, c => c.Name);
+        await LoadAsync(db.AccessDoors, ResourceKind.Door, d => d.Name);
+        await LoadAsync(db.AlarmAreas, ResourceKind.Partition, a => a.Name);
+        await LoadAsync(db.AlarmZones, ResourceKind.Zone, z => z.Name);
+        await LoadAsync(db.CercoPanels, ResourceKind.Fence, p => p.Name);
+        await LoadAsync(db.Speakers, ResourceKind.Speaker, s => s.Name);
+        await LoadAsync(db.Intercoms, ResourceKind.Intercom, i => i.Name);
+        await LoadAsync(db.IoModules, ResourceKind.IoModule, m => m.Name);
+
+        // El orden actual es el que muestran los árboles: el propio y, sin él, por tipo y nombre.
+        var current = items
+            .OrderBy(x => x.Item.LocationOrder ?? int.MaxValue).ThenBy(x => x.Kind).ThenBy(x => x.Name, NaturalOrder)
+            .ToList();
+        var byKey = current.ToDictionary(x => Key(x.Kind, x.Item.Id));
+        var placed = new HashSet<string>();
+        var result = new List<(ResourceKind Kind, IOrderedResource Item, string Name)>();
+        int missing = 0;
+        foreach (var r in order)
+        {
+            string key = Key(r.Kind, r.Id);
+            if (!placed.Add(key)) continue;
+            if (byKey.TryGetValue(key, out var item)) result.Add(item);
+            else missing++;
+        }
+        result.AddRange(current.Where(x => !placed.Contains(Key(x.Kind, x.Item.Id))));
+
+        bool changed = false;
+        for (int i = 0; i < result.Count; i++)
+        {
+            if (result[i].Item.LocationOrder == i) continue;
+            result[i].Item.LocationOrder = i;
+            changed = true;
+        }
+        return (changed, result.Select(x => x.Name).ToList(), missing);
     }
 
     /// <summary>Nombres desde la raíz hasta la ubicación dada (incluida); vacío si no hay ubicación.</summary>

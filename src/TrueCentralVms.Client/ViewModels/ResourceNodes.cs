@@ -71,6 +71,7 @@ public sealed partial class ResourceNode : ObservableObject
             // Puertas y áreas son parte de un equipo; un parlante, citófono,
             // cerco o módulo de E/S es el equipo mismo.
             Equipment = dto.Kind is ResourceKind.Door or ResourceKind.Partition or ResourceKind.Zone ? dto.Source : null,
+            LocationOrder = dto.LocationOrder,
         };
 
     public ResourceKind Kind { get; }
@@ -85,6 +86,10 @@ public sealed partial class ResourceNode : ObservableObject
     public string Name { get; }
     public string? Detail { get; }
     public int? LocationId { get; }
+
+    /// <summary>Posición dentro de su ubicación, la que se le dio en Recursos;
+    /// null = sin orden propio (después de los ordenados, por tipo y nombre).</summary>
+    public int? LocationOrder { get; init; }
 
     /// <summary>Equipo del que es parte (controladora de una puerta, panel de
     /// un área); null si el recurso es el equipo mismo.</summary>

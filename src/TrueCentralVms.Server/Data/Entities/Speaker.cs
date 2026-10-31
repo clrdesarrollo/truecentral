@@ -8,7 +8,7 @@ namespace TrueCentralVms.Server.Data.Entities;
 /// una biblioteca de audios propia y un canal de audio en vivo. La contraseña
 /// se guarda cifrada con AES-256-GCM (ver <see cref="CredentialProtector"/>).
 /// </summary>
-public class Speaker : ILocatable, IIsupEquipment
+public class Speaker : IOrderedResource, IIsupEquipment
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -41,6 +41,8 @@ public class Speaker : ILocatable, IIsupEquipment
 
     /// <summary>Ubicación en el árbol de Recursos; null = por ubicar.</summary>
     public int? LocationId { get; set; }
+    /// <summary>Posición dentro de su ubicación (Recursos); null = sin orden propio.</summary>
+    public int? LocationOrder { get; set; }
 
     /// <summary>
     /// Altavoz de un terminal de acceso (facial): el VMS lo crea y lo mantiene a

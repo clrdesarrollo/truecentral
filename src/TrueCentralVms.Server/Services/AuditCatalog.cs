@@ -76,6 +76,8 @@ public static class AuditCatalog
             new("location-command", "Orden sobre las áreas de alarma de una ubicación"),
             new("resources-unlocated", "Recursos devueltos a «por ubicar»"),
             new("equipment-located", "Recursos movidos junto con su equipo"),
+            new("locations-reordered", "Orden de las ubicaciones cambiado"),
+            new("resources-reordered", "Orden de los recursos de una ubicación cambiado"),
         ]),
         new("live", "Video en vivo",
         [

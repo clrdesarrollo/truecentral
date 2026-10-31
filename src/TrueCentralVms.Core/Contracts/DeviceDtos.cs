@@ -112,8 +112,9 @@ public sealed record DeviceProbeResultDto(
 public sealed record ProbedChannelDto(int ChannelNumber, int RtspChannel, string Name, bool IsOnline);
 
 /// <summary>Canal de un equipo. DisabledByLicense: quedó deshabilitado por el cupo de canales de la licencia (se habilita solo al haber cupo).
-/// LocationId: ubicación del canal en el árbol de Recursos (null = por ubicar).</summary>
-public sealed record ChannelDto(int Id, int DeviceId, int ChannelNumber, int RtspChannel, string Name, bool Enabled, bool IsOnline, bool SupportsPtz, bool UseFfmpegProxy = false, bool DisabledByLicense = false, int? LocationId = null);
+/// LocationId: ubicación del canal en el árbol de Recursos (null = por ubicar); LocationOrder: su posición
+/// dentro de esa ubicación (null = sin orden propio, por nombre).</summary>
+public sealed record ChannelDto(int Id, int DeviceId, int ChannelNumber, int RtspChannel, string Name, bool Enabled, bool IsOnline, bool SupportsPtz, bool UseFfmpegProxy = false, bool DisabledByLicense = false, int? LocationId = null, int? LocationOrder = null);
 
 /// <summary>Resultado de "Habilitar canales con señal": cuántos se habilitaron y cuántos quedaron fuera por cupo.</summary>
 public sealed record ChannelBulkEnableResultDto(int Enabled, int LeftWithoutQuota, string Message);

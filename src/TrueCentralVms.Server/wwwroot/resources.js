@@ -65,6 +65,7 @@ const resState = {
   locations: [],
   byId: new Map(),
   children: new Map(),      // id del padre ("root" = raíz) → ubicaciones hijas ordenadas
+  treeIndex: new Map(),     // id de ubicación → posición al recorrer el árbol (el orden de la lista)
   resources: [],             // los que se muestran (sin los deshabilitados, salvo que se pida verlos)
   allResources: [],          // todos, tal como llegan del servidor
   showDisabled: false,       // interruptor «Mostrar deshabilitados» (recordado en este navegador)
@@ -80,6 +81,8 @@ const resState = {
   pollTimer: null,
   signature: "",            // última respuesta dibujada: sin cambios no se redibuja
   dragging: false,          // mientras se arrastra no se redibuja (cancelaría el arrastre)
+  dragLocation: null,       // ubicación que se está arrastrando en el árbol
+  dragKeys: null,           // recursos que se están arrastrando desde la lista
   sheet: null,              // ficha abierta: { kind, id, tab, detail, workflows, history }
 };
 
@@ -128,7 +131,16 @@ function resIndex() {
     if (!resState.children.has(key)) resState.children.set(key, []);
     resState.children.get(key).push(l);
   }
-  for (const list of resState.children.values()) list.sort((a, b) => resCollator.compare(a.name, b.name));
+  for (const list of resState.children.values()) list.sort(compareLocations);
+  resState.treeIndex = new Map();
+  const walk = (key) => {
+    for (const l of resState.children.get(key) || []) {
+      if (resState.treeIndex.has(l.id)) continue;
+      resState.treeIndex.set(l.id, resState.treeIndex.size);
+      walk(l.id);
+    }
+  };
+  walk("root");
   // Una selección que ya no existe (otra persona borró la ubicación) vuelve a "Todos".
   if (typeof resState.selected === "number" && !resState.byId.has(resState.selected)) resState.selected = "all";
   const alive = new Set(resState.resources.map(resKey));
@@ -187,13 +199,24 @@ function resInSelection() {
   return resState.resources.filter((r) => r.locationId != null && ids.has(r.locationId));
 }
 
+/** Orden de la lista, el mismo de los árboles del cliente y de la vista en vivo:
+ *  por ubicación (en el orden del árbol) y, dentro de cada una, el orden propio;
+ *  lo que no lo tiene, después, por tipo y nombre. Lo por ubicar va al final. */
+function resCompare(a, b) {
+  const none = Number.MAX_SAFE_INTEGER;
+  const where = (r) => r.locationId == null ? none : resState.treeIndex.get(r.locationId) ?? none - 1;
+  const order = (r) => r.locationId == null ? none : r.locationOrder ?? none;
+  return where(a) - where(b) || order(a) - order(b)
+    || RES_KIND_ORDER.indexOf(a.kind) - RES_KIND_ORDER.indexOf(b.kind) || resCollator.compare(a.name, b.name);
+}
+
 function resFiltered(list) {
   const needle = resFold(resState.text.trim());
   return list
     .filter((r) => !resState.kind || r.kind === resState.kind)
     .filter((r) => !resState.source || `${r.sourceModule}:${r.sourceId}` === resState.source)
     .filter((r) => !needle || resFold(`${r.name} ${r.source} ${r.detail ?? ""} ${r.state}`).includes(needle))
-    .sort((a, b) => RES_KIND_ORDER.indexOf(a.kind) - RES_KIND_ORDER.indexOf(b.kind) || resCollator.compare(a.name, b.name));
+    .sort(resCompare);
 }
 
 /** Carga árbol y recursos. quiet = refresco de fondo: sin cambios no se toca
@@ -325,7 +348,7 @@ function resDrawTree() {
     <div class="res-node pending${sel === "pending" ? " active" : ""}" data-special="pending" title="Recursos que todavía no tienen ubicación${isAdmin ? ". Soltar aquí un recurso le quita la ubicación." : ""}">
       ${resIcon("inbox")}<span class="res-name">Por ubicar</span><span class="res-count${pending ? " has" : ""}">${pending}</span>
     </div>
-    ${isAdmin ? `<p class="muted res-hint">Arrastre recursos desde la lista hasta una ubicación, o ubicaciones entre sí para reordenar el árbol.</p>` : ""}`;
+    ${isAdmin ? `<p class="muted res-hint">Arrastre recursos desde la lista hasta una ubicación. Para ordenar, suelte una ubicación en el borde de arriba o de abajo de otra (en el centro queda adentro), o una fila de la lista sobre otra de la misma ubicación. Los operadores ven ese orden.</p>` : ""}`;
   $("#res-tree").scrollTop = scrollTop;
   $("#res-new-root")?.addEventListener("click", () => resLocationModal(null, null));
 }
@@ -556,39 +579,59 @@ function resBindTree(isAdmin) {
   });
   if (!isAdmin) return;
 
+  const MARKS = ["drop", "drop-before", "drop-after"];
+  const clearMarks = (except) => $$(".res-node.drop, .res-node.drop-before, .res-node.drop-after", tree)
+    .forEach((n) => n !== except && n.classList.remove(...MARKS));
   tree.addEventListener("dragstart", (e) => {
     const node = e.target.closest(".res-node[data-loc]");
     if (!node) return;
     e.dataTransfer.setData(RES_DRAG_LOCATION, node.dataset.loc);
     e.dataTransfer.effectAllowed = "move";
     resState.dragging = true;
+    resState.dragLocation = Number(node.dataset.loc);
   });
-  tree.addEventListener("dragend", () => { resState.dragging = false; });
+  tree.addEventListener("dragend", () => { resState.dragging = false; resState.dragLocation = null; clearMarks(); });
   const target = (e) => e.target.closest(".res-node");
+  // Una ubicación soltada en el borde de arriba o de abajo de otra queda antes
+  // o después de ella, en su misma rama; en el centro, adentro.
+  const zone = (e, node) => {
+    if (!node.dataset.loc || ![...e.dataTransfer.types].includes(RES_DRAG_LOCATION)) return "inside";
+    const box = node.getBoundingClientRect();
+    const y = (e.clientY - box.top) / box.height;
+    return y < 0.3 ? "before" : y > 0.7 ? "after" : "inside";
+  };
   const accepts = (e, node) => {
     const types = [...e.dataTransfer.types];
     if (types.includes(RES_DRAG_RESOURCES)) return Boolean(node.dataset.loc) || node.dataset.special === "pending";
-    if (types.includes(RES_DRAG_LOCATION)) return Boolean(node.dataset.loc) || node.dataset.special === "all";
+    if (types.includes(RES_DRAG_LOCATION)) {
+      if (node.dataset.special === "all") return true;
+      // Ni sobre sí misma ni dentro de sus sububicaciones.
+      return Boolean(node.dataset.loc) && !(resState.dragLocation != null
+        && resSubtree(resState.dragLocation).has(Number(node.dataset.loc)));
+    }
     return false;
   };
   tree.addEventListener("dragover", (e) => {
     const node = target(e);
-    if (!node || !accepts(e, node)) return;
+    if (!node || !accepts(e, node)) { clearMarks(); return; }
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    $$(".res-node.drop", tree).forEach((n) => n !== node && n.classList.remove("drop"));
-    node.classList.add("drop");
+    clearMarks(node);
+    const where = zone(e, node);
+    node.classList.remove(...MARKS);
+    node.classList.add(where === "inside" ? "drop" : `drop-${where}`);
   });
   tree.addEventListener("dragleave", (e) => {
     const node = target(e);
-    if (node && !node.contains(e.relatedTarget)) node.classList.remove("drop");
+    if (node && !node.contains(e.relatedTarget)) node.classList.remove(...MARKS);
   });
   tree.addEventListener("drop", async (e) => {
     const node = target(e);
-    $$(".res-node.drop", tree).forEach((n) => n.classList.remove("drop"));
+    clearMarks();
     if (!node || !accepts(e, node)) return;
     e.preventDefault();
     resState.dragging = false;
+    resState.dragLocation = null;
     const destination = node.dataset.loc ? Number(node.dataset.loc) : null;
     const resources = e.dataTransfer.getData(RES_DRAG_RESOURCES);
     if (resources) {
@@ -597,7 +640,10 @@ function resBindTree(isAdmin) {
       return;
     }
     const moved = Number(e.dataTransfer.getData(RES_DRAG_LOCATION));
-    if (moved && moved !== destination) await resMoveLocation(resState.byId.get(moved), destination);
+    if (!moved || moved === destination) return;
+    const where = zone(e, node);
+    if (where === "inside") await resMoveLocation(resState.byId.get(moved), destination);
+    else await resPlaceLocation(resState.byId.get(moved), resState.byId.get(destination), where);
   });
 }
 
@@ -632,6 +678,7 @@ function resBindList(isAdmin) {
     e.dataTransfer.setData(RES_DRAG_RESOURCES, JSON.stringify(keys));
     e.dataTransfer.effectAllowed = "move";
     resState.dragging = true;
+    resState.dragKeys = keys;
     const ghost = document.createElement("div");
     ghost.className = "res-drag-ghost";
     ghost.textContent = keys.length === 1 ? (resState.resources.find((r) => resKey(r) === key)?.name ?? "1 recurso") : `${keys.length} recursos`;
@@ -639,7 +686,48 @@ function resBindList(isAdmin) {
     e.dataTransfer.setDragImage(ghost, 12, 12);
     setTimeout(() => ghost.remove(), 0);
   });
-  table.addEventListener("dragend", () => { resState.dragging = false; });
+  const clearMarks = (except) => $$("tr.res-row.drop-before, tr.res-row.drop-after", table)
+    .forEach((r) => r !== except && r.classList.remove("drop-before", "drop-after"));
+  table.addEventListener("dragend", () => { resState.dragging = false; resState.dragKeys = null; clearMarks(); });
+
+  // Filas soltadas sobre otra fila de la MISMA ubicación quedan antes o después
+  // de ella: es el orden que siguen el árbol del cliente y la vista en vivo.
+  // Para cambiarlas de ubicación se sueltan en el árbol.
+  const rowTarget = (e) => {
+    const row = e.target.closest("tr.res-row");
+    const keys = resState.dragKeys;
+    if (!row || !keys?.length || keys.includes(row.dataset.key)
+      || ![...e.dataTransfer.types].includes(RES_DRAG_RESOURCES)) return null;
+    const target = resState.resources.find((r) => resKey(r) === row.dataset.key);
+    if (target?.locationId == null) return null;
+    const dragged = resState.allResources.filter((r) => keys.includes(resKey(r)));
+    if (!dragged.length || dragged.some((r) => r.locationId !== target.locationId)) return null;
+    const box = row.getBoundingClientRect();
+    return { row, target, where: e.clientY < box.top + box.height / 2 ? "before" : "after" };
+  };
+  table.addEventListener("dragover", (e) => {
+    const hit = rowTarget(e);
+    clearMarks(hit?.row);
+    if (!hit) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    hit.row.classList.toggle("drop-before", hit.where === "before");
+    hit.row.classList.toggle("drop-after", hit.where === "after");
+  });
+  table.addEventListener("dragleave", (e) => {
+    const row = e.target.closest("tr.res-row");
+    if (row && !row.contains(e.relatedTarget)) row.classList.remove("drop-before", "drop-after");
+  });
+  table.addEventListener("drop", async (e) => {
+    const hit = rowTarget(e);
+    clearMarks();
+    if (!hit) return;
+    e.preventDefault();
+    const keys = new Set(resState.dragKeys);
+    resState.dragging = false;
+    resState.dragKeys = null;
+    await resReorder(hit.target, keys, hit.where);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -680,6 +768,47 @@ async function resMoveLocation(loc, parentId) {
   } catch (err) {
     toast(err.error, true);
   }
+}
+
+/** Deja la ubicación antes o después de otra, en la rama de esa otra (la mueve
+ *  ahí primero si estaba en otra rama). Todos los árboles siguen ese orden. */
+async function resPlaceLocation(loc, target, where) {
+  if (!loc || !target || loc.id === target.id) return;
+  const parentId = target.parentId ?? null;
+  const ids = (resState.children.get(parentId ?? "root") || []).filter((l) => l.id !== loc.id).map((l) => l.id);
+  ids.splice(ids.indexOf(target.id) + (where === "after" ? 1 : 0), 0, loc.id);
+  try {
+    if ((loc.parentId ?? null) !== parentId) {
+      await Api.put(`/api/locations/${loc.id}`, resLocationPayload(loc, { parentId }));
+      if (parentId != null) resState.collapsed.delete(parentId); // que se vea dónde quedó
+    }
+    const result = await Api.put("/api/locations/order", { parentId, ids });
+    toast(result.message);
+  } catch (err) {
+    toast(err.error, true);
+  }
+  await resLoad();
+}
+
+/** Deja los recursos `keys` antes o después de `target`, dentro de la ubicación
+ *  de este: se manda la lista completa de esa ubicación en el orden nuevo. */
+async function resReorder(target, keys, where) {
+  const locationId = target.locationId;
+  const inLocation = resState.allResources.filter((r) => r.locationId === locationId).sort(resCompare);
+  const moving = inLocation.filter((r) => keys.has(resKey(r)));
+  const ordered = inLocation.filter((r) => !keys.has(resKey(r)));
+  ordered.splice(ordered.indexOf(target) + (where === "after" ? 1 : 0), 0, ...moving);
+  // El orden nuevo se ve al instante; la recarga confirma lo que quedó guardado.
+  ordered.forEach((r, i) => { r.locationOrder = i; });
+  resDrawList();
+  try {
+    const result = await Api.put(`/api/locations/${locationId}/resources/order`,
+      { resources: ordered.map((r) => ({ kind: r.kind, id: r.id })) });
+    toast(result.message);
+  } catch (err) {
+    toast(err.error, true);
+  }
+  await resLoad();
 }
 
 async function resDeleteLocation(loc) {
