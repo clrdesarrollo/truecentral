@@ -263,6 +263,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<CercoFirmwareServi
 // implementar IWorkflowActionExecutor y agregarla aquí: aparece sola en el
 // editor del panel.
 builder.Services.AddSingleton<WorkflowStore>();
+builder.Services.AddSingleton<TrueCentralVms.Server.Services.AlertClips>();
 builder.Services.AddSingleton<SmtpSender>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, SnapshotAction>();
 builder.Services.AddSingleton<IWorkflowActionExecutor, EmailAction>();

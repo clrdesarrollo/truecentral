@@ -421,6 +421,7 @@ public static class AuditCatalog
             new("workflow-webhook", "Automatización disparada por llamada externa"),
             new("workflow-webhook-rejected", "Llamada externa rechazada (clave inválida)"),
             new("alert-acknowledged", "Alerta confirmada por un operador o en una pantalla de alarma"),
+            new("alert-clip-missing", "Repetición del evento sin grabación en el equipo"),
             new("smtp-updated", "Correo saliente configurado"),
             new("smtp-tested", "Correo de prueba enviado"),
             new("audio-uploaded", "Sonido de parlante subido"),

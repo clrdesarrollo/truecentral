@@ -78,7 +78,14 @@ public sealed record WorkflowTrigger(
     // --- Control de rondas ---
     int? PatrolRouteId = null,
     /// <summary>PatrolEventKinds del evento.</summary>
-    string? PatrolKind = null)
+    string? PatrolKind = null,
+    // --- Hora del equipo ---
+    /// <summary>
+    /// Hora del evento según el reloj del equipo que lo informó (<see cref="DeviceId"/>), en
+    /// su hora local. Es la que sirve para pedirle la grabación de ese momento: la de
+    /// <see cref="At"/> es la del servidor al recibirlo. null = el evento no la trae.
+    /// </summary>
+    DateTime? DeviceAt = null)
 {
     /// <summary>Etiquetas en español de la naturaleza de un evento de panel.</summary>
     public static string KindLabel(AlarmEventKind kind) => kind switch
@@ -315,7 +322,7 @@ public sealed record WorkflowTrigger(
             Truncate($"Cámara '{camera}' ({device.Name}) · {evt.Description}", 256), fields, local,
             Severity: AlarmSeverity.Critical, Text: evt.Description,
             DeviceKind: "video", DeviceId: device.Id, ChannelId: channel?.Id, VideoKind: evt.Kind, RuleId: evt.RuleId,
-            Overlay: evt.Overlay, Image: evt.Image);
+            Overlay: evt.Overlay, Image: evt.Image, DeviceAt: evt.At);
     }
 
     // ------------------------------------------------------------------
@@ -365,7 +372,7 @@ public sealed record WorkflowTrigger(
             Plate: evt.PlateNumber, Confidence: evt.Confidence >= 0 ? evt.Confidence : null,
             PlateStatus: registry?.Status, PlateEventId: evt.Id > 0 ? evt.Id : null,
             AccessVehicleId: registry?.VehicleId, AccessPersonId: registry?.PersonId,
-            Image: sceneImage, PlateImage: plateImage);
+            Image: sceneImage, PlateImage: plateImage, DeviceAt: evt.CapturedAt);
     }
 
     // ------------------------------------------------------------------

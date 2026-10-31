@@ -75,6 +75,9 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
     /// <summary>Tiempo transcurrido de la cápsula, para la barra del cuadro.</summary>
     [ObservableProperty] private string _recordingElapsed = "";
 
+    /// <summary>Aviso cuya repetición muestra este cuadro (viaja en la concesión para la bitácora).</summary>
+    public long? AlertId { get; init; }
+
     public PlaybackCellViewModel(ApiClient api, ClientSettings settings, ChannelNode channel)
     {
         _api = api;
@@ -199,7 +202,7 @@ public partial class PlaybackCellViewModel : ObservableObject, IZoomTarget, IDis
             // llegan más cuadros por segundo y se presentan más rápido.
             _speed = speed;
             var grant = await _api.RequestPlaybackAsync(Channel.Device.Id, Channel.Channel.RtspChannel,
-                localTime, localEnd, speed);
+                localTime, localEnd, speed, AlertId);
             if (sequence != _openSequence)
             {
                 // El usuario ya se movió a otra hora: como no se llega a abrir,

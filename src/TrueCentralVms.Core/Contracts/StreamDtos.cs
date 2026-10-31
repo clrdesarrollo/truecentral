@@ -46,8 +46,9 @@ public sealed record RecordingSegmentDto(DateTime Start, DateTime End, string Ki
 /// distinto de 1 = el servidor toma la sesión RTSP y le pide al equipo esa
 /// velocidad, que es la única forma de que el grabador entregue más rápido.
 /// </summary>
+/// <param name="AlertId">Aviso desde cuya repetición se reproduce (solo para la bitácora).</param>
 public sealed record PlaybackRequestDto(int DeviceId, int RtspChannel, DateTime StartLocal, DateTime EndLocal,
-    double Speed = 1);
+    double Speed = 1, long? AlertId = null);
 
 /// <summary>Reproducción en el panel web: el mismo rango que <see cref="PlaybackRequestDto"/> más la oferta SDP del navegador.</summary>
 public sealed record PlaybackWebRtcOfferDto(int DeviceId, int RtspChannel, DateTime StartLocal, DateTime EndLocal,

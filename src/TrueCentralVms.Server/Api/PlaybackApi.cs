@@ -606,8 +606,9 @@ public static class PlaybackApi
                 targetName: $"{device.Name} · {channel.Name}",
                 detail: $"Reprodujo grabaciones de '{device.Name}' canal {request.RtspChannel} " +
                         $"desde el {request.StartLocal:dd-MM-yyyy HH:mm:ss}" +
-                        (accelerated ? $" a {speed:0.##}×." : "."),
-                data: new { request.StartLocal, request.EndLocal, request.Speed });
+                        (accelerated ? $" a {speed:0.##}×" : "") +
+                        (request.AlertId is { } alertId ? $" (repetición del aviso {alertId})." : "."),
+                data: new { request.StartLocal, request.EndLocal, request.Speed, request.AlertId });
         return new PlaybackGrant(null, path, token, grant.ExpiresAt, driver.SupportsExactPlaybackSeek);
     }
 

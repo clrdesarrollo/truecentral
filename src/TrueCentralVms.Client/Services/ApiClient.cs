@@ -763,9 +763,16 @@ public sealed class ApiClient
     /// tiempo real salvo que se le pida otra cosa).
     /// </summary>
     public Task<StreamGrantDto> RequestPlaybackAsync(int deviceId, int rtspChannel, DateTime startLocal, DateTime endLocal,
-        double speed = 1, CancellationToken ct = default) =>
+        double speed = 1, long? alertId = null, CancellationToken ct = default) =>
         SendAsync<StreamGrantDto>(HttpMethod.Post, "/api/playback/request",
-            new PlaybackRequestDto(deviceId, rtspChannel, startLocal, endLocal, speed), ct);
+            new PlaybackRequestDto(deviceId, rtspChannel, startLocal, endLocal, speed, alertId), ct);
+
+    /// <summary>
+    /// Repetición del evento de un aviso para una de sus cámaras: si la
+    /// grabación ya cubre el clip, con el rango a pedir (hora local del equipo).
+    /// </summary>
+    public Task<AlertClipDto> GetAlertClipAsync(long alertId, int channelId, CancellationToken ct = default) =>
+        SendAsync<AlertClipDto>(HttpMethod.Get, $"/api/workflows/alerts/{alertId}/clip?channelId={channelId}", null, ct);
 
     /// <summary>
     /// Motivo por el que el EQUIPO rechazó una reproducción (el media server
