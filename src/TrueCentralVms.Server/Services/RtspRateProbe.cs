@@ -35,6 +35,7 @@ public static class RtspRateProbe
     public static async Task<RtspRateResult> MeasureAsync(string rtspUrl, double scale, bool rateControlOff,
         TimeSpan duration, CancellationToken ct)
     {
+        (rtspUrl, var startOffset) = TrueCentralVms.Core.Drivers.PlaybackSource.Split(rtspUrl);
         var uri = new Uri(rtspUrl);
 
         // Credenciales y URL limpia se sacan de la CADENA, no del Uri: para un
@@ -78,7 +79,7 @@ public static class RtspRateProbe
                 return Fail($"El equipo respondió {setup.Status} a SETUP.");
             session.SessionId = HeaderValue(setup.Headers, "Session")?.Split(';')[0].Trim();
 
-            var extra = new List<(string, string)> { ("Range", "npt=0-") };
+            var extra = new List<(string, string)> { ("Range", TrueCentralVms.Core.Drivers.PlaybackSource.RangeHeader(startOffset)) };
             if (scale > 0 && Math.Abs(scale - 1) > 0.001)
                 extra.Add(("Scale", scale.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)));
             if (rateControlOff)

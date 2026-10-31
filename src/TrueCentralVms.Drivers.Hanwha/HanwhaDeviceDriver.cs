@@ -222,6 +222,26 @@ public sealed class HanwhaDeviceDriver : IDeviceDriver
     }
 
     // ------------------------------------------------------------------
+    // Reproducción (tarjeta SD/NAS de la cámara o disco del grabador).
+    // ------------------------------------------------------------------
+
+    public Task<IReadOnlyList<RecordingSegment>> QueryRecordingsAsync(DeviceConnectionInfo info, int channelNumber,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default) =>
+        HanwhaRecordings.QuerySegmentsAsync(info, channelNumber, localStart, localEnd, ct);
+
+    public Task<IReadOnlyList<int>> QueryRecordedDaysAsync(DeviceConnectionInfo info, int channelNumber,
+        int year, int month, CancellationToken ct = default) =>
+        HanwhaRecordings.QueryDaysAsync(info, channelNumber, year, month, ct);
+
+    /// <summary>La URL necesita el tipo de equipo y su desfase horario: ver <see cref="ResolvePlaybackUrlAsync"/>.</summary>
+    public string? BuildPlaybackUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd) => null;
+
+    public async Task<string?> ResolvePlaybackUrlAsync(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default) =>
+        await HanwhaRecordings.BuildPlaybackUrlAsync(info, rtspPort, rtspChannel, localStart, localEnd, ct);
+
+    // ------------------------------------------------------------------
     // Eventos (eventstatus.cgi monitordiff).
     // ------------------------------------------------------------------
 

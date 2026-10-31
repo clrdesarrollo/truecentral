@@ -215,6 +215,29 @@ public sealed class AxisDeviceDriver : IDeviceDriver
     }
 
     // ------------------------------------------------------------------
+    // Reproducción (Edge Storage: tarjeta SD o NAS de la cámara).
+    // ------------------------------------------------------------------
+
+    public Task<IReadOnlyList<RecordingSegment>> QueryRecordingsAsync(DeviceConnectionInfo info, int channelNumber,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default) =>
+        AxisRecordings.QuerySegmentsAsync(info, channelNumber, localStart, localEnd, ct);
+
+    public Task<IReadOnlyList<int>> QueryRecordedDaysAsync(DeviceConnectionInfo info, int channelNumber,
+        int year, int month, CancellationToken ct = default) =>
+        AxisRecordings.QueryDaysAsync(info, channelNumber, year, month, ct);
+
+    /// <summary>La grabación se elige consultando a la cámara: ver <see cref="ResolvePlaybackUrlAsync"/>.</summary>
+    public string? BuildPlaybackUrl(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd) => null;
+
+    public Task<string?> ResolvePlaybackUrlAsync(DeviceConnectionInfo info, int rtspPort, int rtspChannel,
+        DateTime localStart, DateTime localEnd, CancellationToken ct = default) =>
+        AxisRecordings.ResolvePlaybackUrlAsync(info, rtspPort, rtspChannel, localStart, ct);
+
+    /// <summary>Exacto: la URL marca el segundo dentro de la grabación y el servidor lo pide con Range (<see cref="PlaybackSource"/>).</summary>
+    public bool SupportsExactPlaybackSeek => true;
+
+    // ------------------------------------------------------------------
     // Eventos (AXIS OS 10.11+: WebSocket de eventos).
     // ------------------------------------------------------------------
 
