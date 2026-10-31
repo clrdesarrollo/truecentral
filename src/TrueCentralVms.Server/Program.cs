@@ -148,6 +148,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<LicenseService>())
 builder.Services.AddSingleton<IDeviceDriverFactory, HikvisionDeviceDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Dahua.DahuaDeviceDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Onvif.OnvifDeviceDriverFactory>();
+builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Axis.AxisDeviceDriverFactory>();
+builder.Services.AddSingleton<IDeviceDriverFactory, TrueCentralVms.Drivers.Hanwha.HanwhaDeviceDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, HikvisionIsupDeviceDriverFactory>();
 builder.Services.AddSingleton<DriverRegistry>();
 builder.Services.AddSingleton<DeviceStatusMonitor>();

@@ -163,9 +163,11 @@ public static partial class DiscoveryApi
             {
                 if (decodersOnly) break;               // WS-Discovery no distingue decodificadores
                 if (seenIps.Contains(d.Ip)) continue; // ya visto por su protocolo de fábrica
+                // Axis y Hanwha se anuncian por WS-Discovery: se les propone su driver nativo.
+                var (brand, driverKey) = OnvifBrand(d.Name, d.Hardware);
                 Add(d.Ip, "", new
                 {
-                    d.Ip, Brand = "ONVIF", DriverKey = "onvif",
+                    d.Ip, Brand = brand, DriverKey = driverKey,
                     CommandPort = d.HttpPort, d.HttpPort,
                     Model = d.Hardware.Length > 0 ? d.Hardware : d.Name,
                     Serial = "", Mac = "", Activated = true, Category = "Cámara",
@@ -626,6 +628,22 @@ public static partial class DiscoveryApi
                 Confirmed = confirmed, Reachable = reachable, DnsApplied = dnsApplied, DnsError = dnsError,
             });
         });
+    }
+
+    /// <summary>
+    /// Marca y driver de un equipo anunciado por WS-Discovery, según los
+    /// scopes name/hardware ("AXIS P3245-LVE", "Hanwha Vision XNV-8080R",
+    /// "Samsung Techwin"...). Lo que no se reconoce queda en ONVIF genérico.
+    /// </summary>
+    internal static (string Brand, string DriverKey) OnvifBrand(string name, string hardware)
+    {
+        string text = $"{name} {hardware}";
+        if (text.Contains("axis", StringComparison.OrdinalIgnoreCase))
+            return ("Axis", TrueCentralVms.Drivers.Axis.AxisDeviceDriverFactory.Key);
+        if (text.Contains("hanwha", StringComparison.OrdinalIgnoreCase) || text.Contains("wisenet", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("samsung", StringComparison.OrdinalIgnoreCase))
+            return ("Hanwha", TrueCentralVms.Drivers.Hanwha.HanwhaDeviceDriverFactory.Key);
+        return ("ONVIF", "onvif");
     }
 
     /// <summary>MAC iguales sin importar separadores ni mayúsculas (cada búsqueda las escribe distinto).</summary>
