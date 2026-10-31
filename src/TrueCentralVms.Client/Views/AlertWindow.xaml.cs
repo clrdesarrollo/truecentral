@@ -64,6 +64,7 @@ public partial class AlertWindow : Window
             // Cerrar la ventana calla la alarma y suelta las concesiones de
             // video: nada puede quedar sonando ni consumiendo sesiones RTSP.
             _sound.Stop();
+            StopReplay();
             foreach (var cell in _cells) cell.Dispose();
             _cells.Clear();
         };
@@ -86,9 +87,11 @@ public partial class AlertWindow : Window
     /// arriba la indicada, o la más reciente sin confirmar.
     /// </summary>
     public static void Show(Window? owner, ApiClient api, ClientSettings settings, AlertSoundPlayer sound,
-        Func<int, ChannelNode?> findChannel, IEnumerable<WorkflowAlertDto> alerts, long? focus = null)
+        Func<int, ChannelNode?> findChannel, IEnumerable<WorkflowAlertDto> alerts, long? focus = null,
+        AlertReplayHost? replay = null)
     {
         var window = _current ??= new AlertWindow(api, settings, sound, findChannel);
+        if (replay is not null) window._replayHost = replay;
         if (owner is not null && !ReferenceEquals(window.Owner, owner) && owner.IsLoaded)
         {
             try { window.Owner = owner; } catch (InvalidOperationException) { /* ya visible con otro dueño */ }
@@ -200,14 +203,20 @@ public partial class AlertWindow : Window
             string.IsNullOrWhiteSpace(alert.LocationPath) ? Visibility.Collapsed : Visibility.Visible;
         LocationText.Text = alert.LocationPath ?? "";
 
-        // Pestaña inicial de cada alerta: sus fotos o, si no tiene pero sí
+        // Pestaña inicial de cada alerta: la repetición del evento si la tiene
+        // (es lo que responde qué pasó); si no, sus fotos o, sin fotos pero con
         // cámaras (p. ej. las asociadas al recurso), directo el vivo.
+        ReplayTab.Visibility = ReplayAvailable(alert) ? Visibility.Visible : Visibility.Collapsed;
         if (_shownAlertId != alert.Id)
         {
             _shownAlertId = alert.Id;
             bool hasPhotos = alert.ImagePaths.Count > 0 || alert.ImagePath is { Length: > 0 };
             _choosingTab = true;
-            try { Tabs.SelectedItem = !hasPhotos && alert.ChannelIds.Count > 0 ? VideoTab : PhotosTab; }
+            try
+            {
+                Tabs.SelectedItem = ReplayAvailable(alert) ? ReplayTab
+                    : !hasPhotos && alert.ChannelIds.Count > 0 ? VideoTab : PhotosTab;
+            }
             finally { _choosingTab = false; }
         }
 
@@ -215,6 +224,7 @@ public partial class AlertWindow : Window
         RenderPager();
         RenderSteps(alert);
         RenderCameras(alert);
+        RenderReplay(alert);
         MuteButton.IsEnabled = true;
         MuteButton.Content = "Silenciar";
         await RenderPhotosAsync(alert);
@@ -290,6 +300,7 @@ public partial class AlertWindow : Window
     {
         if (!ReferenceEquals(e.OriginalSource, Tabs) || _choosingTab) return;
         _ = OpenVideoAsync();
+        _ = StartReplayAsync();
     }
 
     private void OnMute(object sender, RoutedEventArgs e)

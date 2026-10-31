@@ -336,7 +336,7 @@ public partial class MainViewModel : ObservableObject
         // dispositivos que este cliente ya tiene cargado.
         Views.AlertWindow.Show(owner, _api, _settings, _alertSound,
             id => Devices.SelectMany(d => d.Channels).FirstOrDefault(c => c.Channel.Id == id),
-            pending, pending[^1].Id);
+            pending, pending[^1].Id, AlertReplay());
         return Task.CompletedTask;
     }
 
@@ -452,6 +452,23 @@ public partial class MainViewModel : ObservableObject
         IsPlaybackOpen = true;
         ActiveSection = "Playback";
         StatusMessage = "Reproducción: doble clic en un canal del árbol y luego clic en la línea de tiempo.";
+    }
+
+    /// <summary>Lo que la ventana de alarma necesita para la repetición del evento.</summary>
+    private Views.AlertReplayHost AlertReplay() => new(CanPlayback, CanDownloads, Downloads, OpenPlaybackAtAsync);
+
+    /// <summary>
+    /// «Abrir en Reproducción» desde la repetición de un aviso: el módulo con
+    /// esa cámara sola, en ese día y posicionado en ese momento.
+    /// </summary>
+    private async Task OpenPlaybackAtAsync(ChannelNode camera, DateTime localTime)
+    {
+        if (!CanPlayback) return;
+        OpenPlayback();
+        if (Playback.Date.Date != localTime.Date) Playback.Date = localTime.Date;
+        await Playback.SelectChannelAsync(camera, replaceAll: true);
+        await Playback.SeekToAsync(localTime);
+        Application.Current.MainWindow?.Activate();
     }
 
     /// <summary>Cerrar la viñeta detiene la reproducción en curso.</summary>
@@ -948,7 +965,7 @@ public partial class MainViewModel : ObservableObject
         Events.OpenRequested += alert => Application.Current.Dispatcher.InvokeAsync(() =>
             Views.AlertWindow.Show(Application.Current.MainWindow, _api, _settings, _alertSound,
                 id => Devices.SelectMany(d => d.Channels).FirstOrDefault(c => c.Channel.Id == id),
-                [alert], alert.Id));
+                [alert], alert.Id, AlertReplay()));
 
         Alarms = new AlarmsViewModel(api, hub);
         Alarms.AlarmRaised += OnAlarmRaised;

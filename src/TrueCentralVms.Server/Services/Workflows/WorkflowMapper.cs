@@ -48,7 +48,8 @@ public static class WorkflowMapper
         alert.AcknowledgedAt, alert.AcknowledgedBy, alert.AcknowledgedFrom,
         alert.AcknowledgedAt is { } ack ? (int)Math.Round((ack - alert.RaisedAt).TotalSeconds) : null,
         alert.Recipients, alert.ResourceKey, alert.LocationPath, alert.Instructions,
-        alert.ShowPopup, alert.ShowOnScreens, alert.Screens);
+        alert.ShowPopup, alert.ShowOnScreens, alert.Screens,
+        alert.EventAt, alert.ClipPreSeconds, alert.ClipPostSeconds);
 
     public static SmtpSettingsDto ToDto(SmtpSettings settings) => new(
         settings.Enabled, settings.Host, settings.Port, settings.Security, settings.Username,

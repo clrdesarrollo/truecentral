@@ -248,7 +248,7 @@ public partial class MainViewModel
         if (System.Windows.Application.Current.MainWindow is not { IsLoaded: true } owner) return;
         Views.AlertWindow.Show(owner, _api, _settings, _alertSound,
             id => Devices.SelectMany(d => d.Channels).FirstOrDefault(c => c.Channel.Id == id),
-            [alert], alert.Id);
+            [alert], alert.Id, AlertReplay());
     }
 
     /// <summary>«Contestar» desde un cuadro de citófono: la ventana de llamada de siempre.</summary>

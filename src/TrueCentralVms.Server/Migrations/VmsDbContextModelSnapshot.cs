@@ -4939,6 +4939,21 @@ namespace TrueCentralVms.Server.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<int?>("ClipPostSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ClipPreSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("EventAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("EventDeviceAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("EventDeviceId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ImagePath")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");

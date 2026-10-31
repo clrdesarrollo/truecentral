@@ -22,9 +22,14 @@ namespace TrueCentralVms.Server.Services.Workflows.Actions;
 ///
 /// Configuración: <c>{ "title":"...", "message":"...", "severity":"Critical",
 /// "attachSnapshot":true, "sound":"sirena", "soundRepeat":2, "requireAck":true,
-/// "channelIds":[4] }</c> (sin <c>channelIds</c>, la ventana muestra el vivo de
+/// "channelIds":[4], "clip":true, "clipPre":5, "clipPost":15 }</c> (sin <c>channelIds</c>, la ventana muestra el vivo de
 /// las cámaras que capturaron foto en la misma ejecución o, si no hubo, el de
 /// las cámaras asociadas al recurso que disparó).
+///
+/// Repetición del evento (<c>clip</c>, encendida por omisión): la ventana de
+/// alarma reproduce la grabación de esas cámaras desde <c>clipPre</c> segundos
+/// antes del evento hasta <c>clipPost</c> después. Sin esos números (o vacíos)
+/// valen los del servidor (<see cref="AlertClips"/>).
 ///
 /// Si el recurso que disparó tiene ficha en Recursos, la alerta guarda su
 /// ubicación y sus consignas: la ventana del operador las muestra (así el
@@ -44,6 +49,7 @@ public sealed class NotifyAction(
     AlarmScreenService screens,
     LicenseService license,
     IServiceScopeFactory scopeFactory,
+    IConfiguration config,
     ILogger<NotifyAction> logger) : IWorkflowActionExecutor
 {
     public string Type => WorkflowActionTypes.Notify;
@@ -104,6 +110,13 @@ public sealed class NotifyAction(
         var briefing = await BriefingAsync(context, ct);
         if (channels.Count == 0 && briefing is not null)
             channels = briefing.Cameras.Select(c => c.ChannelId).ToList();
+        // Repetición del evento: solo tiene sentido con cámaras. Los segundos
+        // quedan fijos en la alerta (cambiar la acción después no cambia los
+        // avisos que ya salieron).
+        bool withClip = channels.Count > 0 && context.Flag("clip", true);
+        int? clipPre = withClip ? AlertClips.Pre(context.Number("clipPre", -1), config) : null;
+        int? clipPost = withClip ? AlertClips.Post(context.Number("clipPost", -1), config) : null;
+
         title = ResourceMarks(title, briefing);
         message = ResourceMarks(message, briefing);
 
@@ -204,6 +217,13 @@ public sealed class NotifyAction(
             Sound = sound.Length == 0 ? null : sound,
             SoundRepeat = repeat,
             TriggerSummary = Cut(context.Trigger.Summary, 256),
+            EventAt = AlertClips.WallTime(context.Trigger.At),
+            EventDeviceId = context.Trigger.DeviceAt is not null ? context.Trigger.DeviceId : null,
+            EventDeviceAt = context.Trigger.DeviceId is not null && context.Trigger.DeviceAt is { } deviceAt
+                ? AlertClips.WallTime(deviceAt, toLocal: false)
+                : null,
+            ClipPreSeconds = clipPre,
+            ClipPostSeconds = clipPost,
             // El recurso que ORIGINÓ el evento (decide quién ve la alerta), que
             // puede no ser el de las consignas (una zona sin ficha usa las de su área).
             ResourceKey = briefing is null ? null : briefing.OriginKey ?? ResourceCatalog.Key(briefing.Kind, briefing.Id),

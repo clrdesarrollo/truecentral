@@ -783,6 +783,36 @@ public static class WorkflowsApi
             return alert is null ? Results.NotFound() : Results.Ok(ScopedDto(alert, await ctx.ScopeAsync(session)));
         });
 
+        // Repetición del evento: si la grabación de esa cámara ya cubre el
+        // clip. El cliente vuelve a preguntar mientras diga "recording" y,
+        // cuando está listo, pide la reproducción normal con ese rango.
+        app.MapGet("/api/workflows/alerts/{id:long}/clip", async (HttpContext ctx, long id, int channelId,
+            VmsDbContext db, AlertClips clips, LicenseService license, CancellationToken ct) =>
+        {
+            if (ApiSecurity.Require(ctx, Permissions.EventsAttend, out var session) is { } failure) return failure;
+            if (ApiSecurity.Require(ctx, Permissions.PlaybackView, out _) is { } noPlayback) return noPlayback;
+            if (license.Deny(LicenseFeatures.ModulePlayback, null, 0, 0) is { } denied)
+                return await license.DenyAsync(ctx, denied, "workflow-alert", $"aviso {id}");
+
+            var alert = await (await VisibleAlertsAsync(ctx, db, session)).FirstOrDefaultAsync(a => a.Id == id, ct);
+            if (alert is null) return Results.NotFound();
+            if (alert.ClipPreSeconds is null)
+                return Results.Json(new { error = "Este aviso no tiene repetición del evento." }, statusCode: StatusCodes.Status409Conflict);
+            // Solo las cámaras del aviso y que el usuario ve (las demás ni siquiera le llegan en el aviso).
+            var channels = WorkflowJson.TryDeserialize<List<int>>(alert.ChannelIdsJson) ?? [];
+            if (!channels.Contains(channelId) || !(await ctx.ScopeAsync(session)).CanViewChannel(channelId))
+                return Results.NotFound();
+            var channel = await db.Channels.AsNoTracking().Include(c => c.Device).FirstOrDefaultAsync(c => c.Id == channelId, ct);
+            if (channel is null) return Results.NotFound();
+            // Las cámaras móviles se reproducen por la flota, con su propio permiso.
+            if (channel.Device.IsMobile)
+                return Results.Ok(new AlertClipDto(AlertClipStates.Missing, channel.DeviceId, channel.RtspChannel,
+                    alert.RaisedAt, alert.RaisedAt, alert.RaisedAt, 0, false,
+                    "La repetición no está disponible para cámaras de vehículos: búsquela en Flota."));
+
+            return Results.Ok(await clips.StatusAsync(alert, channel, ct));
+        });
+
         // Darse por enterado. Cualquier usuario con sesión puede hacerlo (el
         // que esté frente al puesto); la PRIMERA confirmación es la que queda:
         // el registro no se puede reescribir ni "mejorar" después.

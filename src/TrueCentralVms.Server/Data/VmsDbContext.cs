@@ -1123,6 +1123,10 @@ public class VmsDbContext(DbContextOptions<VmsDbContext> options) : DbContext(op
             e.Property(a => a.ResourceKey).HasMaxLength(32);
             e.Property(a => a.LocationPath).HasMaxLength(1100);
             e.Property(a => a.Instructions).HasMaxLength(4000);
+            // Horas de PARED (del servidor y del equipo que informó), como el
+            // CapturedAt de las patentes: con ellas se pide la grabación.
+            e.Property(a => a.EventAt).HasColumnType("timestamp without time zone");
+            e.Property(a => a.EventDeviceAt).HasColumnType("timestamp without time zone");
             // Las pendientes se consultan en cada arranque de cliente; el
             // registro se lee por fecha descendente.
             e.HasIndex(a => a.RaisedAt);

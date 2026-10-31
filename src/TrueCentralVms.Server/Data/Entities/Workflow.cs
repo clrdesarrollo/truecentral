@@ -176,6 +176,24 @@ public class WorkflowAlert
     /// </summary>
     public string? Instructions { get; set; }
 
+    /// <summary>
+    /// Hora del evento que originó el aviso en la hora local del SERVIDOR (cuando lo recibió).
+    /// Con ella y <see cref="ClipPreSeconds"/>/<see cref="ClipPostSeconds"/> se pide al grabador
+    /// la repetición del evento. null en avisos anteriores a la repetición.
+    /// </summary>
+    public DateTime? EventAt { get; set; }
+    /// <summary>Equipo de video que informó el evento (cámara, grabador o cámara de patentes), si fue uno.</summary>
+    public int? EventDeviceId { get; set; }
+    /// <summary>
+    /// Hora del evento según el reloj de <see cref="EventDeviceId"/> (su hora local). Para las
+    /// cámaras de ese mismo equipo el clip se pide con esta, sin depender de que los relojes calcen.
+    /// </summary>
+    public DateTime? EventDeviceAt { get; set; }
+    /// <summary>Segundos de grabación antes del evento que muestra la repetición; null = sin repetición.</summary>
+    public int? ClipPreSeconds { get; set; }
+    /// <summary>Segundos de grabación después del evento que muestra la repetición.</summary>
+    public int? ClipPostSeconds { get; set; }
+
     /// <summary>Exige acuse de recibo (queda pendiente hasta que alguien la confirme).</summary>
     public bool RequiresAck { get; set; } = true;
 

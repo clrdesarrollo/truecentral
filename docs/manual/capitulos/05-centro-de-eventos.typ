@@ -64,8 +64,10 @@ A la izquierda de la ventana está el detalle del hecho:
 - *ACUSE DE RECIBO*: PENDIENTE, Confirmada (por quién, cuándo, cuántos segundos
   después de emitida y desde dónde) o Informativa.
 
-A la derecha hay tres pestañas: *Fotos*, *Video en vivo* y *Qué hizo el
-sistema*.
+A la derecha están las pestañas *Fotos*, *Video en vivo* y *Qué hizo el
+sistema*.#modulo("playback")[ Si la alerta tiene cámaras y usted puede ver
+grabaciones, aparece primero *Repetición del evento* (ver «Ver la repetición del
+evento», más abajo).]
 
 === Darse por enterado
 
@@ -124,6 +126,63 @@ en este puesto o en otro, y al cerrar la ventana.
 Si la pestaña Video en vivo dice «Las cámaras vinculadas ya no están
 disponibles en este cliente», esas cámaras no están en la lista de dispositivos
 de su puesto (se quitaron o quedan fuera de su alcance).
+
+#modulo("playback")[
+=== Ver la repetición del evento
+
+La pestaña *Repetición del evento* responde lo primero que hay que saber: qué
+pasó. Reproduce en bucle lo que grabó el equipo (el DVR/NVR o la tarjeta de la
+cámara) alrededor del evento: por omisión, desde 5 segundos antes hasta 15
+segundos después. Cuando la alerta la tiene, la ventana se abre en esta pestaña.
+
+Al abrirse una alerta recién emitida, el equipo todavía está grabando el
+después del evento. Mientras tanto, la pestaña muestra el video en vivo de la
+misma cámara y arriba dice «El equipo está grabando el después del evento: la
+repetición estará en N s». Cuando la grabación está disponible, la pestaña pasa
+sola a la repetición. En una alerta antigua (abierta desde el Centro de
+eventos) la repetición empieza de inmediato.
+
+Debajo del video:
+
+- La línea del clip, con una *marca roja en el instante del evento*. Arrastre el
+  control o haga clic en la línea para ir a otro momento. Al centro se lee
+  cuánto falta o cuánto pasó desde el evento («−2,9 s del evento») y la hora de
+  la grabación.
+- El botón de pausa y el de volver al comienzo del clip.
+- #boton("½×"), #boton("1×") y #boton("2×"): la velocidad.
+- #boton("Abrir en Reproducción"): abre el módulo Reproducción en esa cámara,
+  posicionado en el clip, para ver más (#capitulo(<cap-reproduccion>)).
+- #boton("Guardar clip"): abre la exportación con la cámara y el rango del clip
+  ya puestos. Aparece solo si sus roles permiten descargar grabaciones.
+
+Con varias cámaras en la alerta, elija la cámara en la lista de arriba: se
+prepara una a la vez, porque los grabadores admiten pocas reproducciones
+simultáneas.
+
+La franja de arriba dice la hora del evento. Si dice «hora aproximada», el
+evento lo informó otro equipo (por ejemplo, una zona de un panel de alarma) y la
+hora se tomó del reloj del servidor: la repetición incluye un segundo de margen
+por cada lado.
+
+#table(
+  columns: (auto, 1fr),
+  table.header[Mensaje][Qué hacer],
+  [«El equipo no tiene grabación de ese momento»],
+  [La cámara no estaba grabando: revise en el grabador que grabe en forma
+    continua o por evento con pregrabación, que el disco no esté lleno y que el
+    horario de grabación cubra esa hora. Queda registrado en la bitácora como
+    «Repetición del evento sin grabación en el equipo».],
+  [«El equipo no grabó el clip completo»],
+  [La grabación cubre solo una parte; se reproduce lo que hay y el mensaje dice
+    cuántos segundos faltan.],
+  [«Sus roles no incluyen ver grabaciones»],
+  [La repetición requiere el permiso de ver grabaciones. El video en vivo sigue
+    disponible en su pestaña.],
+  [No aparece la pestaña Repetición del evento],
+  [La alerta no tiene cámaras, la automatización tiene apagada la repetición, o
+    su puesto no tiene el módulo Reproducción.],
+)
+]
 
 El visor de fotos se maneja así:
 
@@ -248,6 +307,9 @@ que ve el operador:
   [Cámaras del video en vivo de la ventana de alarma], [Las cámaras de la
     pestaña Video en vivo. Si no marca ninguna, se usan las que capturaron foto
     o, si no hubo fotos, las asociadas al recurso en su ficha.],
+  [Repetición del evento], [Encendida, la ventana muestra la grabación de esas
+    cámaras alrededor del evento, con los segundos antes y después que indique
+    la acción.],
 )
 ]
 

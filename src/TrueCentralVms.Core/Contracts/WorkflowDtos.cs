@@ -621,10 +621,48 @@ public sealed record WorkflowAlertDto(
     /// <summary>Se muestra en las pantallas de alarma de las casetas.</summary>
     bool ShowOnScreens = false,
     /// <summary>Pantallas a las que se envió ("Caseta norte, Portería"); null = a todas.</summary>
-    string? Screens = null)
+    string? Screens = null,
+    /// <summary>Hora del evento (hora local del servidor al recibirlo); null en avisos viejos.</summary>
+    DateTime? EventAt = null,
+    /// <summary>Segundos antes del evento de la repetición; null = el aviso no tiene repetición.</summary>
+    int? ClipPreSeconds = null,
+    /// <summary>Segundos después del evento de la repetición.</summary>
+    int? ClipPostSeconds = null)
 {
     public bool Pending => RequiresAck && AcknowledgedAt is null;
+
+    /// <summary>La ventana de alarma ofrece la repetición del evento (video antes y después).</summary>
+    public bool HasClip => ClipPreSeconds is not null && ChannelIds.Count > 0;
 }
+
+/// <summary>Estados de la repetición del evento (<see cref="AlertClipDto.State"/>).</summary>
+public static class AlertClipStates
+{
+    /// <summary>El grabador todavía está guardando el después del evento: volver a preguntar.</summary>
+    public const string Recording = "recording";
+    /// <summary>La grabación cubre todo el clip.</summary>
+    public const string Ready = "ready";
+    /// <summary>Se acabó la espera y la grabación cubre solo una parte: se reproduce lo que hay.</summary>
+    public const string Partial = "partial";
+    /// <summary>El equipo no tiene grabación de ese momento.</summary>
+    public const string Missing = "missing";
+}
+
+/// <summary>
+/// Repetición del evento de un aviso para una de sus cámaras. Las horas van en la hora
+/// LOCAL DEL EQUIPO que graba (la que pide la reproducción), no en la del puesto.
+/// </summary>
+/// <param name="State"><see cref="AlertClipStates"/>.</param>
+/// <param name="DeviceId">Equipo donde está la grabación (para pedir la reproducción).</param>
+/// <param name="RtspChannel">Canal de reproducción en ese equipo.</param>
+/// <param name="Start">Inicio del clip (lo que hay de él, si es parcial).</param>
+/// <param name="End">Fin del clip.</param>
+/// <param name="EventTime">Instante del evento, para marcarlo en la línea de tiempo.</param>
+/// <param name="RemainingSeconds">Con <see cref="AlertClipStates.Recording"/>: cuánto falta, estimado (0 = esperando al grabador).</param>
+/// <param name="ExactTime">false = la hora se dedujo del reloj del servidor (otro equipo informó el evento).</param>
+/// <param name="Message">Explicación para el operador (parcial, sin grabación).</param>
+public sealed record AlertClipDto(string State, int DeviceId, int RtspChannel, DateTime Start, DateTime End,
+    DateTime EventTime, int RemainingSeconds, bool ExactTime, string? Message);
 
 /// <summary>Listado de alertas con el total y cuántas siguen sin confirmar.</summary>
 public sealed record WorkflowAlertListDto(int Total, int Pending, IReadOnlyList<WorkflowAlertDto> Items);
