@@ -141,8 +141,34 @@ internal sealed class HanwhaEventStream : IDeviceEventSubscription
             bool was = _states.GetValueOrDefault(key);
             _states[key] = active.Value;
             if (!notify || !active.Value || was) continue;
-            if (Translate(key) is { } evt) _onEvent(evt);
+            if (Translate(key) is { } evt) Emit(evt);
         }
+    }
+
+    /// <summary>
+    /// SUNAPI no adjunta imagen al evento: se toma la del canal en ese momento
+    /// (sobre ella el servidor dibuja la regla), sin frenar la lectura de los
+    /// siguientes cambios.
+    /// </summary>
+    private void Emit(DeviceEvent evt)
+    {
+        if (evt.ChannelNumber <= 0 || evt.Kind == VideoEventKind.DeviceFault)
+        {
+            _onEvent(evt);
+            return;
+        }
+        _ = Task.Run(async () =>
+        {
+            byte[]? jpeg = null;
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                timeout.CancelAfter(TimeSpan.FromSeconds(3));
+                jpeg = await new HanwhaDeviceDriver().CaptureSnapshotAsync(_info, evt.ChannelNumber, timeout.Token);
+            }
+            catch (Exception) { }
+            _onEvent(evt with { Image = jpeg });
+        });
     }
 
     /// <summary>

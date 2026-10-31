@@ -181,7 +181,7 @@ internal sealed class SunapiClient : IDisposable
     }
 
     private static bool IsIdentity(string name) =>
-        name is "Channel" or "Profile" or "Preset" or "AlarmInput" or "AlarmOutput" or "Line" or "Area" or "Region";
+        name is "Channel" or "Profile" or "Preset" or "AlarmInput" or "AlarmOutput" or "Line" or "Area" or "Region" or "DefinedArea";
 
     private static string Join(string prefix, string name) => prefix.Length == 0 ? name : $"{prefix}.{name}";
 

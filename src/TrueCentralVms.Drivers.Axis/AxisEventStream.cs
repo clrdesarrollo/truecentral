@@ -36,11 +36,18 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
     private readonly Dictionary<string, bool> _states = new();
     private Task? _loop;
     private volatile bool _alive = true;
+    /// <summary>Para tomar la foto del momento (null en las pruebas del traductor).</summary>
+    private readonly DeviceConnectionInfo? _info;
+    /// <summary>Escenarios y perfiles de la cámara: dan el tipo y el número de regla de cada evento de analítica.</summary>
+    private readonly IReadOnlyList<AxisAnalytics.Rule> _rules;
 
-    private AxisEventStream(ClientWebSocket socket, Action<DeviceEvent> onEvent)
+    internal AxisEventStream(ClientWebSocket socket, Action<DeviceEvent> onEvent, DeviceConnectionInfo? info = null,
+        IReadOnlyList<AxisAnalytics.Rule>? rules = null)
     {
         _socket = socket;
         _onEvent = onEvent;
+        _info = info;
+        _rules = rules ?? [];
     }
 
     public bool IsAlive => _alive && _socket.State == WebSocketState.Open;
@@ -87,7 +94,11 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
             throw new DriverException($"No se pudo abrir el canal de eventos de la cámara Axis {info.Host}: {ex.Message}", ex);
         }
 
-        var stream = new AxisEventStream(socket, onEvent);
+        IReadOnlyList<AxisAnalytics.Rule> rules;
+        try { rules = await AxisAnalytics.RulesAsync(info, ct); }
+        catch (DriverException) { rules = []; }   // sin reglas los eventos llegan igual, con su tipo genérico
+
+        var stream = new AxisEventStream(socket, onEvent, info, rules);
         stream._loop = Task.Run(stream.ReceiveLoopAsync);
         return stream;
     }
@@ -156,7 +167,7 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
         var source = Dictionary(message, "source");
         var data = Dictionary(message, "data");
 
-        if (Translate(topic, source, data) is not { } evt) return;
+        if (Translate(topic, source, data, _rules) is not { } evt) return;
 
         bool active = IsActive(data);
         string stateKey = topic + "|" + string.Join(",", source.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}={kv.Value}"));
@@ -167,7 +178,25 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
         DateTime at = n.TryGetProperty("timestamp", out var ts) && ts.TryGetInt64(out long ms)
             ? DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime
             : DateTime.Now;
-        _onEvent(evt with { At = at });
+        evt = evt with { At = at };
+
+        // Axis no adjunta imagen al evento: se toma la del momento (sobre ella el
+        // servidor dibuja la regla), sin frenar la lectura de los siguientes.
+        if (_info is { } info && evt.ChannelNumber > 0 && evt.Kind != VideoEventKind.DeviceFault)
+            _ = Task.Run(async () =>
+            {
+                byte[]? jpeg = null;
+                try
+                {
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(3));
+                    jpeg = await new AxisDeviceDriver().CaptureSnapshotAsync(info, evt.ChannelNumber, timeout.Token);
+                }
+                catch (Exception) { }
+                _onEvent(evt with { Image = jpeg });
+            });
+        else
+            _onEvent(evt);
     }
 
     private static Dictionary<string, string> Dictionary(JsonElement message, string name)
@@ -190,7 +219,8 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
     }
 
     /// <summary>Tema de Axis → evento del VMS (sin hora); null si el tema no interesa.</summary>
-    internal static DeviceEvent? Translate(string topic, Dictionary<string, string> source, Dictionary<string, string> data)
+    internal static DeviceEvent? Translate(string topic, Dictionary<string, string> source, Dictionary<string, string> data,
+        IReadOnlyList<AxisAnalytics.Rule>? rules = null)
     {
         string Has(string s) => topic.Contains(s, StringComparison.OrdinalIgnoreCase) ? s : "";
         int channel = ChannelOf(topic, source);
@@ -198,6 +228,29 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
 
         DeviceEvent Video(VideoEventKind kind, string label) =>
             new(channel, kind, rule is null ? label : $"{label} ({rule})", DateTime.Now, RuleName: rule);
+
+        // Escenarios de Object Analytics y perfiles de VMD4: el tipo y el nombre salen de la
+        // configuración de la cámara ("Device1Scenario3" solo dice el número). ANY repite
+        // cualquier escenario/perfil: se descarta para no duplicar.
+        var acap = AcapRuleInTopic().Match(topic);
+        if (acap.Success)
+        {
+            if (acap.Groups[3].Value.Equals("ANY", StringComparison.OrdinalIgnoreCase)) return null;
+            bool aoa = acap.Groups[2].Value.Equals("Scenario", StringComparison.OrdinalIgnoreCase);
+            int id = int.Parse(acap.Groups[3].Value, CultureInfo.InvariantCulture);
+            var known = AxisAnalytics.ForTopic(rules ?? [], aoa ? "aoa" : "vmd", channel, id);
+            var kind = known?.Kind ?? (aoa ? VideoEventKind.Intrusion : VideoEventKind.Motion);
+            string label = kind switch
+            {
+                VideoEventKind.LineCrossing => "Cruce de línea",
+                VideoEventKind.PeopleCounting => "Conteo por línea",
+                VideoEventKind.Crowd => "Ocupación del área",
+                VideoEventKind.Motion => "Detección de movimiento",
+                _ => "Objeto en el área",
+            };
+            string name = known?.Name ?? (aoa ? $"escenario {id}" : $"perfil {id}");
+            return new DeviceEvent(channel, kind, $"{label} ({name})", DateTime.Now, RuleName: name, RuleId: id);
+        }
 
         // Entradas físicas: "IO/Port" (las salidas publican aparte, en Trigger/Relay, que no se pide).
         if (topic.EndsWith("IO/Port", StringComparison.OrdinalIgnoreCase))
@@ -229,6 +282,7 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
     internal static int ChannelOf(string topic, Dictionary<string, string> source)
     {
         var camera = CameraInTopic().Match(topic);
+        if (!camera.Success) camera = DeviceInTopic().Match(topic);
         if (camera.Success) return int.Parse(camera.Groups[1].Value, CultureInfo.InvariantCulture);
         if (int.TryParse(source.GetValueOrDefault("channel"), out int ch) && ch > 0) return ch;
         foreach (string key in new[] { "VideoSourceConfigurationToken", "VideoSource", "VideoSourceToken", "source" })
@@ -248,6 +302,13 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
 
     [GeneratedRegex(@"(Profile|Scenario)(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex RuleInTopic();
+
+    [GeneratedRegex(@"Device(\d+)Scenario", RegexOptions.IgnoreCase)]
+    private static partial Regex DeviceInTopic();
+
+    /// <summary>".../ObjectAnalytics/Device1Scenario3" o ".../VMD/Camera1Profile2" (o ANY).</summary>
+    [GeneratedRegex(@"(?:ObjectAnalytics/Device|VMD/Camera)(\d+)(Scenario|Profile)(\d+|ANY)", RegexOptions.IgnoreCase)]
+    private static partial Regex AcapRuleInTopic();
 
     public async ValueTask DisposeAsync()
     {

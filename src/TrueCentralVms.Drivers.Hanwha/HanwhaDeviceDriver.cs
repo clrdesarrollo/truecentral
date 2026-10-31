@@ -250,6 +250,16 @@ public sealed class HanwhaDeviceDriver : IDeviceDriver
     public async Task<IDeviceEventSubscription> SubscribeEventsAsync(DeviceConnectionInfo info, Action<DeviceEvent> onEvent,
         CancellationToken ct = default) =>
         await HanwhaEventStream.OpenAsync(info, onEvent, ct);
+
+    /// <summary>Línea o área de la analítica del canal, para dibujarla sobre la foto.</summary>
+    public Task<VideoEventOverlay?> GetEventOverlayAsync(DeviceConnectionInfo info, int rtspChannel,
+        Core.Contracts.VideoEventKind kind, int? ruleId, CancellationToken ct = default) =>
+        HanwhaAnalytics.OverlayAsync(info, Math.Max(0, rtspChannel - 1), kind, ruleId, ct);
+
+    /// <summary>Líneas/áreas configuradas en el canal para ese tipo de analítica.</summary>
+    public Task<IReadOnlyList<AnalyticsRuleInfo>?> GetAnalyticsRulesAsync(DeviceConnectionInfo info, int rtspChannel,
+        Core.Contracts.VideoEventKind kind, CancellationToken ct = default) =>
+        HanwhaAnalytics.ListAsync(info, Math.Max(0, rtspChannel - 1), kind, ct);
 }
 
 /// <summary>Fábrica del driver Hanwha (clave estable para la base de datos).</summary>

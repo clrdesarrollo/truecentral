@@ -246,6 +246,16 @@ public sealed class AxisDeviceDriver : IDeviceDriver
     public async Task<IDeviceEventSubscription> SubscribeEventsAsync(DeviceConnectionInfo info, Action<DeviceEvent> onEvent,
         CancellationToken ct = default) =>
         await AxisEventStream.OpenAsync(info, onEvent, ct);
+
+    /// <summary>Línea o área del escenario de Object Analytics / perfil de VMD4, para dibujarla sobre la foto.</summary>
+    public Task<VideoEventOverlay?> GetEventOverlayAsync(DeviceConnectionInfo info, int rtspChannel,
+        Core.Contracts.VideoEventKind kind, int? ruleId, CancellationToken ct = default) =>
+        AxisAnalytics.OverlayAsync(info, Math.Max(1, rtspChannel), kind, ruleId, ct);
+
+    /// <summary>Escenarios/perfiles configurados en la cámara para ese tipo de analítica.</summary>
+    public Task<IReadOnlyList<AnalyticsRuleInfo>?> GetAnalyticsRulesAsync(DeviceConnectionInfo info, int rtspChannel,
+        Core.Contracts.VideoEventKind kind, CancellationToken ct = default) =>
+        AxisAnalytics.ListAsync(info, Math.Max(1, rtspChannel), kind, ct);
 }
 
 /// <summary>Fábrica del driver Axis (clave estable para la base de datos).</summary>
