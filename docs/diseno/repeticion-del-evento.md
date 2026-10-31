@@ -224,7 +224,12 @@ Fase 2 hecha en la rama `feat/repeticion-fase2` (sin migraciones):
 - Panel web: pestaña «Repetición» en la ficha del aviso del Centro de eventos (PbSession/PbMseSession, bucle, marca).
 - Vigía del cliente: botón «Repetir» (eventos que no son avisos) que abre Reproducción unos segundos antes.
 
-Queda: «Repetir» en el vigía web, repetición en las pantallas de alarma (no previsto).
+«Repetir» del vigía web (rama `feat/repetir-vigia-web`): abre `#/playback?ch=<canal>&at=<ms>` en otra pestaña (el vigía
+sigue en la vista en vivo); `playback.js` (`pbOpenFromHash`) deja el canal solo, en ese día y en ese instante. Está
+también en los avisos (el «Ver aviso» del navegador no trae la repetición). `GET /api/workflows/clip-settings` lo
+puede leer quien tiene `playback.view` (para los «antes»).
+
+Queda: repetición en las pantallas de alarma (no previsto).
 
 ## 13. Preguntas abiertas
 

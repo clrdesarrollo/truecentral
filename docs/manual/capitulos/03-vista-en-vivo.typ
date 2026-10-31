@@ -1350,10 +1350,15 @@ vivo del navegador:
   web).
 
 La franja va arriba del video, con el mismo color según la gravedad, «hace N
-s», «+N en cola» y los botones ‹ ›, *Ver aviso*, *Siguiente*, *Listo*, 📌
-(fijar), ⚙ (sus opciones) y ✕ (quitar el vigía del cuadro). *Ver aviso* abre
-lo esencial del aviso con #boton("Enterado") para confirmarlo sin salir de la
-vista en vivo, y un enlace al Centro de eventos en otra pestaña.
+s», «+N en cola» y los botones ‹ ›, *Repetir*, *Ver aviso*, *Siguiente*,
+*Listo*, 📌 (fijar), ⚙ (sus opciones) y ✕ (quitar el vigía del cuadro). *Ver
+aviso* abre lo esencial del aviso con #boton("Enterado") para confirmarlo sin
+salir de la vista en vivo, y un enlace al Centro de eventos en otra pestaña.
+*Repetir* (si sus roles permiten ver grabaciones) abre en otra pestaña el
+módulo Reproducción con la cámara que muestra el vigía, unos segundos antes del
+evento (los «antes» de la repetición del evento del servidor); el vigía sigue
+vigilando en la pestaña de la vista en vivo. A diferencia del cliente, también
+está en los avisos: el *Ver aviso* del navegador no trae la repetición.
 
 Las reglas son las del cliente: un evento queda al menos el tiempo mínimo
 (20 s por omisión) y uno más grave lo reemplaza (el reemplazado vuelve a la
