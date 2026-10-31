@@ -513,9 +513,10 @@ El engranaje de la barra del cuadro abre *Cuadro vigía*:
     cambia de cámara más rápido.],
 )
 
-Lo elegido se guarda con el cuadro en los tableros y en la última sesión. Un
-administrador también puede poner un Cuadro vigía en un tablero compartido
-desde el panel web; sus opciones se eligen en el cliente.
+Lo elegido se guarda con el cuadro en los tableros y en la última sesión. El
+vigía también funciona en la vista en vivo del navegador (ver _El Cuadro vigía
+en el navegador_, más abajo), con las mismas opciones: un tablero armado en el
+cliente se ve igual en el panel web y al revés.
 
 #nota[Cada usuario ve solo lo suyo: un evento llega a un vigía si su rol
   permite verlo (por ejemplo, los accesos piden *Ver control de acceso* y las
@@ -1222,6 +1223,8 @@ muchas cámaras a la vez, use el cliente.
     cliente, en cambio, se lleva el Centro de mando entero a otra ventana.],
   [Subdividir un cuadro y divisiones verticales], [No están: se usan en el
     cliente.],
+  [Cuadro vigía], [Está, con las mismas opciones y reglas (ver _El Cuadro vigía
+    en el navegador_). La cinta de eventos, en cambio, es solo del cliente.],
   [Ajustes], [Se cambian con el engranaje de la barra y quedan guardados en
     ese navegador.],
   [Joystick PTZ], [Solo con la ventana principal activa (en el cliente vale
@@ -1304,19 +1307,50 @@ ejemplo, 1, 2 y el botón de *Ir al preset tecleado* llevan la cámara al preset
 12 («PTZ: moviéndose al preset 12.»). La configuración se guarda en ese
 navegador, por joystick.
 
+=== El Cuadro vigía en el navegador
+
+El vigía del cliente (ver _El Cuadro vigía_) también se pone en la vista en
+vivo del navegador:
+
+- Con #boton("Vigía") en la barra de herramientas: queda en el cuadro
+  seleccionado o en el primero libre.
+- Con clic derecho en una ubicación del árbol → *Vigilar esta ubicación en el
+  cuadro seleccionado*.
+- Cargando un tablero que tenga vigías (armados en el cliente o en el panel
+  web).
+
+La franja va arriba del video, con el mismo color según la gravedad, «hace N
+s», «+N en cola» y los botones ‹ ›, *Ver aviso*, *Siguiente*, *Listo*, 📌
+(fijar), ⚙ (sus opciones) y ✕ (quitar el vigía del cuadro). *Ver aviso* abre
+lo esencial del aviso con #boton("Enterado") para confirmarlo sin salir de la
+vista en vivo, y un enlace al Centro de eventos en otra pestaña.
+
+Las reglas son las del cliente: un evento queda al menos el tiempo mínimo
+(20 s por omisión) y uno más grave lo reemplaza (el reemplazado vuelve a la
+cola); no cambia mientras usa el zoom del cuadro o recién tocó sus botones;
+varios vigías iguales se reparten los eventos. Soltar una cámara sobre el
+vigía lo reemplaza por esa cámara; arrastrar el cuadro a otro lo mueve con lo
+que muestra. Los vigías se guardan en los tableros y en la última sesión del
+navegador. Fijar, soltar y dar por visto un evento crítico quedan en la
+bitácora de auditoría, como en el cliente.
+
+#nota[Si la cámara del evento es H.265 y el navegador no la decodifica, el
+  cuadro muestra el mismo aviso que cualquier cámara del panel web; la franja
+  con el evento sigue funcionando.]
+
 === Tableros en el navegador
 
 Son los mismos tableros del cliente de monitoreo, pero el panel web abre solo
-sus cámaras: si un tablero tiene otros cuadros, la barra de estado avisa
-cuántos se ven solo en el cliente de escritorio. Sin el permiso *Crear
+sus cámaras y sus Cuadros vigía: si un tablero tiene otros cuadros, la barra de
+estado avisa cuántos se ven solo en el cliente de escritorio. Sin el permiso *Crear
 tableros propios*, el desplegable solo permite cargarlos. Para guardar,
 escriba el nombre y haga clic en #boton("Guardar") o presione #tecla("Enter").
 
 A diferencia del cliente, si ya tiene un tablero con ese nombre el panel no
 ofrece reemplazarlo: muestra «Ya tiene un tablero con ese nombre.». Para
 cambiar un tablero existente, use su lápiz (*Actualizar este tablero con la
-grilla actual*). Un tablero con recursos, tarjetas o páginas web no se
-actualiza desde el navegador, porque se perderían esos cuadros: el panel pide
+grilla actual*). Un tablero con recursos, tarjetas (salvo el Cuadro vigía) o
+páginas web no se actualiza desde el navegador, porque se perderían esos cuadros: el panel pide
 hacerlo desde el cliente de escritorio o, si es compartido, en
 #menu("Configuración", "Tableros"). Al eliminar un tablero compartido, el panel
 advierte que desaparece para todos los puestos.

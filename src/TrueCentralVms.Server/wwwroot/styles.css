@@ -3121,3 +3121,34 @@ tr.pt-voided td:last-child, tr.pt-voided td:nth-last-child(2) { opacity: 1; }
 }
 .bk-run-stall { margin: 10px 0 0; }
 .bk-run-done .bk-run-warn { margin-top: 4px; color: var(--warn-text); }
+
+/* Cuadro vigía en la vista en vivo (live-watch.js): franja arriba del video con el evento,
+   la cola y los botones. Va como fila propia del cuadro, igual que en el cliente. */
+.lv-watch { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px 6px 4px 8px;
+  background: #151515; border-left: 4px solid #3a3a3a; border-bottom: 1px solid #262626; font-size: 11.5px;
+  color: var(--text); min-height: 30px; }
+.lv-watch.alarm { background: rgba(var(--danger-rgb), .24); border-left-color: var(--danger); }
+.lv-watch.warn { background: rgba(var(--warn-rgb), .2); border-left-color: var(--warn); }
+.lv-watch.ok { background: rgba(31, 157, 85, .16); border-left-color: var(--ok); }
+.lv-watch-text { flex: 1; min-width: 120px; overflow: hidden; }
+.lv-watch-title { font-weight: 700; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lv-watch.alarm .lv-watch-title { color: #ff8a8d; }
+.lv-watch.warn .lv-watch-title { color: #ffc35c; }
+.lv-watch-where, .lv-watch-idle { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lv-watch-where b { color: var(--text); font-weight: 600; margin-right: 4px; }
+.lv-watch-idle svg { vertical-align: -2px; margin-right: 4px; color: var(--accent); }
+.lv-watch-acts { display: flex; align-items: center; gap: 4px; }
+.lv-watch-acts button { background: transparent; border: 1px solid #3a3a3a; color: var(--text); border-radius: 4px;
+  padding: 1px 7px; font-size: 11px; cursor: pointer; }
+.lv-watch-acts button:hover { background: #2a2a2a; }
+.lv-watch-acts button.on { border-color: var(--accent); background: rgba(31, 111, 235, .25); }
+.lv-watch-queue { font-weight: 600; }
+.lv-watch-nocam { flex-basis: 100%; }
+/* En espera (sin cámara) el cuerpo del cuadro no invita a «doble clic en un canal». */
+.lv-cell.watching .lv-empty { display: none; }
+.lvw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; margin: 12px 0; }
+.lvw-grid label { display: flex; flex-direction: column; gap: 4px; }
+.lvw-label { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.lvw-list { max-height: 230px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; }
+label.lvw-check { display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 2px 0; }
+@media (max-width: 640px) { .lvw-grid { grid-template-columns: 1fr; } }
