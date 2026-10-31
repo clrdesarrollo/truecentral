@@ -147,4 +147,6 @@ public sealed record DriverDto(
     int DefaultSdkPort,
     int DefaultRtspPort,
     /// <summary>El equipo se conecta por ISUP: el asistente pide ID y clave en vez de dirección y credenciales.</summary>
-    bool UsesIsup = false);
+    bool UsesIsup = false,
+    /// <summary>El driver sabe recibir reconocimientos de patentes (la columna «Patentes» del panel).</summary>
+    bool SupportsAnpr = false);

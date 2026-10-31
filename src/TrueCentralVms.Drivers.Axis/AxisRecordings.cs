@@ -145,7 +145,7 @@ internal static class AxisRecordings
     }
 
     /// <summary>Hora local − UTC según la cámara (time.cgi, AXIS OS 7.10+); sin él, la del servidor.</summary>
-    private static async Task<TimeSpan> OffsetAsync(AxisVapixClient client, DeviceConnectionInfo info, CancellationToken ct)
+    internal static async Task<TimeSpan> OffsetAsync(AxisVapixClient client, DeviceConnectionInfo info, CancellationToken ct)
     {
         string key = $"{info.Host}:{info.Port}";
         if (Offsets.TryGetValue(key, out var cached) && DateTime.UtcNow - cached.FetchedUtc < TimeSpan.FromMinutes(30))

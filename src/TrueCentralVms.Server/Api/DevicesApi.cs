@@ -306,7 +306,7 @@ public static class DevicesApi
             return Results.Ok(drivers.All.Select(f => new DriverDto(
                 f.DriverKey, f.DisplayName,
                 f.Capabilities.SupportsSnapshot, f.Capabilities.SupportsDiscovery,
-                f.Capabilities.DefaultSdkPort, f.Capabilities.DefaultRtspPort, f.UsesIsup)));
+                f.Capabilities.DefaultSdkPort, f.Capabilities.DefaultRtspPort, f.UsesIsup, f.Capabilities.SupportsAnpr)));
         });
 
         // ------------------------------------------------------------------

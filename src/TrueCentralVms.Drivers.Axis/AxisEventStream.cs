@@ -54,6 +54,23 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
 
     public static async Task<AxisEventStream> OpenAsync(DeviceConnectionInfo info, Action<DeviceEvent> onEvent, CancellationToken ct)
     {
+        var socket = await ConnectAsync(info, TopicFilters, ct);
+
+        IReadOnlyList<AxisAnalytics.Rule> rules;
+        try { rules = await AxisAnalytics.RulesAsync(info, ct); }
+        catch (DriverException) { rules = []; }   // sin reglas los eventos llegan igual, con su tipo genérico
+
+        var stream = new AxisEventStream(socket, onEvent, info, rules);
+        stream._loop = Task.Run(stream.ReceiveLoopAsync);
+        return stream;
+    }
+
+    /// <summary>
+    /// Abre el WebSocket de eventos de la cámara suscrito a <paramref name="filters"/>
+    /// (lo usan también las patentes, con su propio tema).
+    /// </summary>
+    internal static async Task<ClientWebSocket> ConnectAsync(DeviceConnectionInfo info, IEnumerable<string> filters, CancellationToken ct)
+    {
         string session;
         using (var client = new AxisVapixClient(info))
         {
@@ -84,7 +101,7 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
                 apiVersion = "1.0",
                 context = "truecentral",
                 method = "events:configure",
-                @params = new { eventFilterList = TopicFilters.Select(t => new { topicFilter = t }).ToArray() },
+                @params = new { eventFilterList = filters.Select(t => new { topicFilter = t }).ToArray() },
             };
             await socket.SendAsync(JsonSerializer.SerializeToUtf8Bytes(configure), WebSocketMessageType.Text, true, timeout.Token);
         }
@@ -93,14 +110,27 @@ internal sealed partial class AxisEventStream : IDeviceEventSubscription
             socket.Dispose();
             throw new DriverException($"No se pudo abrir el canal de eventos de la cámara Axis {info.Host}: {ex.Message}", ex);
         }
+        return socket;
+    }
 
-        IReadOnlyList<AxisAnalytics.Rule> rules;
-        try { rules = await AxisAnalytics.RulesAsync(info, ct); }
-        catch (DriverException) { rules = []; }   // sin reglas los eventos llegan igual, con su tipo genérico
-
-        var stream = new AxisEventStream(socket, onEvent, info, rules);
-        stream._loop = Task.Run(stream.ReceiveLoopAsync);
-        return stream;
+    /// <summary>
+    /// Lee mensajes completos del WebSocket y se los pasa a <paramref name="handle"/> hasta que se corta o se cancela
+    /// (un mensaje mal formado no corta el canal).
+    /// </summary>
+    internal static async Task ReceiveAsync(ClientWebSocket socket, Action<string> handle, CancellationToken ct)
+    {
+        var buffer = new byte[16 * 1024];
+        var message = new MemoryStream();
+        while (!ct.IsCancellationRequested && socket.State == WebSocketState.Open)
+        {
+            var result = await socket.ReceiveAsync(buffer, ct);
+            if (result.MessageType == WebSocketMessageType.Close) break;
+            message.Write(buffer, 0, result.Count);
+            if (!result.EndOfMessage) continue;
+            try { handle(Encoding.UTF8.GetString(message.GetBuffer(), 0, (int)message.Length)); }
+            catch (Exception) { }
+            message.SetLength(0);
+        }
     }
 
     /// <summary>wssession.cgi devuelve la sesión como texto o, en algunos firmware, dentro de un JSON.</summary>

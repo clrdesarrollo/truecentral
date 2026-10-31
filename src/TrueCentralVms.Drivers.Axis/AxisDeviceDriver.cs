@@ -261,6 +261,13 @@ public sealed class AxisDeviceDriver : IDeviceDriver
         CancellationToken ct = default) =>
         await AxisEventStream.OpenAsync(info, onEvent, ct);
 
+    /// <summary>Patentes de AXIS License Plate Verifier (la aplicación tiene que estar instalada y corriendo en la cámara).</summary>
+    public bool SupportsAnpr => true;
+
+    public async Task<IPlateSubscription> SubscribePlatesAsync(DeviceConnectionInfo info, Action<PlateRecognition> onPlate,
+        CancellationToken ct = default) =>
+        await AxisPlateStream.OpenAsync(info, onPlate, ct);
+
     /// <summary>Línea o área del escenario de Object Analytics / perfil de VMD4, para dibujarla sobre la foto.</summary>
     public Task<VideoEventOverlay?> GetEventOverlayAsync(DeviceConnectionInfo info, int rtspChannel,
         Core.Contracts.VideoEventKind kind, int? ruleId, CancellationToken ct = default) =>
@@ -284,6 +291,7 @@ public sealed class AxisDeviceDriverFactory : IDeviceDriverFactory
         SupportsDiscovery: false,
         DefaultSdkPort: 80,
         DefaultRtspPort: 554,
+        SupportsAnpr: true,
         SupportsEvents: true);
 
     public IDeviceDriver Create() => new AxisDeviceDriver();

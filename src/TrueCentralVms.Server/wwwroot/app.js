@@ -956,8 +956,8 @@ async function getDrivers() {
 
 let lastScan = null; // resultados del último sondeo (persisten al re-renderizar)
 
-/** Drivers que entregan reconocimientos de patentes (ver DriverCapabilities.SupportsAnpr). */
-const ANPR_DRIVERS = ["hikvision-netsdk", "dahua-netsdk", "hikvision-isup"];
+/** Drivers que entregan reconocimientos de patentes: lo dice cada driver (DriverCapabilities.SupportsAnpr). */
+const anprDriversOf = (drivers) => drivers.filter((d) => d.supportsAnpr).map((d) => d.key);
 
 async function renderDevices() {
   $("#page-title").textContent = "Dispositivos";
@@ -969,6 +969,7 @@ async function renderDevices() {
   }
   catch (err) { $("#view").innerHTML = `<div class="error-box">${esc(err.error)}</div>`; return; }
   const brandOf = (key) => drivers.find((dr) => dr.key === key)?.displayName ?? key;
+  const anprDrivers = anprDriversOf(drivers);
 
   const isAdmin = Perms.can("devices.manage");
   $("#view").innerHTML = `
@@ -998,7 +999,7 @@ async function renderDevices() {
               <td class="muted">${esc(d.serialNumber ?? "—")}</td>
               <td class="muted">${esc(d.firmwareVersion ?? "—")}</td>
               <td>${channelCountCell(d)}</td>
-              <td>${d.accessDeviceId ? `<span class="muted">—</span>` : anprCell(d, isAdmin)}</td>
+              <td>${d.accessDeviceId ? `<span class="muted">—</span>` : anprCell(d, isAdmin, anprDrivers)}</td>
               <td>${statusTag(d.status)}</td>
               <td class="row-actions">
                 <button class="btn ghost btn-channels">Canales</button>
@@ -1114,11 +1115,11 @@ function devicePartsFieldHtml(device) {
 
 /**
  * Celda "Patentes": interruptor de la fuente ANPR. Solo tiene sentido en
- * equipos cuyo driver sabe entregar lecturas (hoy, Hikvision por SDK); en el
+ * equipos cuyo driver sabe entregar lecturas (Hikvision, Dahua, Axis); en el
  * resto se muestra un guion en vez de un botón que fallaría.
  */
-function anprCell(device, isAdmin) {
-  if (!ANPR_DRIVERS.includes(device.driverKey)) return `<span class="muted">—</span>`;
+function anprCell(device, isAdmin, anprDrivers) {
+  if (!anprDrivers.includes(device.driverKey)) return `<span class="muted">—</span>`;
   if (!isAdmin) return device.anprEnabled ? "Sí" : `<span class="muted">No</span>`;
   return `<button class="btn ghost btn-anpr" data-on="${device.anprEnabled ? 1 : 0}"
     title="Recibir los reconocimientos de patentes de este equipo">${device.anprEnabled ? "Activo" : "Activar"}</button>`;
