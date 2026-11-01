@@ -1,0 +1,76 @@
+﻿CONTRATO DE LICENCIA DE USUARIO FINAL
+CLR TRUECENTRAL VMS
+Versión 1.0 — [POR COMPLETAR: fecha de entrada en vigencia]
+
+LEA ESTE CONTRATO ANTES DE INSTALAR O USAR EL SOFTWARE. Al marcar «Acepto el acuerdo», instalar, copiar o usar el Software, usted acepta este Contrato en nombre propio y de la organización a la que representa. Si no lo acepta, no instale ni use el Software.
+
+1. PARTES
+1.1 Licenciante: [POR COMPLETAR: razón social], RUT [POR COMPLETAR], con domicilio en [POR COMPLETAR], que opera bajo el nombre comercial «CLRobotics» («CLRobotics»).
+1.2 Licenciatario: la persona natural o jurídica que adquiere la licencia del Software para su uso («usted» o el «Licenciatario»). Quien instale el Software por cuenta de otro (por ejemplo, un integrador) declara contar con facultades para aceptar este Contrato en nombre del Licenciatario.
+
+2. DEFINICIONES
+2.1 «Software»: el programa CLR TrueCentral VMS en código objeto, incluidos servidor, panel web, cliente de escritorio, complementos, aplicaciones para pantallas y parlantes, sus actualizaciones y la Documentación.
+2.2 «Documentación»: manuales y ayudas que CLRobotics entrega con el Software.
+2.3 «Licencia»: el derecho de uso descrito en la cláusula 3, con el alcance (número de cámaras, puertas, puestos, módulos, vigencia u otros límites) indicado en el archivo de licencia emitido por CLRobotics y en la orden de compra o contrato respectivo.
+2.4 «Componentes de Terceros»: el software de terceros incluido en el Software, listado en el archivo «AVISOS-DE-TERCEROS.txt».
+
+3. LICENCIA
+3.1 Sujeto al cumplimiento de este Contrato y al pago de lo que corresponda, CLRobotics otorga al Licenciatario una licencia no exclusiva, intransferible y no sublicenciable para instalar y usar el Software para sus fines internos, dentro del alcance de la Licencia adquirida.
+3.2 La Licencia es perpetua o temporal según lo indique el archivo de licencia. Las funciones que excedan el alcance adquirido, o cuya vigencia haya terminado, pueden quedar deshabilitadas.
+3.3 Puede hacer las copias de respaldo razonablemente necesarias, siempre que conserven los avisos de propiedad.
+3.4 Las versiones de evaluación o demostración solo pueden usarse para evaluar el Software, durante el plazo que indiquen.
+
+4. ACTIVACIÓN Y VERIFICACIÓN DE LA LICENCIA
+4.1 El Software se activa y verifica su Licencia en forma periódica, conectándose al servidor de licencias de CLRobotics, o en forma desconectada mediante el intercambio de archivos que prevé el Software.
+4.2 Para ello el Software envía a CLRobotics solo datos técnicos: el código de activación, un identificador del equipo derivado de su hardware, el nombre del equipo, el sistema operativo, la versión del Software y los datos propios de la conexión (como la dirección IP). No envía imágenes, grabaciones, eventos ni datos de las personas registradas en el sistema.
+4.3 Si la verificación no es posible durante un período prolongado, el Software puede operar en un plazo de gracia y luego restringir funciones, según se informe en la Documentación.
+
+5. RESTRICCIONES
+Salvo lo que permita expresamente este Contrato, la licencia de un Componente de Terceros o la ley aplicable sin posibilidad de renuncia, usted no podrá:
+a) vender, arrendar, prestar, sublicenciar ni distribuir el Software, ni ofrecerlo como servicio a terceros sin autorización escrita de CLRobotics;
+b) eludir, desactivar o alterar los mecanismos de licencia, activación o protección del Software;
+c) descompilar, desensamblar o aplicar ingeniería inversa al Software, salvo en la medida en que la ley lo permita para lograr la interoperabilidad o lo autorice la cláusula 6;
+d) retirar o alterar avisos de propiedad intelectual o marcas;
+e) extraer y usar por separado las bibliotecas de fabricantes incluidas en el Software, que solo pueden usarse como parte de él.
+
+6. COMPONENTES DE TERCEROS
+6.1 Los Componentes de Terceros se rigen por sus propias licencias, indicadas en «AVISOS-DE-TERCEROS.txt». Nada en este Contrato limita los derechos que esas licencias le otorgan.
+6.2 En particular, respecto de las bibliotecas distribuidas bajo la GNU Lesser General Public License (como FFmpeg y FlyleafLib), usted puede reemplazarlas por versiones modificadas, y CLRobotics le permite modificar el Software y aplicarle la ingeniería inversa necesaria para depurar esas modificaciones. La forma de obtener el código fuente correspondiente se indica en el archivo de avisos.
+
+7. DATOS PERSONALES Y USO LÍCITO
+7.1 El Software permite tratar datos personales, incluidas imágenes, grabaciones, patentes vehiculares y datos biométricos (rostros y huellas). Esos datos se almacenan en los equipos del Licenciatario, que actúa como responsable de su tratamiento y debe cumplir la legislación aplicable, incluida la Ley N° 19.628 sobre Protección de la Vida Privada y la Ley N° 21.719 desde su entrada en vigencia, y la normativa del país donde use el Software.
+7.2 Corresponde al Licenciatario, entre otras cosas: contar con una base de licitud para cada tratamiento; informar a las personas (por ejemplo, mediante señalética de videovigilancia); definir plazos de conservación; configurar permisos y medidas de seguridad; atender los derechos de los titulares; y respetar las normas laborales sobre control de trabajadores y la regulación de seguridad privada que le aplique.
+7.3 CLRobotics no accede a esos datos en el curso normal del uso del Software. Si, para prestar soporte u otro servicio, el Licenciatario le da acceso a ellos, CLRobotics los tratará solo por encargo e instrucción del Licenciatario, conforme al contrato de servicios o de encargo que las partes suscriban.
+7.4 El Licenciatario no usará el Software para fines ilícitos ni para vigilar o identificar personas en infracción de la ley.
+
+8. ACTUALIZACIONES Y SOPORTE
+8.1 Las actualizaciones, el soporte y el mantenimiento se prestan según el plan o contrato vigente del Licenciatario. Este Contrato no obliga por sí solo a CLRobotics a entregarlos.
+8.2 Las actualizaciones que usted instale, incluidas las que el Software descargue o aplique automáticamente, quedan sujetas a este Contrato o a la versión que lo reemplace y que se le presente al instalarlas.
+
+9. GARANTÍA LIMITADA
+9.1 CLRobotics garantiza que, durante noventa (90) días desde la entrega, el Software funcionará sustancialmente según la Documentación cuando se use en el entorno compatible que ella indica. Su único remedio por un incumplimiento de esta garantía, comunicado dentro de ese plazo, será que CLRobotics corrija la falla o, si no lo logra en un plazo razonable, reembolse lo pagado por la Licencia afectada.
+9.2 Fuera de lo anterior, y en la máxima medida que permita la ley, el Software se entrega «tal cual». CLRobotics no garantiza que funcione sin interrupciones ni errores, ni que detecte o evite todo incidente. El Software es una herramienta de apoyo y no reemplaza los procedimientos ni la supervisión humana de seguridad del Licenciatario. Su desempeño depende también de los equipos, la red, la configuración y los Componentes de Terceros, que CLRobotics no controla.
+
+10. LIMITACIÓN DE RESPONSABILIDAD
+10.1 En la máxima medida que permita la ley, CLRobotics no responderá por lucro cesante, pérdida de datos, interrupción de actividades ni daños indirectos, y su responsabilidad total derivada de este Contrato no excederá lo efectivamente pagado por el Licenciatario por la Licencia en los doce (12) meses anteriores al hecho que la origine.
+10.2 Estas limitaciones no se aplican al dolo ni a la culpa grave, ni a los derechos que la ley reconoce sin posibilidad de renuncia, incluidos, si corresponde, los de la Ley N° 19.496 sobre Protección de los Derechos de los Consumidores.
+
+11. PROPIEDAD INTELECTUAL
+El Software está protegido por la Ley N° 17.336 sobre Propiedad Intelectual y por los tratados internacionales. CLRobotics y sus licenciantes conservan todos los derechos sobre el Software. Este Contrato otorga una licencia de uso, no una venta, y no transfiere derechos de propiedad. «TrueCentral» y «CLRobotics» son marcas de CLRobotics; las marcas de terceros pertenecen a sus titulares y se mencionan solo para indicar compatibilidad.
+
+12. EXPORTACIÓN
+Usted cumplirá las normas de control de exportaciones y sanciones económicas que se apliquen al Software y a los Componentes de Terceros, y no lo usará ni lo transferirá en infracción de ellas.
+
+13. TÉRMINO
+13.1 Este Contrato rige mientras la Licencia esté vigente.
+13.2 CLRobotics podrá terminarlo si usted incumple gravemente alguna de sus obligaciones y no subsana el incumplimiento dentro de treinta (30) días desde que se le notifique, o de inmediato si infringe la cláusula 5.
+13.3 Al terminar, usted dejará de usar el Software y lo desinstalará. Las cláusulas 5, 6, 7, 10, 11 y 14 subsistirán al término.
+
+14. LEY APLICABLE Y JURISDICCIÓN
+Este Contrato se rige por las leyes de la República de Chile. Toda controversia se someterá a los tribunales ordinarios de justicia con asiento en la comuna de Santiago, salvo que las partes hayan pactado otra cosa por escrito.
+
+15. DISPOSICIONES GENERALES
+15.1 Si usted y CLRobotics (o su distribuidor autorizado) firmaron un contrato que regula el Software, ese contrato prevalece sobre este en lo que sean incompatibles.
+15.2 Si alguna cláusula es declarada nula o inaplicable, las demás mantendrán su vigencia.
+15.3 Si existen traducciones de este Contrato, prevalece la versión en español.
+15.4 Contacto: [POR COMPLETAR: correo de contacto].

@@ -1,0 +1,273 @@
+﻿CLR TRUECENTRAL VMS — AVISOS DE SOFTWARE DE TERCEROS
+=====================================================
+
+CLR TrueCentral VMS (el «Software») es un producto de CLRobotics. Además del
+código propio de CLRobotics, el Software incluye componentes de terceros. Cada
+componente sigue siendo de sus autores y se distribuye bajo su propia licencia,
+que se indica abajo. Nada en el Contrato de Licencia de Usuario Final (EULA) de
+CLR TrueCentral VMS limita los derechos que esas licencias le otorgan sobre
+cada componente.
+
+Este archivo se instala junto al Software, en la carpeta «legal». Los textos
+completos de las licencias y los avisos originales de cada proveedor están en
+la subcarpeta «legal\terceros».
+
+Contacto para consultas de licencias y solicitudes de código fuente:
+[POR COMPLETAR: correo de contacto]
+
+
+-----------------------------------------------------------------------------
+1. COMPONENTES BAJO LGPL Y GPL — CÓDIGO FUENTE Y REEMPLAZO
+-----------------------------------------------------------------------------
+
+1.1 FFmpeg (bibliotecas compartidas) — cliente de escritorio
+    Versión : n9.0.2-42-gd7643a0fe3 (compilación «win64-lgpl-shared» de BtbN)
+    Licencia: GNU Lesser General Public License v3 o posterior
+              (texto en terceros\LGPL-3.0.txt y terceros\GPL-3.0.txt)
+    Archivos: carpeta «FFmpeg» del cliente (avcodec-63.dll, avformat-63.dll,
+              avutil-61.dll, avfilter-12.dll, avdevice-63.dll,
+              swresample-7.dll, swscale-10.dll)
+    Fuentes : https://github.com/FFmpeg/FFmpeg/tree/d7643a0fe3
+              Scripts de compilación: https://github.com/BtbN/FFmpeg-Builds
+    Copyright (c) 2000-2026 the FFmpeg developers.
+
+1.2 FlyleafLib, Flyleaf.FFmpeg y Flyleaf.FFmpeg.Bindings — cliente
+    Versión : 3.11.3 / 9.0.0
+    Licencia: GNU Lesser General Public License v3 o posterior
+    Fuentes : https://github.com/SuRGeoNix/Flyleaf
+    Copyright (c) SuRGeoNix.
+
+    Las bibliotecas LGPL se usan como archivos separados (DLL) que el Software
+    carga al ejecutarse. Usted puede reemplazarlas por versiones modificadas
+    compatibles. CLRobotics permite la modificación del Software y la
+    ingeniería inversa que sean necesarias para depurar esas modificaciones,
+    según exige la sección 4 de la LGPL v3.
+
+1.3 FFmpeg (programas ffmpeg.exe y ffprobe.exe) — servidor y cliente
+    Versión : 9.0.1 «essentials» (compilación de www.gyan.dev)
+    Licencia: GNU General Public License v3 (texto en terceros\GPL-3.0.txt)
+    Archivos: tools\ffmpeg\ (incluye su propio archivo LICENSE)
+    Fuentes : https://github.com/FFmpeg/FFmpeg/tree/n9.0.1
+              Detalle de la compilación: https://www.gyan.dev/ffmpeg/builds/
+    Copyright (c) 2000-2026 the FFmpeg developers.
+
+    ffmpeg.exe y ffprobe.exe son programas independientes: el Software los
+    ejecuta como procesos aparte y no se enlaza con ellos. La GPL se aplica a
+    esos programas, no al resto del Software.
+
+    Oferta de código fuente: durante al menos tres (3) años desde que reciba
+    esta versión del Software, CLRobotics le entregará, a solicitud escrita
+    al contacto indicado arriba y sin otro costo que el del medio físico, una
+    copia completa del código fuente correspondiente de los componentes de
+    las secciones 1.1 a 1.3.
+
+
+-----------------------------------------------------------------------------
+2. COMPONENTES BAJO LICENCIAS PERMISIVAS
+-----------------------------------------------------------------------------
+
+Componente                                Versión        Licencia
+------------------------------------------------------------------------------
+.NET (runtime, ASP.NET Core, WPF y        10.0           MIT
+  Windows Forms; Microsoft.Extensions.*,
+  System.*, Entity Framework Core,
+  SignalR Client)
+  Copyright (c) .NET Foundation and Contributors / Microsoft Corporation.
+  Avisos de terceros de .NET en terceros\dotnet-runtime-THIRD-PARTY-NOTICES.txt,
+  terceros\aspnetcore-THIRD-PARTY-NOTICES.txt y
+  terceros\windowsdesktop-LICENSE.txt.
+
+MediaMTX                                  1.21.2         MIT
+  Copyright (c) 2019 aler9. Texto en terceros\mediamtx-LICENSE.txt.
+
+PostgreSQL                                18.4           PostgreSQL License
+  Portions Copyright (c) 1996-2025, The PostgreSQL Global Development Group;
+  Portions Copyright (c) 1994, The Regents of the University of California.
+  Texto en terceros\postgresql-LICENSE.txt (y tools\postgres\pgsql).
+
+Npgsql y Npgsql.EntityFrameworkCore.      10.0.3         PostgreSQL License
+  PostgreSQL
+  Copyright (c) 2002-2025, The Npgsql Development Team.
+
+PDFsharp y MigraDoc                       6.2.4          MIT
+  Copyright (c) 2026 empira Software GmbH.
+
+MailKit y MimeKit                         4.17.0         MIT
+  Copyright (c) .NET Foundation and Contributors.
+
+BouncyCastle.Cryptography                 2.6.2          MIT
+  Copyright (c) 2000-2025 Legion of the Bouncy Castle Inc.
+
+FluentFTP                                 54.2.0         MIT
+  Copyright (c) 2015 Robin Rodricks, Michael Stiemke and FluentFTP Contributors.
+
+Newtonsoft.Json                           13.0.4         MIT
+  Copyright (c) 2008 James Newton-King.
+
+Humanizer.Core                            2.14.1         MIT
+  Copyright (c) .NET Foundation and Contributors.
+
+CommunityToolkit.Mvvm                     8.4.0          MIT
+  Copyright (c) .NET Foundation and Contributors.
+
+NAudio                                    2.2.1          MIT
+  Copyright (c) 2023 Mark Heath.
+
+Vortice.Windows (Direct3D11, DXGI,        3.8.3 / 2.1.1  MIT
+  Direct2D1, DirectComposition,
+  MediaFoundation, XAudio2, D3DCompiler,
+  Mathematics)
+  Copyright (c) Amer Koleci and Contributors.
+
+SharpGen.Runtime                          2.4.2-beta     MIT
+  Copyright (c) 2010-2017 Alexandre Mutel, 2017-2023 Jeremy Koritzinsky,
+  2023-2024 Amer Koleci.
+
+Microsoft.Web.WebView2                    1.0.4258.31    BSD de 3 cláusulas
+  Copyright (C) Microsoft Corporation. Textos en terceros\webview2-LICENSE.txt
+  y terceros\webview2-NOTICE.txt.
+
+Avalonia (pantallas de alarma)            11.3.2         MIT
+  Copyright (c) The AvaloniaUI Project.
+  Incluye la fuente Inter, Copyright (c) 2016 The Inter Project Authors,
+  bajo SIL Open Font License 1.1 (texto en el aviso de MDI, abajo).
+
+SkiaSharp y HarfBuzzSharp                 2.88.9 / 8.3.1 MIT
+  (pantallas de alarma)
+  Copyright (c) Microsoft Corporation. Incluyen Skia, HarfBuzz, FreeType,
+  libpng y otros; sus avisos están en terceros\skiasharp-THIRD-PARTY-NOTICES.txt.
+
+MicroCom.Runtime                          0.11.0         MIT
+  Copyright (c) 2021 Nikita Tsukanov.
+
+Tmds.DBus.Protocol                        0.21.3         MIT
+  Copyright (c) Tom Deseyn.
+
+MapLibre GL JS (panel web)                —              BSD de 3 cláusulas
+  Copyright (c) 2023, MapLibre contributors; contiene código de mapbox-gl-js
+  v1.13, Copyright (c) 2020, Mapbox. Texto en wwwroot\vendor\maplibre\LICENSE.txt.
+
+PMTiles (panel web)                       4.5.0          BSD de 3 cláusulas
+  Copyright (c) Protomaps LLC. Ver wwwroot\vendor\pmtiles\LICENSE.txt.
+
+Protomaps basemaps (panel web)            5.7.2          BSD de 3 cláusulas (código), CC0 (estilo)
+  Copyright (c) Protomaps LLC. Los datos de mapa provienen de OpenStreetMap
+  (© colaboradores de OpenStreetMap, ODbL); el mapa muestra esa atribución.
+  Ver wwwroot\vendor\protomaps\LICENSE.txt.
+
+Material Design Icons (panel web)         1.8.36         SIL OFL 1.1 (fuente), MIT (CSS),
+                                                         Apache 2.0 (algunos íconos de Google)
+  Copyright (c) Austin Andrews y colaboradores (Pictogrammers).
+  Ver wwwroot\vendor\mdi\LICENSE.txt y terceros\Apache-2.0.txt.
+
+
+-----------------------------------------------------------------------------
+3. KITS DE DESARROLLO DE FABRICANTES (SOFTWARE PROPIETARIO)
+-----------------------------------------------------------------------------
+
+El Software incluye bibliotecas de fabricantes de equipos, solo para
+comunicarse con equipos de esas marcas. Son propiedad de sus fabricantes,
+que se reservan todos los derechos; no se otorga sobre ellas ninguna licencia
+distinta del uso como parte del Software. No pueden extraerse ni usarse por
+separado.
+
+- Hikvision Device Network SDK (HCNetSDK), ISUP SDK, SADP SDK y
+  FPModule SDK — Copyright (c) Hangzhou Hikvision Digital Technology Co., Ltd.
+  Componentes de código abierto incluidos por el fabricante:
+  terceros\hikvision-hcnetsdk-open-source.txt,
+  terceros\hikvision-audiointercom-open-source.txt,
+  terceros\hikvision-playctrl-open-source.txt.
+
+- Dahua NetSDK y PlaySDK — Copyright (c) Zhejiang Dahua Technology Co., Ltd.
+  Componentes de código abierto incluidos por el fabricante:
+  terceros\dahua-netsdk-open-source.txt,
+  terceros\dahua-playsdk-open-source.txt,
+  terceros\dahua-streamconvertor-open-source.txt.
+
+Estos kits incluyen además OpenSSL (OpenSSL License y SSLeay License /
+Apache License 2.0, según la versión), zlib (zlib License) y SQLite (dominio
+público), cuyos avisos figuran en los archivos del fabricante indicados.
+
+
+-----------------------------------------------------------------------------
+4. TEXTO DE LA LICENCIA MIT
+-----------------------------------------------------------------------------
+
+Se aplica a los componentes marcados «MIT» en la sección 2, junto con el aviso
+de copyright indicado para cada uno.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+-----------------------------------------------------------------------------
+5. TEXTO DE LA LICENCIA BSD DE 3 CLÁUSULAS
+-----------------------------------------------------------------------------
+
+Se aplica a los componentes marcados «BSD de 3 cláusulas» en la sección 2,
+junto con el aviso de copyright indicado para cada uno.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+
+-----------------------------------------------------------------------------
+6. TEXTO DE LA LICENCIA POSTGRESQL (Npgsql)
+-----------------------------------------------------------------------------
+
+Copyright (c) 2002-2025, The Npgsql Development Team
+
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose, without fee, and without a written agreement is
+hereby granted, provided that the above copyright notice and this paragraph
+and the following two paragraphs appear in all copies.
+
+IN NO EVENT SHALL THE NPGSQL DEVELOPMENT TEAM BE LIABLE TO ANY PARTY FOR
+DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION,
+EVEN IF THE NPGSQL DEVELOPMENT TEAM HAS BEEN ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.
+
+THE NPGSQL DEVELOPMENT TEAM SPECIFICALLY DISCLAIMS ANY WARRANTIES, INCLUDING,
+BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE. THE SOFTWARE PROVIDED HEREUNDER IS ON AN "AS IS" BASIS,
+AND THE NPGSQL DEVELOPMENT TEAM HAS NO OBLIGATIONS TO PROVIDE MAINTENANCE,
+SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.

@@ -56,6 +56,9 @@ VersionInfoOriginalFileName=CLRTrueCentralVMS-Client-Setup.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; Contrato de licencia (EULA): página «Acuerdo de licencia»; las instalaciones
+; silenciosas (actualizaciones) la saltan. Se copia también a {app}\legal.
+LicenseFile=legal\EULA.txt
 ; Si el cliente (o su ffmpeg/mediamtx) está abierto, que el Administrador de
 ; reinicios lo cierre en vez de fallar la copia:
 CloseApplications=yes
@@ -74,6 +77,10 @@ Type: filesandordirs; Name: "{app}\tools\ffmpeg"
 Type: filesandordirs; Name: "{app}\tools\mediamtx"
 
 [Files]
+; Textos legales: EULA, avisos de terceros y licencias originales (legal\README.md).
+Source: "legal\EULA.txt"; DestDir: "{app}\legal"; Flags: ignoreversion
+Source: "legal\AVISOS-DE-TERCEROS.txt"; DestDir: "{app}\legal"; Flags: ignoreversion
+Source: "legal\terceros\*"; DestDir: "{app}\legal\terceros"; Flags: ignoreversion
 Source: "{#ClientPublish}\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Motor de video: FlyleafLib carga el FFmpeg compartido (9.x) desde la carpeta
 ; FFmpeg\ junto al exe (App.xaml.cs). Build LGPL (la valida build-installers.ps1);

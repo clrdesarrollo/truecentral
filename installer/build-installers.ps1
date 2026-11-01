@@ -87,6 +87,9 @@ function Invoke-PublishScreen([string]$OutDir, [string]$Package) {
         -r linux-arm64 --self-contained true "-p:Version=$script:Version" -o $OutDir --nologo -v q
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish falló para la app de las pantallas de alarma." }
     Get-ChildItem $OutDir -Filter '*.pdb' -ErrorAction SilentlyContinue | Remove-Item -Force
+    # Textos legales (EULA y avisos de terceros) dentro del paquete, en legal/.
+    Copy-Item -Recurse -Force (Join-Path $PSScriptRoot 'legal') (Join-Path $OutDir 'legal')
+    Remove-Item -Force (Join-Path $OutDir 'legal\README.md') -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Package) | Out-Null
     if (Test-Path $Package) { Remove-Item -Force $Package }
     # tar.exe de Windows (bsdtar): el paquete se abre en la Pi con tar -xzf.
@@ -271,6 +274,14 @@ if (-not $iscc) {
     else { throw 'Inno Setup 6 no está instalado. Instálelo con:  winget install -e --id JRSoftware.InnoSetup' }
 }
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+# La EULA y los avisos de terceros tienen campos que completa el área legal
+# (razón social, RUT, contacto); mientras falten, el instalador sale igual pero se avisa.
+$legalPending = Select-String -Path (Join-Path $PSScriptRoot 'legal\*.txt') -Pattern '[POR COMPLETAR' -SimpleMatch
+if ($legalPending) {
+    Write-Warning ("La EULA o los avisos de terceros tienen {0} campo(s) [POR COMPLETAR] (ver installer\legal\README.md)." -f
+        @($legalPending).Count)
+}
 
 function Invoke-Iscc([string]$Script, [string[]]$Defines = @()) {
     Write-Host ""
