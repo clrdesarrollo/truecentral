@@ -75,8 +75,9 @@ Type: filesandordirs; Name: "{app}\tools\mediamtx"
 
 [Files]
 Source: "{#ClientPublish}\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
-; Motor de video: FlyleafLib exige el FFmpeg compartido de SU release, en la
-; carpeta FFmpeg\ junto al exe (App.xaml.cs).
+; Motor de video: FlyleafLib carga el FFmpeg compartido (9.x) desde la carpeta
+; FFmpeg\ junto al exe (App.xaml.cs). Build LGPL (la valida build-installers.ps1);
+; su LICENSE.txt y README.txt (versión y origen de las fuentes) viajan con las DLL.
 Source: "{#FlyleafDir}\*"; DestDir: "{app}\FFmpeg"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; FFmpeg de línea de comandos: solo lo que usa el cliente (sin ffplay ni docs).
 Source: "{#FfmpegDir}\bin\ffmpeg.exe"; DestDir: "{app}\tools\ffmpeg\bin"; Flags: ignoreversion
