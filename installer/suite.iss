@@ -143,6 +143,9 @@ VersionInfoOriginalFileName=CLRTrueCentralVMS-Suite-Setup.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; Contrato de licencia (EULA): página «Acuerdo de licencia»; las instalaciones
+; silenciosas (actualizaciones) la saltan. Se copia también a {app}\legal.
+LicenseFile=legal\EULA.txt
 ; El instalador gestiona por sí mismo el servicio y sus procesos hijos:
 CloseApplications=no
 RestartApplications=no
@@ -184,6 +187,10 @@ Type: files; Name: "{app}\DemoLocalCfg.json"
 Type: files; Name: "{app}\DeviceCfg.json"
 
 [Files]
+; Textos legales: EULA, avisos de terceros y licencias originales (legal\README.md).
+Source: "legal\EULA.txt"; DestDir: "{app}\legal"; Flags: ignoreversion
+Source: "legal\AVISOS-DE-TERCEROS.txt"; DestDir: "{app}\legal"; Flags: ignoreversion
+Source: "legal\terceros\*"; DestDir: "{app}\legal\terceros"; Flags: ignoreversion
 ; Servidor publicado (self-contained). Se excluyen los restos de desarrollo
 ; que el SDK Web arrastra como contenido (ajustes locales, configuración
 ; generada de MediaMTX, logs).
