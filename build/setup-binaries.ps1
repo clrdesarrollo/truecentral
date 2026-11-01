@@ -12,7 +12,8 @@
       native\dahua      DLLs del NetSDK de Dahua
       tools\postgres    PostgreSQL portable (base embebida del servidor)
       tools\mediamtx    MediaMTX (media server que hace el fan-out RTSP)
-      tools\ffmpeg-flyleaf  FFmpeg compartido que exige FlyleafLib (cliente WPF)
+      tools\ffmpeg-flyleaf  FFmpeg compartido que carga FlyleafLib (cliente WPF);
+                           SIEMPRE una build LGPL: va dentro del proceso del cliente
       tools\ffmpeg         FFmpeg y ffprobe de línea de comandos (exportación de
                            tramos en el servidor y proyección de pantalla al muro)
 
@@ -258,8 +259,9 @@ if ($missing -gt 0) {
     Write-Host "  - PostgreSQL portable : https://www.enterprisedb.com/download-postgresql-binaries -> tools\postgres\pgsql"
     Write-Host "  - MediaMTX v1.21.2    : https://github.com/bluenviron/mediamtx/releases -> tools\mediamtx"
     Write-Host "  - SDK ISUP 5.0        : ISUP SDK de Hikvision (Win64, carpeta lib64 con HCISUPCMS.dll y HCAapSDKCom\) -> Resources\"
-    Write-Host "  - FFmpeg para Flyleaf : asset del release de FlyleafLib con la MISMA versión que el paquete NuGet"
-    Write-Host "                          https://github.com/SuRGeoNix/Flyleaf/releases -> carpeta FFmpeg\ -> tools\ffmpeg-flyleaf"
+    Write-Host "  - FFmpeg para Flyleaf : build LGPL compartida de la MISMA versión mayor que Flyleaf.FFmpeg (9.x):"
+    Write-Host "                          https://github.com/BtbN/FFmpeg-Builds/releases -> ffmpeg-n9.0-latest-win64-lgpl-shared"
+    Write-Host "                          -> bin\*.dll y LICENSE.txt en tools\ffmpeg-flyleaf (NO la del release de Flyleaf: es GPL)"
     Write-Host "  - FFmpeg CLI          : build de Windows (gyan.dev / BtbN) -> tools\ffmpeg (con bin\ffmpeg.exe y bin\ffprobe.exe)"
 } else {
     Write-Host ""

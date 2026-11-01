@@ -19,7 +19,7 @@
 //        <BINARIES_DIR>\tools\postgres\pgsql\bin\pg_ctl.exe
 //        <BINARIES_DIR>\tools\mediamtx\mediamtx.exe
 //        <BINARIES_DIR>\tools\ffmpeg\bin\ffmpeg.exe         (proxy de canales)
-//        <BINARIES_DIR>\tools\ffmpeg-flyleaf\avcodec-*.dll  (cliente WPF)
+//        <BINARIES_DIR>\tools\ffmpeg-flyleaf\avcodec-*.dll  (cliente WPF; build LGPL + LICENSE.txt)
 //
 //     Sin esa carpeta el build igual compila, pero el paquete sale incompleto
 //     y la ejecución queda marcada UNSTABLE.

@@ -224,6 +224,15 @@ if ($buildClient) {
     if (-not (Get-ChildItem (Join-Path $repo 'tools\ffmpeg-flyleaf') -Filter 'avcodec-*.dll' -ErrorAction SilentlyContinue)) {
         throw "Falta el FFmpeg compartido de FlyleafLib en tools\ffmpeg-flyleaf (avcodec-*.dll). $setupHint"
     }
+    # El cliente carga estas DLL dentro de su proceso: una build GPL obligaría a
+    # liberar el cliente bajo GPL. Solo se aceptan builds LGPL (sin --enable-gpl).
+    # Todas las bibliotecas de FFmpeg embeben la línea de configure; avutil es la más chica.
+    $avutil = Get-ChildItem (Join-Path $repo 'tools\ffmpeg-flyleaf') -Filter 'avutil-*.dll' | Select-Object -First 1
+    if (-not $avutil -or [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($avutil.FullName)).Contains('--enable-gpl')) {
+        throw ("tools\ffmpeg-flyleaf tiene una build GPL de FFmpeg (o le falta avutil-*.dll). " +
+            "Use la build LGPL compartida de BtbN (ffmpeg-n9.0-latest-win64-lgpl-shared). $setupHint")
+    }
+    Assert-File (Join-Path $repo 'tools\ffmpeg-flyleaf\LICENSE.txt') 'Falta LICENSE.txt (LGPL) junto a las DLL de tools\ffmpeg-flyleaf: la licencia debe viajar con ellas.'
     Assert-File (Join-Path $repo 'tools\ffmpeg\bin\ffmpeg.exe') "Copie FFmpeg (build de gyan.dev) en tools\ffmpeg. $setupHint"
     Assert-File (Join-Path $repo 'tools\ffmpeg\bin\ffprobe.exe') 'La build de FFmpeg debe incluir ffprobe.exe (duración de archivos al proyectar).'
     Assert-File (Join-Path $repo 'tools\mediamtx\mediamtx.exe') "Copie MediaMTX en tools\mediamtx. $setupHint"

@@ -123,6 +123,11 @@ C:\CI\truecentral-binaries\tools\ffmpeg-flyleaf\avcodec-*.dll
 Sin esa carpeta el build compila igual, pero los `.zip` salen incompletos y la
 ejecución queda marcada **UNSTABLE**.
 
+`tools\ffmpeg-flyleaf` debe ser la build **LGPL** compartida de BtbN
+(`ffmpeg-n9.0-latest-win64-lgpl-shared`: `bin\*.dll` + `LICENSE.txt`), no la
+del release de Flyleaf, que es GPL: el cliente carga esas DLL en su proceso.
+`installer\build-installers.ps1` rechaza una build GPL o sin `LICENSE.txt`.
+
 ---
 
 ## 5. Crear el nodo en el controlador
